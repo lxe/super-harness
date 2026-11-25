@@ -4,6 +4,8 @@ import { cn } from './cn';
 
 export interface SectionHeaderProps {
   level?: 1 | 2;
+  /** 'separator' renders a full-bleed collapsible divider band (used between harnesses in All view). */
+  variant?: 'tree' | 'separator';
   collapsed?: boolean;
   onToggle: () => void;
   icon?: React.ReactNode;
@@ -16,6 +18,7 @@ export interface SectionHeaderProps {
 
 export const SectionHeader: React.FC<SectionHeaderProps> = ({
   level = 1,
+  variant = 'tree',
   collapsed = false,
   onToggle,
   icon,
@@ -25,17 +28,47 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   sticky = true,
   className,
 }) => {
+  if (variant === 'separator') {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        className={cn(
+          'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-8 flex items-center gap-2 bg-surface-rail/95 backdrop-blur-md border-y border-line-hairline/75 hover:bg-white/[0.035] transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+          sticky && 'sticky top-0 z-20',
+          className
+        )}
+      >
+        {icon && <span className="shrink-0 inline-flex">{icon}</span>}
+        <span className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-secondary group-hover:text-ink-primary transition-colors truncate">
+          {label}
+        </span>
+        <span className="flex-1 h-px bg-line-hairline/70 mx-1" aria-hidden="true" />
+        <span className="flex items-center gap-1.5 text-micro tabular-nums font-normal text-ink-faint shrink-0">
+          {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
+          {count !== undefined && <span>{count}</span>}
+          {collapsed ? (
+            <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
+          )}
+        </span>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-expanded={!collapsed}
       className={cn(
-        'w-full flex items-center gap-2 px-2 bg-surface-rail/95 backdrop-blur-sm hover:bg-surface-subtle rounded-md transition-colors cursor-pointer select-none',
+        'w-full flex items-center gap-2 px-2 bg-surface-rail/95 backdrop-blur-sm hover:bg-surface-subtle rounded-md transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
         level === 1
-          ? 'h-9 text-body font-semibold text-ink-primary'
-          : 'h-8 text-label font-medium text-ink-secondary hover:text-ink-primary',
-        sticky && (level === 1 ? 'sticky top-0 z-20' : 'sticky top-9 z-10'),
+          ? 'h-8 text-label font-semibold text-ink-primary'
+          : 'h-7 text-caption font-medium text-ink-muted hover:text-ink-primary',
+        sticky && (level === 1 ? 'sticky top-0 z-20' : 'sticky top-8 z-10'),
         className
       )}
     >
@@ -46,7 +79,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
       )}
       {icon && <span className="shrink-0 inline-flex">{icon}</span>}
       <span className="truncate">{label}</span>
-      <span className="ml-auto flex items-center gap-1.5 text-caption font-normal text-ink-faint">
+      <span className="ml-auto flex items-center gap-1.5 text-caption tabular-nums font-normal text-ink-faint">
         {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
         {count !== undefined && <span>{count}</span>}
       </span>

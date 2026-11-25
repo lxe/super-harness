@@ -37,7 +37,7 @@ export const LiveStepsBar: React.FC<LiveStepsBarProps> = React.memo(({ steps }) 
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full px-3 py-1.5 flex items-center gap-2 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer"
+        className="w-full px-3.5 py-2.5 flex items-center gap-2.5 text-caption leading-none text-ink-muted hover:text-ink-primary hover:bg-white/[0.03] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
       >
         {expanded ? (
           <ChevronDown className="w-3.5 h-3.5 shrink-0" />
@@ -45,30 +45,30 @@ export const LiveStepsBar: React.FC<LiveStepsBarProps> = React.memo(({ steps }) 
           <ChevronRight className="w-3.5 h-3.5 shrink-0" />
         )}
         <ListChecks className="w-3.5 h-3.5 shrink-0 text-ink-faint" />
-        <span className="font-mono text-micro text-ink-faint shrink-0">
+        <span className="tabular-nums font-medium text-caption leading-none text-ink-faint shrink-0">
           {completedCount}/{steps.length}
         </span>
-        <span className="truncate flex-1 text-left text-ink-secondary">
+        <span className="truncate flex-1 text-left leading-snug text-ink-secondary">
           {current ? current.title : 'Completed'}
         </span>
       </button>
       {expanded && (
-        <div className="px-3 pb-2.5 pt-1 border-t border-line-hairline space-y-1">
+        <div className="px-3.5 py-3 border-t border-white/[0.06] space-y-2.5">
           {steps.map((st, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-caption">
+            <div key={idx} className="flex items-center gap-2.5 text-caption leading-snug">
               {st.status === 'done' ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                <CheckCircle2 className="w-4 h-4 text-ink-faint shrink-0" />
               ) : st.status === 'in_progress' ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-secondary shrink-0" />
+                <Loader2 className="w-4 h-4 animate-spin text-ink-secondary shrink-0" />
               ) : (
-                <Circle className="w-3.5 h-3.5 text-zinc-700 shrink-0" />
+                <Circle className="w-4 h-4 text-zinc-700 shrink-0" />
               )}
               <span
                 className={
                   st.status === 'done'
                     ? 'text-ink-faint line-through'
                     : st.status === 'in_progress'
-                      ? 'text-ink-primary'
+                      ? 'text-ink-primary font-medium'
                       : 'text-ink-faint'
                 }
               >

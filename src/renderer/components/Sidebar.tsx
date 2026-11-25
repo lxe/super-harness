@@ -42,6 +42,7 @@ import { formatRelativeTime } from '../utils/format';
 import {
   filterSidebarSessions,
   flattenVisibleSessions,
+  getGlobalPinnedSessions,
   groupSessionsForSidebar,
   type SidebarFilterTab,
 } from '../utils/sidebarGrouping';
@@ -266,6 +267,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
     [sessions]
   );
 
+  // Global Super Harness top-pinned chats across ALL harnesses (always shown below Master Orchestrator)
+  const globalPinnedSessions = useMemo(
+    () => getGlobalPinnedSessions(workerSessions),
+    [workerSessions]
+  );
+
   const filtered = useMemo(
     () => filterSidebarSessions(workerSessions, filter, query),
     [workerSessions, filter, query]
@@ -278,8 +285,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
   // Flat list of currently visible session IDs in exact rendered top-to-bottom order (for Shift+Click range select)
   const visibleOrderedSessions = useMemo(
-    () => flattenVisibleSessions(topGroups, collapsed),
-    [topGroups, collapsed]
+    () => flattenVisibleSessions(topGroups, collapsed, globalPinnedSessions),
+    [topGroups, collapsed, globalPinnedSessions]
   );
 
   const handleRowClick = (e: React.MouseEvent, s: UnifiedSession) => {
@@ -334,7 +341,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
     setRenamingId(null);
   };
 
-  const renderSessionRow = (s: UnifiedSession, showLogo = true) => {
+  const renderSessionRow = (
+    s: UnifiedSession,
+    opts: { showLogo?: boolean; showPin?: boolean } = {}
+  ) => {
+    const { showLogo = true, showPin = false } = opts;
     const isPrimary = activeSessionId === s.id;
     const isSplit = splitSessionId === s.id;
     const isMultiSelected = selectedIds.has(s.id);
@@ -374,10 +385,16 @@ export const Sidebar: React.FC<Props> = React.memo(({
       });
     };
 
+    const leadingIcon = showLogo ? (
+      <HarnessLogo harness={s.harness} size={15} />
+    ) : showPin ? (
+      <Pin className="w-3.5 h-3.5 text-amber-400/80" />
+    ) : undefined;
+
     return (
       <NavRow
         key={s.id}
-        icon={showLogo ? <HarnessLogo harness={s.harness} size={15} /> : undefined}
+        icon={leadingIcon}
         title={s.title}
         active={isPrimary}
         secondaryActive={isSplit}
@@ -385,6 +402,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
         working={s.status === 'running'}
         meta={
           <>
+            {showPin && showLogo && (
+              <Pin className="w-3 h-3 text-amber-400/80 shrink-0" aria-label="Pinned" />
+            )}
             {s.harness === 'claude-tmux' && (
               <span
                 title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'remote'}`}
@@ -522,8 +542,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
         </div>
       </div>
 
-      {/* Primary Actions */}
-      <div className="px-2.5 pb-2.5 space-y-1">
+      {/* Primary Actions + Global Top-Pinned Chats (all harnesses, flat below Master Orchestrator) */}
+      <div className="px-2.5 pb-2.5 space-y-0.5">
         <button
           type="button"
           onClick={() => onNewSession(filter)}
@@ -552,6 +572,14 @@ export const Sidebar: React.FC<Props> = React.memo(({
               </IconButton>
             }
           />
+        )}
+
+        {globalPinnedSessions.length > 0 && (
+          <div className="pt-0.5 space-y-0.5 max-h-[32vh] overflow-y-auto">
+            {globalPinnedSessions.map((s) =>
+              renderSessionRow(s, { showLogo: true, showPin: true })
+            )}
+          </div>
         )}
       </div>
 
@@ -778,23 +806,45 @@ export const Sidebar: React.FC<Props> = React.memo(({
             No conversations found
           </div>
         ) : (
-          <div className="space-y-4">
-            {topGroups.map((grp) => {
-              const isTopClosed = Boolean(collapsed[grp.id]);
-              const totalInGroup = grp.sections
-                ? grp.sections.reduce((acc, s) => acc + s.items.length, 0)
-                : grp.items?.length ?? 0;
-              const groupHasWorking = grp.sections
-                ? grp.sections.some((sec) => sec.items.some((i) => i.status === 'running'))
-                : (grp.items ?? []).some((i) => i.status === 'running') ||
-                  (grp.harnessLogo ? workingByHarness[grp.harnessLogo] : false);
+          <div className="space-y-3">
+            {topGroups.map((grp, grpIdx) => {
+              // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
+              if (grp.headless) {
+                const showRowLogos =
+                  filter !== 'antigravity' && filter !== 'codex' && filter !== 'claude';
+                return (
+                  <div
+                    key={grp.id}
+                    className={`pt-1.5 space-y-0.5 ${
+                      grpIdx < topGroups.length - 1 ? 'pb-2 border-b border-line-hairline/60' : ''
+                    }`}
+                  >
+                    {(grp.items ?? []).map((s) =>
+                      renderSessionRow(s, { showLogo: showRowLogos, showPin: true })
+                    )}
+                  </div>
+                );
+              }
 
+              const isTopClosed = Boolean(collapsed[grp.id]);
+              const pinnedCount = grp.pinnedItems?.length ?? 0;
+              const totalInGroup =
+                pinnedCount +
+                (grp.sections
+                  ? grp.sections.reduce((acc, s) => acc + s.items.length, 0)
+                  : grp.items?.length ?? 0);
+              const groupHasWorking =
+                (grp.pinnedItems ?? []).some((i) => i.status === 'running') ||
+                (grp.sections
+                  ? grp.sections.some((sec) => sec.items.some((i) => i.status === 'running'))
+                  : (grp.items ?? []).some((i) => i.status === 'running')) ||
+                (grp.harnessLogo ? workingByHarness[grp.harnessLogo] : false);
+
+              const isHarnessDivider = Boolean(grp.harnessLogo);
               const topIcon = grp.harnessLogo ? (
-                <HarnessLogo harness={grp.harnessLogo} size={16} />
+                <HarnessLogo harness={grp.harnessLogo} size={14} />
               ) : grp.isUngrouped ? (
                 <Inbox className="w-4 h-4 text-ink-secondary" />
-              ) : grp.label === 'Pinned' ? (
-                <Pin className="w-4 h-4 text-amber-400" />
               ) : (
                 <FolderGit2 className="w-4 h-4 text-ink-secondary" />
               );
@@ -803,30 +853,43 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 <div key={grp.id} className="relative">
                   <SectionHeader
                     level={1}
+                    variant={isHarnessDivider ? 'separator' : 'tree'}
                     collapsed={isTopClosed}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
                     icon={topIcon}
                     label={grp.label}
                     count={totalInGroup}
                     working={groupHasWorking}
+                    className={
+                      isHarnessDivider && grpIdx === 0 && draftConversations.length === 0
+                        ? 'border-t-0'
+                        : undefined
+                    }
                   />
 
                   {!isTopClosed && (
-                    <div className="mt-1 space-y-2.5">
+                    <div className="mt-1 space-y-2">
+                      {/* Individual harness pins right below the harness separator (no extra Pinned section) */}
+                      {grp.pinnedItems && grp.pinnedItems.length > 0 && (
+                        <div className="space-y-0.5">
+                          {grp.pinnedItems.map((s) =>
+                            renderSessionRow(s, { showLogo: false, showPin: true })
+                          )}
+                        </div>
+                      )}
+
                       {grp.sections ? (
                         grp.sections.map((sec) => {
                           const isSecClosed = Boolean(collapsed[sec.id]);
                           const secHasWorking = sec.items.some((i) => i.status === 'running');
                           const secIcon =
-                            sec.label === 'Pinned' ? (
-                              <Pin className="w-3.5 h-3.5 text-amber-400" />
-                            ) : sec.label === 'Ungrouped' ? (
+                            sec.label === 'Ungrouped' ? (
                               <Inbox className="w-3.5 h-3.5 text-ink-muted" />
                             ) : (
                               <Folder className="w-3.5 h-3.5 text-ink-secondary" />
                             );
                           return (
-                            <div key={sec.id} className="relative pl-2">
+                            <div key={sec.id} className="relative">
                               <SectionHeader
                                 level={2}
                                 collapsed={isSecClosed}
@@ -839,24 +902,26 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                 working={secHasWorking}
                               />
                               {!isSecClosed && (
-                                <div className="mt-1 space-y-0.5 pl-2">
-                                  {sec.items.map((s) => renderSessionRow(s, false))}
+                                <div className="mt-0.5 space-y-0.5">
+                                  {sec.items.map((s) =>
+                                    renderSessionRow(s, { showLogo: false })
+                                  )}
                                 </div>
                               )}
                             </div>
                           );
                         })
                       ) : (
-                        <div className="space-y-0.5 pl-1">
+                        <div className="space-y-0.5">
                           {(grp.items ?? []).map((s) =>
-                            renderSessionRow(
-                              s,
-                              Boolean(grp.isTopPinned) ||
-                                (!grp.harnessLogo &&
-                                  filter !== 'antigravity' &&
-                                  filter !== 'codex' &&
-                                  filter !== 'claude')
-                            )
+                            renderSessionRow(s, {
+                              showLogo:
+                                !grp.harnessLogo &&
+                                filter !== 'antigravity' &&
+                                filter !== 'codex' &&
+                                filter !== 'claude',
+                              showPin: Boolean(s.pinned),
+                            })
                           )}
                         </div>
                       )}

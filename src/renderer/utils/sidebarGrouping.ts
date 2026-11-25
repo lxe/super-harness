@@ -18,8 +18,11 @@ export interface TopGroup {
   id: string;
   label: string;
   harnessLogo?: HarnessGroup;
-  isTopPinned?: boolean;
+  /** True when items should render flat at the top with no collapsible header (e.g., native harness pins in single-harness view). */
+  headless?: boolean;
   isUngrouped?: boolean;
+  /** Natively pinned chats rendered flat directly below a harness separator (no extra Pinned section). */
+  pinnedItems?: UnifiedSession[];
   sections?: SubSection[];
   items?: UnifiedSession[];
 }
@@ -29,6 +32,16 @@ const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude' },
 ];
+
+/**
+ * Returns all Super Harness top-pinned chats across every harness (rendered
+ * directly below Master Orchestrator and above the harness switcher).
+ */
+export function getGlobalPinnedSessions(workerSessions: UnifiedSession[]): UnifiedSession[] {
+  return workerSessions
+    .filter((s) => s.pinnedToTop)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
 
 export function filterSidebarSessions(
   workerSessions: UnifiedSession[],
@@ -51,18 +64,30 @@ export function filterSidebarSessions(
   });
 }
 
-function buildNativeSections(hId: string, hItems: UnifiedSession[]): SubSection[] {
+function splitNativePinnedAndSections(
+  hId: string,
+  hItems: UnifiedSession[]
+): { pinnedItems: UnifiedSession[]; sections: SubSection[] } {
+  const pinnedItems: UnifiedSession[] = [];
   const secMap = new Map<string, { order: number; items: UnifiedSession[] }>();
+
   for (const s of hItems) {
+    if (s.pinned) {
+      pinnedItems.push(s);
+      continue;
+    }
     const isUnfiled = !s.nativeSection || s.nativeSection === 'Ungrouped';
-    const sec = s.pinned ? 'Pinned' : isUnfiled ? 'Ungrouped' : s.nativeSection!;
-    const order = s.pinned ? -1 : isUnfiled ? 9999 : (s.nativeSectionOrder ?? 500);
+    const sec = isUnfiled ? 'Ungrouped' : s.nativeSection!;
+    const order = isUnfiled ? 9999 : (s.nativeSectionOrder ?? 500);
     if (!secMap.has(sec)) secMap.set(sec, { order, items: [] });
     const entry = secMap.get(sec)!;
     entry.order = Math.min(entry.order, order);
     entry.items.push(s);
   }
-  return Array.from(secMap.entries())
+
+  pinnedItems.sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const sections = Array.from(secMap.entries())
     .map(([label, info]) => ({
       id: `${hId}:${label}`,
       label,
@@ -73,12 +98,19 @@ function buildNativeSections(hId: string, hItems: UnifiedSession[]): SubSection[
       if (a.order !== b.order) return a.order - b.order;
       return (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0);
     });
+
+  return { pinnedItems, sections };
 }
 
 /**
- * Pure grouping & ordering logic for the sidebar across all 5 view modes
- * (`native`, `harness`, `project`, `folders`, `recent`), always keeping
- * Super Harness top-pinned chats anchored at the very top.
+ * Pure grouping & ordering logic for the scrollable conversation list below
+ * the harness switcher across all 5 view modes (`native`, `harness`, `project`,
+ * `folders`, `recent`).
+ *
+ * - Global Super Harness top-pinned chats (`pinnedToTop`) are excluded here
+ *   because they live permanently above the harness switcher across all tabs.
+ * - Individual harness pins (`pinned`) float directly below their harness
+ *   header (or at the top of a single-harness tab) with no extra "Pinned" section.
  */
 export function groupSessionsForSidebar(
   filtered: UnifiedSession[],
@@ -86,67 +118,76 @@ export function groupSessionsForSidebar(
   folders: SessionFolder[],
   filter: SidebarFilterTab
 ): TopGroup[] {
-  const topPinnedItems = filtered
-    .filter((s) => s.pinnedToTop)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-  const rest = topPinnedItems.length > 0 ? filtered.filter((s) => !s.pinnedToTop) : filtered;
-  const pinnedGroup: TopGroup[] =
-    topPinnedItems.length > 0
-      ? [{ id: 'sh-pinned-top', label: 'Pinned', isTopPinned: true, items: topPinnedItems }]
-      : [];
+  const rest = filtered.filter((s) => !s.pinnedToTop);
 
   if (groupBy === 'recent') {
-    return [
-      ...pinnedGroup,
-      ...(rest.length > 0 ? [{ id: 'recent', label: 'Conversations', items: rest }] : []),
-    ];
+    return rest.length > 0 ? [{ id: 'recent', label: 'Conversations', items: rest }] : [];
   }
 
   if (groupBy === 'native') {
-    // When filtered to a single harness tab, promote its native sections directly to top-level
+    // Single-harness tab: native harness pins sit flat at the top (no Pinned header),
+    // followed directly by the harness's project / native sections.
     if (filter === 'antigravity' || filter === 'codex' || filter === 'claude') {
-      const secs = buildNativeSections(filter, rest);
-      return [
-        ...pinnedGroup,
-        ...secs.map((sec) => ({
+      const { pinnedItems, sections } = splitNativePinnedAndSections(filter, rest);
+      const out: TopGroup[] = [];
+      if (pinnedItems.length > 0) {
+        out.push({
+          id: `${filter}:native-pinned`,
+          label: 'Pinned',
+          headless: true,
+          items: pinnedItems,
+        });
+      }
+      for (const sec of sections) {
+        out.push({
           id: sec.id,
           label: sec.label,
           isUngrouped: sec.label === 'Ungrouped',
           items: sec.items,
-        })),
-      ];
+        });
+      }
+      return out;
     }
 
-    const out: TopGroup[] = [...pinnedGroup];
+    const out: TopGroup[] = [];
     for (const h of HARNESS_DEFS) {
       const hItems = rest.filter((s) => s.harnessGroup === h.id);
       if (hItems.length === 0) continue;
+      const { pinnedItems, sections } = splitNativePinnedAndSections(h.id, hItems);
       out.push({
         id: `harness:${h.id}`,
         label: h.label,
         harnessLogo: h.id,
-        sections: buildNativeSections(h.id, hItems),
+        pinnedItems: pinnedItems.length > 0 ? pinnedItems : undefined,
+        sections,
       });
     }
     return out;
   }
 
   if (groupBy === 'harness') {
-    return [
-      ...pinnedGroup,
-      ...HARNESS_DEFS.map((d) => ({
+    return HARNESS_DEFS.map((d) => {
+      const hItems = rest
+        .filter((s) => s.harnessGroup === d.id)
+        .sort((a, b) => {
+          if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+          return b.updatedAt - a.updatedAt;
+        });
+      return {
         id: `flat-h:${d.id}`,
         label: d.label,
         harnessLogo: d.id,
-        items: rest.filter((s) => s.harnessGroup === d.id),
-      })).filter((g) => (g.items?.length ?? 0) > 0),
-    ];
+        items: hItems,
+      };
+    }).filter((g) => (g.items?.length ?? 0) > 0);
   }
 
   if (groupBy === 'folders') {
-    const out: TopGroup[] = [...pinnedGroup];
-    const pinned = rest.filter((s) => s.pinned);
-    if (pinned.length > 0) out.push({ id: 'pinned', label: 'Harness Pinned', items: pinned });
+    const out: TopGroup[] = [];
+    const pinned = rest.filter((s) => s.pinned).sort((a, b) => b.updatedAt - a.updatedAt);
+    if (pinned.length > 0) {
+      out.push({ id: 'harness-pinned-flat', label: 'Pinned', headless: true, items: pinned });
+    }
     const folderMap = new Map<string, UnifiedSession[]>();
     for (const f of folders) folderMap.set(f.id, []);
     const unfiled: UnifiedSession[] = [];
@@ -170,12 +211,9 @@ export function groupSessionsForSidebar(
     if (!projMap.has(key)) projMap.set(key, []);
     projMap.get(key)!.push(s);
   }
-  return [
-    ...pinnedGroup,
-    ...Array.from(projMap.entries())
-      .map(([label, items]) => ({ id: `proj:${label}`, label, items }))
-      .sort((a, b) => (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0)),
-  ];
+  return Array.from(projMap.entries())
+    .map(([label, items]) => ({ id: `proj:${label}`, label, items }))
+    .sort((a, b) => (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0));
 }
 
 /**
@@ -184,11 +222,15 @@ export function groupSessionsForSidebar(
  */
 export function flattenVisibleSessions(
   topGroups: TopGroup[],
-  collapsed: Record<string, boolean>
+  collapsed: Record<string, boolean>,
+  globalPinned: UnifiedSession[] = []
 ): UnifiedSession[] {
-  const list: UnifiedSession[] = [];
+  const list: UnifiedSession[] = [...globalPinned];
   for (const grp of topGroups) {
-    if (collapsed[grp.id]) continue;
+    if (!grp.headless && collapsed[grp.id]) continue;
+    if (grp.pinnedItems && grp.pinnedItems.length > 0) {
+      list.push(...grp.pinnedItems);
+    }
     if (grp.sections) {
       for (const sec of grp.sections) {
         if (collapsed[sec.id]) continue;

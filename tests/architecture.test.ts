@@ -11,6 +11,7 @@ import type { ConfigStore } from '../src/main/store/configStore';
 import {
   filterSidebarSessions,
   flattenVisibleSessions,
+  getGlobalPinnedSessions,
   groupSessionsForSidebar,
 } from '../src/renderer/utils/sidebarGrouping';
 
@@ -140,6 +141,16 @@ describe('sidebarGrouping pure logic', () => {
       updatedAt: 5000,
     }),
     makeSession({
+      id: 'codex:c0',
+      harness: 'codex',
+      harnessGroup: 'codex',
+      title: 'Codex Native Pin',
+      projectName: 'api',
+      nativeSection: 'api',
+      pinned: true,
+      updatedAt: 4500,
+    }),
+    makeSession({
       id: 'codex:c1',
       harness: 'codex',
       harnessGroup: 'codex',
@@ -165,41 +176,58 @@ describe('sidebarGrouping pure logic', () => {
   const folders: SessionFolder[] = [{ id: 'f1', name: 'Sprint', createdAt: 1 }];
 
   it('filters by harness tab, live flag, and search query', () => {
-    expect(filterSidebarSessions(sessions, 'all', '')).toHaveLength(3);
+    expect(filterSidebarSessions(sessions, 'all', '')).toHaveLength(4);
     expect(filterSidebarSessions(sessions, 'live', '').map((s) => s.id)).toEqual(['claude-tmux:t1']);
-    expect(filterSidebarSessions(sessions, 'codex', '').map((s) => s.id)).toEqual(['codex:c1']);
+    expect(filterSidebarSessions(sessions, 'codex', '').map((s) => s.id)).toEqual([
+      'codex:c0',
+      'codex:c1',
+    ]);
     expect(filterSidebarSessions(sessions, 'all', 'backend').map((s) => s.id)).toEqual(['codex:c1']);
   });
 
-  it('anchors Super Harness top-pinned chats above all harnesses and promotes sections on single-harness filter', () => {
-    const groupsAll = groupSessionsForSidebar(sessions, 'native', folders, 'all');
-    expect(groupsAll[0].id).toBe('sh-pinned-top');
-    expect(groupsAll[0].items?.map((s) => s.id)).toEqual(['antigravity:a1']);
-    expect(groupsAll[1].id).toBe('harness:codex');
-    expect(groupsAll[2].id).toBe('harness:claude');
+  it('extracts global pinned chats across all harnesses and keeps native pins flat below each harness header', () => {
+    const globalPins = getGlobalPinnedSessions(sessions);
+    expect(globalPins.map((s) => s.id)).toEqual(['antigravity:a1']);
 
+    // Tree excludes global top-pinned chats (rendered above the harness switcher)
+    const groupsAll = groupSessionsForSidebar(sessions, 'native', folders, 'all');
+    expect(groupsAll.map((g) => g.id)).toEqual(['harness:codex', 'harness:claude']);
+    // Codex native pin lives in pinnedItems directly below the Codex separator (no extra Pinned section)
+    expect(groupsAll[0].pinnedItems?.map((s) => s.id)).toEqual(['codex:c0']);
+    expect(groupsAll[0].sections?.map((s) => s.label)).toEqual(['api']);
+
+    // Single-harness tab promotes native pins to a headless flat strip at the top
     const codexOnly = groupSessionsForSidebar(
       filterSidebarSessions(sessions, 'codex', ''),
       'native',
       folders,
       'codex'
     );
-    expect(codexOnly[0].label).toBe('api');
-    expect(codexOnly[0].items?.map((s) => s.id)).toEqual(['codex:c1']);
+    expect(codexOnly[0].headless).toBe(true);
+    expect(codexOnly[0].items?.map((s) => s.id)).toEqual(['codex:c0']);
+    expect(codexOnly[1].label).toBe('api');
+    expect(codexOnly[1].items?.map((s) => s.id)).toEqual(['codex:c1']);
   });
 
   it('supports folders, project, harness, and recent groupings + collapsed flattening', () => {
+    const globalPins = getGlobalPinnedSessions(sessions);
     const byFolders = groupSessionsForSidebar(sessions, 'folders', folders, 'all');
     expect(byFolders.map((g) => g.label)).toEqual(['Pinned', 'Sprint', 'Conversations']);
+    expect(byFolders[0].headless).toBe(true);
 
     const byProject = groupSessionsForSidebar(sessions, 'project', folders, 'all');
-    expect(byProject.map((g) => g.label)).toEqual(['Pinned', 'api', 'web']);
+    expect(byProject.map((g) => g.label)).toEqual(['api', 'web']);
 
-    // Flattening skips collapsed groups
-    const visibleAll = flattenVisibleSessions(byFolders, {});
-    expect(visibleAll.map((s) => s.id)).toEqual(['antigravity:a1', 'claude-tmux:t1', 'codex:c1']);
+    // Flattening prepends global pins and skips collapsed groups
+    const visibleAll = flattenVisibleSessions(byFolders, {}, globalPins);
+    expect(visibleAll.map((s) => s.id)).toEqual([
+      'antigravity:a1',
+      'codex:c0',
+      'claude-tmux:t1',
+      'codex:c1',
+    ]);
 
-    const visibleCollapsed = flattenVisibleSessions(byFolders, { f1: true });
-    expect(visibleCollapsed.map((s) => s.id)).toEqual(['antigravity:a1', 'codex:c1']);
+    const visibleCollapsed = flattenVisibleSessions(byFolders, { f1: true }, globalPins);
+    expect(visibleCollapsed.map((s) => s.id)).toEqual(['antigravity:a1', 'codex:c0', 'codex:c1']);
   });
 });

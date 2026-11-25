@@ -120,6 +120,9 @@ export function isTranscriptEquivalent(
   const aQueue = a.liveActivity?.queuedMessages?.length ?? 0;
   const bQueue = b.liveActivity?.queuedMessages?.length ?? 0;
   if (aQueue !== bQueue) return false;
+  const aTasks = a.liveActivity?.runningTasks?.map((t) => t.id).join(',') ?? '';
+  const bTasks = b.liveActivity?.runningTasks?.map((t) => t.id).join(',') ?? '';
+  if (aTasks !== bTasks) return false;
   if (a.messages.length > 0) {
     const aLast = a.messages[a.messages.length - 1];
     const bLast = b.messages[b.messages.length - 1];

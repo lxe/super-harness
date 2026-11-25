@@ -16,6 +16,7 @@ import {
 import type { MessageSourceKind, UnifiedBlock, UnifiedMessage } from '../../shared/types';
 import { Badge, Button, CollapsibleCard, DisclosureRow } from '../ui';
 import { mediaUrlForPath, renderMarkdownHtml } from '../utils/format';
+import type { PreviewImageItem } from './ImageLightbox';
 
 export type TraceBlock = Extract<
   UnifiedBlock,
@@ -117,9 +118,11 @@ interface Props {
   block: UnifiedBlock;
   onQuickReply?: (text: string) => void;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
 }
 
-export const CoalescedBlockView: React.FC<Props> = React.memo(({ block, onQuickReply, onOpenPath }) => {
+export const CoalescedBlockView: React.FC<Props> = React.memo(
+  ({ block, onQuickReply, onOpenPath, onPreviewImage }) => {
   const textContent = block.type === 'text' ? block.text : '';
   const renderedHtml = useMemo(() => {
     if (!textContent) return '';
@@ -161,13 +164,22 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(({ block, onQuickR
     const src = block.dataUrl || mediaUrlForPath(block.path);
     return (
       <div className="my-1.5">
-        <img
-          src={src}
-          alt={block.name || 'Attached image'}
-          loading="lazy"
-          decoding="async"
-          className="max-h-64 max-w-full rounded-xl border border-line-hairline object-contain bg-black/30"
-        />
+        <button
+          type="button"
+          onClick={() =>
+            onPreviewImage?.([{ src, name: block.name, path: block.path }], 0)
+          }
+          title={block.name ? `Preview ${block.name}` : 'Preview image'}
+          className="inline-block rounded-xl overflow-hidden border border-line-hairline hover:border-line-strong transition-colors cursor-pointer bg-black/30"
+        >
+          <img
+            src={src}
+            alt={block.name || 'Attached image'}
+            loading="lazy"
+            decoding="async"
+            className="max-h-64 max-w-full object-contain block"
+          />
+        </button>
       </div>
     );
   }
@@ -475,127 +487,190 @@ function classifyUserMessage(msg: UnifiedMessage): UserMessageClassification {
 interface UserMessageViewProps {
   msg: UnifiedMessage;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
 }
 
-export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(({ msg, onOpenPath }) => {
-  const [expanded, setExpanded] = useState(false);
-  const info = useMemo(() => classifyUserMessage(msg), [msg]);
+export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
+  ({ msg, onOpenPath, onPreviewImage }) => {
+    const [expanded, setExpanded] = useState(false);
+    const info = useMemo(() => classifyUserMessage(msg), [msg]);
 
-  if (
-    info.kind === 'agent' ||
-    info.kind === 'compaction' ||
-    info.kind === 'task' ||
-    info.kind === 'system_meta'
-  ) {
-    const Icon =
-      info.kind === 'agent'
-        ? Bot
-        : info.kind === 'compaction'
-          ? History
-          : info.kind === 'task'
-            ? Bell
-            : FileText;
-
-    const iconClass =
-      info.kind === 'agent'
-        ? 'text-indigo-300/80'
-        : info.kind === 'compaction'
-          ? 'text-status-warning/80'
-          : 'text-ink-faint';
-
-    return (
-      <CollapsibleCard
-        icon={<Icon className={`w-3.5 h-3.5 ${iconClass}`} />}
-        title={info.label}
-        preview={info.preview}
-        meta={info.sizeLabel}
-        bodyClassName="text-body text-ink-secondary space-y-2 max-h-[520px] overflow-y-auto"
-      >
-        {msg.blocks.map((b, i) => (
-          <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
-        ))}
-      </CollapsibleCard>
+    const imageBlocks = useMemo(
+      () =>
+        msg.blocks.filter(
+          (b): b is Extract<UnifiedBlock, { type: 'image' }> => b.type === 'image'
+        ),
+      [msg.blocks]
     );
-  }
+    const nonImageBlocks = useMemo(
+      () => msg.blocks.filter((b) => b.type !== 'image'),
+      [msg.blocks]
+    );
+    const previewItems = useMemo<PreviewImageItem[]>(
+      () =>
+        imageBlocks.map((b) => ({
+          src: b.dataUrl || mediaUrlForPath(b.path),
+          name: b.name,
+          path: b.path,
+        })),
+      [imageBlocks]
+    );
 
-  if (info.kind === 'long_human') {
-    const imageBlocks = msg.blocks.filter((b) => b.type === 'image');
-    const nonImageBlocks = msg.blocks.filter((b) => b.type !== 'image');
-    const previewSnippet = nonImageBlocks
-      .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n')
-      .trim()
-      .slice(0, 420);
-
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
-          {imageBlocks.map((b, i) => (
-            <CoalescedBlockView key={`img-${i}`} block={b} onOpenPath={onOpenPath} />
+    const renderThumbnailStrip = () =>
+      previewItems.length > 0 ? (
+        <div className="flex flex-wrap justify-end gap-2 max-w-[82%]">
+          {previewItems.map((img, idx) => (
+            <button
+              key={`${img.src}-${idx}`}
+              type="button"
+              onClick={() => onPreviewImage?.(previewItems, idx)}
+              title={img.name ? `Preview ${img.name}` : 'Preview image'}
+              className="group relative w-[72px] h-[72px] rounded-xl overflow-hidden border border-line-subtle bg-black/40 hover:border-line-strong hover:brightness-110 transition-all shrink-0 cursor-pointer"
+            >
+              <img
+                src={img.src}
+                alt={img.name || `Attachment ${idx + 1}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+              />
+            </button>
           ))}
+        </div>
+      ) : null;
 
-          {expanded ? (
-            <>
-              <div className="space-y-2">
-                {nonImageBlocks.map((b, i) => (
-                  <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
-                ))}
-              </div>
-              <div className="pt-1 flex justify-end border-t border-line-hairline">
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setExpanded(false)}
-                  iconLeft={<ChevronUp className="w-3.5 h-3.5" />}
-                >
-                  Collapse
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-2">
-              <div className="relative max-h-20 overflow-hidden">
-                <div className="whitespace-pre-wrap text-body leading-relaxed text-ink-secondary">
-                  {previewSnippet}
+    if (
+      info.kind === 'agent' ||
+      info.kind === 'compaction' ||
+      info.kind === 'task' ||
+      info.kind === 'system_meta'
+    ) {
+      const Icon =
+        info.kind === 'agent'
+          ? Bot
+          : info.kind === 'compaction'
+            ? History
+            : info.kind === 'task'
+              ? Bell
+              : FileText;
+
+      const iconClass =
+        info.kind === 'agent'
+          ? 'text-indigo-300/80'
+          : info.kind === 'compaction'
+            ? 'text-status-warning/80'
+            : 'text-ink-faint';
+
+      return (
+        <CollapsibleCard
+          icon={<Icon className={`w-3.5 h-3.5 ${iconClass}`} />}
+          title={info.label}
+          preview={info.preview}
+          meta={info.sizeLabel}
+          bodyClassName="text-body text-ink-secondary space-y-2 max-h-[520px] overflow-y-auto"
+        >
+          {msg.blocks.map((b, i) => (
+            <CoalescedBlockView
+              key={i}
+              block={b}
+              onOpenPath={onOpenPath}
+              onPreviewImage={onPreviewImage}
+            />
+          ))}
+        </CollapsibleCard>
+      );
+    }
+
+    if (info.kind === 'long_human') {
+      const previewSnippet = nonImageBlocks
+        .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim()
+        .slice(0, 420);
+
+      return (
+        <div className="flex flex-col items-end gap-2">
+          {renderThumbnailStrip()}
+          {nonImageBlocks.length > 0 && (
+            <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
+              {expanded ? (
+                <>
+                  <div className="space-y-2">
+                    {nonImageBlocks.map((b, i) => (
+                      <CoalescedBlockView
+                        key={i}
+                        block={b}
+                        onOpenPath={onOpenPath}
+                        onPreviewImage={onPreviewImage}
+                      />
+                    ))}
+                  </div>
+                  <div className="pt-1 flex justify-end border-t border-line-hairline">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setExpanded(false)}
+                      iconLeft={<ChevronUp className="w-3.5 h-3.5" />}
+                    >
+                      Collapse
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <div className="relative max-h-20 overflow-hidden">
+                    <div className="whitespace-pre-wrap text-body leading-relaxed text-ink-secondary">
+                      {previewSnippet}
+                    </div>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setExpanded(true)}
+                    iconLeft={<ChevronDown className="w-3.5 h-3.5" />}
+                    className="-ml-2"
+                  >
+                    Show full message ({info.sizeLabel})
+                  </Button>
                 </div>
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
-              </div>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => setExpanded(true)}
-                iconLeft={<ChevronDown className="w-3.5 h-3.5" />}
-                className="-ml-2"
-              >
-                Show full message ({info.sizeLabel})
-              </Button>
+              )}
             </div>
           )}
         </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col items-end gap-2">
+        {renderThumbnailStrip()}
+        {nonImageBlocks.length > 0 && (
+          <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
+            {nonImageBlocks.map((b, i) => (
+              <CoalescedBlockView
+                key={i}
+                block={b}
+                onOpenPath={onOpenPath}
+                onPreviewImage={onPreviewImage}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
-
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
-        {msg.blocks.map((b, i) => (
-          <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
-        ))}
-      </div>
-    </div>
-  );
-});
+);
 
 interface AssistantMessageViewProps {
   msg: UnifiedMessage;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
   onQuickReply?: (text: string) => void;
+  onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
 }
 
 export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.memo(
-  ({ msg, onOpenPath, onQuickReply }) => {
+  ({ msg, onOpenPath, onQuickReply, onPreviewImage }) => {
     const segments = useMemo(() => segmentBlocks(msg.blocks), [msg.blocks]);
     return (
       <div className="space-y-2.5">
@@ -608,6 +683,7 @@ export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.m
               block={seg.block}
               onOpenPath={onOpenPath}
               onQuickReply={onQuickReply}
+              onPreviewImage={onPreviewImage}
             />
           )
         )}

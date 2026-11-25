@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Loader2, Terminal } from 'lucide-react';
 import type {
   ImageAttachment,
   LiveActivityState,
@@ -11,7 +11,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
-import { Button } from '../ui';
+import { Badge, Button } from '../ui';
 import {
   DEFAULT_TRANSCRIPT_LIMIT,
   isTranscriptEquivalent,
@@ -24,6 +24,7 @@ import {
   isTraceBlock,
   UserMessageView,
 } from './CoalescedBlockView';
+import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
 import { LiveStepsBar } from './LiveStepsBar';
 import { QueuedMessagesTray } from './QueuedMessagesTray';
 import { SessionComposer } from './SessionComposer';
@@ -107,6 +108,11 @@ export const SessionPane: React.FC<Props> = ({
   const [streamingText, setStreamingText] = useState('');
   const [streamingBlocks, setStreamingBlocks] = useState<UnifiedBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [lightbox, setLightbox] = useState<{
+    images: PreviewImageItem[];
+    index: number;
+  } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -188,6 +194,8 @@ export const SessionPane: React.FC<Props> = ({
     setStreamingText('');
     setStreamingBlocks([]);
     setIsStreaming(false);
+    setTasksExpanded(false);
+    setLightbox(null);
     stickyBottomRef.current = true;
 
     if (!sessionId) {
@@ -613,6 +621,11 @@ export const SessionPane: React.FC<Props> = ({
     [ingestImageFiles]
   );
 
+  const handlePreviewImage = useCallback((images: PreviewImageItem[], index: number) => {
+    if (images.length === 0) return;
+    setLightbox({ images, index });
+  }, []);
+
   if (!session) {
     return (
       <div className="flex-1 flex items-center justify-center text-ink-faint text-body bg-surface-canvas">
@@ -685,6 +698,7 @@ export const SessionPane: React.FC<Props> = ({
                       key={msg.id}
                       msg={msg}
                       onOpenPath={handleMessageOpenPath}
+                      onPreviewImage={handlePreviewImage}
                     />
                   );
                 }
@@ -693,7 +707,11 @@ export const SessionPane: React.FC<Props> = ({
                   return (
                     <div key={msg.id} className="flex justify-center">
                       {msg.blocks.map((b, i) => (
-                        <CoalescedBlockView key={i} block={b} />
+                        <CoalescedBlockView
+                          key={i}
+                          block={b}
+                          onPreviewImage={handlePreviewImage}
+                        />
                       ))}
                     </div>
                   );
@@ -705,6 +723,7 @@ export const SessionPane: React.FC<Props> = ({
                     msg={msg}
                     onOpenPath={handleMessageOpenPath}
                     onQuickReply={handleQuickReply}
+                    onPreviewImage={handlePreviewImage}
                   />
                 );
               })
@@ -733,6 +752,64 @@ export const SessionPane: React.FC<Props> = ({
                 <span>Working</span>
                 {liveActivity.focus && (
                   <span className="text-zinc-600 truncate">· {liveActivity.focus}</span>
+                )}
+              </div>
+            )}
+
+            {/* Running background tasks indicator (Antigravity parity) */}
+            {!isMaster && liveActivity?.runningTasks && liveActivity.runningTasks.length > 0 && (
+              <div className="pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => setTasksExpanded((v) => !v)}
+                  className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
+                  <span>
+                    {liveActivity.runningTasks.length}{' '}
+                    {liveActivity.runningTasks.length === 1 ? 'task' : 'tasks'} running
+                  </span>
+                  {tasksExpanded ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
+                  )}
+                </button>
+                {tasksExpanded && (
+                  <div className="mt-1.5 rounded-xl border border-line-hairline bg-surface-subtle/80 divide-y divide-line-hairline overflow-hidden">
+                    {liveActivity.runningTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className="px-3 py-2 flex items-start justify-between gap-2.5 text-caption"
+                      >
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Terminal className="w-3 h-3 text-ink-faint shrink-0" />
+                            <span className="text-ink-secondary font-medium truncate">
+                              {task.summary}
+                            </span>
+                            {task.isDaemon && <Badge tone="neutral">daemon</Badge>}
+                          </div>
+                          {task.command && (
+                            <div className="text-micro font-mono text-ink-faint truncate">
+                              {task.command}
+                            </div>
+                          )}
+                        </div>
+                        {task.logPath && (
+                          <button
+                            type="button"
+                            onClick={() => handleMessageOpenPath(task.logPath!)}
+                            className="inline-flex items-center gap-1 text-micro text-ink-muted hover:text-ink-primary px-1.5 py-0.5 rounded hover:bg-white/[0.06] shrink-0 cursor-pointer"
+                            title="Inspect task log"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>Log</span>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
@@ -770,6 +847,7 @@ export const SessionPane: React.FC<Props> = ({
             textareaRef={textareaRef}
             onInputChange={setInput}
             onRemoveAttachment={handleRemoveAttachment}
+            onPreviewImage={handlePreviewImage}
             onPaste={(e) => void handlePaste(e)}
             onDropFiles={handleDropFiles}
             onPickImages={() => void handlePickImages()}
@@ -778,6 +856,14 @@ export const SessionPane: React.FC<Props> = ({
           />
         </div>
       </div>
+
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </section>
   );
 };

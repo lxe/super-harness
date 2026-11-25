@@ -9,6 +9,7 @@ import type {
   ImageAttachment,
   LiveActivityState,
   LiveStepItem,
+  RunningTaskItem,
   SendMessageResult,
   SessionTranscriptResult,
   StartSessionRequest,
@@ -266,8 +267,8 @@ export async function detectAntigravity(
     const preview =
       cleanTextPreview(summary?.preview || header.preview, 140) || 'Antigravity conversation';
     const isRunning =
-      (summary?.status && summary.status !== 'CASCADE_RUN_STATUS_IDLE') ||
-      Date.now() - d.mtime < 30_000;
+      summary?.status === 'CASCADE_RUN_STATUS_RUNNING' ||
+      (summary?.status !== 'CASCADE_RUN_STATUS_IDLE' && Date.now() - d.mtime < 20_000);
     const isLive = Boolean(isRunning) || Date.now() - d.mtime < 10 * 60 * 1000;
 
     const hasWorkspaceProject = cwd !== os.homedir();
@@ -379,6 +380,8 @@ export function parseAntigravityJsonlLines(
   let lastEventAt = sourceMtimeMs;
   const pendingOutputBlocks: Array<Extract<UnifiedBlock, { type: 'command' | 'tool_call' }>> = [];
   let pendingQuestionBlock: Extract<UnifiedBlock, { type: 'question' }> | null = null;
+  const runningTasks = new Map<string, RunningTaskItem>();
+  let pendingBgCmdMeta: Array<{ summary: string; command?: string; isDaemon: boolean }> = [];
 
   const applyAntigravityQuestionAnswers = (
     qBlock: Extract<UnifiedBlock, { type: 'question' }>,
@@ -422,7 +425,8 @@ export function parseAntigravityJsonlLines(
       !line.includes('USER_INPUT') &&
       !line.includes('PLANNER_RESPONSE') &&
       !line.includes('GENERIC') &&
-      !line.includes('SYSTEM_MESSAGE')
+      !line.includes('SYSTEM_MESSAGE') &&
+      !line.includes('CHECKPOINT')
     ) {
       continue;
     }
@@ -437,6 +441,35 @@ export function parseAntigravityJsonlLines(
     const ts = normalizeTimestamp(obj.created_at);
     lastStepType = stepType;
     lastEventAt = ts;
+
+    // Antigravity CHECKPOINT entries contain an exact snapshot of currently running background tasks.
+    // Resetting the active task map here avoids ghost tasks from pre-compaction turns.
+    if (stepType === 'CHECKPOINT' && typeof obj.content === 'string') {
+      runningTasks.clear();
+      const idx = obj.content.indexOf('# Running Background Tasks');
+      if (idx >= 0) {
+        const section = obj.content.slice(idx);
+        const re =
+          /"taskId":\s*"([^"]+)"[\s\S]*?"toolSummary":\s*"([^"]*)"[\s\S]*?"description":\s*"([^"]*)"[\s\S]*?"logUri":\s*"file:\/\/([^"]*)"[\s\S]*?"isDaemon":\s*(true|false)/g;
+        for (const m of section.matchAll(re)) {
+          runningTasks.set(m[1], {
+            id: m[1],
+            summary: m[2] || m[1].split('/').pop() || 'Background task',
+            command: m[3] || undefined,
+            logPath: m[4] || undefined,
+            isDaemon: m[5] === 'true',
+          });
+        }
+      }
+      continue;
+    }
+
+    if (stepType === 'SYSTEM_MESSAGE' && typeof obj.content === 'string') {
+      for (const m of obj.content.matchAll(/Task id "([^"]+)" finished/g)) {
+        runningTasks.delete(m[1]);
+      }
+      continue;
+    }
 
     if (stepType === 'USER_INPUT') {
       const content = typeof obj.content === 'string' ? stripUserRequestTags(obj.content) : '';
@@ -472,6 +505,25 @@ export function parseAntigravityJsonlLines(
     }
 
     if (stepType === 'GENERIC' && typeof obj.content === 'string' && obj.content.trim()) {
+      // Detect newly backgrounded tasks (status: RUNNING + task id line)
+      if (obj.status === 'RUNNING') {
+        const taskMatch = obj.content.match(
+          /Tool is running as a background task with task id:\s*([a-zA-Z0-9_-]+\/task-\d+)/
+        );
+        if (taskMatch) {
+          const taskId = taskMatch[1];
+          const logMatch = obj.content.match(/Task logs are available at:\s*file:\/\/([^\s\n]+)/);
+          const metaInfo = pendingBgCmdMeta.shift();
+          runningTasks.set(taskId, {
+            id: taskId,
+            summary: metaInfo?.summary || taskId.split('/').pop() || 'Background task',
+            command: metaInfo?.command,
+            logPath: logMatch?.[1],
+            isDaemon: metaInfo?.isDaemon ?? false,
+          });
+        }
+      }
+
       const cleaned = obj.content
         .replace(/^(?:Created At:.*\n|Completed At:.*\n)+/gm, '')
         .trim()
@@ -501,12 +553,33 @@ export function parseAntigravityJsonlLines(
       }
       const toolCalls = Array.isArray(obj.tool_calls) ? obj.tool_calls : [];
       lastPlannerHadToolCalls = toolCalls.length > 0;
+      pendingBgCmdMeta = [];
 
       for (const tc of toolCalls) {
         if (!tc || typeof tc !== 'object') continue;
         const t = tc as Record<string, unknown>;
         const name = String(t.name || 'tool');
         const argsObj = (t.args ?? {}) as Record<string, unknown>;
+
+        if (name === 'manage_task' && String(argsObj.Action ?? '').replace(/^"|"$/g, '') === 'kill') {
+          const tid = String(argsObj.TaskId ?? '').replace(/^"|"$/g, '');
+          if (tid) runningTasks.delete(tid);
+        }
+
+        if (name === 'run_command' || name === 'schedule') {
+          const rawSummary = String(
+            argsObj.toolSummary ?? argsObj.CommandLine ?? argsObj.Prompt ?? name
+          ).replace(/^"|"$/g, '');
+          const rawCmd =
+            typeof argsObj.CommandLine === 'string'
+              ? argsObj.CommandLine.replace(/^"|"$/g, '')
+              : undefined;
+          pendingBgCmdMeta.push({
+            summary: rawSummary,
+            command: rawCmd,
+            isDaemon: String(argsObj.IsDaemon) === 'true',
+          });
+        }
 
         if (name === 'update_focus') {
           if (typeof argsObj.focus === 'string' && argsObj.focus.trim()) {
@@ -622,10 +695,14 @@ export function parseAntigravityJsonlLines(
       lastStepType === 'USER_INPUT' ||
       (lastStepType === 'PLANNER_RESPONSE' && lastPlannerHadToolCalls));
 
+  const runningTasksList = Array.from(runningTasks.values());
+
   const liveActivity: LiveActivityState = {
     isWorking,
     focus: isWorking ? latestFocus : undefined,
-    steps: latestSteps,
+    // Suppress stale in-progress steps once a conversation has been idle for >2 minutes
+    steps: isWorking || Date.now() - sourceMtimeMs < 120_000 ? latestSteps : undefined,
+    runningTasks: runningTasksList.length > 0 ? runningTasksList : undefined,
     lastEventAt,
   };
 
@@ -668,7 +745,7 @@ export async function loadAntigravityTranscript(
     };
   }
 
-  const initialBytes = Math.max(512 * 1024, limit * 16 * 1024);
+  const initialBytes = Math.max(1024 * 1024, limit * 24 * 1024);
   const outcome = readProgressiveJsonlTail(
     resolved,
     (lines, chunkMeta) =>

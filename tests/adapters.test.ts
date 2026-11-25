@@ -331,6 +331,74 @@ describe('Antigravity transcript parsing & tail parity', () => {
     const lastBlock = tail.messages[15].blocks.find((b) => b.type === 'text');
     expect(lastBlock).toEqual({ type: 'text', text: 'Answer 119' });
   });
+
+  it('tracks Antigravity running background tasks accurately across CHECKPOINT, start, finish, and kill', () => {
+    const lines = [
+      // Pre-checkpoint task that should be cleared by CHECKPOINT snapshot
+      JSON.stringify({
+        step_index: 5,
+        type: 'GENERIC',
+        status: 'RUNNING',
+        created_at: 1000,
+        content: 'Tool is running as a background task with task id: conv-1/task-5',
+      }),
+      // Checkpoint resets active task map to task-10 + task-11
+      JSON.stringify({
+        step_index: 50,
+        type: 'CHECKPOINT',
+        created_at: 2000,
+        content: `# Running Background Tasks\n{\n  "taskId": "conv-1/task-10",\n  "toolName": "run_command",\n  "toolSummary": "Start Storybook",\n  "description": "npm run storybook",\n  "logUri": "file:///tmp/task-10.log",\n  "isDaemon": true\n}\n{\n  "taskId": "conv-1/task-11",\n  "toolName": "run_command",\n  "toolSummary": "Old electron",\n  "description": "node launch.mjs",\n  "logUri": "file:///tmp/task-11.log",\n  "isDaemon": true\n}`,
+      }),
+      // New task started after checkpoint
+      JSON.stringify({
+        step_index: 60,
+        type: 'PLANNER_RESPONSE',
+        created_at: 3000,
+        tool_calls: [
+          {
+            name: 'run_command',
+            args: {
+              toolSummary: 'Launch Electron',
+              CommandLine: 'node scripts/launch-electron.mjs .',
+              IsDaemon: true,
+            },
+          },
+        ],
+      }),
+      JSON.stringify({
+        step_index: 61,
+        type: 'GENERIC',
+        status: 'RUNNING',
+        created_at: 3001,
+        content:
+          'Tool is running as a background task with task id: conv-1/task-61\nTask logs are available at: file:///tmp/task-61.log',
+      }),
+      // Old task-11 finishes
+      JSON.stringify({
+        step_index: 62,
+        type: 'SYSTEM_MESSAGE',
+        created_at: 3005,
+        content: '<SYSTEM_MESSAGE>Task id "conv-1/task-11" finished with result: exit 0</SYSTEM_MESSAGE>',
+      }),
+    ];
+
+    const res = parseAntigravityJsonlLines(lines, 'antigravity:conv-1', Date.now(), 40);
+    expect(res.liveActivity?.runningTasks).toHaveLength(2);
+    expect(res.liveActivity?.runningTasks?.map((t) => t.id)).toEqual([
+      'conv-1/task-10',
+      'conv-1/task-61',
+    ]);
+    expect(res.liveActivity?.runningTasks?.[0]).toMatchObject({
+      summary: 'Start Storybook',
+      logPath: '/tmp/task-10.log',
+      isDaemon: true,
+    });
+    expect(res.liveActivity?.runningTasks?.[1]).toMatchObject({
+      summary: 'Launch Electron',
+      logPath: '/tmp/task-61.log',
+      isDaemon: true,
+    });
+  });
 });
 
 describe('Codex SQLite paginated loading & fingerprinting', () => {

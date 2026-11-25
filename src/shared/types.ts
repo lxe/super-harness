@@ -162,6 +162,14 @@ export interface LiveStepItem {
   status: 'pending' | 'in_progress' | 'done' | 'skipped' | 'failed';
 }
 
+export interface RunningTaskItem {
+  id: string;
+  summary: string;
+  command?: string;
+  logPath?: string;
+  isDaemon?: boolean;
+}
+
 export interface QueuedMessageItem {
   id: string;
   text: string;
@@ -175,6 +183,7 @@ export interface LiveActivityState {
   focus?: string;
   steps?: LiveStepItem[];
   queuedMessages?: QueuedMessageItem[];
+  runningTasks?: RunningTaskItem[];
   lastEventAt?: number;
 }
 

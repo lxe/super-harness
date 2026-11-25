@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { ArrowUp, ImagePlus, Loader2, Square, X } from 'lucide-react';
 import type { ImageAttachment, UnifiedSession } from '../../shared/types';
 import { IconButton } from '../ui';
-import { getHarnessVisual } from '../utils/format';
+import { getHarnessVisual, mediaUrlForPath } from '../utils/format';
 import { HarnessLogo } from './HarnessLogo';
+import type { PreviewImageItem } from './ImageLightbox';
 
 export interface SessionComposerProps {
   session: UnifiedSession;
@@ -17,6 +18,7 @@ export interface SessionComposerProps {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   onInputChange: (next: string) => void;
   onRemoveAttachment: (id: string) => void;
+  onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   onDropFiles: (files: FileList) => void;
   onPickImages: () => void;
@@ -41,6 +43,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
     textareaRef,
     onInputChange,
     onRemoveAttachment,
+    onPreviewImage,
     onPaste,
     onDropFiles,
     onPickImages,
@@ -80,20 +83,41 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
         }`}
       >
         {attachments.length > 0 && (
-          <div className="px-4 pt-3.5 pb-1.5 flex items-center gap-2.5 flex-wrap border-b border-line-hairline">
-            {attachments.map((att) => (
+          <div className="px-3.5 pt-3 pb-1 flex items-center gap-2 flex-wrap">
+            {attachments.map((att, idx) => (
               <div
                 key={att.id}
-                className="relative group w-16 h-16 rounded-lg overflow-hidden border border-line-subtle bg-black/40"
+                className="relative group w-14 h-14 rounded-xl overflow-hidden border border-line-subtle hover:border-line-strong bg-black/40 transition-colors"
               >
-                <img
-                  src={att.previewDataUrl}
-                  alt={att.name}
-                  className="w-full h-full object-cover"
-                />
                 <button
                   type="button"
-                  onClick={() => onRemoveAttachment(att.id)}
+                  onClick={() =>
+                    onPreviewImage?.(
+                      attachments.map((a) => ({
+                        src: a.previewDataUrl || mediaUrlForPath(a.path),
+                        name: a.name,
+                        path: a.path,
+                      })),
+                      idx
+                    )
+                  }
+                  title={`Preview ${att.name}`}
+                  className="w-full h-full block cursor-pointer"
+                >
+                  <img
+                    src={att.previewDataUrl}
+                    alt={att.name}
+                    className="w-full h-full object-cover hover:brightness-110 transition-all"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveAttachment(att.id);
+                  }}
+                  title="Remove image"
+                  aria-label="Remove image"
                   className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/80 text-ink-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                 >
                   <X className="w-2.5 h-2.5" />

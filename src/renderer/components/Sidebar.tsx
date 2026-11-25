@@ -218,6 +218,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
     }
   };
 
+  const dismissUsageHover = () => {
+    cancelCloseUsageHover();
+    setHoveredUsage(null);
+  };
+
   // Close context menu on outside click; Escape clears menu or multi-selection
   useEffect(() => {
     const close = () => setCtxMenu(null);
@@ -554,7 +559,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
       <div className="px-2.5 pb-3">
         <SegmentedControl<FilterTab>
           value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
-          onChange={(tab) => setFilter(tab)}
+          onChange={(tab) => {
+            setFilter(tab);
+            dismissUsageHover();
+          }}
           onItemMouseEnter={(id, el) => {
             if (!usage) return;
             const target: HarnessGroup | 'all' =

@@ -1,0 +1,99 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  HarnessDetection,
+  HarnessGroup,
+  OrganizeAction,
+  StartSessionRequest,
+  StreamEvent,
+  SuperHarnessApi,
+  SuperHarnessSettings,
+  SuperHarnessState,
+  UnifiedSession,
+} from '../shared/types';
+
+const api: SuperHarnessApi = {
+  getBootstrap: () => ipcRenderer.invoke('sh:bootstrap'),
+  refreshDiscovery: () => ipcRenderer.invoke('sh:refresh'),
+  getTranscript: (sessionId: string, limit?: number) =>
+    ipcRenderer.invoke('sh:transcript', sessionId, limit),
+  watchSession: (paneId: string, sessionId: string | null, limit?: number) =>
+    ipcRenderer.invoke('sh:watch-session', paneId, sessionId, limit),
+  captureTmux: (target: string) => ipcRenderer.invoke('sh:capture-tmux', target),
+  saveAttachment: (dataUrl: string, filename?: string) =>
+    ipcRenderer.invoke('sh:save-attachment', dataUrl, filename),
+  readClipboardImage: () => ipcRenderer.invoke('sh:read-clipboard-image'),
+  pickImageFiles: () => ipcRenderer.invoke('sh:pick-image-files'),
+  sendMessage: (
+    sessionId: string,
+    prompt: string,
+    attachments?: import('../shared/types').ImageAttachment[]
+  ) => ipcRenderer.invoke('sh:send', sessionId, prompt, attachments),
+  abortRun: (sessionId: string) => ipcRenderer.invoke('sh:abort', sessionId),
+  startSession: (req: StartSessionRequest) => ipcRenderer.invoke('sh:start-session', req),
+  controlHarness: (
+    harness: HarnessGroup,
+    action: 'start_remote' | 'stop_remote' | 'open_desktop'
+  ) => ipcRenderer.invoke('sh:control-harness', harness, action),
+  organize: (actions: OrganizeAction[]) => ipcRenderer.invoke('sh:organize', actions),
+  archiveSession: (sessionId: string, opts?: { killTmux?: boolean }) =>
+    ipcRenderer.invoke('sh:archive-session', sessionId, opts),
+  updateSettings: (patch: Partial<SuperHarnessSettings>) =>
+    ipcRenderer.invoke('sh:update-settings', patch),
+  clearMasterHistory: () => ipcRenderer.invoke('sh:clear-master'),
+  pickDirectory: () => ipcRenderer.invoke('sh:pick-directory'),
+  getSystemApps: () => ipcRenderer.invoke('sh:system-apps'),
+  readFilePreview: (filePath: string, startLine?: number, endLine?: number) =>
+    ipcRenderer.invoke('sh:read-file-preview', filePath, startLine, endLine),
+  openPath: (
+    targetPath: string,
+    mode?: 'auto' | 'internal' | 'editor' | 'file-manager' | 'terminal' | 'system',
+    opts?: { line?: number; tmuxSession?: string }
+  ) => ipcRenderer.invoke('sh:open-path', targetPath, mode, opts),
+  openExternalUrl: (url: string) => ipcRenderer.invoke('sh:open-external', url),
+  getUsage: (force?: boolean) => ipcRenderer.invoke('sh:get-usage', force),
+
+  onStreamEvent: (cb: (ev: StreamEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: StreamEvent) => cb(payload);
+    ipcRenderer.on('sh:stream', listener);
+    return () => ipcRenderer.removeListener('sh:stream', listener);
+  },
+
+  onTranscriptUpdated: (
+    cb: (result: import('../shared/types').SessionTranscriptResult) => void
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: import('../shared/types').SessionTranscriptResult
+    ) => cb(payload);
+    ipcRenderer.on('sh:transcript-updated', listener);
+    return () => ipcRenderer.removeListener('sh:transcript-updated', listener);
+  },
+
+  onStateChanged: (cb: (state: SuperHarnessState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: SuperHarnessState) => cb(state);
+    ipcRenderer.on('sh:state-changed', listener);
+    return () => ipcRenderer.removeListener('sh:state-changed', listener);
+  },
+
+  onUsageUpdated: (cb: (usage: import('../shared/types').UsageSnapshot) => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      usage: import('../shared/types').UsageSnapshot
+    ) => cb(usage);
+    ipcRenderer.on('sh:usage-updated', listener);
+    return () => ipcRenderer.removeListener('sh:usage-updated', listener);
+  },
+
+  onSessionsUpdated: (
+    cb: (payload: { harnesses: HarnessDetection[]; sessions: UnifiedSession[] }) => void
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { harnesses: HarnessDetection[]; sessions: UnifiedSession[] }
+    ) => cb(payload);
+    ipcRenderer.on('sh:sessions-updated', listener);
+    return () => ipcRenderer.removeListener('sh:sessions-updated', listener);
+  },
+};
+
+contextBridge.exposeInMainWorld('superHarness', api);

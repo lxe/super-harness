@@ -1,0 +1,623 @@
+import React, { useMemo, useState } from 'react';
+import {
+  Bell,
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  FileCode2,
+  FileText,
+  Globe,
+  HelpCircle,
+  History,
+  Terminal,
+  Wrench,
+} from 'lucide-react';
+import type { MessageSourceKind, UnifiedBlock, UnifiedMessage } from '../../shared/types';
+import { Badge, Button, CollapsibleCard, DisclosureRow } from '../ui';
+import { mediaUrlForPath, renderMarkdownHtml } from '../utils/format';
+
+export type TraceBlock = Extract<
+  UnifiedBlock,
+  { type: 'thinking' | 'command' | 'file_change' | 'tool_call' | 'web_search' | 'notice' }
+>;
+
+export function isTraceBlock(b: UnifiedBlock): b is TraceBlock {
+  return b.type !== 'text' && b.type !== 'image' && b.type !== 'question';
+}
+
+export type BlockSegment =
+  | { kind: 'single'; block: UnifiedBlock }
+  | { kind: 'trace'; blocks: TraceBlock[] };
+
+/**
+ * Groups consecutive trace blocks (thinking / commands / file_changes / tool_calls)
+ * into a single collapsible summary while leaving prose, images, and questions
+ * directly visible.
+ */
+export function segmentBlocks(blocks: UnifiedBlock[]): BlockSegment[] {
+  const segments: BlockSegment[] = [];
+  for (const b of blocks) {
+    if (isTraceBlock(b)) {
+      const last = segments[segments.length - 1];
+      if (last && last.kind === 'trace') {
+        last.blocks.push(b);
+      } else {
+        segments.push({ kind: 'trace', blocks: [b] });
+      }
+    } else {
+      segments.push({ kind: 'single', block: b });
+    }
+  }
+  return segments;
+}
+
+interface TraceGroupProps {
+  blocks: TraceBlock[];
+  onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+}
+
+export const CollapsedTraceGroup: React.FC<TraceGroupProps> = React.memo(({ blocks, onOpenPath }) => {
+  const summary = useMemo(() => {
+    let thinkCount = 0;
+    let cmdCount = 0;
+    let fileCount = 0;
+    let toolCount = 0;
+    let searchCount = 0;
+
+    for (const b of blocks) {
+      if (b.type === 'thinking') thinkCount++;
+      else if (b.type === 'command') cmdCount++;
+      else if (b.type === 'file_change') fileCount += b.changes.length;
+      else if (b.type === 'web_search') searchCount++;
+      else if (b.type === 'tool_call') toolCount++;
+    }
+
+    const parts: string[] = [];
+    if (cmdCount > 0) parts.push(cmdCount === 1 ? 'Ran command' : `Ran ${cmdCount} commands`);
+    if (fileCount > 0) parts.push(fileCount === 1 ? 'Edited file' : `Edited ${fileCount} files`);
+    if (searchCount > 0) parts.push(searchCount === 1 ? 'Searched web' : `${searchCount} searches`);
+    if (toolCount > 0) parts.push(toolCount === 1 ? 'Used tool' : `${toolCount} tool calls`);
+    if (parts.length === 0 && thinkCount > 0) parts.push('Thought');
+    if (parts.length === 0) parts.push(`${blocks.length} steps`);
+    return parts.join(' · ');
+  }, [blocks]);
+
+  return (
+    <DisclosureRow label={summary}>
+      {blocks.map((b, i) => (
+        <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
+      ))}
+    </DisclosureRow>
+  );
+});
+
+function parseFileLinkHref(
+  href: string
+): { filePath: string; startLine?: number; endLine?: number } | null {
+  if (!href.startsWith('file://')) return null;
+  try {
+    const u = new URL(href);
+    const filePath = decodeURIComponent(u.pathname);
+    let startLine: number | undefined;
+    let endLine: number | undefined;
+    const hash = u.hash.replace(/^#/, '');
+    const m = hash.match(/^L(\d+)(?:-L?(\d+))?$/i);
+    if (m) {
+      startLine = Number(m[1]);
+      endLine = m[2] ? Number(m[2]) : startLine;
+    }
+    return { filePath, startLine, endLine };
+  } catch {
+    return null;
+  }
+}
+
+interface Props {
+  block: UnifiedBlock;
+  onQuickReply?: (text: string) => void;
+  onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+}
+
+export const CoalescedBlockView: React.FC<Props> = React.memo(({ block, onQuickReply, onOpenPath }) => {
+  const textContent = block.type === 'text' ? block.text : '';
+  const renderedHtml = useMemo(() => {
+    if (!textContent) return '';
+    return renderMarkdownHtml(textContent);
+  }, [textContent]);
+
+  const handleMarkdownClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement | null)?.closest('a');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href') || '';
+    if (!href) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const parsedFile = parseFileLinkHref(href);
+    if (parsedFile) {
+      onOpenPath?.(parsedFile.filePath, {
+        startLine: parsedFile.startLine,
+        endLine: parsedFile.endLine,
+      });
+      return;
+    }
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      void window.superHarness.openExternalUrl(href);
+    }
+  };
+
+  if (block.type === 'text') {
+    return (
+      <div
+        className="sh-markdown"
+        onClick={handleMarkdownClick}
+        dangerouslySetInnerHTML={{ __html: renderedHtml }}
+      />
+    );
+  }
+
+  if (block.type === 'image') {
+    const src = block.dataUrl || mediaUrlForPath(block.path);
+    return (
+      <div className="my-1.5">
+        <img
+          src={src}
+          alt={block.name || 'Attached image'}
+          loading="lazy"
+          decoding="async"
+          className="max-h-64 max-w-full rounded-xl border border-line-hairline object-contain bg-black/30"
+        />
+      </div>
+    );
+  }
+
+  if (block.type === 'question') {
+    const isAnswered =
+      Boolean(block.answered) || block.questions.some((q) => Boolean(q.answer));
+
+    if (isAnswered) {
+      return (
+        <div className="my-3 rounded-xl border border-line-hairline bg-surface-subtle/60 overflow-hidden">
+          <div className="px-4 py-2.5 flex items-center justify-between gap-2 border-b border-line-hairline">
+            <div className="flex items-center gap-1.5 text-caption text-ink-muted">
+              <HelpCircle className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+              <span>
+                {block.questions.length} {block.questions.length === 1 ? 'question' : 'questions'}
+              </span>
+            </div>
+            <Badge tone="success" icon={<Check className="w-2.5 h-2.5" />}>
+              Answered
+            </Badge>
+          </div>
+          <div className="divide-y divide-line-hairline">
+            {block.questions.map((q, qi) => (
+              <div key={qi} className="px-4 py-3 space-y-1">
+                <div className="text-label font-medium text-ink-primary">{q.question}</div>
+                <div className="text-body text-ink-secondary">
+                  {q.answer || <span className="text-ink-faint italic">Answered</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="my-3 rounded-xl border border-line-subtle bg-surface-subtle/60 p-4 space-y-3.5">
+        <div className="flex items-center gap-1.5 text-caption text-ink-muted">
+          <HelpCircle className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+          <span>
+            {block.questions.length} {block.questions.length === 1 ? 'question' : 'questions'}
+          </span>
+        </div>
+        <div className="space-y-3.5">
+          {block.questions.map((q, qi) => (
+            <div key={qi} className="space-y-1.5">
+              <div className="text-label font-medium text-ink-primary">{q.question}</div>
+              {q.options.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {q.options.map((opt, oi) => (
+                    <Button
+                      key={oi}
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => onQuickReply?.(`${q.question}: ${opt}`)}
+                      className="text-left font-normal"
+                    >
+                      {opt}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'thinking') {
+    const preview = (block.summary || block.text).replace(/\s+/g, ' ').slice(0, 90);
+    return (
+      <CollapsibleCard
+        variant="subtle"
+        title="Thought"
+        preview={preview}
+        bodyClassName="max-h-72 overflow-y-auto"
+      >
+        <div className="text-caption text-ink-muted whitespace-pre-wrap font-mono leading-relaxed">
+          {block.text}
+        </div>
+      </CollapsibleCard>
+    );
+  }
+
+  if (block.type === 'command') {
+    return (
+      <CollapsibleCard
+        variant="recessed"
+        icon={<Terminal className="w-3 h-3 text-ink-faint" />}
+        title={<code className="font-mono font-normal text-ink-secondary">{block.command}</code>}
+        meta={
+          block.exitCode !== undefined && block.exitCode !== null && block.exitCode !== 0 ? (
+            <Badge tone="danger" mono>
+              exit {block.exitCode}
+            </Badge>
+          ) : undefined
+        }
+        bodyClassName="max-h-64 overflow-y-auto"
+      >
+        <pre className="text-micro text-ink-muted font-mono whitespace-pre-wrap break-all">
+          {block.output?.trim() || '(no output)'}
+        </pre>
+      </CollapsibleCard>
+    );
+  }
+
+  if (block.type === 'file_change') {
+    const label =
+      block.changes.length === 1
+        ? block.changes[0].path
+        : `${block.changes.length} files modified`;
+    return (
+      <CollapsibleCard
+        variant="recessed"
+        icon={<FileCode2 className="w-3 h-3 text-ink-faint" />}
+        title={<span className="font-mono font-normal text-ink-secondary">{label}</span>}
+        bodyClassName="space-y-2 max-h-72 overflow-y-auto"
+      >
+        {block.changes.map((ch, idx) => (
+          <div key={idx} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => onOpenPath?.(ch.path)}
+              className="text-micro font-mono text-ink-secondary hover:text-brand-antigravity hover:underline truncate block text-left cursor-pointer"
+            >
+              {ch.path}
+            </button>
+            {ch.diff && (
+              <pre className="text-micro font-mono bg-black/30 p-2 rounded overflow-x-auto leading-relaxed">
+                {ch.diff.split('\n').map((line, i) => {
+                  const cls = line.startsWith('+')
+                    ? 'text-emerald-300/90 block'
+                    : line.startsWith('-')
+                      ? 'text-rose-300/90 block'
+                      : 'text-ink-faint block';
+                  return (
+                    <span key={i} className={cls}>
+                      {line}
+                    </span>
+                  );
+                })}
+              </pre>
+            )}
+          </div>
+        ))}
+      </CollapsibleCard>
+    );
+  }
+
+  if (block.type === 'tool_call') {
+    return (
+      <CollapsibleCard
+        variant="recessed"
+        icon={<Wrench className="w-3 h-3 text-ink-faint" />}
+        title={
+          <span className="font-mono font-normal text-ink-secondary">
+            {block.server ? `${block.server}.` : ''}
+            {block.name}
+          </span>
+        }
+        bodyClassName="space-y-2 max-h-64 overflow-y-auto"
+      >
+        {block.args && (
+          <pre className="text-micro font-mono text-ink-muted whitespace-pre-wrap break-all">
+            {block.args}
+          </pre>
+        )}
+        {block.output && (
+          <pre className="text-micro font-mono text-ink-secondary border-t border-line-hairline pt-2 whitespace-pre-wrap break-all">
+            {block.output}
+          </pre>
+        )}
+      </CollapsibleCard>
+    );
+  }
+
+  if (block.type === 'web_search') {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-caption text-ink-muted px-1 py-0.5">
+        <Globe className="w-3 h-3 text-ink-faint shrink-0" />
+        <span className="truncate max-w-md">{block.query}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-caption text-ink-faint px-1 py-0.5">
+      {block.title}
+      {block.detail ? ` — ${block.detail}` : ''}
+    </div>
+  );
+});
+
+interface UserMessageClassification {
+  kind: MessageSourceKind | 'long_human';
+  label: string;
+  preview: string;
+  sizeLabel: string;
+  senderName?: string;
+}
+
+function formatSizeBadge(charCount: number, lineCount: number): string {
+  if (charCount >= 1000) return `${(charCount / 1000).toFixed(1)}k chars`;
+  if (lineCount > 1) return `${lineCount} lines`;
+  return `${charCount} chars`;
+}
+
+function extractReadablePreview(text: string): string {
+  const summaryTag = text.match(/<summary>([\s\S]*?)<\/summary>/i);
+  if (summaryTag?.[1]) {
+    return summaryTag[1].replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+  const stripped = text
+    .replace(/^Another Claude session sent a message:\s*/i, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.slice(0, 120);
+}
+
+function classifyUserMessage(msg: UnifiedMessage): UserMessageClassification {
+  const fullText = msg.blocks
+    .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+
+  const charCount = fullText.length;
+  const lineCount = fullText ? fullText.split('\n').length : 0;
+  const sizeLabel = formatSizeBadge(charCount, lineCount);
+  const preview = extractReadablePreview(fullText);
+  const metaKind = msg.harnessMeta?.sourceKind;
+  let senderName = msg.harnessMeta?.senderName;
+
+  if (!senderName) {
+    const m =
+      fullText.match(/<cross-session-message[^>]*\bname="([^"]+)"/i) ||
+      fullText.match(/<teammate-message[^>]*\bteammate_id="([^"]+)"/i) ||
+      fullText.match(/\bsender=([^\s\]]+)/i);
+    if (m?.[1]) senderName = m[1];
+  }
+
+  if (
+    metaKind === 'compaction' ||
+    /^This session is being continued from a previous conversation/i.test(fullText) ||
+    /^<CONTEXT_SUMMARY>/i.test(fullText) ||
+    /^Continuing .* conversation "/i.test(fullText)
+  ) {
+    return { kind: 'compaction', label: 'Compacted conversation summary', preview, sizeLabel };
+  }
+
+  if (
+    metaKind === 'agent' ||
+    /<cross-session-message\b/i.test(fullText) ||
+    /<teammate-message\b/i.test(fullText) ||
+    /<subagent[_-]notification\b/i.test(fullText) ||
+    /^Another (?:Claude|Codex|agent|session)\b.*sent a message:/i.test(fullText) ||
+    (/^\[Message\]/i.test(fullText) && /\bsender=/i.test(fullText)) ||
+    (/<SYSTEM_MESSAGE>/i.test(fullText) && /\bsender=/i.test(fullText)) ||
+    (charCount > 450 &&
+      /^(?:You are (?:"[^"]+"|the |an? )|Human Interface\s*\()/i.test(fullText))
+  ) {
+    return {
+      kind: 'agent',
+      label: senderName ? `From agent · ${senderName}` : 'Message from another agent',
+      preview,
+      sizeLabel,
+      senderName,
+    };
+  }
+
+  if (
+    metaKind === 'task' ||
+    /^<task-notification\b/i.test(fullText) ||
+    (/<SYSTEM_MESSAGE>/i.test(fullText) && /Task id/i.test(fullText))
+  ) {
+    return { kind: 'task', label: 'Task notification', preview, sizeLabel };
+  }
+
+  if (
+    metaKind === 'system_meta' ||
+    /^# AGENTS\.md instructions/i.test(fullText) ||
+    /^<(?:INSTRUCTIONS|environment_context|local-command-caveat|turn_aborted|system-reminder)\b/i.test(
+      fullText
+    ) ||
+    /^\[Image:\s*(?:source:|original )/i.test(fullText)
+  ) {
+    const label = /^# AGENTS\.md instructions/i.test(fullText)
+      ? 'AGENTS.md instructions'
+      : /^<environment_context/i.test(fullText)
+        ? 'Environment context'
+        : 'Context note';
+    return { kind: 'system_meta', label, preview, sizeLabel };
+  }
+
+  if (charCount > 480 || lineCount > 8) {
+    return { kind: 'long_human', label: 'Long message', preview, sizeLabel };
+  }
+
+  return { kind: 'human', label: '', preview, sizeLabel };
+}
+
+interface UserMessageViewProps {
+  msg: UnifiedMessage;
+  onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+}
+
+export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(({ msg, onOpenPath }) => {
+  const [expanded, setExpanded] = useState(false);
+  const info = useMemo(() => classifyUserMessage(msg), [msg]);
+
+  if (
+    info.kind === 'agent' ||
+    info.kind === 'compaction' ||
+    info.kind === 'task' ||
+    info.kind === 'system_meta'
+  ) {
+    const Icon =
+      info.kind === 'agent'
+        ? Bot
+        : info.kind === 'compaction'
+          ? History
+          : info.kind === 'task'
+            ? Bell
+            : FileText;
+
+    const iconClass =
+      info.kind === 'agent'
+        ? 'text-indigo-300/80'
+        : info.kind === 'compaction'
+          ? 'text-status-warning/80'
+          : 'text-ink-faint';
+
+    return (
+      <CollapsibleCard
+        icon={<Icon className={`w-3.5 h-3.5 ${iconClass}`} />}
+        title={info.label}
+        preview={info.preview}
+        meta={info.sizeLabel}
+        bodyClassName="text-body text-ink-secondary space-y-2 max-h-[520px] overflow-y-auto"
+      >
+        {msg.blocks.map((b, i) => (
+          <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
+        ))}
+      </CollapsibleCard>
+    );
+  }
+
+  if (info.kind === 'long_human') {
+    const imageBlocks = msg.blocks.filter((b) => b.type === 'image');
+    const nonImageBlocks = msg.blocks.filter((b) => b.type !== 'image');
+    const previewSnippet = nonImageBlocks
+      .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim()
+      .slice(0, 420);
+
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
+          {imageBlocks.map((b, i) => (
+            <CoalescedBlockView key={`img-${i}`} block={b} onOpenPath={onOpenPath} />
+          ))}
+
+          {expanded ? (
+            <>
+              <div className="space-y-2">
+                {nonImageBlocks.map((b, i) => (
+                  <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
+                ))}
+              </div>
+              <div className="pt-1 flex justify-end border-t border-line-hairline">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setExpanded(false)}
+                  iconLeft={<ChevronUp className="w-3.5 h-3.5" />}
+                >
+                  Collapse
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <div className="relative max-h-20 overflow-hidden">
+                <div className="whitespace-pre-wrap text-body leading-relaxed text-ink-secondary">
+                  {previewSnippet}
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
+              </div>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setExpanded(true)}
+                iconLeft={<ChevronDown className="w-3.5 h-3.5" />}
+                className="-ml-2"
+              >
+                Show full message ({info.sizeLabel})
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
+        {msg.blocks.map((b, i) => (
+          <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
+        ))}
+      </div>
+    </div>
+  );
+});
+
+interface AssistantMessageViewProps {
+  msg: UnifiedMessage;
+  onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onQuickReply?: (text: string) => void;
+}
+
+export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.memo(
+  ({ msg, onOpenPath, onQuickReply }) => {
+    const segments = useMemo(() => segmentBlocks(msg.blocks), [msg.blocks]);
+    return (
+      <div className="space-y-2.5">
+        {segments.map((seg, idx) =>
+          seg.kind === 'trace' ? (
+            <CollapsedTraceGroup key={idx} blocks={seg.blocks} onOpenPath={onOpenPath} />
+          ) : (
+            <CoalescedBlockView
+              key={idx}
+              block={seg.block}
+              onOpenPath={onOpenPath}
+              onQuickReply={onQuickReply}
+            />
+          )
+        )}
+        {msg.streaming && <div className="text-xs text-zinc-500 pt-1">Working…</div>}
+        {msg.error && (
+          <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3.5 py-2.5 text-xs text-rose-300 font-mono">
+            {msg.error}
+          </div>
+        )}
+      </div>
+    );
+  }
+);

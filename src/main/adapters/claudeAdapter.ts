@@ -1,0 +1,1441 @@
+import { execFile, spawn } from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import type {
+  HarnessDetection,
+  ImageAttachment,
+  LiveActivityState,
+  LiveStepItem,
+  QueuedMessageItem,
+  SendMessageResult,
+  SessionTranscriptResult,
+  StartSessionRequest,
+  StreamEvent,
+  TmuxCaptureResult,
+  UnifiedBlock,
+  UnifiedMessage,
+  UnifiedSession,
+} from '../../shared/types';
+import { readProgressiveJsonlTail } from '../utils/tailReader';
+import {
+  cleanTextPreview,
+  getBinaryVersion,
+  isPidAlive,
+  normalizeTimestamp,
+  projectNameFromCwd,
+  whichBinary,
+  type ProcessRow,
+} from '../utils/system';
+import {
+  computeFileFingerprint,
+  createUniqueIdGenerator,
+  formatPromptWithImagePaths,
+  type DaemonControlAction,
+  type DispatchContext,
+  type HarnessDriver,
+  type HarnessWatchSpec,
+} from './types';
+
+const execFileAsync = promisify(execFile);
+
+const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+const CLAUDE_SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
+const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
+const CLAUDE_DESKTOP_SESSIONS_DIR = path.join(
+  os.homedir(),
+  '.config',
+  'Claude',
+  'claude-code-sessions'
+);
+const CLAUDE_DESKTOP_CONFIG_PATH = path.join(
+  os.homedir(),
+  '.config',
+  'Claude',
+  'claude_desktop_config.json'
+);
+
+interface ClaudeNativeSections {
+  /** Maps local_<uuid> -> { name, order } */
+  sectionByLocalId: Map<string, { name: string; order: number }>;
+  starredLocalIds: Set<string>;
+}
+
+function loadClaudeNativeSections(): ClaudeNativeSections {
+  const sectionByLocalId = new Map<string, { name: string; order: number }>();
+  const starredLocalIds = new Set<string>();
+
+  if (!fs.existsSync(CLAUDE_DESKTOP_CONFIG_PATH)) {
+    return { sectionByLocalId, starredLocalIds };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(CLAUDE_DESKTOP_CONFIG_PATH, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const prefs = (raw.preferences ?? {}) as Record<string, unknown>;
+    const ep = (prefs.epitaxyPrefs ?? {}) as Record<string, unknown>;
+
+    const starred = ep['starred-local-code-sessions'];
+    if (Array.isArray(starred)) {
+      for (const s of starred) {
+        if (typeof s === 'string') starredLocalIds.add(s);
+      }
+    }
+
+    // Build group id -> { name, order } from dframe-code-sections + dframe-group-scopes
+    const groupInfo = new Map<string, { name: string; order: number }>();
+    const codeSections = (ep['dframe-code-sections'] ?? {}) as Record<
+      string,
+      { sections?: Array<{ id?: string; name?: string; order?: number; kind?: string }> }
+    >;
+    for (const acctObj of Object.values(codeSections)) {
+      for (const sec of acctObj?.sections ?? []) {
+        if (sec.id && sec.name && sec.kind === 'manual') {
+          groupInfo.set(sec.id, {
+            name: sec.name,
+            order: typeof sec.order === 'number' ? sec.order : 50,
+          });
+        }
+      }
+    }
+
+    const groupScopes = (ep['dframe-group-scopes'] ?? {}) as Record<
+      string,
+      {
+        groups?: Array<{ id?: string; name?: string }>;
+        assignments?: Record<string, string>;
+      }
+    >;
+    for (const acctObj of Object.values(groupScopes)) {
+      let fallbackOrder = 20;
+      for (const g of acctObj?.groups ?? []) {
+        if (g.id && g.name && !groupInfo.has(g.id)) {
+          groupInfo.set(g.id, { name: g.name, order: fallbackOrder++ });
+        }
+      }
+      for (const [key, groupId] of Object.entries(acctObj?.assignments ?? {})) {
+        // Keys look like "code:local_<uuid>"
+        const localId = key.replace(/^code:/, '');
+        const info = groupInfo.get(groupId);
+        if (localId && info) {
+          sectionByLocalId.set(localId, info);
+        }
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return { sectionByLocalId, starredLocalIds };
+}
+
+interface ActiveClaudeSessionJson {
+  pid?: number;
+  sessionId?: string;
+  cwd?: string;
+  startedAt?: number;
+  updatedAt?: number;
+  version?: string;
+  entrypoint?: string;
+  hostSessionId?: string;
+  tmux?: string;
+  name?: string;
+  status?: string;
+  bridgeSessionId?: string;
+}
+
+interface ClaudeDesktopMetaJson {
+  sessionId?: string;
+  cliSessionId?: string;
+  cwd?: string;
+  title?: string;
+  model?: string;
+  createdAt?: number;
+  lastActivityAt?: number;
+  isArchived?: boolean;
+  permissionMode?: string;
+  gitAnchors?: Array<{ branch?: string }>;
+}
+
+let cachedClaudeVersion: string | null | undefined;
+const claudeTranscriptPathCache = new Map<string, string>();
+const headMetaCache = new Map<
+  string,
+  { mtimeMs: number; size: number; meta: { title?: string; preview?: string; cwd?: string; model?: string } }
+>();
+
+function encodeClaudeProjectDir(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+export function resolveClaudeTranscriptPath(cliSessionId: string, cwd?: string): string | undefined {
+  return findClaudeTranscriptPath(cliSessionId, cwd);
+}
+
+function findClaudeTranscriptPath(cliSessionId: string, cwd?: string): string | undefined {
+  if (!cliSessionId) return undefined;
+  const cached = claudeTranscriptPathCache.get(cliSessionId);
+  if (cached && fs.existsSync(cached)) return cached;
+  if (cwd) {
+    const direct = path.join(CLAUDE_PROJECTS_DIR, encodeClaudeProjectDir(cwd), `${cliSessionId}.jsonl`);
+    if (fs.existsSync(direct)) {
+      claudeTranscriptPathCache.set(cliSessionId, direct);
+      return direct;
+    }
+  }
+  if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) return undefined;
+  try {
+    for (const dir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+      const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${cliSessionId}.jsonl`);
+      if (fs.existsSync(candidate)) {
+        claudeTranscriptPathCache.set(cliSessionId, candidate);
+        return candidate;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+interface ClaudeActivityResult {
+  working: boolean;
+  mtimeMs: number;
+  activeTool?: string;
+}
+
+function isClaudeLocalCommandText(text: string): boolean {
+  const t = text.trim();
+  return (
+    t.startsWith('<local-command-caveat>') ||
+    t.startsWith('<local-command-stdout>') ||
+    t.startsWith('<local-command-stderr>') ||
+    t.startsWith('<command-name>') ||
+    t.startsWith('<command-message>')
+  );
+}
+
+function extractTagContent(text: string, tag: string): string | null {
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const m = text.match(re);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Inspects only the tail (last 48KB) of a recently modified Claude .jsonl transcript
+ * to accurately determine if the agent is mid-turn (API request in flight, streaming,
+ * or executing a tool like Bash without a matching tool_result yet).
+ */
+function inspectClaudeTranscriptActivity(
+  transcriptPath: string | undefined,
+  isLivePid: boolean
+): ClaudeActivityResult {
+  if (!transcriptPath) return { working: false, mtimeMs: 0 };
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(transcriptPath);
+  } catch {
+    return { working: false, mtimeMs: 0 };
+  }
+
+  const ageMs = Date.now() - st.mtimeMs;
+  if (ageMs > 15 * 60 * 1000) {
+    return { working: false, mtimeMs: st.mtimeMs };
+  }
+
+  try {
+    const readLen = Math.min(st.size, 49152);
+    const fd = fs.openSync(transcriptPath, 'r');
+    const buf = Buffer.alloc(readLen);
+    fs.readSync(fd, buf, 0, readLen, st.size - readLen);
+    fs.closeSync(fd);
+
+    const text = buf.toString('utf8');
+    const lines = text.split('\n');
+    const startIdx = st.size > readLen ? 1 : 0;
+
+    const pendingTools = new Map<string, string>();
+    let turnState: 'idle' | 'working' = 'idle';
+
+    for (let i = startIdx; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) continue;
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      const type = obj.type;
+      if (type === 'api-request') {
+        turnState = 'working';
+      } else if (type === 'system') {
+        const sub = obj.subtype;
+        if (sub === 'stop_hook_summary' || sub === 'turn_duration') {
+          turnState = 'idle';
+          pendingTools.clear();
+        }
+      } else if (type === 'assistant') {
+        const msg = obj.message as Record<string, unknown> | undefined;
+        const stopReason = msg?.stop_reason;
+        const content = msg?.content;
+        let sawToolUse = false;
+        if (Array.isArray(content)) {
+          for (const item of content) {
+            if (!item || typeof item !== 'object') continue;
+            const b = item as Record<string, unknown>;
+            if (b.type === 'tool_use' && typeof b.id === 'string') {
+              pendingTools.set(b.id, String(b.name || 'tool'));
+              sawToolUse = true;
+            }
+          }
+        }
+        if (sawToolUse || stopReason === 'tool_use') {
+          turnState = 'working';
+        } else if (
+          stopReason === 'end_turn' ||
+          stopReason === 'stop_sequence' ||
+          stopReason === 'max_tokens'
+        ) {
+          turnState = pendingTools.size > 0 ? 'working' : 'idle';
+        } else {
+          turnState = 'working';
+        }
+      } else if (type === 'user') {
+        const msg = obj.message as Record<string, unknown> | undefined;
+        const content = msg?.content;
+        const origin =
+          obj.origin && typeof obj.origin === 'object'
+            ? (obj.origin as Record<string, unknown>)
+            : undefined;
+        let sawToolResult = false;
+        let rawUserText = '';
+        if (typeof content === 'string') {
+          rawUserText = content;
+        } else if (Array.isArray(content)) {
+          const texts: string[] = [];
+          for (const item of content) {
+            if (!item || typeof item !== 'object') continue;
+            const b = item as Record<string, unknown>;
+            if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+              pendingTools.delete(b.tool_use_id);
+              sawToolResult = true;
+            } else if (b.type === 'text' && typeof b.text === 'string') {
+              texts.push(b.text);
+            }
+          }
+          rawUserText = texts.join('\n');
+        }
+        if (sawToolResult) {
+          turnState = 'working';
+        } else if (
+          !obj.isMeta &&
+          !obj.isCompactSummary &&
+          origin?.kind !== 'task-notification' &&
+          !isClaudeLocalCommandText(rawUserText)
+        ) {
+          turnState = 'working';
+        }
+      }
+    }
+
+    const activeTool = Array.from(pendingTools.values()).pop();
+    const hasPendingTool = pendingTools.size > 0;
+    const maxIdleAge = isLivePid ? 3 * 60 * 1000 : 45 * 1000;
+    const maxToolAge = isLivePid ? 15 * 60 * 1000 : 5 * 60 * 1000;
+
+    const working =
+      (hasPendingTool && ageMs < maxToolAge) ||
+      (turnState === 'working' && ageMs < maxIdleAge);
+
+    return { working, mtimeMs: st.mtimeMs, activeTool };
+  } catch {
+    return { working: false, mtimeMs: st.mtimeMs };
+  }
+}
+
+function readJsonlHeadMeta(filePath: string): {
+  title?: string;
+  preview?: string;
+  cwd?: string;
+  model?: string;
+} {
+  try {
+    const st = fs.statSync(filePath);
+    const cached = headMetaCache.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+      return cached.meta;
+    }
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(65536);
+    const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const chunk = buf.subarray(0, bytesRead).toString('utf8');
+    let title: string | undefined;
+    let preview: string | undefined;
+    let cwd: string | undefined;
+    let model: string | undefined;
+
+    for (const line of chunk.split('\n')) {
+      if (!line.trim()) continue;
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (!cwd && typeof obj.cwd === 'string') cwd = obj.cwd;
+      if (obj.type === 'custom-title' && typeof obj.customTitle === 'string') {
+        title = obj.customTitle;
+      }
+      if (obj.type === 'user' && !preview) {
+        const msg = obj.message as Record<string, unknown> | undefined;
+        const c = msg?.content;
+        if (typeof c === 'string') {
+          preview = cleanTextPreview(c, 140);
+        } else if (Array.isArray(c)) {
+          const t = c
+            .map((x) => ((x as Record<string, unknown>)?.text as string) || '')
+            .filter(Boolean)
+            .join(' ');
+          if (t) preview = cleanTextPreview(t, 140);
+        }
+      }
+      if (obj.type === 'assistant' && !model) {
+        const msg = obj.message as Record<string, unknown> | undefined;
+        if (typeof msg?.model === 'string') model = msg.model;
+      }
+    }
+    const meta = { title, preview, cwd, model };
+    headMetaCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, meta });
+    return meta;
+  } catch {
+    return {};
+  }
+}
+
+export async function detectClaude(
+  processes: ProcessRow[],
+  maxSessions: number,
+  showArchived: boolean
+): Promise<{ detection: HarnessDetection; sessions: UnifiedSession[] }> {
+  const binPath = await whichBinary('claude');
+  if (cachedClaudeVersion === undefined) {
+    cachedClaudeVersion = await getBinaryVersion(binPath);
+  }
+
+  const claudeProcs = processes.filter(
+    (p) =>
+      p.comm === 'claude' ||
+      p.args.includes('/claude') ||
+      p.args.toLowerCase().includes('claude-desktop') ||
+      p.args.includes('/Claude')
+  );
+  const desktopRunning = claudeProcs.some(
+    (p) =>
+      p.args.toLowerCase().includes('claude-desktop') ||
+      p.args.includes('/opt/claude') ||
+      p.args.includes('app.asar')
+  );
+
+  // Load exact native Claude Desktop sidebar sections (Muse, PhoneUse, Orble, Pocket Model, DSX, Hill Climber...)
+  const nativeSec = loadClaudeNativeSections();
+
+  // 1. Live active sessions from ~/.claude/sessions/*.json (includes both tmux CLI & Desktop!)
+  const liveBySessionId = new Map<string, ActiveClaudeSessionJson>();
+  const liveTmuxSessions: UnifiedSession[] = [];
+  let remoteActiveCount = 0;
+
+  if (fs.existsSync(CLAUDE_SESSIONS_DIR)) {
+    try {
+      for (const fn of fs.readdirSync(CLAUDE_SESSIONS_DIR)) {
+        if (!fn.endsWith('.json')) continue;
+        const full = path.join(CLAUDE_SESSIONS_DIR, fn);
+        let data: ActiveClaudeSessionJson;
+        try {
+          data = JSON.parse(fs.readFileSync(full, 'utf8')) as ActiveClaudeSessionJson;
+        } catch {
+          continue;
+        }
+        if (!data.sessionId || !data.pid) continue;
+        if (!isPidAlive(Number(data.pid))) continue;
+
+        liveBySessionId.set(data.sessionId, data);
+        if (data.bridgeSessionId) remoteActiveCount++;
+
+        const isTmux = Boolean(data.tmux);
+        const isDesktop = data.entrypoint === 'claude-desktop';
+        const harness = isTmux
+          ? 'claude-tmux'
+          : isDesktop
+            ? 'claude-desktop'
+            : 'claude-cli';
+        const cwd = data.cwd || os.homedir();
+        const transcriptPath = findClaudeTranscriptPath(data.sessionId, cwd);
+        const headMeta = transcriptPath ? readJsonlHeadMeta(transcriptPath) : {};
+        const tmuxSessionName = data.tmux ? data.tmux.split(':')[0] : undefined;
+        const title =
+          cleanTextPreview(data.name || headMeta.title || tmuxSessionName || headMeta.preview, 90) ||
+          `Claude (${projectNameFromCwd(cwd)})`;
+        const assignedSec = data.hostSessionId
+          ? nativeSec.sectionByLocalId.get(data.hostSessionId)
+          : undefined;
+        const isStarred = data.hostSessionId
+          ? nativeSec.starredLocalIds.has(data.hostSessionId)
+          : false;
+        const activity = inspectClaudeTranscriptActivity(transcriptPath, true);
+        const isRunning = data.status === 'running' || activity.working;
+        const updatedAt = Math.max(
+          normalizeTimestamp(data.updatedAt ?? data.startedAt),
+          activity.mtimeMs
+        );
+
+        liveTmuxSessions.push({
+          id: `${harness}:${data.sessionId}`,
+          nativeId: data.sessionId,
+          harness,
+          harnessGroup: 'claude',
+          title,
+          preview:
+            headMeta.preview ||
+            (isTmux ? `Live tmux session: ${data.tmux}` : `Live ${harness} session`),
+          cwd,
+          projectName: projectNameFromCwd(cwd),
+          nativeSection: assignedSec ? assignedSec.name : 'Ungrouped',
+          nativeSectionOrder: assignedSec ? assignedSec.order : 9999,
+          model: headMeta.model,
+          status: isRunning ? 'running' : 'idle',
+          isLive: true,
+          isRemote: Boolean(data.bridgeSessionId),
+          remoteId: data.bridgeSessionId || undefined,
+          tmuxTarget: data.tmux || undefined,
+          tmuxSessionName,
+          pid: Number(data.pid),
+          transcriptPath,
+          createdAt: normalizeTimestamp(data.startedAt),
+          updatedAt,
+          pinned: isStarred,
+          folderId: null,
+          tags: [
+            ...(isTmux ? ['tmux'] : []),
+            ...(data.bridgeSessionId ? ['remote-control'] : []),
+            ...(isDesktop ? ['desktop'] : []),
+          ],
+          hidden: false,
+          dispatchMode: isTmux ? 'tmux-send' : 'claude-resume',
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Claude Desktop metadata sessions (~/.config/Claude/claude-code-sessions/*/*/local_*.json)
+  const desktopSessions: UnifiedSession[] = [];
+  const seenCliIds = new Set<string>(liveBySessionId.keys());
+
+  if (fs.existsSync(CLAUDE_DESKTOP_SESSIONS_DIR)) {
+    const metaFiles: Array<{ file: string; mtime: number }> = [];
+    const walk = (dir: string, depth: number) => {
+      if (depth > 3) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(p, depth + 1);
+        } else if (e.isFile() && e.name.startsWith('local_') && e.name.endsWith('.json')) {
+          try {
+            metaFiles.push({ file: p, mtime: fs.statSync(p).mtimeMs });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+    walk(CLAUDE_DESKTOP_SESSIONS_DIR, 0);
+    metaFiles.sort((a, b) => b.mtime - a.mtime);
+
+    for (const item of metaFiles.slice(0, maxSessions)) {
+      let data: ClaudeDesktopMetaJson;
+      try {
+        data = JSON.parse(fs.readFileSync(item.file, 'utf8')) as ClaudeDesktopMetaJson;
+      } catch {
+        continue;
+      }
+      if (data.isArchived && !showArchived) continue;
+      const cliId = data.cliSessionId || data.sessionId;
+      if (!cliId || seenCliIds.has(cliId)) continue;
+      seenCliIds.add(cliId);
+
+      const cwd = data.cwd || os.homedir();
+      const transcriptPath = findClaudeTranscriptPath(cliId, cwd);
+      const branch = Array.isArray(data.gitAnchors) ? data.gitAnchors[0]?.branch : undefined;
+      const localId = data.sessionId || path.basename(item.file, '.json');
+      const assignedSec = nativeSec.sectionByLocalId.get(localId);
+      const isStarred = nativeSec.starredLocalIds.has(localId);
+      const activity = inspectClaudeTranscriptActivity(transcriptPath, desktopRunning);
+      const isRunning = !data.isArchived && activity.working;
+      const updatedAt = Math.max(
+        normalizeTimestamp(data.lastActivityAt ?? item.mtime),
+        activity.mtimeMs
+      );
+
+      desktopSessions.push({
+        id: `claude-desktop:${cliId}`,
+        nativeId: cliId,
+        harness: 'claude-desktop',
+        harnessGroup: 'claude',
+        title: cleanTextPreview(data.title, 90) || `Claude Desktop (${projectNameFromCwd(cwd)})`,
+        preview: data.title || cwd,
+        cwd,
+        projectName: projectNameFromCwd(cwd),
+        nativeSection: assignedSec ? assignedSec.name : 'Ungrouped',
+        nativeSectionOrder: assignedSec ? assignedSec.order : 9999,
+        nativeMetaPath: item.file,
+        gitBranch: branch,
+        model: data.model || undefined,
+        status: data.isArchived ? 'archived' : isRunning ? 'running' : 'idle',
+        isLive: isRunning,
+        isRemote: false,
+        transcriptPath,
+        createdAt: normalizeTimestamp(data.createdAt ?? item.mtime),
+        updatedAt,
+        pinned: isStarred,
+        folderId: null,
+        tags: ['desktop'],
+        hidden: false,
+        dispatchMode: 'claude-resume',
+      });
+    }
+  }
+
+  // 3. Recent Claude CLI project transcripts (~/.claude/projects/*/*.jsonl)
+  const cliSessions: UnifiedSession[] = [];
+  if (fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+    const jsonlFiles: Array<{ file: string; mtime: number; nativeId: string }> = [];
+    try {
+      for (const projDir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+        const fullDir = path.join(CLAUDE_PROJECTS_DIR, projDir);
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(fullDir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const e of entries) {
+          if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+          const nativeId = e.name.slice(0, -6);
+          if (seenCliIds.has(nativeId)) continue;
+          const full = path.join(fullDir, e.name);
+          try {
+            const st = fs.statSync(full);
+            if (st.size < 200) continue;
+            jsonlFiles.push({ file: full, mtime: st.mtimeMs, nativeId });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    jsonlFiles.sort((a, b) => b.mtime - a.mtime);
+    const remaining = Math.max(0, maxSessions - liveTmuxSessions.length - desktopSessions.length);
+    for (const jf of jsonlFiles.slice(0, Math.min(remaining, 40))) {
+      seenCliIds.add(jf.nativeId);
+      const meta = readJsonlHeadMeta(jf.file);
+      const cwd = meta.cwd || os.homedir();
+      const title =
+        cleanTextPreview(meta.title || meta.preview, 90) ||
+        `Claude CLI (${projectNameFromCwd(cwd)})`;
+      const activity = inspectClaudeTranscriptActivity(jf.file, claudeProcs.length > 0);
+      cliSessions.push({
+        id: `claude-cli:${jf.nativeId}`,
+        nativeId: jf.nativeId,
+        harness: 'claude-cli',
+        harnessGroup: 'claude',
+        title,
+        preview: meta.preview || cwd,
+        cwd,
+        projectName: projectNameFromCwd(cwd),
+        nativeSection: 'Ungrouped',
+        nativeSectionOrder: 9999,
+        model: meta.model,
+        status: activity.working ? 'running' : 'idle',
+        isLive: activity.working,
+        isRemote: false,
+        transcriptPath: jf.file,
+        createdAt: jf.mtime,
+        updatedAt: jf.mtime,
+        pinned: false,
+        folderId: null,
+        tags: ['cli'],
+        hidden: false,
+        dispatchMode: 'claude-resume',
+      });
+    }
+  }
+
+  const allSessions = [...liveTmuxSessions, ...desktopSessions, ...cliSessions].sort((a, b) => {
+    if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
+    return b.updatedAt - a.updatedAt;
+  });
+
+  const detection: HarnessDetection = {
+    id: 'claude',
+    name: 'Claude (Desktop + tmux CLI)',
+    installed: Boolean(binPath) || fs.existsSync(CLAUDE_DIR),
+    binaryPath: binPath,
+    version: cachedClaudeVersion,
+    runningProcesses: claudeProcs.length,
+    desktopAppRunning: desktopRunning,
+    daemonRunning: liveTmuxSessions.some((s) => s.harness === 'claude-tmux'),
+    remoteControlEnabled: remoteActiveCount > 0,
+    activeSessionCount: liveTmuxSessions.length,
+    totalSessionCount: allSessions.length,
+    capabilities: {
+      canStartNew: Boolean(binPath),
+      canResume: Boolean(binPath),
+      canTmuxMirror: true,
+      canControlDaemon: Boolean(binPath),
+    },
+    notes: `${liveTmuxSessions.filter((s) => s.harness === 'claude-tmux').length} live tmux sessions (${remoteActiveCount} remote-control), ${desktopSessions.length} Desktop sessions`,
+  };
+
+  return { detection, sessions: allSessions };
+}
+
+export function parseClaudeJsonlLines(
+  lines: string[],
+  sessionId: string,
+  sourceMtimeMs: number,
+  limit = 120,
+  meta?: {
+    truncated?: boolean;
+    fileSize?: number;
+    bytesRead?: number;
+    tailActivity?: ClaudeActivityResult;
+  }
+): SessionTranscriptResult {
+  const messages: UnifiedMessage[] = [];
+  const uniqueId = createUniqueIdGenerator();
+  const toolBlockById = new Map<string, UnifiedBlock>();
+  const pendingToolNames = new Map<string, string>();
+  const nativeQueue: QueuedMessageItem[] = [];
+  let latestSteps: LiveStepItem[] | undefined;
+  let currentAssistant: UnifiedMessage | null = null;
+  let seq = 0;
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    // Fast byte-level pre-filter: skip high-volume telemetry/snapshot lines
+    // (api-request-blob, file-history-snapshot, progress, etc.) before JSON.parse
+    if (
+      !line.includes('"user"') &&
+      !line.includes('"assistant"') &&
+      !line.includes('"queue-operation"')
+    ) {
+      continue;
+    }
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const type = obj.type;
+    if (type === 'queue-operation') {
+      const op = String(obj.operation || '');
+      if (op === 'enqueue' && typeof obj.content === 'string' && obj.content.trim()) {
+        nativeQueue.push({
+          id: `claude-q-${seq++}`,
+          text: obj.content.trim(),
+          createdAt: normalizeTimestamp(obj.timestamp),
+          source: 'native',
+        });
+      } else if (op === 'dequeue') {
+        nativeQueue.shift();
+      } else if (op === 'popAll' || op === 'clear') {
+        nativeQueue.length = 0;
+      } else if (op === 'remove' && typeof obj.content === 'string') {
+        const idx = nativeQueue.findIndex((q) => q.text === obj.content);
+        if (idx >= 0) nativeQueue.splice(idx, 1);
+      }
+      continue;
+    }
+
+    if (type !== 'user' && type !== 'assistant') continue;
+    const msg = obj.message as Record<string, unknown> | undefined;
+    if (!msg) continue;
+
+    const ts = normalizeTimestamp(obj.timestamp);
+    const content = msg.content;
+
+    if (type === 'user') {
+      const origin = (obj.origin && typeof obj.origin === 'object'
+        ? (obj.origin as Record<string, unknown>)
+        : undefined);
+      const originKind = typeof origin?.kind === 'string' ? origin.kind : undefined;
+      const isCompactSummary = Boolean(obj.isCompactSummary);
+      const isMeta = Boolean(obj.isMeta);
+
+      const buildUserMeta = (txt: string): UnifiedMessage['harnessMeta'] => {
+        if (
+          isCompactSummary ||
+          /^This session is being continued from a previous conversation/i.test(txt)
+        ) {
+          return { sourceKind: 'compaction' };
+        }
+        if (
+          originKind === 'peer' ||
+          /<cross-session-message\b/i.test(txt) ||
+          /<teammate-message\b/i.test(txt) ||
+          /^Another Claude session sent a message:/i.test(txt)
+        ) {
+          const nameMatch =
+            txt.match(/<cross-session-message[^>]*\bname="([^"]+)"/i) ||
+            txt.match(/<teammate-message[^>]*\bteammate_id="([^"]+)"/i);
+          const senderName =
+            nameMatch?.[1] ||
+            (typeof origin?.from === 'string' ? origin.from : undefined);
+          return { sourceKind: 'agent', senderName };
+        }
+        if (
+          originKind === 'task-notification' ||
+          /^<task-notification\b/i.test(txt)
+        ) {
+          return { sourceKind: 'task' };
+        }
+        if (isMeta) {
+          return { sourceKind: 'system_meta' };
+        }
+        return undefined;
+      };
+
+      const pushUserOrLocalCommand = (rawText: string) => {
+        const trimmed = rawText.trim();
+        if (!trimmed) return;
+
+        // Hide Claude Code's internal local-command-caveat boilerplate
+        if (trimmed.startsWith('<local-command-caveat>')) {
+          return;
+        }
+
+        // Render local slash commands (/effort, /model, /compact, etc.) as quiet system notices
+        if (trimmed.startsWith('<command-name>') || trimmed.startsWith('<command-message>')) {
+          const cmdName =
+            extractTagContent(trimmed, 'command-name') ||
+            extractTagContent(trimmed, 'command-message') ||
+            'command';
+          const cmdArgs = extractTagContent(trimmed, 'command-args');
+          const title = cmdArgs ? `${cmdName} ${cmdArgs}` : cmdName;
+          currentAssistant = null;
+          messages.push({
+            id: uniqueId(String(obj.uuid || `cs-${seq++}`)),
+            role: 'system',
+            timestamp: ts,
+            blocks: [{ type: 'notice', title }],
+          });
+          return;
+        }
+
+        // Attach local command output to the preceding command notice when possible
+        if (
+          trimmed.startsWith('<local-command-stdout>') ||
+          trimmed.startsWith('<local-command-stderr>')
+        ) {
+          const out =
+            extractTagContent(trimmed, 'local-command-stdout') ||
+            extractTagContent(trimmed, 'local-command-stderr') ||
+            '';
+          if (!out) return;
+          const prev = messages[messages.length - 1];
+          if (prev?.role === 'system' && prev.blocks[0]?.type === 'notice' && !prev.blocks[0].detail) {
+            prev.blocks[0].detail = out;
+            return;
+          }
+          currentAssistant = null;
+          messages.push({
+            id: uniqueId(String(obj.uuid || `cs-${seq++}`)),
+            role: 'system',
+            timestamp: ts,
+            blocks: [{ type: 'notice', title: out }],
+          });
+          return;
+        }
+
+        currentAssistant = null;
+        messages.push({
+          id: uniqueId(String(obj.uuid || `cu-${seq++}`)),
+          role: 'user',
+          timestamp: ts,
+          blocks: [{ type: 'text', text: rawText }],
+          harnessMeta: buildUserMeta(trimmed),
+        });
+      };
+
+      // Check if this is purely a tool_result reply from Claude's agent loop
+      if (Array.isArray(content)) {
+        const nonToolTexts: string[] = [];
+        for (const item of content) {
+          if (!item || typeof item !== 'object') continue;
+          const b = item as Record<string, unknown>;
+          if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+            pendingToolNames.delete(b.tool_use_id);
+            const target = toolBlockById.get(b.tool_use_id);
+            const resultText =
+              typeof b.content === 'string'
+                ? b.content
+                : Array.isArray(b.content)
+                  ? b.content
+                      .map((x) => ((x as Record<string, unknown>)?.text as string) || '')
+                      .filter(Boolean)
+                      .join('\n')
+                  : JSON.stringify(b.content ?? '');
+            if (target && (target.type === 'tool_call' || target.type === 'command')) {
+              target.output = resultText.slice(0, 10000);
+              target.status = b.is_error ? 'error' : 'completed';
+            } else if (target && target.type === 'question') {
+              target.answered = true;
+              // Parse Claude AskUserQuestion tool_result: `User has answered your questions: "Q"="A", ...`
+              const pairs = Array.from(resultText.matchAll(/"([^"]+)"="([^"]*)"/g));
+              if (pairs.length > 0) {
+                for (const [, qKey, ans] of pairs) {
+                  const matchQ = target.questions.find(
+                    (q) => q.question.trim() === qKey.trim() || q.question.includes(qKey.trim())
+                  );
+                  if (matchQ) matchQ.answer = ans;
+                }
+              } else if (target.questions.length === 1 && resultText.trim()) {
+                target.questions[0].answer = resultText
+                  .replace(/^User has answered your questions?:\s*/i, '')
+                  .trim();
+              }
+            }
+          } else if (b.type === 'text' && typeof b.text === 'string') {
+            nonToolTexts.push(b.text);
+          }
+        }
+        const joined = nonToolTexts.join('\n').trim();
+        if (joined) pushUserOrLocalCommand(joined);
+      } else if (typeof content === 'string' && content.trim()) {
+        pushUserOrLocalCommand(content);
+      }
+      continue;
+    }
+
+    // Assistant message
+    const blocks: UnifiedBlock[] = [];
+    if (typeof content === 'string' && content.trim()) {
+      blocks.push({ type: 'text', text: content });
+    } else if (Array.isArray(content)) {
+      for (const item of content) {
+        if (!item || typeof item !== 'object') continue;
+        const b = item as Record<string, unknown>;
+        if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+          blocks.push({ type: 'text', text: b.text });
+        } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
+          blocks.push({ type: 'thinking', text: b.thinking });
+        } else if (b.type === 'tool_use') {
+          const name = String(b.name || 'tool');
+          const input = (b.input ?? {}) as Record<string, unknown>;
+          const toolUseId = typeof b.id === 'string' ? b.id : undefined;
+          if (toolUseId) pendingToolNames.set(toolUseId, name);
+
+          if (name === 'TodoWrite' && Array.isArray(input.todos)) {
+            latestSteps = (input.todos as Array<Record<string, unknown>>).map((td) => ({
+              title: String(td.content ?? td.title ?? ''),
+              status:
+                td.status === 'completed'
+                  ? 'done'
+                  : td.status === 'in_progress'
+                    ? 'in_progress'
+                    : 'pending',
+            }));
+          } else if (name === 'AskUserQuestion' && Array.isArray(input.questions)) {
+            const qBlock: Extract<UnifiedBlock, { type: 'question' }> = {
+              type: 'question',
+              questions: (input.questions as Array<Record<string, unknown>>).map((q) => ({
+                question: String(q.question ?? ''),
+                options: Array.isArray(q.options)
+                  ? q.options.map((o) =>
+                      typeof o === 'string' ? o : String((o as Record<string, unknown>)?.label ?? '')
+                    )
+                  : [],
+                multiSelect: Boolean(q.multiSelect),
+              })),
+            };
+            blocks.push(qBlock);
+            if (toolUseId) toolBlockById.set(toolUseId, qBlock);
+          } else if (name === 'Bash' || name === 'bash' || name === 'run_command') {
+            const cmdBlock: UnifiedBlock = {
+              type: 'command',
+              command: String(input.command ?? input.cmd ?? JSON.stringify(input)),
+              status: 'running',
+            };
+            blocks.push(cmdBlock);
+            if (toolUseId) toolBlockById.set(toolUseId, cmdBlock);
+          } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
+            const filePath = String(input.file_path ?? input.path ?? 'file');
+            const diff =
+              typeof input.new_string === 'string'
+                ? `- ${String(input.old_string ?? '').slice(0, 600)}\n+ ${input.new_string.slice(0, 600)}`
+                : typeof input.content === 'string'
+                  ? `+ ${input.content.slice(0, 800)}`
+                  : undefined;
+            const fcBlock: UnifiedBlock = {
+              type: 'file_change',
+              changes: [{ path: filePath, kind: name.toLowerCase(), diff }],
+              status: 'completed',
+            };
+            blocks.push(fcBlock);
+          } else {
+            const tcBlock: UnifiedBlock = {
+              type: 'tool_call',
+              name,
+              args: JSON.stringify(input, null, 2).slice(0, 4000),
+              status: 'completed',
+            };
+            blocks.push(tcBlock);
+            if (toolUseId) toolBlockById.set(toolUseId, tcBlock);
+          }
+        }
+      }
+    }
+
+    if (blocks.length > 0) {
+      if (!currentAssistant) {
+        currentAssistant = {
+          id: uniqueId(String(obj.uuid || `ca-${seq++}`)),
+          role: 'assistant',
+          timestamp: ts,
+          blocks,
+          harnessMeta: {
+            model: typeof msg.model === 'string' ? msg.model : undefined,
+          },
+        };
+        messages.push(currentAssistant);
+      } else {
+        currentAssistant.blocks.push(...blocks);
+        currentAssistant.timestamp = ts;
+      }
+    }
+  }
+
+  const tailActivity = meta?.tailActivity ?? { working: false, mtimeMs: sourceMtimeMs };
+  const activeTool = Array.from(pendingToolNames.values()).pop() || tailActivity.activeTool;
+  const isWorking =
+    tailActivity.working ||
+    (Date.now() - sourceMtimeMs < 30_000 &&
+      (pendingToolNames.size > 0 || Boolean(latestSteps?.some((s) => s.status === 'in_progress'))));
+  const liveActivity: LiveActivityState = {
+    isWorking,
+    focus: activeTool ? `Running ${activeTool}` : undefined,
+    steps: latestSteps,
+    queuedMessages: nativeQueue.length > 0 ? nativeQueue : undefined,
+    lastEventAt: sourceMtimeMs,
+  };
+
+  const sliced = messages.length > limit ? messages.slice(messages.length - limit) : messages;
+  const truncated = Boolean(meta?.truncated);
+  let totalCount = messages.length;
+  if (truncated) {
+    const ratio =
+      meta?.fileSize && meta?.bytesRead && meta.bytesRead > 0
+        ? meta.fileSize / meta.bytesRead
+        : 2;
+    totalCount = Math.max(messages.length + 1, Math.round(messages.length * ratio));
+  }
+
+  return {
+    sessionId,
+    messages: sliced,
+    totalCount,
+    hasMore: truncated || messages.length > limit,
+    sourceMtimeMs,
+    liveActivity,
+  };
+}
+
+export async function loadClaudeTranscript(
+  sessionId: string,
+  nativeId: string,
+  transcriptPath: string | undefined,
+  cwd: string | undefined,
+  limit = 120
+): Promise<SessionTranscriptResult> {
+  const resolved = transcriptPath || findClaudeTranscriptPath(nativeId, cwd);
+  if (!resolved || !fs.existsSync(resolved)) {
+    return {
+      sessionId,
+      messages: [],
+      totalCount: 0,
+      hasMore: false,
+      sourceMtimeMs: Date.now(),
+    };
+  }
+
+  const tailActivity = inspectClaudeTranscriptActivity(resolved, true);
+  const initialBytes = Math.max(768 * 1024, limit * 24 * 1024);
+
+  const outcome = readProgressiveJsonlTail(
+    resolved,
+    (lines, chunkMeta) =>
+      parseClaudeJsonlLines(lines, sessionId, chunkMeta.mtimeMs, limit, {
+        truncated: chunkMeta.truncated,
+        fileSize: chunkMeta.fileSize,
+        bytesRead: lines.reduce((sum, l) => sum + l.length + 1, 0),
+        tailActivity,
+      }),
+    (parsed) => parsed.messages.length >= limit,
+    { initialBytes }
+  );
+
+  if (!outcome) {
+    return {
+      sessionId,
+      messages: [],
+      totalCount: 0,
+      hasMore: false,
+      sourceMtimeMs: Date.now(),
+    };
+  }
+
+  return outcome.parsed;
+}
+
+export async function captureTmuxPane(target: string): Promise<TmuxCaptureResult> {
+  try {
+    // Strip ANSI escape sequences cleanly for crisp readable mirror, or keep layout
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['capture-pane', '-p', '-J', '-S', '-150', '-t', target],
+      { timeout: 3000, maxBuffer: 2 * 1024 * 1024 }
+    );
+    return {
+      target,
+      content: stdout,
+      updatedAt: Date.now(),
+    };
+  } catch (err) {
+    return {
+      target,
+      content: '',
+      updatedAt: Date.now(),
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Parses one JSONL stdout line emitted by `claude --output-format stream-json --verbose`.
+ */
+function parseClaudeStreamLine(
+  sessionId: string,
+  runId: string,
+  line: string,
+  gotAnyDelta: boolean,
+  emitStream: (ev: StreamEvent) => void
+): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    if (!trimmed.startsWith('Warning:')) {
+      emitStream({ sessionId, runId, kind: 'delta', text: `${trimmed}\n` });
+      return true;
+    }
+    return false;
+  }
+
+  if (obj.type === 'assistant') {
+    const msg = obj.message as Record<string, unknown> | undefined;
+    const content = msg?.content;
+    let emitted = false;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        const p = part as Record<string, unknown>;
+        if (p.type === 'text' && typeof p.text === 'string' && p.text) {
+          emitStream({ sessionId, runId, kind: 'delta', text: p.text });
+          emitted = true;
+        } else if (p.type === 'thinking' && typeof p.thinking === 'string' && p.thinking) {
+          emitStream({
+            sessionId,
+            runId,
+            kind: 'block',
+            block: { type: 'thinking', text: p.thinking },
+          });
+        } else if (p.type === 'tool_use') {
+          emitStream({
+            sessionId,
+            runId,
+            kind: 'block',
+            block: {
+              type: 'tool_call',
+              name: String(p.name ?? 'tool'),
+              args: JSON.stringify(p.input ?? {}, null, 2).slice(0, 2000),
+              status: 'running',
+            },
+          });
+        }
+      }
+    }
+    return emitted;
+  }
+
+  if (obj.type === 'result') {
+    if (obj.is_error && typeof obj.result === 'string') {
+      emitStream({ sessionId, runId, kind: 'error', error: obj.result });
+    } else if (!gotAnyDelta && typeof obj.result === 'string' && obj.result) {
+      emitStream({ sessionId, runId, kind: 'delta', text: obj.result });
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Cohesive HarnessDriver encapsulating all Anthropic Claude integration
+ * (Claude Desktop metadata, Claude Code CLI transcripts, and live tmux remote-control).
+ */
+export function createClaudeDriver(): HarnessDriver {
+  const startClaudeSession = async (
+    req: StartSessionRequest,
+    ctx: DispatchContext
+  ): Promise<{ ok: boolean; sessionId?: string; error?: string }> => {
+    const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
+
+    if (req.harness === 'claude-tmux') {
+      const claudeBin = await whichBinary('claude');
+      const tmuxBin = await whichBinary('tmux');
+      if (!claudeBin) return { ok: false, error: 'claude CLI not found' };
+      if (!tmuxBin) return { ok: false, error: 'tmux not found' };
+
+      const rawName =
+        (req.tmuxSessionName || req.title || `sh-${Date.now().toString(36)}`)
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 32) || `sh-${Date.now().toString(36)}`;
+
+      const flags: string[] = [];
+      if (req.remoteControl !== false) flags.push('--remote-control');
+      if (req.model) flags.push('--model', req.model);
+      if (req.title) flags.push('--name', req.title);
+
+      const cmd = [claudeBin, ...flags].map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+
+      try {
+        await execFileAsync(tmuxBin, ['new-session', '-d', '-s', rawName, '-c', cwd, cmd], {
+          timeout: 5000,
+        });
+        if (req.prompt?.trim()) {
+          setTimeout(() => {
+            execFile(tmuxBin, ['send-keys', '-t', rawName, '-l', req.prompt!.trim()], () => {
+              setTimeout(() => {
+                execFile(tmuxBin, ['send-keys', '-t', rawName, 'C-m'], () => {});
+              }, 150);
+            });
+          }, 2500);
+        }
+        ctx.triggerRefresh(1500);
+        return { ok: true, sessionId: `tmux:${rawName}` };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    const bin = await whichBinary('claude');
+    if (!bin) return { ok: false, error: 'claude CLI not found' };
+    const args = [
+      '-p',
+      req.prompt || 'Hello! Summarize the workspace briefly.',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+    ];
+    if (req.model) args.push('--model', req.model);
+    const child = spawn(bin, args, { cwd, stdio: 'ignore', detached: true });
+    child.unref();
+    ctx.triggerRefresh(2000);
+    return { ok: true };
+  };
+
+  return {
+    id: 'claude',
+    displayName: 'Claude (Desktop + tmux CLI)',
+
+    detect(processes, maxSessions, showArchived) {
+      return detectClaude(processes, maxSessions, showArchived);
+    },
+
+    async getTranscriptFingerprint(session) {
+      const resolved =
+        session.transcriptPath || resolveClaudeTranscriptPath(session.nativeId, session.cwd);
+      return computeFileFingerprint(resolved);
+    },
+
+    loadTranscript(session, limit) {
+      const resolved =
+        session.transcriptPath || resolveClaudeTranscriptPath(session.nativeId, session.cwd);
+      return loadClaudeTranscript(session.id, session.nativeId, resolved, session.cwd, limit);
+    },
+
+    getGlobalWatchDirs(): HarnessWatchSpec[] {
+      const specs: HarnessWatchSpec[] = [
+        { dir: CLAUDE_SESSIONS_DIR, filter: (fn) => fn.endsWith('.json') },
+      ];
+      // Watch recent Claude project transcript dirs so background working spinners update live
+      if (fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+        try {
+          for (const entry of fs
+            .readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
+            .slice(0, 40)) {
+            if (entry.isDirectory()) {
+              specs.push({
+                dir: path.join(CLAUDE_PROJECTS_DIR, entry.name),
+                filter: (fn) => fn.endsWith('.jsonl'),
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return specs;
+    },
+
+    getSessionWatchFiles(session: UnifiedSession): string[] {
+      const files: string[] = [];
+      if (session.transcriptPath) files.push(session.transcriptPath);
+      if (session.pid) {
+        files.push(path.join(CLAUDE_SESSIONS_DIR, `${session.pid}.json`));
+      }
+      return files;
+    },
+
+    async sendMessage(
+      session: UnifiedSession,
+      prompt: string,
+      attachments: ImageAttachment[] | undefined,
+      ctx: DispatchContext
+    ): Promise<SendMessageResult> {
+      const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
+
+      // Live tmux-backed Claude session -> direct tmux send-keys with TUI-safe Enter delay
+      if (session.dispatchMode === 'tmux-send' && session.tmuxTarget) {
+        try {
+          await execFileAsync(
+            'tmux',
+            ['send-keys', '-t', session.tmuxTarget, '-l', promptWithImages],
+            { timeout: 4000 }
+          );
+          await new Promise((r) => setTimeout(r, 150));
+          await execFileAsync('tmux', ['send-keys', '-t', session.tmuxTarget, 'C-m'], {
+            timeout: 4000,
+          });
+          ctx.triggerRefresh(1200);
+          return { ok: true, dispatchedVia: `tmux → ${session.tmuxTarget}` };
+        } catch (err) {
+          return {
+            ok: false,
+            error: `tmux send-keys failed: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      }
+
+      const bin = await whichBinary('claude');
+      if (!bin) return { ok: false, error: 'claude binary not found in PATH' };
+
+      const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
+      const runId = crypto.randomBytes(6).toString('hex');
+      const args = [
+        '--resume',
+        session.nativeId,
+        '-p',
+        promptWithImages,
+        '--output-format',
+        'stream-json',
+        '--verbose',
+      ];
+      ctx.spawnStreaming({
+        sessionId: session.id,
+        runId,
+        bin,
+        args,
+        cwd,
+        parseLine: (line, gotAnyDelta) =>
+          parseClaudeStreamLine(session.id, runId, line, gotAnyDelta, ctx.emitStream),
+      });
+      return { ok: true, runId, dispatchedVia: 'Claude CLI resume' };
+    },
+
+    startSession: startClaudeSession,
+
+    async controlDaemon(
+      action: DaemonControlAction,
+      ctx: DispatchContext
+    ): Promise<{ ok: boolean; output?: string; error?: string }> {
+      if (action === 'start_remote') {
+        return startClaudeSession(
+          {
+            harness: 'claude-tmux',
+            cwd: os.homedir(),
+            title: `claude-rc-${Date.now().toString(36)}`,
+            remoteControl: true,
+          },
+          ctx
+        );
+      }
+      return { ok: false, error: `Action '${action}' not supported for claude` };
+    },
+
+    async archiveSession(
+      session: UnifiedSession,
+      opts?: { killTmux?: boolean }
+    ) {
+      if (
+        session.harness === 'claude-desktop' &&
+        session.nativeMetaPath &&
+        fs.existsSync(session.nativeMetaPath)
+      ) {
+        const raw = JSON.parse(fs.readFileSync(session.nativeMetaPath, 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        raw.isArchived = true;
+        fs.writeFileSync(session.nativeMetaPath, JSON.stringify(raw, null, 2), 'utf8');
+        return { ok: true, method: 'Claude Desktop isArchived' };
+      }
+
+      if (session.harness === 'claude-tmux' && opts?.killTmux && session.tmuxSessionName) {
+        const tmuxBin = await whichBinary('tmux');
+        if (tmuxBin) {
+          await execFileAsync(tmuxBin, ['kill-session', '-t', session.tmuxSessionName], {
+            timeout: 5000,
+          });
+        }
+        return {
+          ok: true,
+          method: `tmux kill-session (${session.tmuxSessionName})`,
+          hideLocally: true,
+        };
+      }
+
+      return null;
+    },
+  };
+}

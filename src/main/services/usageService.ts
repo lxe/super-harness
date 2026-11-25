@@ -1,0 +1,861 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import readline from 'node:readline';
+import type {
+  DailySpendPoint,
+  HarnessUsageSummary,
+  UsageQuotaWindow,
+  UsageSnapshot,
+} from '../../shared/types';
+import { querySqliteReadOnly } from '../utils/sqlite';
+
+const HOME = os.homedir();
+const CLAUDE_PLAN_HISTORY = path.join(HOME, '.config', 'Claude', 'plan-usage-history.json');
+const CLAUDE_PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
+const CODEX_SESSIONS_DIR = path.join(HOME, '.codex', 'sessions');
+const CODEX_STATE_DB = path.join(HOME, '.codex', 'state_5.sqlite');
+const AGY_APP_BRAIN = path.join(HOME, '.gemini', 'antigravity', 'brain');
+const AGY_CLI_BRAIN = path.join(HOME, '.gemini', 'antigravity-cli', 'brain');
+const USAGE_CACHE_PATH = path.join(HOME, '.config', 'super-harness', 'usage-cache.json');
+
+const HOUR_MS = 3600 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+interface FileHourBucket {
+  /** Hour bucket epoch ms (floored to 1 hour) */
+  h: number;
+  /** USD spend in this hour */
+  s: number;
+  /** Total tokens in this hour */
+  t: number;
+}
+
+interface CachedFileSummary {
+  mtimeMs: number;
+  size: number;
+  buckets: FileHourBucket[];
+  /** Optional latest Codex rate limits snapshot from this rollout */
+  rlTs?: number;
+  rl?: Record<string, unknown>;
+}
+
+interface DiskUsageCache {
+  version: number;
+  files: Record<string, CachedFileSummary>;
+}
+
+interface SpendBucketAccumulator {
+  spend5h: number;
+  spend24h: number;
+  spend7d: number;
+  spend14d: number;
+  tokens7d: number;
+  byDate: Map<string, { spend: number; tokens: number }>;
+}
+
+function localDateKey(ts: number): string {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function createAccumulator(): SpendBucketAccumulator {
+  return {
+    spend5h: 0,
+    spend24h: 0,
+    spend7d: 0,
+    spend14d: 0,
+    tokens7d: 0,
+    byDate: new Map(),
+  };
+}
+
+function foldBuckets(
+  acc: SpendBucketAccumulator,
+  buckets: FileHourBucket[],
+  now: number
+): void {
+  const currentHour = Math.floor(now / HOUR_MS) * HOUR_MS;
+  for (const b of buckets) {
+    const age = currentHour - b.h;
+    if (age < -HOUR_MS || age > 14 * DAY_MS) continue;
+    acc.spend14d += b.s;
+    if (age <= 7 * DAY_MS) {
+      acc.spend7d += b.s;
+      acc.tokens7d += b.t;
+      const key = localDateKey(b.h + HOUR_MS / 2);
+      const cur = acc.byDate.get(key) ?? { spend: 0, tokens: 0 };
+      cur.spend += b.s;
+      cur.tokens += b.t;
+      acc.byDate.set(key, cur);
+    }
+    if (age <= DAY_MS) acc.spend24h += b.s;
+    if (age <= 5 * HOUR_MS) acc.spend5h += b.s;
+  }
+}
+
+function addEventToHourMap(
+  hourMap: Map<number, FileHourBucket>,
+  ts: number,
+  spendUsd: number,
+  tokens: number
+): void {
+  if (!Number.isFinite(ts) || ts <= 0) return;
+  const h = Math.floor(ts / HOUR_MS) * HOUR_MS;
+  const cur = hourMap.get(h);
+  if (cur) {
+    cur.s += spendUsd;
+    cur.t += tokens;
+  } else {
+    hourMap.set(h, { h, s: spendUsd, t: tokens });
+  }
+}
+
+function buildDailySeries7d(acc: SpendBucketAccumulator, now: number): DailySpendPoint[] {
+  const out: DailySpendPoint[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const t = now - i * DAY_MS;
+    const d = new Date(t);
+    const key = localDateKey(t);
+    const entry = acc.byDate.get(key);
+    out.push({
+      date: key,
+      dayLabel: DAY_NAMES[d.getDay()],
+      spendUsd: round2(entry?.spend ?? 0),
+      tokens: Math.round(entry?.tokens ?? 0),
+    });
+  }
+  return out;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function priceClaudeTokens(
+  model: string,
+  input: number,
+  cacheCreate: number,
+  cacheRead: number,
+  output: number
+): number {
+  const m = model.toLowerCase();
+  let inRate = 3.0;
+  let outRate = 15.0;
+  let cacheWriteRate = 3.75;
+  let cacheReadRate = 0.3;
+
+  if (m.includes('opus')) {
+    inRate = 5.0;
+    outRate = 25.0;
+    cacheWriteRate = 6.25;
+    cacheReadRate = 0.5;
+  } else if (m.includes('haiku')) {
+    inRate = 1.0;
+    outRate = 5.0;
+    cacheWriteRate = 1.25;
+    cacheReadRate = 0.1;
+  }
+
+  return (
+    (input * inRate +
+      cacheCreate * cacheWriteRate +
+      cacheRead * cacheReadRate +
+      output * outRate) /
+    1_000_000
+  );
+}
+
+function priceCodexTokens(
+  model: string,
+  uncachedInput: number,
+  cachedInput: number,
+  output: number
+): number {
+  const m = model.toLowerCase();
+  let inRate = 2.5;
+  let cachedRate = 0.25;
+  let outRate = 15.0;
+
+  if (m.includes('mini') || m.includes('spark') || m.includes('nano')) {
+    inRate = 0.4;
+    cachedRate = 0.04;
+    outRate = 1.6;
+  } else if (m.includes('pro') || m.includes('astra')) {
+    inRate = 5.0;
+    cachedRate = 0.5;
+    outRate = 25.0;
+  }
+
+  return (uncachedInput * inRate + cachedInput * cachedRate + output * outRate) / 1_000_000;
+}
+
+function priceAntigravityTokens(
+  model: string,
+  uncachedInput: number,
+  cacheRead: number,
+  output: number
+): number {
+  const m = model.toLowerCase();
+  if (m.includes('claude')) {
+    return priceClaudeTokens(model, uncachedInput, 0, cacheRead, output);
+  }
+  if (m.includes('flash')) {
+    return (uncachedInput * 0.3 + cacheRead * 0.03 + output * 2.5) / 1_000_000;
+  }
+  // Gemini Pro / Neon / Carbon / Argon API-equivalent rates ($1.25/M in, $0.125/M cached, $10/M out)
+  return (uncachedInput * 1.25 + cacheRead * 0.125 + output * 10.0) / 1_000_000;
+}
+
+async function scanJsonlLines(
+  filePath: string,
+  onLine: (line: string) => void
+): Promise<void> {
+  return new Promise((resolve) => {
+    let stream: fs.ReadStream;
+    try {
+      stream = fs.createReadStream(filePath, { encoding: 'utf8', highWaterMark: 64 * 1024 });
+    } catch {
+      resolve();
+      return;
+    }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    rl.on('line', onLine);
+    rl.on('close', () => resolve());
+    rl.on('error', () => resolve());
+    stream.on('error', () => {
+      try {
+        rl.close();
+      } catch {
+        // ignore
+      }
+      resolve();
+    });
+  });
+}
+
+const CACHE_VERSION = 2;
+
+function loadDiskCache(): Record<string, CachedFileSummary> {
+  try {
+    if (!fs.existsSync(USAGE_CACHE_PATH)) return {};
+    const parsed = JSON.parse(fs.readFileSync(USAGE_CACHE_PATH, 'utf8')) as DiskUsageCache;
+    if (parsed?.version === CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
+      return parsed.files;
+    }
+  } catch {
+    // ignore corrupt cache
+  }
+  return {};
+}
+
+function saveDiskCache(files: Record<string, CachedFileSummary>): void {
+  try {
+    fs.mkdirSync(path.dirname(USAGE_CACHE_PATH), { recursive: true });
+    // Prune entries older than 21 days so cache stays tiny
+    const minMtime = Date.now() - 21 * DAY_MS;
+    const pruned: Record<string, CachedFileSummary> = {};
+    for (const [k, v] of Object.entries(files)) {
+      if (v.mtimeMs >= minMtime) pruned[k] = v;
+    }
+    const tmp = `${USAGE_CACHE_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ version: CACHE_VERSION, files: pruned }), 'utf8');
+    fs.renameSync(tmp, USAGE_CACHE_PATH);
+  } catch {
+    // ignore write failures
+  }
+}
+
+function classifyCodexWindowLabel(windowMinutes?: number): { id: string; label: string } {
+  if (!windowMinutes) return { id: 'primary', label: 'Plan limit' };
+  if (windowMinutes <= 360) {
+    const hrs = Math.round(windowMinutes / 60);
+    return { id: 'five_hour', label: `${hrs}-hour` };
+  }
+  if (windowMinutes >= 7200) {
+    const days = Math.round(windowMinutes / 1440);
+    return { id: 'weekly', label: days === 7 ? 'Weekly (7d)' : `${days}-day` };
+  }
+  const hrs = Math.round(windowMinutes / 60);
+  return { id: `win_${windowMinutes}`, label: `${hrs}h window` };
+}
+
+export class UsageService {
+  private cache: UsageSnapshot | null = null;
+  private lastComputedAt = 0;
+  private inFlight: Promise<UsageSnapshot> | null = null;
+  private fileCache: Record<string, CachedFileSummary>;
+
+  constructor() {
+    this.fileCache = loadDiskCache();
+  }
+
+  async getUsage(force = false): Promise<UsageSnapshot> {
+    const now = Date.now();
+    if (!force && this.cache && now - this.lastComputedAt < 30_000) {
+      return this.cache;
+    }
+    if (this.inFlight) return this.inFlight;
+
+    this.inFlight = (async () => {
+      let dirty = false;
+      const markDirty = () => {
+        dirty = true;
+      };
+      const [antigravity, codex, claude] = await Promise.all([
+        this.collectAntigravityUsage(now, markDirty),
+        this.collectCodexUsage(now, markDirty),
+        this.collectClaudeUsage(now, markDirty),
+      ]);
+      if (dirty) {
+        saveDiskCache(this.fileCache);
+      }
+      const snapshot: UsageSnapshot = {
+        antigravity,
+        codex,
+        claude,
+      };
+      this.cache = snapshot;
+      this.lastComputedAt = Date.now();
+      return snapshot;
+    })();
+
+    try {
+      return await this.inFlight;
+    } finally {
+      this.inFlight = null;
+    }
+  }
+
+  private async collectClaudeUsage(
+    now: number,
+    markDirty: () => void
+  ): Promise<HarnessUsageSummary> {
+    const windows: UsageQuotaWindow[] = [];
+    let updatedAt = now;
+
+    // 1. Official Claude Desktop plan-usage-history.json (5h, 7d weekly, extra usage)
+    try {
+      if (fs.existsSync(CLAUDE_PLAN_HISTORY)) {
+        const parsed = JSON.parse(fs.readFileSync(CLAUDE_PLAN_HISTORY, 'utf8')) as {
+          samples?: Array<{ t: number; u?: { fh?: number; sd?: number; xu?: number } }>;
+        };
+        const samples = Array.isArray(parsed.samples) ? parsed.samples : [];
+        if (samples.length > 0) {
+          const latest = samples[samples.length - 1];
+          updatedAt = latest.t || now;
+
+          let fhVal: number | null = null;
+          for (let i = samples.length - 1; i >= 0; i--) {
+            const s = samples[i];
+            if (now - s.t > 5 * HOUR_MS) break;
+            if (typeof s.u?.fh === 'number') {
+              fhVal = s.u.fh;
+              break;
+            }
+          }
+          if (fhVal !== null) {
+            windows.push({
+              id: 'five_hour',
+              label: '5-hour',
+              usedPercent: Math.min(100, Math.max(0, round2(fhVal))),
+              windowMinutes: 300,
+            });
+          } else if (now - latest.t < 2 * HOUR_MS && typeof latest.u?.sd === 'number') {
+            windows.push({
+              id: 'five_hour',
+              label: '5-hour',
+              usedPercent: 0,
+              windowMinutes: 300,
+            });
+          }
+
+          let sdVal: number | null = null;
+          let sdTs = 0;
+          for (let i = samples.length - 1; i >= 0; i--) {
+            const s = samples[i];
+            if (typeof s.u?.sd === 'number') {
+              sdVal = s.u.sd;
+              sdTs = s.t;
+              break;
+            }
+          }
+          if (sdVal !== null && now - sdTs < 7 * DAY_MS) {
+            let delta24h: number | undefined;
+            const target24h = sdTs - DAY_MS;
+            for (let i = samples.length - 1; i >= 0; i--) {
+              const s = samples[i];
+              if (s.t <= target24h && typeof s.u?.sd === 'number') {
+                delta24h = Math.round(sdVal - s.u.sd);
+                break;
+              }
+            }
+            windows.push({
+              id: 'weekly',
+              label: 'Weekly (7d)',
+              usedPercent: Math.min(100, Math.max(0, round2(sdVal))),
+              delta24h,
+              windowMinutes: 10080,
+            });
+          }
+
+          for (let i = samples.length - 1; i >= 0; i--) {
+            const s = samples[i];
+            if (now - s.t > 7 * DAY_MS) break;
+            if (typeof s.u?.xu === 'number' && s.u.xu > 0) {
+              windows.push({
+                id: 'extra',
+                label: 'Extra usage',
+                usedPercent: Math.min(100, Math.max(0, round2(s.u.xu))),
+              });
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
+
+    // 2. Scan Claude transcripts modified in last 14 days (with per-file mtime+size cache!)
+    const acc = createAccumulator();
+    const cutoff = now - 14 * DAY_MS;
+    const recentFiles: Array<{ path: string; mtimeMs: number; size: number }> = [];
+
+    if (fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+      try {
+        for (const projDir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+          const fullDir = path.join(CLAUDE_PROJECTS_DIR, projDir);
+          let entries: fs.Dirent[];
+          try {
+            entries = fs.readdirSync(fullDir, { withFileTypes: true });
+          } catch {
+            continue;
+          }
+          for (const e of entries) {
+            if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+            const p = path.join(fullDir, e.name);
+            try {
+              const st = fs.statSync(p);
+              if (st.mtimeMs >= cutoff) {
+                recentFiles.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    for (const file of recentFiles) {
+      const cacheKey = `claude:${file.path}`;
+      const cached = this.fileCache[cacheKey];
+      if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+        foldBuckets(acc, cached.buckets, now);
+        continue;
+      }
+
+      const msgUsageById = new Map<
+        string,
+        { ts: number; model: string; input: number; cacheCreate: number; cacheRead: number; output: number }
+      >();
+
+      await scanJsonlLines(file.path, (line) => {
+        if (!line.includes('"usage"') || !line.includes('"assistant"')) return;
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        if (obj.type !== 'assistant') return;
+        const msg = obj.message as Record<string, unknown> | undefined;
+        const usage = msg?.usage as Record<string, unknown> | undefined;
+        if (!usage) return;
+
+        const ts =
+          typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : Number(obj.timestamp || 0);
+        if (!Number.isFinite(ts) || ts < cutoff) return;
+
+        const msgId = String(msg?.id || obj.uuid || `${ts}`);
+        const model = String(msg?.model || 'claude-sonnet');
+        const input = Number(usage.input_tokens || 0);
+        const cacheCreate = Number(usage.cache_creation_input_tokens || 0);
+        const cacheRead = Number(usage.cache_read_input_tokens || 0);
+        const output = Number(usage.output_tokens || 0);
+
+        const prev = msgUsageById.get(msgId);
+        if (!prev || output >= prev.output) {
+          msgUsageById.set(msgId, { ts, model, input, cacheCreate, cacheRead, output });
+        }
+      });
+
+      const hourMap = new Map<number, FileHourBucket>();
+      for (const rec of msgUsageById.values()) {
+        const spend = priceClaudeTokens(
+          rec.model,
+          rec.input,
+          rec.cacheCreate,
+          rec.cacheRead,
+          rec.output
+        );
+        const totalTokens = rec.input + rec.cacheCreate + rec.cacheRead + rec.output;
+        addEventToHourMap(hourMap, rec.ts, spend, totalTokens);
+      }
+
+      const buckets = Array.from(hourMap.values());
+      this.fileCache[cacheKey] = { mtimeMs: file.mtimeMs, size: file.size, buckets };
+      markDirty();
+      foldBuckets(acc, buckets, now);
+    }
+
+    const weekly = windows.find((w) => w.id === 'weekly');
+    const fiveHour = windows.find((w) => w.id === 'five_hour');
+    const barPercent =
+      weekly && fiveHour
+        ? Math.max(weekly.usedPercent, fiveHour.usedPercent)
+        : (weekly?.usedPercent ?? fiveHour?.usedPercent ?? null);
+
+    return {
+      harness: 'claude',
+      updatedAt,
+      planLabel: 'Claude Plan',
+      barPercent,
+      barIsEstimated: false,
+      windows,
+      spend5hUsd: round2(acc.spend5h),
+      spend24hUsd: round2(acc.spend24h),
+      spend7dUsd: round2(acc.spend7d),
+      spend14dUsd: round2(acc.spend14d),
+      tokens7d: Math.round(acc.tokens7d),
+      dailySpend7d: buildDailySeries7d(acc, now),
+      spendIsEstimated: true,
+      note: 'API-equivalent spend from local transcripts',
+    };
+  }
+
+  private async collectCodexUsage(
+    now: number,
+    markDirty: () => void
+  ): Promise<HarnessUsageSummary> {
+    const cutoff = now - 14 * DAY_MS;
+
+    const modelByThread = new Map<string, string>();
+    try {
+      const rows = await querySqliteReadOnly<{ id: string; model: string | null }>(
+        CODEX_STATE_DB,
+        'SELECT id, model FROM threads'
+      );
+      for (const r of rows) {
+        if (r.id && r.model) modelByThread.set(r.id, r.model);
+      }
+    } catch {
+      // ignore
+    }
+
+    const recentFiles: Array<{ path: string; mtimeMs: number; size: number }> = [];
+    const walk = (dir: string, depth: number) => {
+      if (depth > 4 || !fs.existsSync(dir)) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(p, depth + 1);
+        } else if (e.isFile() && e.name.endsWith('.jsonl')) {
+          try {
+            const st = fs.statSync(p);
+            if (st.mtimeMs >= cutoff) {
+              recentFiles.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+    walk(CODEX_SESSIONS_DIR, 0);
+    recentFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    let latestRlTs = 0;
+    let latestRateLimits: Record<string, unknown> | null = null;
+    const acc = createAccumulator();
+
+    for (const file of recentFiles) {
+      const cacheKey = `codex:${file.path}`;
+      const cached = this.fileCache[cacheKey];
+      if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+        foldBuckets(acc, cached.buckets, now);
+        if (cached.rl && cached.rlTs && cached.rlTs > latestRlTs) {
+          latestRlTs = cached.rlTs;
+          latestRateLimits = cached.rl;
+        }
+        continue;
+      }
+
+      const base = path.basename(file.path, '.jsonl');
+      const uuidMatch = base.match(
+        /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+      );
+      const threadModel = (uuidMatch && modelByThread.get(uuidMatch[1])) || 'gpt-5-codex';
+
+      const hourMap = new Map<number, FileHourBucket>();
+      const seenResponseIds = new Set<string>();
+      let fileRlTs = 0;
+      let fileRl: Record<string, unknown> | undefined;
+
+      await scanJsonlLines(file.path, (line) => {
+        const hasRateLimits = line.includes('"rate_limits"');
+        const hasTokenRecord = line.includes('"token_usage_record"');
+        if (!hasRateLimits && !hasTokenRecord) return;
+
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+
+        const ts =
+          typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : Number(obj.timestamp || 0);
+        if (!Number.isFinite(ts) || ts <= 0) return;
+
+        const payload = (obj.payload ?? {}) as Record<string, unknown>;
+
+        if (hasRateLimits && payload.rate_limits && typeof payload.rate_limits === 'object') {
+          if (ts > fileRlTs) {
+            fileRlTs = ts;
+            fileRl = payload.rate_limits as Record<string, unknown>;
+          }
+        }
+
+        if (hasTokenRecord && obj.type === 'token_usage_record' && ts >= cutoff) {
+          const respId = typeof payload.response_id === 'string' ? payload.response_id : '';
+          if (respId) {
+            if (seenResponseIds.has(respId)) return;
+            seenResponseIds.add(respId);
+          }
+          const usage = payload.usage as Record<string, unknown> | undefined;
+          if (!usage) return;
+          const input = Number(usage.input_tokens || 0);
+          const cachedIn = Number(usage.cached_input_tokens || 0);
+          const uncached = Math.max(0, input - cachedIn);
+          const output = Number(usage.output_tokens || 0);
+          const totalTokens = Number(usage.total_tokens || input + output);
+          const tid = typeof payload.thread_id === 'string' ? payload.thread_id : '';
+          const model = (tid && modelByThread.get(tid)) || threadModel;
+
+          const spend = priceCodexTokens(model, uncached, cachedIn, output);
+          addEventToHourMap(hourMap, ts, spend, totalTokens);
+        }
+      });
+
+      const buckets = Array.from(hourMap.values());
+      this.fileCache[cacheKey] = {
+        mtimeMs: file.mtimeMs,
+        size: file.size,
+        buckets,
+        rlTs: fileRlTs || undefined,
+        rl: fileRl,
+      };
+      markDirty();
+      foldBuckets(acc, buckets, now);
+      if (fileRl && fileRlTs > latestRlTs) {
+        latestRlTs = fileRlTs;
+        latestRateLimits = fileRl;
+      }
+    }
+
+    const windows: UsageQuotaWindow[] = [];
+    let creditsBalance: number | undefined;
+    let planLabel: string | undefined;
+
+    if (latestRateLimits) {
+      const rl = latestRateLimits as {
+        primary?: { used_percent?: number; window_minutes?: number; resets_at?: number } | null;
+        secondary?: { used_percent?: number; window_minutes?: number; resets_at?: number } | null;
+        credits?: { has_credits?: boolean; balance?: string | number } | null;
+        plan_type?: string | null;
+      };
+
+      if (rl.plan_type) {
+        planLabel = `Codex ${rl.plan_type.charAt(0).toUpperCase()}${rl.plan_type.slice(1)}`;
+      }
+
+      const pushWin = (
+        w: { used_percent?: number; window_minutes?: number; resets_at?: number } | null | undefined
+      ) => {
+        if (!w || typeof w.used_percent !== 'number') return;
+        const meta = classifyCodexWindowLabel(w.window_minutes);
+        const resetsAt =
+          typeof w.resets_at === 'number'
+            ? w.resets_at < 1e12
+              ? w.resets_at * 1000
+              : w.resets_at
+            : undefined;
+        windows.push({
+          id: meta.id,
+          label: meta.label,
+          usedPercent: Math.min(100, Math.max(0, round2(w.used_percent))),
+          resetsAt,
+          windowMinutes: w.window_minutes,
+        });
+      };
+
+      pushWin(rl.primary);
+      pushWin(rl.secondary);
+      windows.sort((a, b) => (a.windowMinutes ?? 99999) - (b.windowMinutes ?? 99999));
+
+      if (rl.credits?.has_credits && rl.credits.balance !== undefined) {
+        const bal = Number(rl.credits.balance);
+        if (Number.isFinite(bal)) creditsBalance = round2(bal);
+      }
+    }
+
+    const barPercent =
+      windows.length > 0 ? Math.max(...windows.map((w) => w.usedPercent)) : null;
+
+    return {
+      harness: 'codex',
+      updatedAt: latestRlTs || now,
+      planLabel: planLabel || 'Codex',
+      barPercent,
+      barIsEstimated: false,
+      windows,
+      creditsBalance,
+      spend5hUsd: round2(acc.spend5h),
+      spend24hUsd: round2(acc.spend24h),
+      spend7dUsd: round2(acc.spend7d),
+      spend14dUsd: round2(acc.spend14d),
+      tokens7d: Math.round(acc.tokens7d),
+      dailySpend7d: buildDailySeries7d(acc, now),
+      spendIsEstimated: true,
+      note: 'API-equivalent spend from rollout token records',
+    };
+  }
+
+  private async collectAntigravityUsage(
+    now: number,
+    markDirty: () => void
+  ): Promise<HarnessUsageSummary> {
+    const cutoff = now - 14 * DAY_MS;
+    const acc = createAccumulator();
+    const seenIds = new Set<string>();
+    const recentFiles: Array<{ path: string; mtimeMs: number; size: number }> = [];
+
+    for (const brainDir of [AGY_APP_BRAIN, AGY_CLI_BRAIN]) {
+      if (!fs.existsSync(brainDir)) continue;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(brainDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || seenIds.has(e.name)) continue;
+        const tr = path.join(brainDir, e.name, '.system_generated', 'logs', 'transcript.jsonl');
+        if (!fs.existsSync(tr)) continue;
+        seenIds.add(e.name);
+        try {
+          const st = fs.statSync(tr);
+          if (st.mtimeMs >= cutoff) {
+            recentFiles.push({ path: tr, mtimeMs: st.mtimeMs, size: st.size });
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    for (const file of recentFiles) {
+      const cacheKey = `agy:${file.path}`;
+      const cached = this.fileCache[cacheKey];
+      if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+        foldBuckets(acc, cached.buckets, now);
+        continue;
+      }
+
+      const hourMap = new Map<number, FileHourBucket>();
+      let rollingContextTokens = 2500;
+      await scanJsonlLines(file.path, (line) => {
+        if (!line.trim()) return;
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        const stepType = String(obj.type || '');
+        if (stepType === 'PLANNER_RESPONSE') {
+          const ts = typeof obj.created_at === 'string' ? Date.parse(obj.created_at) : 0;
+          if (ts < cutoff) return;
+
+          const model = String(obj.model || 'gemini-pro');
+          const hasRealTokens =
+            typeof obj.input_tokens === 'number' ||
+            typeof obj.cache_read_tokens === 'number' ||
+            typeof obj.output_tokens === 'number';
+
+          if (hasRealTokens) {
+            const uncachedIn = Math.max(0, Number(obj.input_tokens || 0));
+            const cacheRead = Math.max(0, Number(obj.cache_read_tokens || 0));
+            const output = Math.max(0, Number(obj.output_tokens || 0));
+            const spend = priceAntigravityTokens(model, uncachedIn, cacheRead, output);
+            addEventToHourMap(hourMap, ts, spend, uncachedIn + cacheRead + output);
+          } else {
+            const contentLen = typeof obj.content === 'string' ? obj.content.length : 0;
+            const thinkingLen = typeof obj.thinking === 'string' ? obj.thinking.length : 0;
+            const toolLen = Array.isArray(obj.tool_calls) ? JSON.stringify(obj.tool_calls).length : 0;
+            const outputEst = Math.max(20, Math.round((contentLen + thinkingLen + toolLen) / 4));
+            const inputEst = Math.min(rollingContextTokens, 160_000);
+            const spend = priceAntigravityTokens(model, Math.round(inputEst * 0.1), Math.round(inputEst * 0.9), outputEst);
+            addEventToHourMap(hourMap, ts, spend, inputEst + outputEst);
+            rollingContextTokens = Math.min(rollingContextTokens + outputEst, 180_000);
+          }
+        } else {
+          const contentLen = typeof obj.content === 'string' ? obj.content.length : 0;
+          rollingContextTokens = Math.min(
+            rollingContextTokens + Math.max(20, Math.round(contentLen / 4)),
+            180_000
+          );
+        }
+      });
+
+      const buckets = Array.from(hourMap.values());
+      this.fileCache[cacheKey] = { mtimeMs: file.mtimeMs, size: file.size, buckets };
+      markDirty();
+      foldBuckets(acc, buckets, now);
+    }
+
+    const daily = buildDailySeries7d(acc, now);
+
+    return {
+      harness: 'antigravity',
+      updatedAt: now,
+      planLabel: 'Antigravity',
+      // Antigravity does not persist official 5h/weekly quota % locally — never show a fake % fill
+      barPercent: null,
+      barIsEstimated: false,
+      windows: [],
+      spend5hUsd: round2(acc.spend5h),
+      spend24hUsd: round2(acc.spend24h),
+      spend7dUsd: round2(acc.spend7d),
+      spend14dUsd: round2(acc.spend14d),
+      tokens7d: Math.round(acc.tokens7d),
+      dailySpend7d: daily,
+      spendIsEstimated: true,
+      note: 'Weekly & 5h quota % are fetched in-memory by Antigravity Desktop and not persisted locally. Spend below uses real transcript token counts.',
+    };
+  }
+}

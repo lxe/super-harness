@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+storybook-static/
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Local env / editor artifacts
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+coverage/

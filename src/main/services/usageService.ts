@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
+import { promisify } from 'node:util';
 import type {
   DailySpendPoint,
   HarnessUsageSummary,
@@ -9,6 +11,9 @@ import type {
   UsageSnapshot,
 } from '../../shared/types';
 import { querySqliteReadOnly } from '../utils/sqlite';
+import { whichBinary } from '../utils/system';
+
+const execFileAsync = promisify(execFile);
 
 const HOME = os.homedir();
 const CLAUDE_PLAN_HISTORY = path.join(HOME, '.config', 'Claude', 'plan-usage-history.json');
@@ -41,9 +46,16 @@ interface CachedFileSummary {
   rl?: Record<string, unknown>;
 }
 
+interface CachedAgyLiveQuota {
+  fetchedAt: number;
+  windows: UsageQuotaWindow[];
+  creditsBalance?: number;
+}
+
 interface DiskUsageCache {
   version: number;
   files: Record<string, CachedFileSummary>;
+  agyLiveQuota?: CachedAgyLiveQuota;
 }
 
 interface SpendBucketAccumulator {
@@ -240,20 +252,29 @@ async function scanJsonlLines(
 
 const CACHE_VERSION = 2;
 
-function loadDiskCache(): Record<string, CachedFileSummary> {
+function loadDiskCache(): {
+  files: Record<string, CachedFileSummary>;
+  agyLiveQuota?: CachedAgyLiveQuota;
+} {
   try {
-    if (!fs.existsSync(USAGE_CACHE_PATH)) return {};
+    if (!fs.existsSync(USAGE_CACHE_PATH)) return { files: {} };
     const parsed = JSON.parse(fs.readFileSync(USAGE_CACHE_PATH, 'utf8')) as DiskUsageCache;
     if (parsed?.version === CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
-      return parsed.files;
+      return {
+        files: parsed.files,
+        agyLiveQuota: parsed.agyLiveQuota,
+      };
     }
   } catch {
     // ignore corrupt cache
   }
-  return {};
+  return { files: {} };
 }
 
-function saveDiskCache(files: Record<string, CachedFileSummary>): void {
+function saveDiskCache(
+  files: Record<string, CachedFileSummary>,
+  agyLiveQuota?: CachedAgyLiveQuota
+): void {
   try {
     fs.mkdirSync(path.dirname(USAGE_CACHE_PATH), { recursive: true });
     // Prune entries older than 21 days so cache stays tiny
@@ -263,11 +284,113 @@ function saveDiskCache(files: Record<string, CachedFileSummary>): void {
       if (v.mtimeMs >= minMtime) pruned[k] = v;
     }
     const tmp = `${USAGE_CACHE_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ version: CACHE_VERSION, files: pruned }), 'utf8');
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify({ version: CACHE_VERSION, files: pruned, agyLiveQuota }),
+      'utf8'
+    );
     fs.renameSync(tmp, USAGE_CACHE_PATH);
   } catch {
     // ignore write failures
   }
+}
+
+/**
+ * Parses structured JSON emitted by the official `agy -p "/usage" --output-format json`
+ * and `agy -p "/credits" --output-format json` CLI commands into UsageQuotaWindow[].
+ */
+export function parseAntigravityCliUsageJson(
+  usageStdout: string,
+  creditsStdout?: string
+): { windows: UsageQuotaWindow[]; creditsBalance?: number } {
+  const windows: UsageQuotaWindow[] = [];
+
+  try {
+    const parsed = JSON.parse(usageStdout.trim()) as {
+      command?: {
+        name?: string;
+        data?: {
+          groups?: Array<{
+            name?: string;
+            buckets?: Array<{
+              id?: string;
+              name?: string;
+              window?: string;
+              remaining_fraction?: number;
+              reset_time?: string;
+            }>;
+          }>;
+        };
+      };
+    };
+
+    const groups = parsed?.command?.data?.groups ?? [];
+    for (const grp of groups) {
+      const grpName = grp.name || 'Antigravity';
+      const isGemini = /gemini/i.test(grpName);
+      const shortGroup = isGemini
+        ? 'Gemini'
+        : /claude|gpt/i.test(grpName)
+          ? 'Claude & GPT'
+          : grpName;
+
+      // Sort 5h before weekly within each group
+      const buckets = [...(grp.buckets ?? [])].sort((a, b) => {
+        const rank = (w?: string) => (w === '5h' ? 0 : w === 'weekly' ? 1 : 2);
+        return rank(a.window) - rank(b.window);
+      });
+
+      for (const b of buckets) {
+        if (typeof b.remaining_fraction !== 'number' || !Number.isFinite(b.remaining_fraction)) {
+          continue;
+        }
+        const usedPercent = round2(Math.min(100, Math.max(0, (1 - b.remaining_fraction) * 100)));
+        const parsedReset = b.reset_time ? Date.parse(b.reset_time) : NaN;
+        // Ignore epoch-zero placeholder timestamps (1970-01-01T00:00:00Z) on unused buckets
+        const resetsAt =
+          Number.isFinite(parsedReset) && parsedReset > 86_400_000 ? parsedReset : undefined;
+
+        const is5h = b.window === '5h';
+        const isWeekly = b.window === 'weekly';
+        // Give primary Gemini buckets canonical 'five_hour'/'weekly' IDs for the All-Harnesses rollup
+        const id = isGemini
+          ? is5h
+            ? 'five_hour'
+            : isWeekly
+              ? 'weekly'
+              : b.id || `${shortGroup}-${b.window}`
+          : b.id || `${shortGroup.toLowerCase().replace(/\W+/g, '_')}_${b.window || 'limit'}`;
+
+        const windowLabel = is5h ? '5h limit' : isWeekly ? 'Weekly' : b.name || 'Limit';
+        windows.push({
+          id,
+          label: `${shortGroup} · ${windowLabel}`,
+          usedPercent,
+          resetsAt,
+          windowMinutes: is5h ? 300 : isWeekly ? 10080 : undefined,
+        });
+      }
+    }
+  } catch {
+    // ignore malformed usage JSON
+  }
+
+  let creditsBalance: number | undefined;
+  if (creditsStdout) {
+    try {
+      const cParsed = JSON.parse(creditsStdout.trim()) as {
+        command?: { data?: { remaining_credits?: number } };
+      };
+      const val = cParsed?.command?.data?.remaining_credits;
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        creditsBalance = val;
+      }
+    } catch {
+      // ignore malformed credits JSON
+    }
+  }
+
+  return { windows, creditsBalance };
 }
 
 function classifyCodexWindowLabel(windowMinutes?: number): { id: string; label: string } {
@@ -284,14 +407,20 @@ function classifyCodexWindowLabel(windowMinutes?: number): { id: string; label: 
   return { id: `win_${windowMinutes}`, label: `${hrs}h window` };
 }
 
+const AGY_LIVE_QUOTA_TTL_MS = 120_000;
+
 export class UsageService {
   private cache: UsageSnapshot | null = null;
   private lastComputedAt = 0;
   private inFlight: Promise<UsageSnapshot> | null = null;
   private fileCache: Record<string, CachedFileSummary>;
+  private agyLiveQuota?: CachedAgyLiveQuota;
+  private agyQuotaInFlight: Promise<CachedAgyLiveQuota | undefined> | null = null;
 
   constructor() {
-    this.fileCache = loadDiskCache();
+    const loaded = loadDiskCache();
+    this.fileCache = loaded.files;
+    this.agyLiveQuota = loaded.agyLiveQuota;
   }
 
   async getUsage(force = false): Promise<UsageSnapshot> {
@@ -307,12 +436,12 @@ export class UsageService {
         dirty = true;
       };
       const [antigravity, codex, claude] = await Promise.all([
-        this.collectAntigravityUsage(now, markDirty),
+        this.collectAntigravityUsage(now, markDirty, force),
         this.collectCodexUsage(now, markDirty),
         this.collectClaudeUsage(now, markDirty),
       ]);
       if (dirty) {
-        saveDiskCache(this.fileCache);
+        saveDiskCache(this.fileCache, this.agyLiveQuota);
       }
       const snapshot: UsageSnapshot = {
         antigravity,
@@ -328,6 +457,53 @@ export class UsageService {
       return await this.inFlight;
     } finally {
       this.inFlight = null;
+    }
+  }
+
+  private async fetchAntigravityLiveQuota(
+    now: number,
+    markDirty: () => void,
+    force: boolean
+  ): Promise<CachedAgyLiveQuota | undefined> {
+    if (!force && this.agyLiveQuota && now - this.agyLiveQuota.fetchedAt < AGY_LIVE_QUOTA_TTL_MS) {
+      return this.agyLiveQuota;
+    }
+    if (this.agyQuotaInFlight) return this.agyQuotaInFlight;
+
+    this.agyQuotaInFlight = (async () => {
+      try {
+        const bin = await whichBinary('agy');
+        if (!bin) return this.agyLiveQuota;
+        const [usageRes, creditsRes] = await Promise.all([
+          execFileAsync(bin, ['-p', '/usage', '--output-format', 'json'], {
+            timeout: 12_000,
+            maxBuffer: 2 * 1024 * 1024,
+          }).catch(() => null),
+          execFileAsync(bin, ['-p', '/credits', '--output-format', 'json'], {
+            timeout: 12_000,
+            maxBuffer: 1024 * 1024,
+          }).catch(() => null),
+        ]);
+        if (!usageRes?.stdout) return this.agyLiveQuota;
+        const parsed = parseAntigravityCliUsageJson(usageRes.stdout, creditsRes?.stdout);
+        if (parsed.windows.length > 0) {
+          this.agyLiveQuota = {
+            fetchedAt: Date.now(),
+            windows: parsed.windows,
+            creditsBalance: parsed.creditsBalance,
+          };
+          markDirty();
+        }
+        return this.agyLiveQuota;
+      } catch {
+        return this.agyLiveQuota;
+      }
+    })();
+
+    try {
+      return await this.agyQuotaInFlight;
+    } finally {
+      this.agyQuotaInFlight = null;
     }
   }
 
@@ -747,8 +923,10 @@ export class UsageService {
 
   private async collectAntigravityUsage(
     now: number,
-    markDirty: () => void
+    markDirty: () => void,
+    force = false
   ): Promise<HarnessUsageSummary> {
+    const liveQuotaPromise = this.fetchAntigravityLiveQuota(now, markDirty, force);
     const cutoff = now - 14 * DAY_MS;
     const acc = createAccumulator();
     const seenIds = new Set<string>();
@@ -839,15 +1017,19 @@ export class UsageService {
     }
 
     const daily = buildDailySeries7d(acc, now);
+    const liveQuota = await liveQuotaPromise;
+    const windows = liveQuota?.windows ?? [];
+    const barPercent =
+      windows.length > 0 ? Math.max(...windows.map((w) => w.usedPercent)) : null;
 
     return {
       harness: 'antigravity',
-      updatedAt: now,
+      updatedAt: liveQuota?.fetchedAt || now,
       planLabel: 'Antigravity',
-      // Antigravity does not persist official 5h/weekly quota % locally — never show a fake % fill
-      barPercent: null,
+      barPercent,
       barIsEstimated: false,
-      windows: [],
+      windows,
+      creditsBalance: liveQuota?.creditsBalance,
       spend5hUsd: round2(acc.spend5h),
       spend24hUsd: round2(acc.spend24h),
       spend7dUsd: round2(acc.spend7d),
@@ -855,7 +1037,10 @@ export class UsageService {
       tokens7d: Math.round(acc.tokens7d),
       dailySpend7d: daily,
       spendIsEstimated: true,
-      note: 'Weekly & 5h quota % are fetched in-memory by Antigravity Desktop and not persisted locally. Spend below uses real transcript token counts.',
+      note:
+        windows.length > 0
+          ? 'Live quota via `agy -p /usage` · API-equivalent spend from transcripts'
+          : 'Run `agy` CLI login to enable live Antigravity quota bars.',
     };
   }
 }

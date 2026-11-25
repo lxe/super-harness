@@ -13,6 +13,9 @@ import type {
 
 const api: SuperHarnessApi = {
   getBootstrap: () => ipcRenderer.invoke('sh:bootstrap'),
+  getHarnessCatalog: (force?: boolean) => ipcRenderer.invoke('sh:catalog', force),
+  createProjectDirectory: (parentDir: string, name: string) =>
+    ipcRenderer.invoke('sh:create-project', parentDir, name),
   refreshDiscovery: () => ipcRenderer.invoke('sh:refresh'),
   getTranscript: (sessionId: string, limit?: number) =>
     ipcRenderer.invoke('sh:transcript', sessionId, limit),

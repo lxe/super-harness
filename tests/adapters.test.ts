@@ -16,6 +16,7 @@ import {
   loadCodexTranscriptFromPaths,
 } from '../src/main/adapters/codexAdapter';
 import { closeSqlitePool } from '../src/main/utils/sqlite';
+import { parseAntigravityCliUsageJson } from '../src/main/services/usageService';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-adapters-test-'));
 
@@ -398,6 +399,75 @@ describe('Antigravity transcript parsing & tail parity', () => {
       logPath: '/tmp/task-61.log',
       isDaemon: true,
     });
+  });
+
+  it('parses live Antigravity quota and credits from agy -p /usage and /credits JSON', () => {
+    const usageJson = JSON.stringify({
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini Models',
+              buckets: [
+                {
+                  id: 'gemini-weekly',
+                  window: 'weekly',
+                  remaining_fraction: 0.94,
+                  reset_time: '2026-12-02T20:26:40Z',
+                },
+                {
+                  id: 'gemini-5h',
+                  window: '5h',
+                  remaining_fraction: 0.77,
+                  reset_time: '2026-11-26T01:26:40Z',
+                },
+              ],
+            },
+            {
+              name: 'Claude and GPT models',
+              buckets: [
+                {
+                  id: '3p-weekly',
+                  window: 'weekly',
+                  remaining_fraction: 1,
+                  reset_time: '1970-01-01T00:00:00Z',
+                },
+                {
+                  id: '3p-5h',
+                  window: '5h',
+                  remaining_fraction: 1,
+                  reset_time: '1970-01-01T00:00:00Z',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const creditsJson = JSON.stringify({
+      status: 'SUCCESS',
+      command: { name: 'credits', data: { remaining_credits: 250 } },
+    });
+
+    const parsed = parseAntigravityCliUsageJson(usageJson, creditsJson);
+    expect(parsed.creditsBalance).toBe(250);
+    expect(parsed.windows).toHaveLength(4);
+    expect(parsed.windows[0]).toMatchObject({
+      id: 'five_hour',
+      label: 'Gemini · 5h limit',
+      usedPercent: 23,
+    });
+    expect(parsed.windows[0].resetsAt).toBe(Date.parse('2026-11-26T01:26:40Z'));
+    expect(parsed.windows[1]).toMatchObject({
+      id: 'weekly',
+      label: 'Gemini · Weekly',
+      usedPercent: 6,
+    });
+    // Epoch-zero reset timestamps should be omitted cleanly
+    expect(parsed.windows[2].resetsAt).toBeUndefined();
+    expect(parsed.windows[2].usedPercent).toBe(0);
   });
 });
 

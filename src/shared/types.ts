@@ -349,6 +349,27 @@ export interface OrganizeAction {
   tags?: string[];
 }
 
+export interface HarnessModelOption {
+  id: string;
+  label: string;
+  description?: string;
+  isDefault?: boolean;
+  group?: string;
+}
+
+export interface HarnessProjectOption {
+  name: string;
+  path: string;
+  harnesses: HarnessGroup[];
+  lastUsedAt?: number;
+}
+
+export interface HarnessCatalog {
+  models: Record<HarnessGroup, HarnessModelOption[]>;
+  projects: HarnessProjectOption[];
+  updatedAt: number;
+}
+
 export interface SuperHarnessApi {
   getBootstrap: () => Promise<{
     harnesses: HarnessDetection[];
@@ -356,6 +377,11 @@ export interface SuperHarnessApi {
     state: SuperHarnessState;
     controlPort: number;
   }>;
+  getHarnessCatalog: (force?: boolean) => Promise<HarnessCatalog>;
+  createProjectDirectory: (
+    parentDir: string,
+    name: string
+  ) => Promise<{ ok: boolean; path?: string; error?: string }>;
   refreshDiscovery: () => Promise<{
     harnesses: HarnessDetection[];
     sessions: UnifiedSession[];

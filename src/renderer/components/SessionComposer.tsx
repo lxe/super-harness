@@ -152,8 +152,8 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
             <IconButton label="Attach image (or Ctrl+V to paste)" onClick={onPickImages}>
               <ImagePlus className="w-4 h-4" />
             </IconButton>
-            <HarnessLogo harness={session.harness} size={13} />
-            <span className="text-micro text-ink-faint truncate">
+            <HarnessLogo harness={session.harness} size={14} />
+            <span className="text-caption text-ink-muted truncate">
               {session.model || vis.label}
               {dispatchNote ? ` · ${dispatchNote}` : ''}
             </span>

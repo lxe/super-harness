@@ -108,7 +108,7 @@ const SpendSparkline: React.FC<SparklineProps> = ({ points, harness }) => {
                   }`}
                 />
               </div>
-              <span className="text-[10px] text-ink-faint leading-none">
+              <span className="text-micro text-ink-faint leading-none">
                 {pt.dayLabel.slice(0, 1)}
               </span>
             </div>
@@ -218,9 +218,9 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
 
           <SpendSparkline points={combinedDaily} harness="all" />
 
-          <div className="flex items-center justify-between text-[10px] text-ink-faint">
+          <div className="flex items-center justify-between text-micro text-ink-faint">
             <span>14-day est. total</span>
-            <span className="font-mono text-ink-muted">~{formatUsd(total14d)}</span>
+            <span className="font-mono text-ink-secondary">~{formatUsd(total14d)}</span>
           </div>
         </div>
       </PopoverSurface>
@@ -255,7 +255,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
                   <span className="text-ink-secondary font-medium">{w.label}</span>
                   <div className="flex items-center gap-1.5 font-mono">
                     {typeof w.delta24h === 'number' && w.delta24h !== 0 && (
-                      <span className="text-[10px] text-ink-faint">
+                      <span className="text-micro text-ink-faint">
                         {w.delta24h > 0 ? `+${w.delta24h}%` : `${w.delta24h}%`} 24h
                       </span>
                     )}
@@ -273,7 +273,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
                   </div>
                 </div>
                 <ProgressBar value={w.usedPercent} tone={target} />
-                {resetStr && <div className="text-[10px] text-ink-faint">{resetStr}</div>}
+                {resetStr && <div className="text-micro text-ink-faint">{resetStr}</div>}
               </div>
             );
           })}
@@ -295,10 +295,10 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
 
       <div className="pt-2.5 border-t border-line-hairline space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-micro font-medium text-ink-secondary">
+          <span className="text-caption font-medium text-ink-secondary">
             Est. API-equivalent spend
           </span>
-          <span className="text-[10px] font-mono text-ink-faint">
+          <span className="text-micro font-mono text-ink-faint">
             {formatTokens(info.tokens7d)} tok · 7d
           </span>
         </div>
@@ -311,9 +311,9 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
 
         <SpendSparkline points={info.dailySpend7d} harness={target} />
 
-        <div className="flex items-center justify-between text-[10px] text-ink-faint">
+        <div className="flex items-center justify-between text-micro text-ink-faint">
           <span>14-day total</span>
-          <span className="font-mono text-ink-muted">~{formatUsd(info.spend14dUsd)}</span>
+          <span className="font-mono text-ink-secondary">~{formatUsd(info.spend14dUsd)}</span>
         </div>
       </div>
 

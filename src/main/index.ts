@@ -13,6 +13,7 @@ import type {
   SuperHarnessSettings,
 } from '../shared/types';
 import { HarnessRegistry } from './adapters/registry';
+import { createProjectDirectory, HarnessCatalogService } from './services/catalogService';
 import { ControlServer } from './services/controlServer';
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
@@ -33,6 +34,7 @@ let usageTimer: NodeJS.Timeout | null = null;
 const store = new ConfigStore();
 const registry = new HarnessRegistry(store);
 const usageService = new UsageService();
+const catalogService = new HarnessCatalogService();
 
 function broadcastToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -162,12 +164,28 @@ function createWindow(): void {
 function registerIpcHandlers(): void {
   ipcMain.handle('sh:bootstrap', async () => {
     const { harnesses, sessions } = await registry.discover();
+    // Warm model/project catalog in the background so New Conversation opens instantaneously
+    void catalogService.getCatalog(sessions);
     return {
       harnesses,
       sessions,
       state: store.getState(),
       controlPort: controlServer.port,
     };
+  });
+
+  ipcMain.handle('sh:catalog', async (_ev, force?: boolean) => {
+    let { sessions } = registry.getCached();
+    if (sessions.length === 0) {
+      sessions = (await registry.discover()).sessions;
+    }
+    return catalogService.getCatalog(sessions, Boolean(force));
+  });
+
+  ipcMain.handle('sh:create-project', async (_ev, parentDir: string, name: string) => {
+    const res = createProjectDirectory(parentDir, name);
+    if (res.ok) catalogService.invalidate();
+    return res;
   });
 
   ipcMain.handle('sh:refresh', async () => {

@@ -59,7 +59,7 @@ body,
 
 /* Clean, calm Antigravity-grade markdown prose */
 .sh-markdown {
-  font-size: 0.94rem;
+  font-size: 0.975rem;
   line-height: 1.68;
   color: #e8eaef;
   word-break: break-word;
@@ -79,12 +79,12 @@ body,
 .sh-markdown h4 {
   font-weight: 600;
   color: #f4f5f7;
-  margin: 1rem 0 0.45rem;
+  margin: 1.05rem 0 0.45rem;
   letter-spacing: -0.01em;
 }
-.sh-markdown h1 { font-size: 1.15rem; }
-.sh-markdown h2 { font-size: 1.05rem; }
-.sh-markdown h3 { font-size: 0.96rem; }
+.sh-markdown h1 { font-size: 1.22rem; }
+.sh-markdown h2 { font-size: 1.1rem; }
+.sh-markdown h3 { font-size: 1.0rem; }
 .sh-markdown ul,
 .sh-markdown ol {
   margin: 0.5rem 0;
@@ -104,15 +104,15 @@ body,
 }
 .sh-markdown code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.82em;
+  font-size: 0.85em;
   background: rgba(255, 255, 255, 0.07);
-  padding: 0.12rem 0.35rem;
+  padding: 0.14rem 0.38rem;
   border-radius: 5px;
   color: #eceef2;
 }
 .sh-markdown pre {
   margin: 0.7rem 0;
-  padding: 0.85rem 1rem;
+  padding: 0.9rem 1.05rem;
   background: #101114;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
@@ -121,8 +121,8 @@ body,
 .sh-markdown pre code {
   background: transparent;
   padding: 0;
-  font-size: 0.8rem;
-  line-height: 1.55;
+  font-size: 0.84rem;
+  line-height: 1.58;
   color: #d4d7df;
 }
 .sh-markdown blockquote {
@@ -135,7 +135,7 @@ body,
   width: 100%;
   border-collapse: collapse;
   margin: 0.7rem 0;
-  font-size: 0.82rem;
+  font-size: 0.875rem;
 }
 .sh-markdown th,
 .sh-markdown td {

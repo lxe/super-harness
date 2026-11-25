@@ -1,15 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
+  Check,
+  ChevronDown,
+  Cpu,
   FolderOpen,
+  FolderPlus,
   HelpCircle,
   Loader2,
   Radio,
+  Search,
   Sparkles,
+  Terminal,
   X,
 } from 'lucide-react';
-import type { StartSessionRequest } from '../../shared/types';
-import { Button, IconButton } from '../ui';
+import type {
+  HarnessCatalog,
+  HarnessGroup,
+  HarnessModelOption,
+  StartSessionRequest,
+} from '../../shared/types';
+import { Badge, Button, IconButton, MenuDivider, PopoverSurface } from '../ui';
 import { HarnessLogo } from './HarnessLogo';
 
 export interface DraftConversation {
@@ -24,45 +35,30 @@ export interface DraftConversation {
 
 interface Props {
   draft: DraftConversation;
+  catalog?: HarnessCatalog | null;
+  onRefreshCatalog?: () => void;
   onUpdateDraft: (patch: Partial<DraftConversation>) => void;
   onDiscard: () => void;
   onLaunched: (sessionId?: string) => void;
 }
 
-const HARNESS_CHOICES: Array<{
-  id: StartSessionRequest['harness'];
-  label: string;
-  desc: string;
-  logo: 'antigravity' | 'codex' | 'claude-tmux' | 'claude-cli';
-}> = [
-  {
-    id: 'antigravity',
-    label: 'Antigravity',
-    desc: 'Direct ACP conversation',
-    logo: 'antigravity',
-  },
-  {
-    id: 'codex',
-    label: 'Codex',
-    desc: 'OpenAI Codex workspace thread',
-    logo: 'codex',
-  },
-  {
-    id: 'claude-tmux',
-    label: 'Claude · tmux',
-    desc: 'Persistent tmux + remote control',
-    logo: 'claude-tmux',
-  },
-  {
-    id: 'claude-cli',
-    label: 'Claude CLI',
-    desc: 'Resumable headless session',
-    logo: 'claude-cli',
-  },
-];
+function groupForDraftHarness(h: StartSessionRequest['harness'] | null): HarnessGroup | null {
+  if (!h) return null;
+  if (h === 'antigravity') return 'antigravity';
+  if (h === 'codex') return 'codex';
+  return 'claude';
+}
+
+function shortenPath(p: string): string {
+  const parts = p.split('/').filter(Boolean);
+  if (parts.length <= 2) return p;
+  return `…/${parts.slice(-2).join('/')}`;
+}
 
 export const DraftSessionPane: React.FC<Props> = ({
   draft,
+  catalog,
+  onRefreshCatalog,
   onUpdateDraft,
   onDiscard,
   onLaunched,
@@ -70,22 +66,151 @@ export const DraftSessionPane: React.FC<Props> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [highlightPicker, setHighlightPicker] = useState(false);
+
+  // Remember preferred Claude launch mode (defaults to idiomatic tmux + remote-control)
+  const [claudeMode, setClaudeMode] = useState<'claude-tmux' | 'claude-cli'>(
+    draft.harness === 'claude-cli' ? 'claude-cli' : 'claude-tmux'
+  );
+  const [claudeMenuOpen, setClaudeMenuOpen] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+
+  const [projectSearch, setProjectSearch] = useState('');
+  const [modelSearch, setModelSearch] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectError, setNewProjectError] = useState<string | null>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (draft.harness === 'claude-tmux' || draft.harness === 'claude-cli') {
+      setClaudeMode(draft.harness);
+    }
+  }, [draft.harness]);
 
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, 52), 240)}px`;
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 56), 240)}px`;
   }, [draft.prompt, draft.id]);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, [draft.id]);
 
-  const handlePickDir = async () => {
+  // Close open popovers on outside click or Escape
+  useEffect(() => {
+    if (!claudeMenuOpen && !projectMenuOpen && !modelMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setClaudeMenuOpen(false);
+        setProjectMenuOpen(false);
+        setModelMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setClaudeMenuOpen(false);
+        setProjectMenuOpen(false);
+        setModelMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onDocClick);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [claudeMenuOpen, projectMenuOpen, modelMenuOpen]);
+
+  const selectedGroup = groupForDraftHarness(draft.harness);
+
+  const availableModels = useMemo<HarnessModelOption[]>(() => {
+    if (!selectedGroup || !catalog) return [];
+    return catalog.models[selectedGroup] ?? [];
+  }, [selectedGroup, catalog]);
+
+  const filteredModels = useMemo(() => {
+    const q = modelSearch.trim().toLowerCase();
+    if (!q) return availableModels;
+    return availableModels.filter(
+      (m) =>
+        m.label.toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q) ||
+        (m.group || '').toLowerCase().includes(q)
+    );
+  }, [availableModels, modelSearch]);
+
+  const defaultModelOption = useMemo(
+    () => availableModels.find((m) => m.isDefault),
+    [availableModels]
+  );
+
+  const selectedModelOption = useMemo(
+    () => availableModels.find((m) => m.id === draft.model),
+    [availableModels, draft.model]
+  );
+
+  const projects = useMemo(() => {
+    const all = catalog?.projects ?? [];
+    const q = projectSearch.trim().toLowerCase();
+    const filtered = q
+      ? all.filter(
+          (p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+        )
+      : all;
+    if (!selectedGroup) return filtered;
+    // Gently float projects already used by the selected harness to the top
+    return [...filtered].sort((a, b) => {
+      const aMatch = a.harnesses.includes(selectedGroup) ? 0 : 1;
+      const bMatch = b.harnesses.includes(selectedGroup) ? 0 : 1;
+      return aMatch - bMatch;
+    });
+  }, [catalog?.projects, projectSearch, selectedGroup]);
+
+  const selectedProjectLabel = useMemo(() => {
+    const match = (catalog?.projects ?? []).find((p) => p.path === draft.cwd);
+    if (match) return match.name;
+    const parts = draft.cwd.split('/').filter(Boolean);
+    return parts[parts.length - 1] || draft.cwd || '~';
+  }, [catalog?.projects, draft.cwd]);
+
+  const handleSelectHarness = (nextHarness: StartSessionRequest['harness']) => {
+    const nextGroup = groupForDraftHarness(nextHarness);
+    const switchingGroup = nextGroup !== selectedGroup;
+    onUpdateDraft({
+      harness: nextHarness,
+      // Reset model selection when switching between different harnesses
+      ...(switchingGroup ? { model: '' } : {}),
+    });
+    setError(null);
+  };
+
+  const handleBrowseFolder = async () => {
     const dir = await window.superHarness.pickDirectory();
-    if (dir) onUpdateDraft({ cwd: dir });
+    if (dir) {
+      onUpdateDraft({ cwd: dir });
+      setProjectMenuOpen(false);
+    }
+  };
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectName.trim()) return;
+    setNewProjectError(null);
+    const res = await window.superHarness.createProjectDirectory(draft.cwd, newProjectName.trim());
+    if (!res.ok || !res.path) {
+      setNewProjectError(res.error || 'Could not create directory');
+      return;
+    }
+    onUpdateDraft({ cwd: res.path });
+    setNewProjectName('');
+    setCreatingProject(false);
+    setProjectMenuOpen(false);
+    onRefreshCatalog?.();
   };
 
   const handleLaunch = async () => {
@@ -115,21 +240,29 @@ export const DraftSessionPane: React.FC<Props> = ({
     }
   };
 
-  const selectedMeta = HARNESS_CHOICES.find((h) => h.id === draft.harness);
-  const shortCwd = draft.cwd.split('/').filter(Boolean).slice(-2).join('/') || draft.cwd;
+  const headerTitle =
+    selectedGroup === 'antigravity'
+      ? 'Antigravity'
+      : selectedGroup === 'codex'
+        ? 'Codex'
+        : selectedGroup === 'claude'
+          ? draft.harness === 'claude-cli'
+            ? 'Claude CLI'
+            : 'Claude'
+          : null;
 
   return (
     <section className="flex-1 min-w-0 h-full flex flex-col bg-surface-canvas">
       {/* Header */}
       <header className="sh-drag-region h-11 px-4 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          {selectedMeta ? (
-            <HarnessLogo harness={selectedMeta.logo} size={15} />
+          {selectedGroup ? (
+            <HarnessLogo harness={selectedGroup} size={16} />
           ) : (
             <HelpCircle className="w-4 h-4 text-ink-muted shrink-0" />
           )}
           <h1 className="text-label font-medium text-ink-primary truncate">
-            {selectedMeta ? `New ${selectedMeta.label} Conversation` : 'New Conversation'}
+            {headerTitle ? `New ${headerTitle} Conversation` : 'New Conversation'}
           </h1>
         </div>
         <IconButton label="Discard draft" onClick={onDiscard}>
@@ -138,58 +271,178 @@ export const DraftSessionPane: React.FC<Props> = ({
       </header>
 
       {/* Center Canvas */}
-      <div className="flex-1 overflow-y-auto px-6 py-8 flex flex-col items-center justify-center">
-        <div className="w-full max-w-[680px] space-y-6">
-          <div className="text-center space-y-1.5">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-2xl bg-surface-subtle border border-line-subtle mb-1">
-              {selectedMeta ? (
-                <HarnessLogo harness={selectedMeta.logo} size={20} />
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-y-auto px-6 py-8 flex flex-col items-center justify-center"
+      >
+        <div className="w-full max-w-[720px] space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-surface-subtle border border-line-subtle mb-1">
+              {selectedGroup ? (
+                <HarnessLogo harness={selectedGroup} size={22} />
               ) : (
                 <Sparkles className="w-5 h-5 text-ink-muted" />
               )}
             </div>
-            <h2 className="text-base font-semibold text-ink-primary tracking-tight">
-              {selectedMeta
-                ? `Start a new ${selectedMeta.label} thread`
+            <h2 className="text-[18px] font-semibold text-ink-primary tracking-tight">
+              {headerTitle
+                ? `Start a new ${headerTitle} thread`
                 : 'Choose a harness for this conversation'}
             </h2>
-            <p className="text-caption text-ink-muted">
-              {selectedMeta
-                ? 'Type your first message below — Super Harness will launch and attach automatically.'
+            <p className="text-body text-ink-muted">
+              {headerTitle
+                ? 'Choose a project & model below, then send your first message.'
                 : 'Pick Antigravity, Codex, or Claude below. You can switch anytime before sending.'}
             </p>
           </div>
 
-          {/* Inline Harness Selector */}
+          {/* 3-Card Harness Selector (Claude has split dropdown for tmux vs Headless CLI) */}
           <div
-            className={`grid grid-cols-2 sm:grid-cols-4 gap-2 p-1 rounded-2xl transition-all ${
+            className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-1 rounded-2xl transition-all ${
               highlightPicker ? 'ring-2 ring-amber-400/60 bg-amber-400/[0.04]' : ''
             }`}
           >
-            {HARNESS_CHOICES.map((h) => {
-              const active = draft.harness === h.id;
-              return (
-                <button
-                  key={h.id}
-                  type="button"
-                  onClick={() => {
-                    onUpdateDraft({ harness: h.id });
-                    setError(null);
-                  }}
-                  className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-white/[0.09] border-line-strong text-ink-primary'
-                      : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 text-caption font-semibold">
-                    <HarnessLogo harness={h.logo} size={15} />
-                    <span className="truncate">{h.label}</span>
+            {/* Antigravity */}
+            <button
+              type="button"
+              onClick={() => handleSelectHarness('antigravity')}
+              className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+                selectedGroup === 'antigravity'
+                  ? 'bg-white/[0.09] border-line-strong text-ink-primary'
+                  : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-label font-semibold">
+                <HarnessLogo harness="antigravity" size={16} />
+                <span className="truncate">Antigravity</span>
+              </div>
+              <div className="text-caption text-ink-faint mt-1 leading-snug">
+                Direct ACP conversation
+              </div>
+            </button>
+
+            {/* Codex */}
+            <button
+              type="button"
+              onClick={() => handleSelectHarness('codex')}
+              className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+                selectedGroup === 'codex'
+                  ? 'bg-white/[0.09] border-line-strong text-ink-primary'
+                  : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-label font-semibold">
+                <HarnessLogo harness="codex" size={16} />
+                <span className="truncate">Codex</span>
+              </div>
+              <div className="text-caption text-ink-faint mt-1 leading-snug">
+                OpenAI Codex thread
+              </div>
+            </button>
+
+            {/* Claude (defaults to tmux + Remote Control, with dropdown for Headless CLI) */}
+            <div className="relative">
+              <div
+                onClick={() => handleSelectHarness(claudeMode)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSelectHarness(claudeMode);
+                  }
+                }}
+                className={`h-full text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+                  selectedGroup === 'claude'
+                    ? 'bg-white/[0.09] border-line-strong text-ink-primary'
+                    : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-2 text-label font-semibold min-w-0">
+                    <HarnessLogo harness="claude" size={16} />
+                    <span className="truncate">Claude</span>
                   </div>
-                  <div className="text-[10px] text-ink-faint mt-1 leading-snug">{h.desc}</div>
-                </button>
-              );
-            })}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setClaudeMenuOpen((v) => !v);
+                      setProjectMenuOpen(false);
+                      setModelMenuOpen(false);
+                    }}
+                    title="Choose Claude runtime mode"
+                    aria-label="Choose Claude runtime mode"
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-micro font-medium text-ink-muted hover:text-ink-primary hover:bg-white/[0.1] transition-colors shrink-0 cursor-pointer"
+                  >
+                    <span>{claudeMode === 'claude-tmux' ? 'tmux' : 'CLI'}</span>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="text-caption text-ink-faint mt-1 leading-snug">
+                  {claudeMode === 'claude-tmux'
+                    ? 'Persistent tmux + remote control'
+                    : 'Resumable headless CLI'}
+                </div>
+              </div>
+
+              {claudeMenuOpen && (
+                <PopoverSurface
+                  width="auto"
+                  className="absolute right-0 top-[calc(100%+6px)] z-40 w-64 p-1.5 space-y-1"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClaudeMode('claude-tmux');
+                      handleSelectHarness('claude-tmux');
+                      setClaudeMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors cursor-pointer ${
+                      claudeMode === 'claude-tmux'
+                        ? 'bg-white/[0.09] text-ink-primary'
+                        : 'text-ink-secondary hover:bg-white/[0.05]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-label font-medium">
+                        <Terminal className="w-3.5 h-3.5 text-brand-claude" />
+                        tmux + Remote Control
+                      </span>
+                      {claudeMode === 'claude-tmux' && <Check className="w-3.5 h-3.5 text-ink-primary" />}
+                    </div>
+                    <p className="text-micro text-ink-muted mt-0.5 leading-snug">
+                      Recommended · persistent shell, live terminal mirror &amp; mobile control
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClaudeMode('claude-cli');
+                      handleSelectHarness('claude-cli');
+                      setClaudeMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors cursor-pointer ${
+                      claudeMode === 'claude-cli'
+                        ? 'bg-white/[0.09] text-ink-primary'
+                        : 'text-ink-secondary hover:bg-white/[0.05]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-label font-medium">
+                        <Cpu className="w-3.5 h-3.5 text-ink-muted" />
+                        Headless CLI
+                      </span>
+                      {claudeMode === 'claude-cli' && <Check className="w-3.5 h-3.5 text-ink-primary" />}
+                    </div>
+                    <p className="text-micro text-ink-muted mt-0.5 leading-snug">
+                      Lightweight one-shot / resumable `claude -p` turn without tmux
+                    </p>
+                  </button>
+                </PopoverSurface>
+              )}
+            </div>
           </div>
 
           {error && (
@@ -199,7 +452,7 @@ export const DraftSessionPane: React.FC<Props> = ({
           )}
 
           {/* Inline Composer */}
-          <div className="rounded-2xl border border-line-subtle focus-within:border-line-strong bg-surface-subtle transition-colors overflow-hidden">
+          <div className="rounded-2xl border border-line-subtle focus-within:border-line-strong bg-surface-subtle transition-colors">
             <textarea
               ref={textareaRef}
               rows={2}
@@ -212,43 +465,267 @@ export const DraftSessionPane: React.FC<Props> = ({
                 }
               }}
               placeholder={
-                selectedMeta
-                  ? `Message ${selectedMeta.label}…`
+                headerTitle
+                  ? `Message ${headerTitle}…`
                   : 'Select a harness above, then type your message…'
               }
               className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-body text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none max-h-60 overflow-y-auto leading-relaxed"
             />
 
-            <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  onClick={() => void handlePickDir()}
-                  title={draft.cwd}
-                  iconLeft={<FolderOpen className="w-3 h-3 text-ink-muted" />}
-                >
-                  {shortCwd}
-                </Button>
+            <div className="px-3 pb-3 pt-1 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                {/* Project Selector Popover */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectMenuOpen((v) => !v);
+                      setModelMenuOpen(false);
+                      setClaudeMenuOpen(false);
+                      setCreatingProject(false);
+                      setNewProjectError(null);
+                    }}
+                    title={draft.cwd}
+                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.05] border border-line-hairline hover:border-line-subtle hover:bg-white/[0.08] text-caption text-ink-secondary hover:text-ink-primary transition-colors cursor-pointer max-w-[220px]"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                    <span className="truncate font-medium">{selectedProjectLabel}</span>
+                    <ChevronDown className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                  </button>
 
-                <input
-                  value={draft.model}
-                  onChange={(e) => onUpdateDraft({ model: e.target.value })}
-                  placeholder="Model (default)"
-                  className="h-7 w-32 bg-white/[0.04] border border-line-hairline rounded-md px-2 text-micro text-ink-secondary placeholder:text-ink-faint focus:outline-none focus:border-line-subtle"
-                />
+                  {projectMenuOpen && (
+                    <PopoverSurface
+                      width="auto"
+                      className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-80 p-2 space-y-2"
+                    >
+                      <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code border border-line-hairline focus-within:border-line-subtle">
+                        <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                        <input
+                          autoFocus
+                          value={projectSearch}
+                          onChange={(e) => setProjectSearch(e.target.value)}
+                          placeholder="Search harness projects…"
+                          className="flex-1 min-w-0 bg-transparent text-caption text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+                        />
+                      </div>
+
+                      <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5">
+                        {projects.length === 0 ? (
+                          <div className="px-2.5 py-3 text-caption text-ink-faint text-center">
+                            No matching projects
+                          </div>
+                        ) : (
+                          projects.map((proj) => {
+                            const active = draft.cwd === proj.path;
+                            return (
+                              <button
+                                key={proj.path}
+                                type="button"
+                                onClick={() => {
+                                  onUpdateDraft({ cwd: proj.path });
+                                  setProjectMenuOpen(false);
+                                }}
+                                className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                                  active
+                                    ? 'bg-white/[0.1] text-ink-primary'
+                                    : 'text-ink-secondary hover:bg-white/[0.05]'
+                                }`}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-caption font-medium truncate">
+                                    {proj.name}
+                                  </div>
+                                  <div className="text-micro font-mono text-ink-faint truncate">
+                                    {shortenPath(proj.path)}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {proj.harnesses.map((h) => (
+                                    <HarnessLogo key={h} harness={h} size={12} />
+                                  ))}
+                                  {active && <Check className="w-3.5 h-3.5 text-ink-primary ml-0.5" />}
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      <MenuDivider />
+
+                      {creatingProject ? (
+                        <form onSubmit={(e) => void handleCreateProject(e)} className="space-y-2 p-1">
+                          <div className="text-micro text-ink-muted">
+                            Create inside <span className="font-mono text-ink-secondary">{shortenPath(draft.cwd)}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              value={newProjectName}
+                              onChange={(e) => setNewProjectName(e.target.value)}
+                              placeholder="new-project-name"
+                              className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-surface-code border border-line-subtle text-caption text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+                            />
+                            <Button size="xs" variant="primary" type="submit">
+                              Create
+                            </Button>
+                          </div>
+                          {newProjectError && (
+                            <div className="text-micro text-rose-300">{newProjectError}</div>
+                          )}
+                        </form>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            className="flex-1"
+                            iconLeft={<FolderPlus className="w-3.5 h-3.5" />}
+                            onClick={() => setCreatingProject(true)}
+                          >
+                            New project
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            className="flex-1"
+                            iconLeft={<FolderOpen className="w-3.5 h-3.5" />}
+                            onClick={() => void handleBrowseFolder()}
+                          >
+                            Browse…
+                          </Button>
+                        </div>
+                      )}
+                    </PopoverSurface>
+                  )}
+                </div>
+
+                {/* Model Selector Popover (mirrors the selected harness's live models) */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModelMenuOpen((v) => !v);
+                      setProjectMenuOpen(false);
+                      setClaudeMenuOpen(false);
+                    }}
+                    disabled={!selectedGroup}
+                    title={draft.model || defaultModelOption?.label || 'Select model'}
+                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.05] border border-line-hairline hover:border-line-subtle hover:bg-white/[0.08] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer max-w-[230px]"
+                  >
+                    <Cpu className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                    <span className="truncate font-medium">
+                      {selectedModelOption?.label ||
+                        draft.model ||
+                        (defaultModelOption ? `${defaultModelOption.label}` : 'Default model')}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                  </button>
+
+                  {modelMenuOpen && selectedGroup && (
+                    <PopoverSurface
+                      width="auto"
+                      className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-80 p-2 space-y-2"
+                    >
+                      <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code border border-line-hairline focus-within:border-line-subtle">
+                        <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                        <input
+                          autoFocus
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                          placeholder={`Filter ${headerTitle || ''} models…`}
+                          className="flex-1 min-w-0 bg-transparent text-caption text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+                        />
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto space-y-0.5 pr-0.5">
+                        {!modelSearch.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onUpdateDraft({ model: '' });
+                              setModelMenuOpen(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                              !draft.model
+                                ? 'bg-white/[0.1] text-ink-primary'
+                                : 'text-ink-secondary hover:bg-white/[0.05]'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-caption font-medium">Harness default</div>
+                              {defaultModelOption && (
+                                <div className="text-micro text-ink-faint truncate">
+                                  Currently {defaultModelOption.label}
+                                </div>
+                              )}
+                            </div>
+                            {!draft.model && <Check className="w-3.5 h-3.5 text-ink-primary shrink-0" />}
+                          </button>
+                        )}
+
+                        {filteredModels.map((m) => {
+                          const active = draft.model === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                onUpdateDraft({ model: m.id });
+                                setModelMenuOpen(false);
+                              }}
+                              className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                                active
+                                  ? 'bg-white/[0.1] text-ink-primary'
+                                  : 'text-ink-secondary hover:bg-white/[0.05]'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-caption font-medium truncate">{m.label}</span>
+                                  {m.isDefault && <Badge tone="neutral">default</Badge>}
+                                </div>
+                                <div className="text-micro font-mono text-ink-faint truncate">
+                                  {m.id}
+                                </div>
+                              </div>
+                              {active && <Check className="w-3.5 h-3.5 text-ink-primary shrink-0" />}
+                            </button>
+                          );
+                        })}
+
+                        {modelSearch.trim() &&
+                          !filteredModels.some((m) => m.id === modelSearch.trim()) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onUpdateDraft({ model: modelSearch.trim() });
+                                setModelMenuOpen(false);
+                              }}
+                              className="w-full text-left px-2.5 py-2 rounded-lg text-caption text-ink-secondary hover:bg-white/[0.06] cursor-pointer"
+                            >
+                              Use custom model:{' '}
+                              <span className="font-mono text-ink-primary">
+                                {modelSearch.trim()}
+                              </span>
+                            </button>
+                          )}
+                      </div>
+                    </PopoverSurface>
+                  )}
+                </div>
 
                 {draft.harness === 'claude-tmux' && (
                   <button
                     type="button"
                     onClick={() => onUpdateDraft({ remoteControl: !draft.remoteControl })}
-                    className={`h-7 inline-flex items-center gap-1 px-2 rounded-md border text-micro transition-colors cursor-pointer ${
+                    className={`h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg border text-caption transition-colors cursor-pointer ${
                       draft.remoteControl
                         ? 'bg-indigo-500/15 border-indigo-400/30 text-indigo-200'
-                        : 'bg-white/[0.03] border-line-hairline text-ink-faint hover:text-ink-secondary'
+                        : 'bg-white/[0.04] border-line-hairline text-ink-faint hover:text-ink-secondary'
                     }`}
                   >
-                    <Radio className="w-3 h-3" />
+                    <Radio className="w-3.5 h-3.5" />
                     <span>Remote</span>
                   </button>
                 )}
@@ -259,10 +736,10 @@ export const DraftSessionPane: React.FC<Props> = ({
                 disabled={busy}
                 onClick={() => void handleLaunch()}
                 title="Start conversation (Enter)"
-                className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-35 transition-all cursor-pointer shrink-0"
+                className="w-8 h-8 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-35 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {busy ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <ArrowUp className="w-4 h-4" />
                 )}

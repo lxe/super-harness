@@ -682,12 +682,12 @@ export const SessionPane: React.FC<Props> = ({
             )}
 
             {loading && messages.length === 0 ? (
-              <div className="py-16 flex items-center justify-center gap-2 text-xs text-zinc-500">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <div className="py-16 flex items-center justify-center gap-2 text-caption text-ink-muted">
+                <Loader2 className="w-4 h-4 animate-spin" />
                 Loading…
               </div>
             ) : messages.length === 0 ? (
-              <div className="py-20 text-center text-sm text-zinc-500">
+              <div className="py-20 text-center text-body text-ink-muted">
                 Start a conversation below. Paste or drop images anytime.
               </div>
             ) : (
@@ -738,8 +738,8 @@ export const SessionPane: React.FC<Props> = ({
                 {streamingText && (
                   <CoalescedBlockView block={{ type: 'text', text: streamingText }} />
                 )}
-                <div className="flex items-center gap-2 text-xs text-zinc-500 pt-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                <div className="flex items-center gap-2 text-caption text-ink-muted pt-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   <span>Working</span>
                 </div>
               </div>
@@ -747,11 +747,11 @@ export const SessionPane: React.FC<Props> = ({
 
             {/* Quiet live Working indicator */}
             {!isMaster && !isStreaming && liveActivity?.isWorking && (
-              <div className="flex items-center gap-2 text-xs text-zinc-500 pt-1">
-                <Loader2 className="w-3 h-3 animate-spin" />
+              <div className="flex items-center gap-2 text-caption text-ink-muted pt-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 <span>Working</span>
                 {liveActivity.focus && (
-                  <span className="text-zinc-600 truncate">· {liveActivity.focus}</span>
+                  <span className="text-ink-faint truncate">· {liveActivity.focus}</span>
                 )}
               </div>
             )}
@@ -815,7 +815,7 @@ export const SessionPane: React.FC<Props> = ({
             )}
 
             {streamError && (
-              <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-xs text-rose-300 font-mono whitespace-pre-wrap">
+              <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-caption text-rose-300 font-mono whitespace-pre-wrap">
                 {streamError}
               </div>
             )}

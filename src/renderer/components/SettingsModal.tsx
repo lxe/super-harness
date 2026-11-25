@@ -186,7 +186,7 @@ export const SettingsModal: React.FC<Props> = ({
             })}
           </nav>
 
-          <div className="p-3 border-t border-line-hairline text-[10px] font-mono text-ink-faint space-y-0.5">
+          <div className="p-3 border-t border-line-hairline text-micro font-mono text-ink-faint space-y-0.5">
             <div className="flex items-center justify-between">
               <span>Control API</span>
               <span className="text-ink-muted">:{controlPort}</span>
@@ -303,7 +303,7 @@ export const SettingsModal: React.FC<Props> = ({
 
                           <div className="flex items-center justify-between gap-2 pt-1">
                             <div className="flex items-center gap-1.5 min-w-0 bg-surface-code border border-line-hairline rounded-lg px-2.5 py-1 flex-1">
-                              <span className="text-[10px] uppercase tracking-wider text-ink-faint shrink-0">
+                              <span className="text-micro uppercase tracking-wider text-ink-faint shrink-0">
                                 bin
                               </span>
                               <span

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  HarnessCatalog,
   HarnessDetection,
   OrganizeAction,
   QueuedMessageItem,
@@ -24,6 +25,7 @@ export const App: React.FC = () => {
   const [harnesses, setHarnesses] = useState<HarnessDetection[]>([]);
   const [sessions, setSessions] = useState<UnifiedSession[]>([]);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  const [catalog, setCatalog] = useState<HarnessCatalog | null>(null);
   const [state, setState] = useState<SuperHarnessState | null>(null);
   const [controlPort, setControlPort] = useState(0);
 
@@ -112,6 +114,9 @@ export const App: React.FC = () => {
 
     void window.superHarness.getUsage().then((snap) => {
       if (mounted) setUsage(snap);
+    });
+    void window.superHarness.getHarnessCatalog().then((cat) => {
+      if (mounted) setCatalog(cat);
     });
 
     const offSessions = window.superHarness.onSessionsUpdated((payload) => {
@@ -465,6 +470,12 @@ export const App: React.FC = () => {
     setSplitSessionId(null);
   }, []);
 
+  const handleRefreshCatalog = useCallback(() => {
+    void window.superHarness.getHarnessCatalog(true).then((cat) => {
+      setCatalog(cat);
+    });
+  }, []);
+
   const handleToggleSplitPrimary = useCallback(() => {
     setSplitSessionId((prev) => {
       if (prev) return null;
@@ -524,6 +535,8 @@ export const App: React.FC = () => {
         {activeDraft ? (
           <DraftSessionPane
             draft={activeDraft}
+            catalog={catalog}
+            onRefreshCatalog={handleRefreshCatalog}
             onUpdateDraft={(patch) => handleUpdateDraftConversation(activeDraft.id, patch)}
             onDiscard={() => handleDiscardDraftConversation(activeDraft.id)}
             onLaunched={(newSid) => {

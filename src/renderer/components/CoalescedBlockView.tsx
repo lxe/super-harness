@@ -687,9 +687,9 @@ export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.m
             />
           )
         )}
-        {msg.streaming && <div className="text-xs text-zinc-500 pt-1">Working…</div>}
+        {msg.streaming && <div className="text-caption text-ink-muted pt-1">Working…</div>}
         {msg.error && (
-          <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3.5 py-2.5 text-xs text-rose-300 font-mono">
+          <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3.5 py-2.5 text-caption text-rose-300 font-mono">
             {msg.error}
           </div>
         )}

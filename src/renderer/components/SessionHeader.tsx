@@ -164,7 +164,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                 >
                   <div className="px-2 py-1 text-micro font-medium text-ink-muted flex items-center justify-between">
                     <span>Subagents ({subagents.length})</span>
-                    <span className="text-[10px] text-ink-faint">Nested & archived</span>
+                    <span className="text-micro text-ink-faint">Nested & archived</span>
                   </div>
                   <div className="max-h-64 overflow-y-auto space-y-0.5">
                     {subagents.map((sub) => (
@@ -175,7 +175,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                           onSelectSession(sub.id);
                         }}
                         rightSlot={
-                          <span className="text-[10px]">
+                          <span className="text-micro">
                             {sub.status === 'running'
                               ? 'running'
                               : formatRelativeTime(sub.updatedAt)}
@@ -364,7 +364,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                 >
                   Open Workspace in Editor
                 </MenuItem>
-                <div className="border-t border-line-hairline mt-1 pt-1.5 px-2.5 py-1 text-[10px] font-mono text-ink-faint break-all">
+                <div className="border-t border-line-hairline mt-1 pt-1.5 px-2.5 py-1 text-micro font-mono text-ink-faint break-all">
                   {session.cwd}
                 </div>
               </PopoverSurface>

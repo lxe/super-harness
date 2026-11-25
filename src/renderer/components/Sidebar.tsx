@@ -628,19 +628,45 @@ export const Sidebar: React.FC<Props> = React.memo(({
       {/* Inline Search */}
       {(showSearch || query) && (
         <div className="px-2.5 pb-2">
-          <Input
-            ref={searchInputRef}
-            inputSize="sm"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setQuery('');
-                setShowSearch(false);
-              }
-            }}
-            placeholder="Filter conversations…"
-          />
+          <div className="h-9 flex items-center gap-2 px-3 rounded-lg bg-surface-subtle border border-line-subtle focus-within:border-line-strong transition-colors">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  if (query) {
+                    setQuery('');
+                  } else {
+                    setShowSearch(false);
+                  }
+                }
+              }}
+              placeholder="Filter conversations…"
+              className="flex-1 min-w-0 bg-transparent p-0 text-[14px] leading-normal text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (query) {
+                  setQuery('');
+                  searchInputRef.current?.focus();
+                } else {
+                  setShowSearch(false);
+                }
+              }}
+              title={query ? 'Clear filter' : 'Close filter'}
+              aria-label={query ? 'Clear filter' : 'Close filter'}
+              className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                query
+                  ? 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.1]'
+                  : 'text-ink-faint hover:text-ink-secondary hover:bg-white/[0.06]'
+              }`}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 

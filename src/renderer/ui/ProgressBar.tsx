@@ -15,6 +15,10 @@ export interface ProgressBarProps {
   tone?: ProgressTone;
   /** When true, avoids amber/rose threshold override for estimated activity bars */
   estimated?: boolean;
+  /** Quieter opacity for secondary limits below the hero limit */
+  muted?: boolean;
+  /** Optional 0..100 vertical pace tick showing elapsed fraction of the current window */
+  pacePercent?: number | null;
   size?: 'xs' | 'sm' | 'md';
   className?: string;
 }
@@ -22,26 +26,27 @@ export interface ProgressBarProps {
 export function resolveProgressFillClass(
   value: number | null,
   tone: ProgressTone = 'auto',
-  estimated = false
+  estimated = false,
+  muted = false
 ): string {
   if (value === null) return 'bg-zinc-600/40';
   if (!estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude')) {
-    if (value >= 90) return 'bg-status-danger';
-    if (value >= 75) return 'bg-status-warning';
+    if (value >= 95) return 'bg-status-danger';
+    if (value >= 80) return 'bg-status-warning';
   }
   switch (tone) {
     case 'claude':
-      return 'bg-brand-claude';
+      return muted ? 'bg-brand-claude/60' : 'bg-brand-claude';
     case 'codex':
-      return 'bg-brand-codex';
+      return muted ? 'bg-brand-codex/60' : 'bg-brand-codex';
     case 'antigravity':
-      return 'bg-brand-antigravity';
+      return muted ? 'bg-brand-antigravity/60' : 'bg-brand-antigravity';
     case 'warning':
       return 'bg-status-warning';
     case 'danger':
       return 'bg-status-danger';
     default:
-      return 'bg-ink-secondary/80';
+      return muted ? 'bg-ink-secondary/45' : 'bg-ink-secondary/80';
   }
 }
 
@@ -55,25 +60,35 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   value,
   tone = 'auto',
   estimated = false,
+  muted = false,
+  pacePercent = null,
   size = 'sm',
   className,
 }) => {
   const clamped = Math.min(100, Math.max(0, value ?? 0));
+  const showPace =
+    typeof pacePercent === 'number' &&
+    Number.isFinite(pacePercent) &&
+    pacePercent >= 2 &&
+    pacePercent <= 98;
   return (
-    <div
-      className={cn(
-        'w-full rounded-full bg-white/[0.08] overflow-hidden',
-        SIZE_CLASSES[size],
-        className
+    <div className={cn('relative w-full', SIZE_CLASSES[size], className)}>
+      <div className="w-full h-full rounded-full bg-white/[0.08] overflow-hidden">
+        <div
+          style={{ width: `${clamped}%` }}
+          className={cn(
+            'h-full rounded-full transition-all duration-300',
+            resolveProgressFillClass(value, tone, estimated, muted)
+          )}
+        />
+      </div>
+      {showPace && (
+        <div
+          style={{ left: `${pacePercent}%` }}
+          title={`${Math.round(pacePercent!)}% through window`}
+          className="pointer-events-none absolute -top-[3px] -bottom-[3px] w-[2px] -ml-[1px] rounded-full bg-ink-primary/80 shadow-[0_0_4px_rgba(0,0,0,0.8)]"
+        />
       )}
-    >
-      <div
-        style={{ width: `${clamped}%` }}
-        className={cn(
-          'h-full rounded-full transition-all duration-300',
-          resolveProgressFillClass(value, tone, estimated)
-        )}
-      />
     </div>
   );
 };

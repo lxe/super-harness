@@ -16,7 +16,14 @@ import {
   loadCodexTranscriptFromPaths,
 } from '../src/main/adapters/codexAdapter';
 import { closeSqlitePool } from '../src/main/utils/sqlite';
-import { parseAntigravityCliUsageJson } from '../src/main/services/usageService';
+import {
+  inferWeeklyResetFromSamples,
+  parseAntigravityCliUsageJson,
+} from '../src/main/services/usageService';
+import {
+  computeWindowPace,
+  pickHeroWindow,
+} from '../src/renderer/components/HarnessUsageHoverCard';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-adapters-test-'));
 
@@ -586,5 +593,42 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
 
     const fp2 = await getCodexTranscriptFingerprint('thr-1', undefined, dbs);
     expect(fp2).not.toBe(fp1);
+  });
+
+  it('infers Claude weekly reset timestamps and computes hero window + pace projection', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const resetT = 1795384800000;
+    const now = resetT + 3 * DAY; // ~43% through the 7-day window
+
+    const nextReset = inferWeeklyResetFromSamples(
+      [
+        { t: resetT - 60_000, u: { sd: 98 } },
+        { t: resetT, u: { sd: 0 } },
+        { t: now, u: { sd: 32 } },
+      ],
+      now
+    );
+    expect(nextReset).toBe(resetT + 7 * DAY);
+
+    const { hero, secondary } = pickHeroWindow([
+      { id: 'five_hour', label: '5-hour session', usedPercent: 0, windowMinutes: 300 },
+      {
+        id: 'weekly',
+        label: 'Weekly limit',
+        usedPercent: 32,
+        resetsAt: nextReset,
+        windowMinutes: 10080,
+      },
+      { id: 'extra', label: 'Extra usage', usedPercent: 45 },
+    ]);
+    // Extra usage is overflow, so Weekly limit (32%) wins as hero over 5-hour (0%)
+    expect(hero?.id).toBe('weekly');
+    expect(secondary.map((w) => w.id)).toEqual(['five_hour', 'extra']);
+
+    const pace = computeWindowPace(hero!, now);
+    expect(pace).not.toBeNull();
+    expect(Math.round(pace!.elapsedPercent)).toBe(43);
+    expect(pace!.projectedPercent).toBe(75);
+    expect(pace!.windowWord).toBe('week');
   });
 });

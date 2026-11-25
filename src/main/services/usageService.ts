@@ -409,6 +409,31 @@ function classifyCodexWindowLabel(windowMinutes?: number): { id: string; label: 
 
 const AGY_LIVE_QUOTA_TTL_MS = 120_000;
 
+/**
+ * Infers the next weekly reset timestamp from historical `sd` drop-to-zero
+ * transitions in Claude Desktop's `plan-usage-history.json`.
+ */
+export function inferWeeklyResetFromSamples(
+  samples: Array<{ t: number; u?: { sd?: number } }>,
+  now: number
+): number | undefined {
+  let prevSd: number | null = null;
+  let lastResetTs: number | null = null;
+  for (const s of samples) {
+    const sd = s.u?.sd;
+    if (typeof sd === 'number') {
+      if (prevSd !== null && prevSd - sd >= 15 && sd <= 10) {
+        lastResetTs = s.t;
+      }
+      prevSd = sd;
+    }
+  }
+  if (!lastResetTs) return undefined;
+  let nextReset = lastResetTs + 7 * DAY_MS;
+  while (nextReset <= now) nextReset += 7 * DAY_MS;
+  return nextReset;
+}
+
 export class UsageService {
   private cache: UsageSnapshot | null = null;
   private lastComputedAt = 0;
@@ -537,14 +562,14 @@ export class UsageService {
           if (fhVal !== null) {
             windows.push({
               id: 'five_hour',
-              label: '5-hour',
+              label: '5-hour session',
               usedPercent: Math.min(100, Math.max(0, round2(fhVal))),
               windowMinutes: 300,
             });
           } else if (now - latest.t < 2 * HOUR_MS && typeof latest.u?.sd === 'number') {
             windows.push({
               id: 'five_hour',
-              label: '5-hour',
+              label: '5-hour session',
               usedPercent: 0,
               windowMinutes: 300,
             });
@@ -566,14 +591,17 @@ export class UsageService {
             for (let i = samples.length - 1; i >= 0; i--) {
               const s = samples[i];
               if (s.t <= target24h && typeof s.u?.sd === 'number') {
-                delta24h = Math.round(sdVal - s.u.sd);
+                const diff = Math.round(sdVal - s.u.sd);
+                if (diff >= 0) delta24h = diff;
                 break;
               }
             }
+            const weeklyResetsAt = inferWeeklyResetFromSamples(samples, now);
             windows.push({
               id: 'weekly',
-              label: 'Weekly (7d)',
+              label: 'Weekly limit',
               usedPercent: Math.min(100, Math.max(0, round2(sdVal))),
+              resetsAt: weeklyResetsAt,
               delta24h,
               windowMinutes: 10080,
             });

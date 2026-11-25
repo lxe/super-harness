@@ -81,6 +81,8 @@ export interface UnifiedSession {
   originApp?: 'antigravity-app' | 'antigravity-cli';
   /** Native metadata file path for direct archiving (e.g. Claude Desktop local_*.json) */
   nativeMetaPath?: string;
+  /** Native Claude permission mode (e.g. 'bypassPermissions', 'acceptEdits', 'plan') */
+  permissionMode?: string;
 }
 
 export interface ImageAttachment {

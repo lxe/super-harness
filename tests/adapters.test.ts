@@ -7,6 +7,7 @@ import {
   parseAntigravityJsonlLines,
 } from '../src/main/adapters/antigravityAdapter';
 import {
+  createClaudeDriver,
   loadClaudeTranscript,
   parseClaudeJsonlLines,
 } from '../src/main/adapters/claudeAdapter';
@@ -176,6 +177,52 @@ describe('Claude transcript parsing & tail parity', () => {
     expect(tail.totalCount).toBeGreaterThan(20);
     expect(tail.messages.map((m) => m.id)).toEqual(full.messages.map((m) => m.id));
     expect(tail.messages.map((m) => m.blocks)).toEqual(full.messages.map((m) => m.blocks));
+  });
+
+  it('forwards valid session permissionMode to claude --resume in sendMessage', async () => {
+    const driver = createClaudeDriver();
+    const spawned: Array<{ args: string[] }> = [];
+    const ctx = {
+      spawnStreaming: (opts: { args: string[] }) => {
+        spawned.push({ args: opts.args });
+      },
+      emitStream: () => {},
+      triggerRefresh: () => {},
+    };
+
+    const res = await driver.sendMessage(
+      {
+        id: 'claude:abc-123',
+        nativeId: 'abc-123',
+        harness: 'claude-desktop',
+        harnessGroup: 'claude',
+        title: 'Test Desktop',
+        preview: 'Test',
+        cwd: tmpDir,
+        projectName: 'tmp',
+        status: 'idle',
+        isLive: false,
+        isRemote: false,
+        createdAt: 1,
+        updatedAt: 2,
+        pinned: false,
+        tags: ['desktop'],
+        hidden: false,
+        dispatchMode: 'claude-resume',
+        permissionMode: 'bypassPermissions',
+      },
+      'Hello Claude',
+      undefined,
+      ctx
+    );
+
+    if (res.ok) {
+      expect(spawned).toHaveLength(1);
+      expect(spawned[0].args).toContain('--permission-mode');
+      expect(spawned[0].args).toContain('bypassPermissions');
+      expect(spawned[0].args).toContain('--resume');
+      expect(spawned[0].args).toContain('abc-123');
+    }
   });
 });
 

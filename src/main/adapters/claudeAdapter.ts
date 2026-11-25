@@ -445,98 +445,21 @@ export async function detectClaude(
   // Load exact native Claude Desktop sidebar sections (Muse, PhoneUse, Orble, Pocket Model, DSX, Hill Climber...)
   const nativeSec = loadClaudeNativeSections();
 
-  // 1. Live active sessions from ~/.claude/sessions/*.json (includes both tmux CLI & Desktop!)
-  const liveBySessionId = new Map<string, ActiveClaudeSessionJson>();
-  const liveTmuxSessions: UnifiedSession[] = [];
-  let remoteActiveCount = 0;
-
-  if (fs.existsSync(CLAUDE_SESSIONS_DIR)) {
-    try {
-      for (const fn of fs.readdirSync(CLAUDE_SESSIONS_DIR)) {
-        if (!fn.endsWith('.json')) continue;
-        const full = path.join(CLAUDE_SESSIONS_DIR, fn);
-        let data: ActiveClaudeSessionJson;
-        try {
-          data = JSON.parse(fs.readFileSync(full, 'utf8')) as ActiveClaudeSessionJson;
-        } catch {
-          continue;
-        }
-        if (!data.sessionId || !data.pid) continue;
-        if (!isPidAlive(Number(data.pid))) continue;
-
-        liveBySessionId.set(data.sessionId, data);
-        if (data.bridgeSessionId) remoteActiveCount++;
-
-        const isTmux = Boolean(data.tmux);
-        const isDesktop = data.entrypoint === 'claude-desktop';
-        const harness = isTmux
-          ? 'claude-tmux'
-          : isDesktop
-            ? 'claude-desktop'
-            : 'claude-cli';
-        const cwd = data.cwd || os.homedir();
-        const transcriptPath = findClaudeTranscriptPath(data.sessionId, cwd);
-        const headMeta = transcriptPath ? readJsonlHeadMeta(transcriptPath) : {};
-        const tmuxSessionName = data.tmux ? data.tmux.split(':')[0] : undefined;
-        const title =
-          cleanTextPreview(data.name || headMeta.title || tmuxSessionName || headMeta.preview, 90) ||
-          `Claude (${projectNameFromCwd(cwd)})`;
-        const assignedSec = data.hostSessionId
-          ? nativeSec.sectionByLocalId.get(data.hostSessionId)
-          : undefined;
-        const isStarred = data.hostSessionId
-          ? nativeSec.starredLocalIds.has(data.hostSessionId)
-          : false;
-        const activity = inspectClaudeTranscriptActivity(transcriptPath, true);
-        const isRunning = data.status === 'running' || activity.working;
-        const updatedAt = Math.max(
-          normalizeTimestamp(data.updatedAt ?? data.startedAt),
-          activity.mtimeMs
-        );
-
-        liveTmuxSessions.push({
-          id: `${harness}:${data.sessionId}`,
-          nativeId: data.sessionId,
-          harness,
-          harnessGroup: 'claude',
-          title,
-          preview:
-            headMeta.preview ||
-            (isTmux ? `Live tmux session: ${data.tmux}` : `Live ${harness} session`),
-          cwd,
-          projectName: projectNameFromCwd(cwd),
-          nativeSection: assignedSec ? assignedSec.name : 'Ungrouped',
-          nativeSectionOrder: assignedSec ? assignedSec.order : 9999,
-          model: headMeta.model,
-          status: isRunning ? 'running' : 'idle',
-          isLive: true,
-          isRemote: Boolean(data.bridgeSessionId),
-          remoteId: data.bridgeSessionId || undefined,
-          tmuxTarget: data.tmux || undefined,
-          tmuxSessionName,
-          pid: Number(data.pid),
-          transcriptPath,
-          createdAt: normalizeTimestamp(data.startedAt),
-          updatedAt,
-          pinned: isStarred,
-          folderId: null,
-          tags: [
-            ...(isTmux ? ['tmux'] : []),
-            ...(data.bridgeSessionId ? ['remote-control'] : []),
-            ...(isDesktop ? ['desktop'] : []),
-          ],
-          hidden: false,
-          dispatchMode: isTmux ? 'tmux-send' : 'claude-resume',
-        });
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  // 2. Claude Desktop metadata sessions (~/.config/Claude/claude-code-sessions/*/*/local_*.json)
-  const desktopSessions: UnifiedSession[] = [];
-  const seenCliIds = new Set<string>(liveBySessionId.keys());
+  // 0. Pre-load Claude Desktop metadata (~/.config/Claude/claude-code-sessions/*/*/local_*.json)
+  //    so live `claude --resume` PIDs in ~/.claude/sessions/*.json inherit their Desktop identity
+  //    (title, native section, starred pin, permissionMode, and harness='claude-desktop') instead
+  //    of morphing into a separate `claude-cli` session mid-turn and dropping out of view!
+  const desktopEntries: Array<{
+    file: string;
+    mtime: number;
+    cliId: string;
+    localId: string;
+    data: ClaudeDesktopMetaJson;
+  }> = [];
+  const desktopMetaByCliId = new Map<
+    string,
+    { file: string; mtime: number; localId: string; data: ClaudeDesktopMetaJson }
+  >();
 
   if (fs.existsSync(CLAUDE_DESKTOP_SESSIONS_DIR)) {
     const metaFiles: Array<{ file: string; mtime: number }> = [];
@@ -564,58 +487,186 @@ export async function detectClaude(
     walk(CLAUDE_DESKTOP_SESSIONS_DIR, 0);
     metaFiles.sort((a, b) => b.mtime - a.mtime);
 
-    for (const item of metaFiles.slice(0, maxSessions)) {
+    for (const item of metaFiles) {
       let data: ClaudeDesktopMetaJson;
       try {
         data = JSON.parse(fs.readFileSync(item.file, 'utf8')) as ClaudeDesktopMetaJson;
       } catch {
         continue;
       }
-      if (data.isArchived && !showArchived) continue;
       const cliId = data.cliSessionId || data.sessionId;
-      if (!cliId || seenCliIds.has(cliId)) continue;
-      seenCliIds.add(cliId);
-
-      const cwd = data.cwd || os.homedir();
-      const transcriptPath = findClaudeTranscriptPath(cliId, cwd);
-      const branch = Array.isArray(data.gitAnchors) ? data.gitAnchors[0]?.branch : undefined;
+      if (!cliId) continue;
       const localId = data.sessionId || path.basename(item.file, '.json');
-      const assignedSec = nativeSec.sectionByLocalId.get(localId);
-      const isStarred = nativeSec.starredLocalIds.has(localId);
-      const activity = inspectClaudeTranscriptActivity(transcriptPath, desktopRunning);
-      const isRunning = !data.isArchived && activity.working;
-      const updatedAt = Math.max(
-        normalizeTimestamp(data.lastActivityAt ?? item.mtime),
-        activity.mtimeMs
-      );
-
-      desktopSessions.push({
-        id: `claude-desktop:${cliId}`,
-        nativeId: cliId,
-        harness: 'claude-desktop',
-        harnessGroup: 'claude',
-        title: cleanTextPreview(data.title, 90) || `Claude Desktop (${projectNameFromCwd(cwd)})`,
-        preview: data.title || cwd,
-        cwd,
-        projectName: projectNameFromCwd(cwd),
-        nativeSection: assignedSec ? assignedSec.name : 'Ungrouped',
-        nativeSectionOrder: assignedSec ? assignedSec.order : 9999,
-        nativeMetaPath: item.file,
-        gitBranch: branch,
-        model: data.model || undefined,
-        status: data.isArchived ? 'archived' : isRunning ? 'running' : 'idle',
-        isLive: isRunning,
-        isRemote: false,
-        transcriptPath,
-        createdAt: normalizeTimestamp(data.createdAt ?? item.mtime),
-        updatedAt,
-        pinned: isStarred,
-        folderId: null,
-        tags: ['desktop'],
-        hidden: false,
-        dispatchMode: 'claude-resume',
-      });
+      if (!desktopMetaByCliId.has(cliId)) {
+        desktopMetaByCliId.set(cliId, { file: item.file, mtime: item.mtime, localId, data });
+      }
+      if (!data.isArchived || showArchived) {
+        desktopEntries.push({ file: item.file, mtime: item.mtime, cliId, localId, data });
+      }
     }
+  }
+
+  // 1. Live active sessions from ~/.claude/sessions/*.json (includes both tmux CLI & Desktop!)
+  const liveBySessionId = new Map<string, ActiveClaudeSessionJson>();
+  const liveTmuxSessions: UnifiedSession[] = [];
+  let remoteActiveCount = 0;
+
+  if (fs.existsSync(CLAUDE_SESSIONS_DIR)) {
+    try {
+      // Collect & deduplicate live PIDs by sessionId (preferring tmux or claude-desktop over transient CLI resume)
+      const activeFiles: ActiveClaudeSessionJson[] = [];
+      for (const fn of fs.readdirSync(CLAUDE_SESSIONS_DIR)) {
+        if (!fn.endsWith('.json')) continue;
+        const full = path.join(CLAUDE_SESSIONS_DIR, fn);
+        let data: ActiveClaudeSessionJson;
+        try {
+          data = JSON.parse(fs.readFileSync(full, 'utf8')) as ActiveClaudeSessionJson;
+        } catch {
+          continue;
+        }
+        if (!data.sessionId || !data.pid) continue;
+        if (!isPidAlive(Number(data.pid))) continue;
+        activeFiles.push(data);
+      }
+
+      const priority = (d: ActiveClaudeSessionJson): number =>
+        d.tmux ? 3 : d.entrypoint === 'claude-desktop' ? 2 : 1;
+      activeFiles.sort((a, b) => priority(b) - priority(a));
+
+      for (const data of activeFiles) {
+        if (!data.sessionId || !data.pid) continue;
+        if (liveBySessionId.has(data.sessionId)) continue;
+        liveBySessionId.set(data.sessionId, data);
+        if (data.bridgeSessionId) remoteActiveCount++;
+
+        const desktopMatch = desktopMetaByCliId.get(data.sessionId);
+        const isTmux = Boolean(data.tmux);
+        const isDesktop = !isTmux && (data.entrypoint === 'claude-desktop' || Boolean(desktopMatch));
+        const harness = isTmux
+          ? 'claude-tmux'
+          : isDesktop
+            ? 'claude-desktop'
+            : 'claude-cli';
+        const cwd = desktopMatch?.data.cwd || data.cwd || os.homedir();
+        const transcriptPath = findClaudeTranscriptPath(data.sessionId, cwd);
+        const headMeta = transcriptPath ? readJsonlHeadMeta(transcriptPath) : {};
+        const tmuxSessionName = data.tmux ? data.tmux.split(':')[0] : undefined;
+        const title =
+          cleanTextPreview(
+            desktopMatch?.data.title ||
+              data.name ||
+              headMeta.title ||
+              tmuxSessionName ||
+              headMeta.preview,
+            90
+          ) || `Claude (${projectNameFromCwd(cwd)})`;
+        const localId = data.hostSessionId || desktopMatch?.localId;
+        const assignedSec = localId ? nativeSec.sectionByLocalId.get(localId) : undefined;
+        const isStarred = localId ? nativeSec.starredLocalIds.has(localId) : false;
+        const branch = Array.isArray(desktopMatch?.data.gitAnchors)
+          ? desktopMatch.data.gitAnchors[0]?.branch
+          : undefined;
+        const activity = inspectClaudeTranscriptActivity(transcriptPath, true);
+        const isRunning = data.status === 'running' || activity.working;
+        const updatedAt = Math.max(
+          normalizeTimestamp(data.updatedAt ?? data.startedAt),
+          normalizeTimestamp(desktopMatch?.data.lastActivityAt ?? 0),
+          activity.mtimeMs
+        );
+
+        liveTmuxSessions.push({
+          // Canonical ID across all Claude variants so resuming/exiting a CLI process never changes session.id
+          id: `claude:${data.sessionId}`,
+          nativeId: data.sessionId,
+          harness,
+          harnessGroup: 'claude',
+          title,
+          preview:
+            desktopMatch?.data.title ||
+            headMeta.preview ||
+            (isTmux ? `Live tmux session: ${data.tmux}` : `Live ${harness} session`),
+          cwd,
+          projectName: projectNameFromCwd(cwd),
+          nativeSection: assignedSec ? assignedSec.name : 'Ungrouped',
+          nativeSectionOrder: assignedSec ? assignedSec.order : 9999,
+          nativeMetaPath: desktopMatch?.file,
+          permissionMode: desktopMatch?.data.permissionMode,
+          gitBranch: branch,
+          model: desktopMatch?.data.model || headMeta.model,
+          status: isRunning ? 'running' : 'idle',
+          isLive: true,
+          isRemote: Boolean(data.bridgeSessionId),
+          remoteId: data.bridgeSessionId || undefined,
+          tmuxTarget: data.tmux || undefined,
+          tmuxSessionName,
+          pid: Number(data.pid),
+          transcriptPath,
+          createdAt: normalizeTimestamp(desktopMatch?.data.createdAt ?? data.startedAt),
+          updatedAt,
+          pinned: isStarred,
+          folderId: null,
+          tags: [
+            ...(isTmux ? ['tmux'] : []),
+            ...(data.bridgeSessionId ? ['remote-control'] : []),
+            ...(isDesktop ? ['desktop'] : []),
+          ],
+          hidden: false,
+          dispatchMode: isTmux ? 'tmux-send' : 'claude-resume',
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Remaining Claude Desktop metadata sessions (not currently in ~/.claude/sessions)
+  const desktopSessions: UnifiedSession[] = [];
+  const seenCliIds = new Set<string>(liveBySessionId.keys());
+
+  for (const item of desktopEntries.slice(0, maxSessions)) {
+    const { cliId, localId, data } = item;
+    if (seenCliIds.has(cliId)) continue;
+    seenCliIds.add(cliId);
+
+    const cwd = data.cwd || os.homedir();
+    const transcriptPath = findClaudeTranscriptPath(cliId, cwd);
+    const branch = Array.isArray(data.gitAnchors) ? data.gitAnchors[0]?.branch : undefined;
+    const assignedSec = nativeSec.sectionByLocalId.get(localId);
+    const isStarred = nativeSec.starredLocalIds.has(localId);
+    const activity = inspectClaudeTranscriptActivity(transcriptPath, desktopRunning);
+    const isRunning = !data.isArchived && activity.working;
+    const updatedAt = Math.max(
+      normalizeTimestamp(data.lastActivityAt ?? item.mtime),
+      activity.mtimeMs
+    );
+
+    desktopSessions.push({
+      id: `claude:${cliId}`,
+      nativeId: cliId,
+      harness: 'claude-desktop',
+      harnessGroup: 'claude',
+      title: cleanTextPreview(data.title, 90) || `Claude Desktop (${projectNameFromCwd(cwd)})`,
+      preview: data.title || cwd,
+      cwd,
+      projectName: projectNameFromCwd(cwd),
+      nativeSection: assignedSec ? assignedSec.name : 'Ungrouped',
+      nativeSectionOrder: assignedSec ? assignedSec.order : 9999,
+      nativeMetaPath: item.file,
+      permissionMode: data.permissionMode,
+      gitBranch: branch,
+      model: data.model || undefined,
+      status: data.isArchived ? 'archived' : isRunning ? 'running' : 'idle',
+      isLive: isRunning,
+      isRemote: false,
+      transcriptPath,
+      createdAt: normalizeTimestamp(data.createdAt ?? item.mtime),
+      updatedAt,
+      pinned: isStarred,
+      folderId: null,
+      tags: ['desktop'],
+      hidden: false,
+      dispatchMode: 'claude-resume',
+    });
   }
 
   // 3. Recent Claude CLI project transcripts (~/.claude/projects/*/*.jsonl)
@@ -660,7 +711,7 @@ export async function detectClaude(
         `Claude CLI (${projectNameFromCwd(cwd)})`;
       const activity = inspectClaudeTranscriptActivity(jf.file, claudeProcs.length > 0);
       cliSessions.push({
-        id: `claude-cli:${jf.nativeId}`,
+        id: `claude:${jf.nativeId}`,
         nativeId: jf.nativeId,
         harness: 'claude-cli',
         harnessGroup: 'claude',
@@ -1371,6 +1422,17 @@ export function createClaudeDriver(): HarnessDriver {
         'stream-json',
         '--verbose',
       ];
+      const VALID_PERM_MODES = new Set([
+        'acceptEdits',
+        'auto',
+        'bypassPermissions',
+        'manual',
+        'dontAsk',
+        'plan',
+      ]);
+      if (session.permissionMode && VALID_PERM_MODES.has(session.permissionMode)) {
+        args.push('--permission-mode', session.permissionMode);
+      }
       ctx.spawnStreaming({
         sessionId: session.id,
         runId,

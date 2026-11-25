@@ -87,6 +87,13 @@ export class ConfigStore {
     try {
       if (!fs.existsSync(STATE_FILE)) return def;
       const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) as Partial<SuperHarnessState>;
+      // Migrate legacy variant-prefixed Claude IDs (claude-desktop:/claude-cli:/claude-tmux:)
+      // to canonical `claude:<uuid>` so user pins, renames, folders & hidden flags stay intact.
+      const migratedOverrides: SuperHarnessState['overrides'] = {};
+      for (const [k, v] of Object.entries(raw.overrides ?? {})) {
+        const canonical = k.replace(/^claude-(?:desktop|cli|tmux):/, 'claude:');
+        migratedOverrides[canonical] = { ...(migratedOverrides[canonical] ?? {}), ...v };
+      }
       return {
         settings: {
           ...def.settings,
@@ -105,7 +112,7 @@ export class ConfigStore {
           },
         },
         folders: Array.isArray(raw.folders) ? raw.folders : def.folders,
-        overrides: raw.overrides ?? {},
+        overrides: migratedOverrides,
         linkedCliSessions: raw.linkedCliSessions ?? {},
         masterMessages:
           Array.isArray(raw.masterMessages) && raw.masterMessages.length > 0

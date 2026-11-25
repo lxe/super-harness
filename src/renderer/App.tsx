@@ -402,14 +402,30 @@ export const App: React.FC = () => {
     [sessions, streamingIds, liveWorkingMap]
   );
 
+  const findSessionResilient = useCallback(
+    (list: UnifiedSession[], id: string | null): UnifiedSession | undefined => {
+      if (!id) return undefined;
+      const exact = list.find((s) => s.id === id);
+      if (exact) return exact;
+      // Fallback by nativeId so a session never drops out of view if its harness variant changes
+      const colonIdx = id.indexOf(':');
+      if (colonIdx > 0) {
+        const nativeId = id.slice(colonIdx + 1);
+        if (nativeId) return list.find((s) => s.nativeId === nativeId);
+      }
+      return undefined;
+    },
+    []
+  );
+
   const activeSession = useMemo(
-    () => effectiveSessions.find((s) => s.id === activeSessionId),
-    [effectiveSessions, activeSessionId]
+    () => findSessionResilient(effectiveSessions, activeSessionId),
+    [effectiveSessions, activeSessionId, findSessionResilient]
   );
 
   const splitSession = useMemo(
-    () => (splitSessionId ? effectiveSessions.find((s) => s.id === splitSessionId) : undefined),
-    [effectiveSessions, splitSessionId]
+    () => findSessionResilient(effectiveSessions, splitSessionId),
+    [effectiveSessions, splitSessionId, findSessionResilient]
   );
 
   const activeSubagents = useMemo(

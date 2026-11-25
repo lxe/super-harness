@@ -112,8 +112,41 @@ export const SessionPane: React.FC<Props> = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyBottomRef = useRef(true);
   const lastResultRef = useRef<SessionTranscriptResult | null>(null);
+  const pendingOptimisticRef = useRef<{
+    sessionId: string;
+    msg: UnifiedMessage;
+    promptText: string;
+    sentAt: number;
+  } | null>(null);
   const currentSessionRef = useRef(session?.id ?? '');
   currentSessionRef.current = session?.id ?? '';
+
+  const mergeWithOptimistic = useCallback(
+    (reqId: string, incoming: UnifiedMessage[]): UnifiedMessage[] => {
+      const pending = pendingOptimisticRef.current;
+      if (!pending || pending.sessionId !== reqId) return incoming;
+      // Expire after 25s if the harness never wrote it
+      if (Date.now() - pending.sentAt > 25_000) {
+        pendingOptimisticRef.current = null;
+        return incoming;
+      }
+      // Once the real transcript contains this user message (or any newer user message), drop the optimistic copy
+      const matched = incoming.some((m) => {
+        if (m.role !== 'user') return false;
+        if (m.timestamp >= pending.sentAt - 2000) return true;
+        if (!pending.promptText) return false;
+        return m.blocks.some(
+          (b) => b.type === 'text' && b.text.trim() === pending.promptText
+        );
+      });
+      if (matched) {
+        pendingOptimisticRef.current = null;
+        return incoming;
+      }
+      return [...incoming, pending.msg];
+    },
+    []
+  );
 
   const isMaster = session?.harness === 'master';
   const sessionId = session?.id ?? '';
@@ -213,7 +246,7 @@ export const SessionPane: React.FC<Props> = ({
         if (currentSessionRef.current !== reqId) return;
         if (!isTranscriptEquivalent(lastResultRef.current, res)) {
           lastResultRef.current = res;
-          setMessages(res.messages);
+          setMessages(mergeWithOptimistic(reqId, res.messages));
           setTotalCount(res.totalCount);
           setLiveActivity(res.liveActivity);
         }
@@ -249,7 +282,7 @@ export const SessionPane: React.FC<Props> = ({
       if (res.sessionId !== sessionId) return;
       if (!isTranscriptEquivalent(lastResultRef.current, res)) {
         lastResultRef.current = res;
-        setMessages(res.messages);
+        setMessages(mergeWithOptimistic(sessionId, res.messages));
         setTotalCount(res.totalCount);
         setLiveActivity(res.liveActivity);
       }
@@ -427,15 +460,20 @@ export const SessionPane: React.FC<Props> = ({
           })),
           ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
         ];
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `opt-${Date.now()}`,
-            role: 'user',
-            timestamp: Date.now(),
-            blocks: optimisticBlocks,
-          },
-        ]);
+        const sentAt = Date.now();
+        const optMsg: UnifiedMessage = {
+          id: `opt-${sentAt}`,
+          role: 'user',
+          timestamp: sentAt,
+          blocks: optimisticBlocks,
+        };
+        pendingOptimisticRef.current = {
+          sessionId: session.id,
+          msg: optMsg,
+          promptText: prompt.trim(),
+          sentAt,
+        };
+        setMessages((prev) => [...prev, optMsg]);
       }
 
       try {

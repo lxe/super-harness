@@ -160,29 +160,32 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {isStreaming && (
+            {(isStreaming || isAgentBusy) && (isMaster || (!input.trim() && attachments.length === 0)) ? (
               <button
                 type="button"
                 onClick={onAbort}
                 title="Stop"
-                className="w-7 h-7 rounded-full bg-white/[0.12] text-ink-primary flex items-center justify-center hover:bg-white/[0.2] transition-colors cursor-pointer"
+                aria-label="Stop"
+                className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white transition-all cursor-pointer"
               >
                 <Square className="w-3 h-3 fill-current" />
               </button>
+            ) : (
+              <button
+                type="button"
+                disabled={sending || (!input.trim() && attachments.length === 0)}
+                onClick={onSend}
+                title={isAgentBusy ? 'Queue message (sends after agent finishes)' : 'Send (Enter)'}
+                aria-label={isAgentBusy ? 'Queue message' : 'Send'}
+                className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
+              >
+                {sending ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowUp className="w-4 h-4" />
+                )}
+              </button>
             )}
-            <button
-              type="button"
-              disabled={sending || (!input.trim() && attachments.length === 0)}
-              onClick={onSend}
-              title={isAgentBusy ? 'Queue message (sends after agent finishes)' : 'Send (Enter)'}
-              className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
-            >
-              {sending ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <ArrowUp className="w-4 h-4" />
-              )}
-            </button>
           </div>
         </div>
       </div>

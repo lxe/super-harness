@@ -674,11 +674,53 @@ public struct SHRadialGauge<Center: View>: View {
         }
     }
 
+    /// The coloured usage arc as a shape, used to confine the working pulse to the arc.
+    private func arcShape(lineWidth: CGFloat) -> some View {
+        Circle()
+            .inset(by: ringInset)
+            .trim(from: 0, to: displayFraction)
+            .stroke(Color.white, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+    }
+
+    /// A lighter, still saturated version of `color` in the same hue.
+    public static func brightened(_ color: Color) -> Color {
+        let hsb = SHActivityPulse.hsbComponents(of: color)
+        return Color(hue: hsb.hue, saturation: hsb.sat * 0.82, brightness: min(1, hsb.bright * 1.3 + 0.08))
+    }
+
+    /// A comet: a long tail rising to full colour at the head, then a quick fade.
+    static func pulseGradient(color: Color) -> AngularGradient {
+        AngularGradient(
+            gradient: Gradient(stops: [
+                .init(color: color.opacity(0), location: 0.0),
+                .init(color: color.opacity(0.35), location: 60.0 / 360.0),
+                .init(color: color, location: 112.0 / 360.0),
+                .init(color: color.opacity(0), location: 130.0 / 360.0),
+                .init(color: color.opacity(0), location: 1.0),
+            ]),
+            center: .center
+        )
+    }
+
+    /// A short bright bead at the comet's head.
+    static func beadGradient(color: Color) -> AngularGradient {
+        AngularGradient(
+            gradient: Gradient(stops: [
+                .init(color: color.opacity(0), location: 0.0),
+                .init(color: color.opacity(0), location: 98.0 / 360.0),
+                .init(color: color, location: 112.0 / 360.0),
+                .init(color: color.opacity(0), location: 124.0 / 360.0),
+                .init(color: color.opacity(0), location: 1.0),
+            ]),
+            center: .center
+        )
+    }
+
     @ViewBuilder
     private func gaugeContent(sweepDeg: Double) -> some View {
         ZStack {
-            // Isolated ring stack so `.colorDodge` only brightens the track & colored arc,
-            // matching Desktop's `isolation: isolate` + `mix-blend-mode: color-dodge` shimmer wave.
+            // Ring stack: track, usage arc, and the working pulse.
             ZStack {
                 // 1. Recessed circular track
                 Circle()
@@ -698,28 +740,44 @@ public struct SHRadialGauge<Center: View>: View {
                         .animation(.easeOut(duration: 0.3), value: displayFraction)
                 }
 
-                // 3. Long color-dodge shimmer wave: lifts grey toward white & boosts chroma on colored arcs
+                // 3. Working: a pulse of the gauge's own colour travels round the ring. It is
+                // drawn in the arc's hue (never white), so the colour gets brighter where the
+                // pulse passes instead of being washed out.
                 if isWorking {
-                    let shimmerGradient = AngularGradient(
-                        gradient: Gradient(stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: Color.white.opacity(0.12), location: 45.0 / 360.0),
-                            .init(color: Color.white.opacity(0.52), location: 115.0 / 360.0),
-                            .init(color: Color.white.opacity(0.12), location: 185.0 / 360.0),
-                            .init(color: .clear, location: 230.0 / 360.0),
-                            .init(color: .clear, location: 1.0),
-                        ]),
-                        center: .center
-                    )
-
+                    // Over the empty track the pulse is a faint tint of the same hue.
                     Circle()
                         .inset(by: ringInset)
-                        .stroke(shimmerGradient, lineWidth: lineWidth)
+                        .stroke(Self.pulseGradient(color: stroke.opacity(0.42)), lineWidth: lineWidth)
                         .rotationEffect(.degrees(sweepDeg))
-                        .blendMode(.colorDodge)
+
+                    if displayFraction > 0 {
+                        let bright = Self.brightened(stroke)
+                        // Soft halo in the same hue: reads as the arc emitting light.
+                        Circle()
+                            .inset(by: ringInset)
+                            .stroke(Self.pulseGradient(color: bright), lineWidth: lineWidth * 1.5)
+                            .rotationEffect(.degrees(sweepDeg))
+                            .blur(radius: size * 0.055)
+                            .blendMode(.plusLighter)
+                            .mask(arcShape(lineWidth: lineWidth * 2.2).blur(radius: size * 0.045))
+                        // The pulse itself, with a slightly thicker bead at its head.
+                        Circle()
+                            .inset(by: ringInset)
+                            .stroke(Self.pulseGradient(color: bright), lineWidth: lineWidth)
+                            .rotationEffect(.degrees(sweepDeg))
+                            .mask(arcShape(lineWidth: lineWidth))
+                        Circle()
+                            .inset(by: ringInset)
+                            .stroke(Self.beadGradient(color: bright), lineWidth: lineWidth * 1.3)
+                            .rotationEffect(.degrees(sweepDeg))
+                            .mask(arcShape(lineWidth: lineWidth * 1.3))
+                    }
                 }
             }
+            // Room for the halo, which would otherwise be cut off at the gauge's square bounds.
+            .padding(size * 0.15)
             .compositingGroup()
+            .padding(-size * 0.15)
 
             center
         }

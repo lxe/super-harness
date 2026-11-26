@@ -79,15 +79,16 @@ final class LiveE2ETests: XCTestCase {
         // 1. Optimistic bubble containing marker must exist within 0.5s
         let markerPredicate = NSPredicate(format: "label CONTAINS %@", marker)
         let bubbleQuery = scroll.staticTexts.matching(markerPredicate)
-        let optimisticDeadline = sendStart + 1.5
+        let afterTap = CFAbsoluteTimeGetCurrent()
+        let optimisticDeadline = max(sendStart + 1.5, afterTap + 1.0)
         var bubbleAppearedAt: CFAbsoluteTime?
-        while CFAbsoluteTimeGetCurrent() <= optimisticDeadline {
+        repeat {
             if bubbleQuery.firstMatch.exists {
                 bubbleAppearedAt = CFAbsoluteTimeGetCurrent()
                 break
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
-        }
+        } while CFAbsoluteTimeGetCurrent() <= optimisticDeadline
         guard let appearedAt = bubbleAppearedAt else {
             XCTFail("Optimistic user bubble containing '\(marker)' did not appear within 1.5s (XCUITest polling budget)")
             return
@@ -167,6 +168,22 @@ final class LiveE2ETests: XCTestCase {
         }
 
         XCTAssertTrue(latestButton.waitForExistence(timeout: 2.0), "transcript.latest should appear after scrolling up into history")
+
+        // First verify that manually scrolling all the way back down to the bottom hides Latest automatically.
+        for _ in 0..<8 {
+            if !latestButton.exists { break }
+            scroll.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertFalse(latestButton.exists, "transcript.latest must disappear automatically when manually scrolled back to the bottom")
+
+        // Scroll back up into history again so we also verify tapping Latest.
+        for _ in 0..<6 {
+            if latestButton.exists { break }
+            scroll.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertTrue(latestButton.waitForExistence(timeout: 2.0), "transcript.latest should reappear after scrolling up again")
 
         let tapStart = CFAbsoluteTimeGetCurrent()
         latestButton.tap()

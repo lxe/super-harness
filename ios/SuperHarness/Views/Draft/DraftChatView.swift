@@ -397,11 +397,15 @@ public struct DraftChatView: View {
                 }
                 .onChange(of: selectedPhotoItems) { _, newItems in
                     guard !newItems.isEmpty else { return }
+                    let items = newItems
+                    selectedPhotoItems = []
                     Task {
-                        for (index, item) in newItems.enumerated() {
-                            if let data = try? await item.loadTransferable(type: Data.self) {
-                                let jpeg = Self.compressedJPEG(from: data) ?? data
-                                let dataUrl = "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+                        for (index, item) in items.enumerated() {
+                            if let rawData = try? await item.loadTransferable(type: Data.self) {
+                                let dataUrl = await Task.detached(priority: .userInitiated) {
+                                    let jpeg = ComposerView.downscaledJPEG(from: rawData, maxDimension: 1600, quality: 0.75) ?? rawData
+                                    return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+                                }.value
                                 attachments.append(
                                     ImageAttachment(
                                         name: "photo-\(index + 1).jpg",
@@ -411,7 +415,6 @@ public struct DraftChatView: View {
                                 )
                             }
                         }
-                        selectedPhotoItems = []
                     }
                 }
                 .accessibilityLabel("Attach image")

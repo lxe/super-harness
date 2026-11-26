@@ -438,13 +438,27 @@ const liveSync = new LiveSyncService(
     }
     broadcastToRenderer('sh:transcript-updated', transcript);
     const lastMsg = transcript.messages[transcript.messages.length - 1];
+    const lastBlock = lastMsg?.blocks[lastMsg.blocks.length - 1];
+    const lastBlockLen =
+      lastBlock && 'text' in lastBlock && typeof lastBlock.text === 'string'
+        ? lastBlock.text.length
+        : lastBlock && 'output' in lastBlock && typeof lastBlock.output === 'string'
+          ? lastBlock.output.length
+          : 0;
+    const la = transcript.liveActivity;
+    const stableActivityKey = la
+      ? (() => {
+          const { lastEventAt: _ignored, ...stable } = la;
+          return JSON.stringify(stable);
+        })()
+      : '';
     const pushKey = [
-      transcript.sourceMtimeMs,
       transcript.totalCount,
       transcript.messages.length,
       lastMsg?.id ?? '',
       lastMsg?.blocks.length ?? 0,
-      JSON.stringify(transcript.liveActivity ?? null),
+      lastBlockLen,
+      stableActivityKey,
     ].join('|');
     if (lastTranscriptPushKeyBySession.get(transcript.sessionId) === pushKey) return;
     lastTranscriptPushKeyBySession.set(transcript.sessionId, pushKey);

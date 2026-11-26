@@ -137,26 +137,53 @@ export class ControlServer {
     private readonly hooks: ControlServerHooks = {}
   ) {}
 
-  /** Mobile clients that registered a watch only receive transcripts for that session. */
+  /** Mobile clients only receive session-scoped transcripts for the session they explicitly watch. */
   private shouldDeliver(res: http.ServerResponse, item: { event: string; sessionId?: string }): boolean {
     if (!item.sessionId || !SESSION_SCOPED_EVENTS.has(item.event)) return true;
     const clientId = this.sseClientIdByRes.get(res);
-    if (!clientId || !this.watchedSessionByClient.has(clientId)) return true;
+    if (!clientId) return false;
     return this.watchedSessionByClient.get(clientId) === item.sessionId;
   }
 
+  private hasWatcherForSession(sessionId: string): boolean {
+    for (const watched of this.watchedSessionByClient.values()) {
+      if (watched === sessionId) return true;
+    }
+    return false;
+  }
+
   broadcastEvent(event: string, data: unknown): void {
-    const seq = ++this.eventSeq;
-    const frame = `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    const sessionId =
+    const rawSessionId =
       SESSION_SCOPED_EVENTS.has(event) && data && typeof data === 'object'
         ? (data as { sessionId?: unknown }).sessionId
         : undefined;
+    const sessionId = typeof rawSessionId === 'string' ? rawSessionId : undefined;
+
+    // Never serialize, buffer, or broadcast massive desktop transcripts if no mobile client watches them.
+    if (sessionId && SESSION_SCOPED_EVENTS.has(event) && !this.hasWatcherForSession(sessionId)) {
+      return;
+    }
+
+    // Cap mobile SSE transcript payloads to the tail 20 messages so a single frame never sends ~800 KB.
+    let payload: unknown = data;
+    if (event === 'transcript' && data && typeof data === 'object') {
+      const tr = data as { messages?: unknown[]; hasMore?: boolean };
+      if (Array.isArray(tr.messages) && tr.messages.length > 20) {
+        payload = {
+          ...tr,
+          messages: tr.messages.slice(-20),
+          hasMore: true,
+        };
+      }
+    }
+
+    const seq = ++this.eventSeq;
+    const frame = `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
     const item: BufferedEvent = {
       seq,
       event,
       frame,
-      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+      sessionId,
     };
     this.eventBuffer.push(item);
     if (this.eventBuffer.length > this.maxBufferedEvents) {
@@ -571,11 +598,11 @@ export class ControlServer {
             // Ensure liveSync is actively watching this session and immediately push
             // a fresh transcript snapshot (with an optimistic user turn if the harness
             // hasn't flushed to disk yet) so mobile composers see submitted turns right away.
-            void this.hooks.watchSession?.('mobile-active', sessionId, 80).catch(() => {});
+            void this.hooks.watchSession?.('mobile-active', sessionId, 20).catch(() => {});
             this.hooks.onMessageSent?.(sessionId);
             void (async () => {
               try {
-                const tr = await this.registry.getTranscript(sessionId, 80);
+                const tr = await this.registry.getTranscript(sessionId, 20);
                 const trimmed = message.trim();
                 const lastUser = [...tr.messages].reverse().find((m) => m.role === 'user');
                 const lastUserText = lastUser?.blocks
@@ -680,7 +707,12 @@ export class ControlServer {
           const dataUrl = String(body.dataUrl || '');
           const filename = body.filename ? String(body.filename) : undefined;
           const attachment = await this.hooks.saveAttachment(dataUrl, filename);
-          sendJson(attachment);
+          // Avoid echoing multi-MB base64 dataUrl back down cellular/Tailscale links when saved to disk.
+          sendJson(
+            attachment.path
+              ? { ...attachment, previewDataUrl: undefined }
+              : attachment
+          );
           return;
         }
 

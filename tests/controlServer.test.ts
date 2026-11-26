@@ -226,9 +226,10 @@ describe('ControlServer mobile API gateway', () => {
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ dataUrl: 'data:image/png;base64,AAAA', filename: 'snap.png' }),
     });
-    const att = (await attRes.json()) as { id: string; name: string };
+    const att = (await attRes.json()) as { id: string; name: string; previewDataUrl?: string };
     expect(att.id).toBe('att-1');
     expect(att.name).toBe('snap.png');
+    expect(att.previewDataUrl).toBeUndefined();
 
     // Health + watch + SSE Last-Event-ID replay
     const health = (await (await fetch(`${base}/api/health`, { headers })).json()) as {
@@ -265,5 +266,80 @@ describe('ControlServer mobile API gateway', () => {
     expect(chunk).toContain('event: connected');
     expect(chunk).toContain('id: 2');
     expect(chunk).toContain('"kind":"done"');
+  });
+
+  it('never floods unwatched SSE clients with transcripts and tail-caps watched transcript pushes to 20 messages', async () => {
+    const { server } = makeFixtureServer();
+    activeServer = server;
+    await server.start();
+    const mobilePort = await server.syncMobileListener({
+      enabled: true,
+      bindHost: '127.0.0.1',
+      port: 0,
+      token: 'test-mobile-token',
+    });
+    const base = `http://127.0.0.1:${mobilePort}`;
+    const headers = { Authorization: 'Bearer test-mobile-token' };
+
+    // Connect an unwatched client (e.g. sitting on the session list)
+    const acUnwatched = new AbortController();
+    const unwatchedRes = await fetch(`${base}/api/events?clientId=list-only`, {
+      headers,
+      signal: acUnwatched.signal,
+    });
+    const unwatchedReader = unwatchedRes.body!.getReader();
+    const firstChunk = new TextDecoder().decode((await unwatchedReader.read()).value);
+    expect(firstChunk).toContain('event: connected');
+
+    // Broadcast a huge 50-message transcript while nobody is watching it
+    const manyMessages = Array.from({ length: 50 }, (_, i) => ({
+      id: `m-${i}`,
+      role: 'assistant' as const,
+      timestamp: 1000 + i,
+      blocks: [{ type: 'text' as const, text: `msg ${i}` }],
+    }));
+    server.broadcastEvent('transcript', {
+      sessionId: 'codex:t1',
+      messages: manyMessages,
+      totalCount: 50,
+      hasMore: false,
+      sourceMtimeMs: 1234,
+    });
+
+    // Now have a second client watch codex:t1 and verify tail-cap to 20 messages
+    await fetch(`${base}/api/watch`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: 'watcher-1', sessionId: 'codex:t1', limit: 20 }),
+    });
+    const acWatched = new AbortController();
+    const watchedRes = await fetch(`${base}/api/events?clientId=watcher-1`, {
+      headers,
+      signal: acWatched.signal,
+    });
+    const watchedReader = watchedRes.body!.getReader();
+    await watchedReader.read(); // connected
+
+    server.broadcastEvent('transcript', {
+      sessionId: 'codex:t1',
+      messages: manyMessages,
+      totalCount: 50,
+      hasMore: false,
+      sourceMtimeMs: 1235,
+    });
+    // Also send a non-scoped event so unwatchedReader resolves cleanly
+    server.broadcastEvent('activity', { activeWorkingSessionIds: ['codex:t1'] });
+
+    const watchedFrame = new TextDecoder().decode((await watchedReader.read()).value);
+    const unwatchedFrame = new TextDecoder().decode((await unwatchedReader.read()).value);
+    acWatched.abort();
+    acUnwatched.abort();
+
+    expect(watchedFrame).toContain('event: transcript');
+    expect(watchedFrame).toContain('"hasMore":true');
+    expect(watchedFrame).toContain('"m-49"');
+    expect(watchedFrame).not.toContain('"m-0"');
+    expect(unwatchedFrame).toContain('event: activity');
+    expect(unwatchedFrame).not.toContain('event: transcript');
   });
 });

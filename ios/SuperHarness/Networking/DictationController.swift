@@ -28,7 +28,14 @@ private final class DictationAudioCoordinator: @unchecked Sendable {
                     }
                     try session.setActive(true)
 
-                    let settings: [String: Any] = [
+                    let aacSettings: [String: Any] = [
+                        AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                        AVSampleRateKey: 24_000.0,
+                        AVNumberOfChannelsKey: 1,
+                        AVEncoderBitRateKey: 32_000,
+                        AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+                    ]
+                    let wavSettings: [String: Any] = [
                         AVFormatIDKey: Int(kAudioFormatLinearPCM),
                         AVSampleRateKey: 16_000.0,
                         AVNumberOfChannelsKey: 1,
@@ -37,19 +44,31 @@ private final class DictationAudioCoordinator: @unchecked Sendable {
                         AVLinearPCMIsFloatKey: false,
                     ]
 
-                    let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
-                    recorder.isMeteringEnabled = true
-                    recorder.prepareToRecord()
-                    guard recorder.record() else {
-                        try? session.setActive(false, options: .notifyOthersOnDeactivation)
-                        throw NSError(
-                            domain: "DictationController",
-                            code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "Unable to start audio recording."]
-                        )
+                    var startedRecorder: AVAudioRecorder?
+                    if let aacRecorder = try? AVAudioRecorder(url: fileURL, settings: aacSettings) {
+                        aacRecorder.isMeteringEnabled = true
+                        if aacRecorder.prepareToRecord(), aacRecorder.record() {
+                            startedRecorder = aacRecorder
+                        }
+                    }
+                    if startedRecorder == nil {
+                        // Fallback to 16 kHz mono WAV if AAC encoder is unavailable (e.g. simulator audio device)
+                        let fallbackURL = fileURL.deletingPathExtension().appendingPathExtension("wav")
+                        let wavRecorder = try AVAudioRecorder(url: fallbackURL, settings: wavSettings)
+                        wavRecorder.isMeteringEnabled = true
+                        wavRecorder.prepareToRecord()
+                        guard wavRecorder.record() else {
+                            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+                            throw NSError(
+                                domain: "DictationController",
+                                code: -1,
+                                userInfo: [NSLocalizedDescriptionKey: "Unable to start audio recording."]
+                            )
+                        }
+                        startedRecorder = wavRecorder
                     }
 
-                    continuation.resume(returning: (UncheckedRecorderBox(recorder: recorder), generation))
+                    continuation.resume(returning: (UncheckedRecorderBox(recorder: startedRecorder!), generation))
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -168,6 +187,7 @@ public final class DictationController {
                     return false
                 }
                 self.recorder = box.recorder
+                self.recordingURL = box.recorder.url
                 self.activeGeneration = generation
                 PerfLogger.markRecordingStarted()
                 return true
@@ -249,7 +269,7 @@ public final class DictationController {
             wavData = debugTestWavData
         }
 
-        guard wavData.count > 44 else {
+        guard wavData.count > 128 else {
             state = .idle
             elapsedSeconds = 0
             normalizedLevel = 0

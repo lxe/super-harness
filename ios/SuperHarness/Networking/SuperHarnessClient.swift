@@ -305,7 +305,8 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         req.httpMethod = "POST"
         req.timeoutInterval = 45
         req.httpBody = wavData
-        req.setValue("audio/wav", forHTTPHeaderField: "Content-Type")
+        let isWav = wavData.count >= 4 && wavData[wavData.startIndex] == 0x52 && wavData[wavData.startIndex + 1] == 0x49 && wavData[wavData.startIndex + 2] == 0x46 && wavData[wavData.startIndex + 3] == 0x46
+        req.setValue(isWav ? "audio/wav" : "audio/mp4", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -343,10 +344,21 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             let message: String
             let attachments: [ImageAttachment]?
         }
+        // Avoid re-uploading megabytes of base64 previewDataUrl when the attachment is already stored on host.
+        let wireAttachments: [ImageAttachment]? = attachments.isEmpty ? nil : attachments.map { att in
+            guard !att.path.isEmpty else { return att }
+            return ImageAttachment(
+                id: att.id,
+                name: att.name,
+                path: att.path,
+                mimeType: att.mimeType,
+                previewDataUrl: nil
+            )
+        }
         let body = SendBody(
             sessionId: sessionId,
             message: message,
-            attachments: attachments.isEmpty ? nil : attachments
+            attachments: wireAttachments
         )
         return try await request(path: "/api/send", method: "POST", body: body)
     }

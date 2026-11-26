@@ -124,6 +124,7 @@ public final class AppStore {
     public var sendingSessionIds: Set<String> = []
     public var draftInputs: [String: String] = [:]
     public var draftAttachments: [String: [ImageAttachment]] = [:]
+    public var uploadingAttachmentIds: Set<String> = []
     public var isBootstrapping: Bool = false
     public var isRefreshing: Bool = false
     public var isLoadingUsage: Bool = false
@@ -144,6 +145,7 @@ public final class AppStore {
     private var prefetchTask: Task<Void, Never>?
     private var transcriptFallbackTasks: [String: Task<Void, Never>] = [:]
     private var transcriptRevisionBySessionId: [String: Int] = [:]
+    private var attachmentUploadTasks: [String: Task<ImageAttachment?, Never>] = [:]
     private var pathWatcher: NetworkPathWatcher?
     private var hasBootstrapped: Bool = false
     public var hasCompletedBootstrap: Bool { hasBootstrapped }
@@ -1191,11 +1193,24 @@ public final class AppStore {
 
     private func dispatchPendingMessage(sessionId: String, pending: PendingOutgoingMessage) async {
         let revisionBeforeSend = transcriptRevisionBySessionId[sessionId] ?? 0
+        var resolvedAttachments: [ImageAttachment] = []
+        resolvedAttachments.reserveCapacity(pending.attachments.count)
+        for att in pending.attachments {
+            if att.path.isEmpty, let uploadTask = attachmentUploadTasks[att.id] {
+                if let uploaded = await uploadTask.value {
+                    resolvedAttachments.append(uploaded)
+                } else {
+                    resolvedAttachments.append(att)
+                }
+            } else {
+                resolvedAttachments.append(att)
+            }
+        }
         do {
             let result = try await client.sendMessage(
                 sessionId: sessionId,
                 message: pending.text,
-                attachments: pending.attachments
+                attachments: resolvedAttachments
             )
             if result.ok {
                 updatePendingState(sessionId: sessionId, pendingId: pending.id, to: .sent)
@@ -1317,21 +1332,77 @@ public final class AppStore {
     }
 
     public func addAttachment(for sessionId: String, jpegData: Data, filename: String) async {
-        let dataUrl = "data:image/jpeg;base64,\(jpegData.base64EncodedString())"
-        do {
-            let uploaded = try await client.uploadAttachment(dataUrl: dataUrl, filename: filename)
-            var current = draftAttachments[sessionId] ?? []
-            current.append(uploaded)
-            draftAttachments[sessionId] = current
-        } catch {
-            let fallback = ImageAttachment(name: filename, mimeType: "image/jpeg", previewDataUrl: dataUrl)
-            var current = draftAttachments[sessionId] ?? []
-            current.append(fallback)
-            draftAttachments[sessionId] = current
+        let localId = UUID().uuidString
+        // Generate a tiny local thumbnail for instant composer rendering and base64-encode off main actor.
+        let (thumbDataUrl, uploadDataUrl) = await Task.detached(priority: .userInitiated) {
+            let thumbBytes = ComposerView.downscaledJPEG(from: jpegData, maxDimension: 220, quality: 0.7) ?? jpegData
+            let thumbUrl = "data:image/jpeg;base64,\(thumbBytes.base64EncodedString())"
+            let fullUrl = "data:image/jpeg;base64,\(jpegData.base64EncodedString())"
+            return (thumbUrl, fullUrl)
+        }.value
+
+        // Insert optimistically right away so the user sees the thumbnail immediately.
+        let optimistic = ImageAttachment(
+            id: localId,
+            name: filename,
+            path: "",
+            mimeType: "image/jpeg",
+            previewDataUrl: thumbDataUrl
+        )
+        var current = draftAttachments[sessionId] ?? []
+        current.append(optimistic)
+        draftAttachments[sessionId] = current
+        uploadingAttachmentIds.insert(localId)
+
+        let activeClient = client
+        let uploadTask = Task<ImageAttachment?, Never> { [weak self] in
+            defer {
+                Task { @MainActor in
+                    self?.uploadingAttachmentIds.remove(localId)
+                    self?.attachmentUploadTasks.removeValue(forKey: localId)
+                }
+            }
+            do {
+                let uploaded = try await activeClient.uploadAttachment(dataUrl: uploadDataUrl, filename: filename)
+                let merged = ImageAttachment(
+                    id: uploaded.id,
+                    name: uploaded.name,
+                    path: uploaded.path,
+                    mimeType: uploaded.mimeType,
+                    previewDataUrl: thumbDataUrl
+                )
+                await MainActor.run {
+                    guard let self, var list = self.draftAttachments[sessionId],
+                          let idx = list.firstIndex(where: { $0.id == localId }) else { return }
+                    list[idx] = merged
+                    self.draftAttachments[sessionId] = list
+                }
+                return merged
+            } catch {
+                // Keep the optimistic attachment with full uploadDataUrl so send still works offline/fallback.
+                let fallback = ImageAttachment(
+                    id: localId,
+                    name: filename,
+                    path: "",
+                    mimeType: "image/jpeg",
+                    previewDataUrl: uploadDataUrl
+                )
+                await MainActor.run {
+                    guard let self, var list = self.draftAttachments[sessionId],
+                          let idx = list.firstIndex(where: { $0.id == localId }) else { return }
+                    list[idx] = fallback
+                    self.draftAttachments[sessionId] = list
+                }
+                return fallback
+            }
         }
+        attachmentUploadTasks[localId] = uploadTask
     }
 
     public func removeAttachment(for sessionId: String, attachmentId: String) {
+        attachmentUploadTasks[attachmentId]?.cancel()
+        attachmentUploadTasks.removeValue(forKey: attachmentId)
+        uploadingAttachmentIds.remove(attachmentId)
         draftAttachments[sessionId]?.removeAll(where: { $0.id == attachmentId })
     }
 

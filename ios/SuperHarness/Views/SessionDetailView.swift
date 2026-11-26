@@ -84,6 +84,14 @@ public struct SessionDetailView: View {
                         }
                     }
 
+                    if let activity = liveActivity,
+                       activity.isWorking || !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true) {
+                        LiveStepsBarView(
+                            activity: activity,
+                            accentColor: SHColor.harness(currentSession.harness)
+                        )
+                    }
+
                     Color.clear
                         .frame(height: 1)
                         .id("transcript-bottom")
@@ -91,47 +99,39 @@ public struct SessionDetailView: View {
                 .padding(.horizontal, SHSpacing.lg)
                 .padding(.top, SHSpacing.md)
                 .padding(.bottom, SHSpacing.lg)
+                .transaction { $0.animation = nil }
             }
             .accessibilityIdentifier("transcript.scroll")
             .scrollPosition($scrollPosition)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .scrollDismissesKeyboard(.interactively)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .scrollDismissesKeyboard(.never)
             .background(SHColor.surfaceCanvas)
             .onScrollPhaseChange { _, newPhase in
                 userIsDragging = (newPhase == .interacting || newPhase == .decelerating)
             }
-            // While pinned, any content-size change (new message, streaming growth, Markdown
-            // layout settling, images loading) snaps straight to the bottom edge.
+            // Measure exact content distance below the visible viewport using visibleRect
+            // (avoids double-counting safeAreaInset bottom height).
             .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentSize.height
-            } action: { oldHeight, newHeight in
-                guard abs(newHeight - oldHeight) > 0.5, isPinnedToBottom, !userIsDragging else { return }
-                scrollPosition.scrollTo(edge: .bottom)
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                let maxOffsetY = max(
-                    -geo.contentInsets.top,
-                    (geo.contentSize.height + geo.contentInsets.bottom - geo.containerSize.height)
-                )
-                return max(0, maxOffsetY - geo.contentOffset.y)
+                max(0, geo.contentSize.height - geo.visibleRect.maxY)
             } action: { oldDistance, newDistance in
                 distanceFromBottom = newDistance
-                if newDistance <= 48 {
+                if newDistance <= 80 {
                     if !isPinnedToBottom { isPinnedToBottom = true }
-                } else if newDistance > 160 && userIsDragging && newDistance > oldDistance + 0.5 && Date() >= suppressUnpinUntil {
-                    // Only a user gesture moving AWAY from the bottom unpins. A programmatic or
-                    // animated scroll toward the bottom (e.g. tapping Latest mid-fling) never does.
-                    // Content growth, keyboard show/hide, composer resize, and programmatic scrolls
-                    // must never unpin; only user-driven scrolling past 160pt unpins.
+                } else if newDistance > 220 && userIsDragging && newDistance > oldDistance + 0.5 && Date() >= suppressUnpinUntil {
+                    // Only a user gesture scrolling meaningfully up into history unpins.
                     if isPinnedToBottom { isPinnedToBottom = false }
                 }
+            }
+            .onChange(of: messages.count) { oldCount, newCount in
+                guard newCount > oldCount, isPinnedToBottom, !userIsDragging else { return }
+                scrollPosition.scrollTo(edge: .bottom)
             }
             .onChange(of: sendTrigger) { _, _ in
                 suppressUnpinUntil = Date().addingTimeInterval(0.8)
                 userIsDragging = false
                 isPinnedToBottom = true
                 distanceFromBottom = 0
-                // Instant scroll to bottom with no animation delay on the user's own send.
                 scrollPosition.scrollTo(edge: .bottom)
             }
             .onChange(of: scrollToBottomTrigger) { _, _ in
@@ -150,18 +150,11 @@ public struct SessionDetailView: View {
                 if store.transcriptsBySessionId[session.id] == nil {
                     await store.loadTranscript(for: session.id)
                 }
-                // Snap to the bottom once layout settles (covers the navigation push animation
-                // and transcripts that were prefetched before this view appeared).
-                for delayMs in [0, 60, 200] {
-                    if delayMs > 0 { try? await Task.sleep(for: .milliseconds(delayMs)) }
-                    guard !Task.isCancelled, isPinnedToBottom, !userIsDragging else { break }
-                    scrollPosition.scrollTo(edge: .bottom)
-                }
             }
 
-            // Floating "↓ Latest" pill — geometric hysteresis: appears only when user scrolled >160pt up,
-            // hides immediately when <=48pt from bottom or tapped.
-            let showLatestButton = !isPinnedToBottom && distanceFromBottom > 160 && !messages.isEmpty
+            // Floating "↓ Latest" pill — appears only when scrolled >220pt up into history;
+            // automatically hides as soon as the user scrolls within 80pt of the bottom or taps it.
+            let showLatestButton = !isPinnedToBottom && distanceFromBottom > 220 && !messages.isEmpty
             Group {
                 if showLatestButton {
                     Button {
@@ -191,15 +184,6 @@ public struct SessionDetailView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: SHSpacing.sm) {
-                if let activity = liveActivity,
-                   activity.isWorking || !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true) {
-                    LiveStepsBarView(
-                        activity: activity,
-                        accentColor: SHColor.harness(currentSession.harness)
-                    )
-                    .padding(.horizontal, SHSpacing.md)
-                }
-
                 if let queued = liveActivity?.queuedMessages, !queued.isEmpty {
                     QueuedMessagesTrayView(items: queued)
                         .padding(.horizontal, SHSpacing.md)
@@ -212,6 +196,7 @@ public struct SessionDetailView: View {
                         set: { store.draftInputs[session.id] = $0 }
                     ),
                     attachments: store.draftAttachments[session.id] ?? [],
+                    uploadingAttachmentIds: store.uploadingAttachmentIds,
                     availableModels: availableModels,
                     reasoningLevels: availableReasoningLevels,
                     isSending: false,
@@ -285,6 +270,16 @@ public struct SessionDetailView: View {
         .navigationTitle(currentSession.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    #if canImport(UIKit)
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    #endif
+                }
+                .font(SHTypography.micro.weight(.semibold))
+                .foregroundStyle(SHColor.inkSecondary)
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if isBusy {
                     ProgressView()

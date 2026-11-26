@@ -8,6 +8,7 @@ public struct ComposerView: View {
     public let session: UnifiedSession
     @Binding public var text: String
     public let attachments: [ImageAttachment]
+    public let uploadingAttachmentIds: Set<String>
     public let availableModels: [HarnessModelOption]
     public let reasoningLevels: [String]
     public let isSending: Bool
@@ -29,6 +30,7 @@ public struct ComposerView: View {
         session: UnifiedSession,
         text: Binding<String>,
         attachments: [ImageAttachment],
+        uploadingAttachmentIds: Set<String> = [],
         availableModels: [HarnessModelOption] = [],
         reasoningLevels: [String] = [],
         isSending: Bool,
@@ -46,6 +48,7 @@ public struct ComposerView: View {
         self.session = session
         self._text = text
         self.attachments = attachments
+        self.uploadingAttachmentIds = uploadingAttachmentIds
         self.availableModels = availableModels
         self.reasoningLevels = reasoningLevels
         self.isSending = isSending
@@ -150,14 +153,17 @@ public struct ComposerView: View {
                 }
                 .onChange(of: selectedPhotoItems) { _, newItems in
                     guard !newItems.isEmpty else { return }
+                    let items = newItems
+                    selectedPhotoItems = []
                     Task {
-                        for (index, item) in newItems.enumerated() {
-                            if let data = try? await item.loadTransferable(type: Data.self) {
-                                let jpeg = Self.compressedJPEG(from: data) ?? data
+                        for (index, item) in items.enumerated() {
+                            if let rawData = try? await item.loadTransferable(type: Data.self) {
+                                let jpeg = await Task.detached(priority: .userInitiated) {
+                                    Self.compressedJPEG(from: rawData) ?? rawData
+                                }.value
                                 onPickPhotoData(jpeg, "photo-\(index + 1).jpg")
                             }
                         }
-                        selectedPhotoItems = []
                     }
                 }
                 .accessibilityLabel("Attach image")
@@ -410,6 +416,17 @@ public struct ComposerView: View {
                 }
                 .frame(width: 54, height: 54)
                 .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                .overlay {
+                    if uploadingAttachmentIds.contains(att.id) {
+                        ZStack {
+                            Color.black.opacity(0.38)
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(.white)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                    }
+                }
             }
             .buttonStyle(.plain)
 
@@ -433,12 +450,30 @@ public struct ComposerView: View {
         #endif
     }
 
-    private static func compressedJPEG(from data: Data) -> Data? {
+    nonisolated public static func downscaledJPEG(from data: Data, maxDimension: CGFloat = 1600, quality: CGFloat = 0.75) -> Data? {
         #if canImport(UIKit)
         guard let img = UIImage(data: data) else { return nil }
-        return img.jpegData(compressionQuality: 0.78)
+        let size = img.size
+        let longest = max(size.width, size.height)
+        guard longest > 0 else { return img.jpegData(compressionQuality: quality) }
+        if longest <= maxDimension {
+            return img.jpegData(compressionQuality: quality)
+        }
+        let scale = maxDimension / longest
+        let targetSize = CGSize(width: floor(size.width * scale), height: floor(size.height * scale))
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        let resized = renderer.image { _ in
+            img.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return resized.jpegData(compressionQuality: quality)
         #else
         return data
         #endif
+    }
+
+    nonisolated private static func compressedJPEG(from data: Data) -> Data? {
+        downscaledJPEG(from: data, maxDimension: 1600, quality: 0.75)
     }
 }

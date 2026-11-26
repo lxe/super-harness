@@ -1,3 +1,4 @@
+import { readLastUserText } from '../utils/lastUserText';
 import type {
   HarnessDetection,
   HarnessGroup,
@@ -85,7 +86,9 @@ export class HarnessRegistry {
     };
 
     const decorated = mergedRaw
-      .map((s) => {
+      .map((raw) => {
+        const lastUserText = raw.lastUserText ?? readLastUserText(raw.transcriptPath, raw.harnessGroup);
+        const s = lastUserText ? { ...raw, lastUserText } : raw;
         const ov = state.overrides[s.id];
         if (!ov) return s;
         return {

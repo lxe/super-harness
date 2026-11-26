@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ImageAttachment, SessionTranscriptResult, UnifiedSession } from '../../shared/types';
 import { formatPromptWithImagePaths } from './types';
+import { cleanUserPreview } from '../utils/lastUserText';
 import { claudeTmuxTypingSteps, parseClaudeJsonlLines, pickClaudeTitle } from './claudeAdapter';
 
 /**
@@ -40,6 +41,7 @@ interface RemoteClaudeEntry {
   mtimeMs?: number;
   customTitle?: string;
   aiTitle?: string;
+  lastPrompt?: string;
   preview?: string;
   model?: string;
 }
@@ -95,6 +97,14 @@ for f in glob.glob(home + '/.claude/sessions/*.json'):
             if o.get('type') == 'assistant' and 'model' not in e and m.get('model'):
                 e['model'] = m['model']
         for line in tail.split('\n'):
+            if '"last-prompt"' in line:
+                try:
+                    o = json.loads(line)
+                    if o.get('lastPrompt'):
+                        e['lastPrompt'] = o['lastPrompt'][:400]
+                except Exception:
+                    pass
+                continue
             if '"custom-title"' not in line and '"ai-title"' not in line:
                 continue
             try:
@@ -195,6 +205,7 @@ export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
     remoteId: e.bridgeSessionId || undefined,
     tmuxTarget: e.tmux || undefined,
     tmuxSessionName,
+    lastUserText: cleanUserPreview(e.lastPrompt),
     hostAddress: e.host,
     hostLabel: e.label,
     createdAt: e.startedAt ?? updatedAt,

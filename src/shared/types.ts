@@ -61,6 +61,8 @@ export interface UnifiedSession {
   hostAddress?: string;
   /** Friendly name of that machine (e.g. `lxebook-2021`). */
   hostLabel?: string;
+  /** Start of the last message the person sent in this session (one line, for list rows). */
+  lastUserText?: string;
   pid?: number;
   transcriptPath?: string;
   createdAt: number;

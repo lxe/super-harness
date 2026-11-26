@@ -16,7 +16,7 @@ public struct UsageSheetView: View {
     public var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: SHSpacing.xl) {
+                VStack(alignment: .leading, spacing: SHSpacing.lg) {
                     targetPicker
 
                     if let usage = store.usage {
@@ -103,7 +103,7 @@ public struct UsageSheetView: View {
                 selectedDayDate = nil
             }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: SHSpacing.xs) {
                 if let group {
                     HarnessLogoView(group: group, size: 13)
                 }
@@ -111,8 +111,8 @@ public struct UsageSheetView: View {
                     .font(SHTypography.caption.weight(.semibold))
                     .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkMuted)
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
+            .padding(.horizontal, SHSpacing.md)
+            .padding(.vertical, SHSpacing.sm)
             .background(isSelected ? accent.opacity(0.16) : SHColor.surfaceSubtle)
             .overlay(
                 Capsule()
@@ -134,10 +134,10 @@ public struct UsageSheetView: View {
         let resetStr = hero.flatMap { UsageMetrics.formatResetLabel($0.resetsAt) }
         let brand = SHColor.harness(info.harness)
 
-        VStack(alignment: .leading, spacing: SHSpacing.lg) {
+        VStack(alignment: .leading, spacing: SHSpacing.md) {
             // Header
             HStack(alignment: .firstTextBaseline) {
-                HStack(spacing: 8) {
+                HStack(spacing: SHSpacing.sm) {
                     HarnessLogoView(group: info.harness, size: 17)
                     Text(info.harness.title)
                         .font(SHTypography.title)
@@ -148,6 +148,7 @@ public struct UsageSheetView: View {
                     .font(SHTypography.micro)
                     .foregroundStyle(SHColor.inkFaint)
             }
+            .padding(.horizontal, SHSpacing.xs)
 
             // Hero Limit Section
             if let hero {
@@ -158,7 +159,7 @@ public struct UsageSheetView: View {
                 }
                 let paceIsOver = (pace?.projectedPercent ?? 0) >= 100
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: SHSpacing.sm) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(hero.label)
                             .font(SHTypography.caption.weight(.medium))
@@ -170,13 +171,13 @@ public struct UsageSheetView: View {
                     }
 
                     // 28pt Hero Percentage + "+X% today · on pace for Y%"
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: SHSpacing.sm) {
                         Text("\(heroPct)%")
                             .font(SHTypography.heroNumber.monospacedDigit())
                             .foregroundStyle(SHColor.percentageTone(hero.usedPercent))
 
                         if deltaText != nil || paceText != nil {
-                            HStack(spacing: 4) {
+                            HStack(spacing: SHSpacing.xs) {
                                 if let deltaText {
                                     Text(deltaText)
                                         .foregroundStyle(SHColor.inkMuted)
@@ -208,23 +209,22 @@ public struct UsageSheetView: View {
                             .foregroundStyle(SHColor.inkFaint)
                     }
                 }
-                .padding(SHSpacing.lg)
-                .background(SHColor.surfacePopover)
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+                .usageCard()
             } else {
                 Text(info.note ?? "Quota limits are not available locally for this harness.")
                     .font(SHTypography.caption)
                     .foregroundStyle(SHColor.inkMuted)
+                    .usageCard()
             }
 
             // Always-expanded secondary quota windows & credits
             if !secondary.isEmpty || info.creditsBalance != nil {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: SHSpacing.md) {
                     ForEach(secondary) { w in
                         let pct = Int(w.usedPercent.rounded())
                         let reset = UsageMetrics.formatResetLabel(w.resetsAt)
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
+                        VStack(alignment: .leading, spacing: SHSpacing.xs) {
+                            HStack(alignment: .firstTextBaseline, spacing: SHSpacing.xs) {
                                 Text(w.label)
                                     .font(SHTypography.caption)
                                     .foregroundStyle(SHColor.inkSecondary)
@@ -252,16 +252,12 @@ public struct UsageSheetView: View {
                                 .font(SHTypography.caption.weight(.semibold).monospacedDigit())
                                 .foregroundStyle(SHColor.inkPrimary)
                         }
-                        .padding(.top, 2)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(SHColor.surfaceSubtle)
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                .usageCard()
             }
 
-            // Boxless 7-Day Spend Trend (Swift Charts)
+            // 7-Day Spend Trend (Swift Charts)
             spendTrendSection(
                 points: info.dailySpend7d,
                 accent: brand,
@@ -284,7 +280,7 @@ public struct UsageSheetView: View {
         let totalTokens = summaries.reduce(0) { $0 + $1.tokens7d }
         let combinedDaily = combineDailySpend(summaries)
 
-        VStack(alignment: .leading, spacing: SHSpacing.lg) {
+        VStack(alignment: .leading, spacing: SHSpacing.md) {
             VStack(spacing: SHSpacing.md) {
                 ForEach(summaries) { h in
                     let hero = UsageMetrics.pickHeroWindow(h.windows).hero
@@ -297,9 +293,9 @@ public struct UsageSheetView: View {
                             selectedTarget = h.harness
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(alignment: .firstTextBaseline) {
-                                HStack(spacing: 7) {
+                        VStack(alignment: .leading, spacing: SHSpacing.sm) {
+                            HStack(alignment: .firstTextBaseline, spacing: SHSpacing.xs) {
+                                HStack(spacing: SHSpacing.sm) {
                                     HarnessLogoView(group: h.harness, size: 15)
                                     Text(h.harness.title)
                                         .font(SHTypography.label.weight(.semibold))
@@ -331,9 +327,7 @@ public struct UsageSheetView: View {
                                 height: 5
                             )
                         }
-                        .padding(14)
-                        .background(SHColor.surfacePopover)
-                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                        .usageCard()
                     }
                     .buttonStyle(.plain)
                 }
@@ -350,7 +344,7 @@ public struct UsageSheetView: View {
         }
     }
 
-    // MARK: - Boxless 7-Day Spend Swift Chart
+    // MARK: - 7-Day Spend Swift Chart
 
     @ViewBuilder
     private func spendTrendSection(
@@ -364,11 +358,9 @@ public struct UsageSheetView: View {
         let lastDate = points.last?.date
         let activePoint = points.first(where: { $0.date == selectedDayDate })
 
-        VStack(alignment: .leading, spacing: SHSpacing.md) {
-            Divider().overlay(SHColor.lineHairline)
-
+        VStack(alignment: .leading, spacing: SHSpacing.sm) {
             HStack(alignment: .firstTextBaseline) {
-                HStack(spacing: 4) {
+                HStack(spacing: SHSpacing.xs) {
                     Text("API-equivalent value")
                         .font(SHTypography.caption.weight(.medium))
                         .foregroundStyle(SHColor.inkSecondary)
@@ -389,8 +381,8 @@ public struct UsageSheetView: View {
             }
 
             // Boxless inline typographic metrics
-            HStack(alignment: .firstTextBaseline, spacing: 18) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: SHSpacing.lg) {
+                HStack(alignment: .firstTextBaseline, spacing: SHSpacing.xs) {
                     Text(UsageMetrics.formatUsd(spend7d))
                         .font(.system(size: 20, weight: .semibold).monospacedDigit())
                         .foregroundStyle(SHColor.inkPrimary)
@@ -398,7 +390,7 @@ public struct UsageSheetView: View {
                         .font(SHTypography.micro)
                         .foregroundStyle(SHColor.inkFaint)
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: SHSpacing.xs) {
                     Text(UsageMetrics.formatUsd(spend24h))
                         .font(SHTypography.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(SHColor.inkSecondary)
@@ -406,7 +398,7 @@ public struct UsageSheetView: View {
                         .font(SHTypography.micro)
                         .foregroundStyle(SHColor.inkFaint)
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: SHSpacing.xs) {
                     Text(UsageMetrics.formatUsd(spend5h))
                         .font(SHTypography.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(SHColor.inkSecondary)
@@ -434,7 +426,8 @@ public struct UsageSheetView: View {
                             .foregroundStyle(SHColor.inkFaint)
                     }
                 }
-                .frame(height: 112)
+                .frame(height: 88)
+                .padding(.top, SHSpacing.xs)
                 .chartOverlay { proxy in
                     GeometryReader { _ in
                         Rectangle()
@@ -451,6 +444,7 @@ public struct UsageSheetView: View {
                 }
             }
         }
+        .usageCard()
     }
 
     // MARK: - Helpers
@@ -492,5 +486,17 @@ public struct UsageSheetView: View {
                 tokens: tokens
             )
         }
+    }
+}
+
+private extension View {
+    /// The one card style used by every section of the usage sheet, so paddings,
+    /// corner radii and left edges line up.
+    func usageCard() -> some View {
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(SHSpacing.lg)
+            .background(SHColor.surfacePopover)
+            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 }

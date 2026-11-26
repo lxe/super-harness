@@ -1030,13 +1030,6 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
       ) : null;
 
     if (info.kind === 'long_human') {
-      const previewSnippet = nonImageBlocks
-        .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
-        .map((b) => b.text)
-        .join('\n')
-        .trim()
-        .slice(0, 420);
-
       return (
         <div className="flex flex-col items-end gap-1.5">
           {renderThumbnailStrip()}
@@ -1044,7 +1037,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
             <div className="flex items-center justify-end gap-2 w-full">
               {renderFailedBadge()}
               <div
-                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2 ${
+                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary ${
                   msg.error ? 'ring-1 ring-rose-500/35' : ''
                 }`}
               >
@@ -1056,38 +1049,48 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                           key={i}
                           block={b}
                           onOpenPath={onOpenPath}
+                          onOpenSessionLink={onOpenSessionLink}
                           onPreviewImage={onPreviewImage}
                         />
                       ))}
                     </div>
-                    <div className="pt-1 flex justify-end border-t border-line-hairline">
-                      <Button
-                        size="xs"
-                        variant="ghost"
+                    <div className="mt-1.5 flex justify-end">
+                      <button
+                        type="button"
                         onClick={() => setExpanded(false)}
-                        iconLeft={<ChevronUp className="w-3.5 h-3.5" />}
+                        className="text-micro text-ink-muted hover:text-ink-primary transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
                       >
-                        Collapse
-                      </Button>
+                        Show less
+                      </button>
                     </div>
                   </>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="relative max-h-20 overflow-hidden">
-                      <div className="whitespace-pre-wrap text-body leading-relaxed text-ink-secondary">
-                        {previewSnippet}
+                  <div>
+                    <div
+                      onClick={() => setExpanded(true)}
+                      className="relative max-h-[5.1em] overflow-hidden cursor-pointer"
+                    >
+                      <div className="space-y-2">
+                        {nonImageBlocks.map((b, i) => (
+                          <CoalescedBlockView
+                            key={i}
+                            block={b}
+                            onOpenPath={onOpenPath}
+                            onOpenSessionLink={onOpenSessionLink}
+                            onPreviewImage={onPreviewImage}
+                          />
+                        ))}
                       </div>
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
                     </div>
-                    <Button
-                      size="xs"
-                      variant="ghost"
+                    <button
+                      type="button"
                       onClick={() => setExpanded(true)}
-                      iconLeft={<ChevronDown className="w-3.5 h-3.5" />}
-                      className="-ml-2"
+                      aria-label="Show full message"
+                      className="mt-1 inline-flex items-center px-1.5 py-0.5 -ml-1.5 rounded text-caption leading-none tracking-[0.15em] text-ink-muted hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
                     >
-                      Show full message ({info.sizeLabel})
-                    </Button>
+                      ···
+                    </button>
                   </div>
                 )}
               </div>

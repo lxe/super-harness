@@ -973,10 +973,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   progress: {
                     value: usage
                       ? Math.max(
-                          usage.claude.barPercent ?? 0,
-                          usage.codex.barPercent ?? 0,
-                          usage.antigravity.barPercent ?? 0,
-                          usage.muse.barPercent ?? 0
+                          usage.claude?.barPercent ?? 0,
+                          usage.codex?.barPercent ?? 0,
+                          usage.antigravity?.barPercent ?? 0,
+                          usage.muse?.barPercent ?? 0
                         )
                       : null,
                     tone: 'neutral',
@@ -989,9 +989,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   icon: <HarnessLogo harness="antigravity" size={tabLogoSize} />,
                   working: workingByHarness.antigravity,
                   progress: {
-                    value: usage?.antigravity.barPercent ?? null,
+                    value: usage?.antigravity?.barPercent ?? null,
                     tone: 'antigravity',
-                    estimated: usage?.antigravity.barIsEstimated,
+                    estimated: usage?.antigravity?.barIsEstimated,
                   },
                 },
                 {
@@ -1000,9 +1000,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   icon: <HarnessLogo harness="codex" size={tabLogoSize} />,
                   working: workingByHarness.codex,
                   progress: {
-                    value: usage?.codex.barPercent ?? null,
+                    value: usage?.codex?.barPercent ?? null,
                     tone: 'codex',
-                    estimated: usage?.codex.barIsEstimated,
+                    estimated: usage?.codex?.barIsEstimated,
                   },
                 },
                 {
@@ -1011,9 +1011,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   icon: <HarnessLogo harness="claude" size={tabLogoSize} />,
                   working: workingByHarness.claude,
                   progress: {
-                    value: usage?.claude.barPercent ?? null,
+                    value: usage?.claude?.barPercent ?? null,
                     tone: 'claude',
-                    estimated: usage?.claude.barIsEstimated,
+                    estimated: usage?.claude?.barIsEstimated,
                   },
                 },
                 {
@@ -1022,9 +1022,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   icon: <HarnessLogo harness="muse" size={tabLogoSize} />,
                   working: workingByHarness.muse,
                   progress: {
-                    value: usage?.muse.barPercent ?? null,
+                    value: usage?.muse?.barPercent ?? null,
                     tone: 'muse',
-                    estimated: usage?.muse.barIsEstimated,
+                    estimated: usage?.muse?.barIsEstimated,
                   },
                 },
               ]}

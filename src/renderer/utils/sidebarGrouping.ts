@@ -77,6 +77,50 @@ export function canDropSessionIntoSection(
   return currentFolder !== targetFolder;
 }
 
+export interface HarnessSectionOption {
+  label: string;
+  order: number;
+  isUngrouped: boolean;
+}
+
+/**
+ * Returns all distinct native sections available for a specific harness group,
+ * ordered by section order, with `Ungrouped` always available at the end.
+ */
+export function getAvailableSectionsForHarness(
+  sessions: UnifiedSession[],
+  harnessGroup: HarnessGroup
+): HarnessSectionOption[] {
+  const secMap = new Map<string, { order: number; latestUpdatedAt: number }>();
+
+  for (const s of sessions) {
+    if (s.harnessGroup !== harnessGroup) continue;
+    if (!s.nativeSection || s.nativeSection === 'Ungrouped') continue;
+    const order = s.nativeSectionOrder ?? 500;
+    const prev = secMap.get(s.nativeSection);
+    if (!prev) {
+      secMap.set(s.nativeSection, { order, latestUpdatedAt: s.updatedAt });
+    } else {
+      prev.order = Math.min(prev.order, order);
+      prev.latestUpdatedAt = Math.max(prev.latestUpdatedAt, s.updatedAt);
+    }
+  }
+
+  const named: HarnessSectionOption[] = Array.from(secMap.entries())
+    .sort((a, b) => {
+      if (a[1].order !== b[1].order) return a[1].order - b[1].order;
+      return b[1].latestUpdatedAt - a[1].latestUpdatedAt;
+    })
+    .map(([label, info]) => ({
+      label,
+      order: info.order,
+      isUngrouped: false,
+    }));
+
+  named.push({ label: 'Ungrouped', order: 9999, isUngrouped: true });
+  return named;
+}
+
 const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'antigravity', label: 'Antigravity' },
   { id: 'codex', label: 'Codex' },

@@ -285,26 +285,33 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
   const top = anchorRect.bottom + 8;
 
   if (target === 'all') {
-    const list: HarnessUsageSummary[] = [usage.antigravity, usage.codex, usage.claude, usage.muse];
+    const list: HarnessUsageSummary[] = [
+      usage.antigravity,
+      usage.codex,
+      usage.claude,
+      usage.muse,
+    ].filter((x): x is HarnessUsageSummary => Boolean(x));
     const total5h = list.reduce((a, x) => a + x.spend5hUsd, 0);
     const total24h = list.reduce((a, x) => a + x.spend24hUsd, 0);
     const total7d = list.reduce((a, x) => a + x.spend7dUsd, 0);
     const totalTok7d = list.reduce((a, x) => a + x.tokens7d, 0);
 
-    const combinedDaily: DailySpendPoint[] = (usage.claude.dailySpend7d || []).map((pt, idx) => ({
+    const combinedDaily: DailySpendPoint[] = (usage.claude?.dailySpend7d || []).map((pt, idx) => ({
       date: pt.date,
       dayLabel: pt.dayLabel,
       spendUsd:
         Math.round(
-          ((usage.antigravity.dailySpend7d[idx]?.spendUsd ?? 0) +
-            (usage.codex.dailySpend7d[idx]?.spendUsd ?? 0) +
-            (usage.claude.dailySpend7d[idx]?.spendUsd ?? 0)) *
+          ((usage.antigravity?.dailySpend7d[idx]?.spendUsd ?? 0) +
+            (usage.codex?.dailySpend7d[idx]?.spendUsd ?? 0) +
+            (usage.claude?.dailySpend7d[idx]?.spendUsd ?? 0) +
+            (usage.muse?.dailySpend7d[idx]?.spendUsd ?? 0)) *
             100
         ) / 100,
       tokens:
-        (usage.antigravity.dailySpend7d[idx]?.tokens ?? 0) +
-        (usage.codex.dailySpend7d[idx]?.tokens ?? 0) +
-        (usage.claude.dailySpend7d[idx]?.tokens ?? 0),
+        (usage.antigravity?.dailySpend7d[idx]?.tokens ?? 0) +
+        (usage.codex?.dailySpend7d[idx]?.tokens ?? 0) +
+        (usage.claude?.dailySpend7d[idx]?.tokens ?? 0) +
+        (usage.muse?.dailySpend7d[idx]?.tokens ?? 0),
     }));
 
     return (
@@ -325,22 +332,29 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
             const { hero } = pickHeroWindow(h.windows);
             const pace = hero ? computeWindowPace(hero) : null;
             const resetStr = hero ? formatResetLabel(hero.resetsAt) : null;
-            const primaryLink = HARNESS_ACCOUNT_LINKS[h.harness][0];
+            const primaryLink = HARNESS_ACCOUNT_LINKS[h.harness]?.[0];
             const pct = hero ? Math.round(hero.usedPercent) : null;
 
             return (
               <div key={h.harness} className="space-y-1.5">
                 <div className="flex items-baseline justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void window.superHarness.openExternalUrl(primaryLink.url)}
-                    title={`Open ${HARNESS_TITLES[h.harness]} ${primaryLink.label}`}
-                    className="flex items-center gap-1.5 text-label text-ink-primary hover:text-white font-medium transition-colors group cursor-pointer"
-                  >
-                    <HarnessLogo harness={h.harness} size={14} />
-                    <span>{HARNESS_TITLES[h.harness]}</span>
-                    <ExternalLink className="w-2.5 h-2.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </button>
+                  {primaryLink ? (
+                    <button
+                      type="button"
+                      onClick={() => void window.superHarness.openExternalUrl(primaryLink.url)}
+                      title={`Open ${HARNESS_TITLES[h.harness]} ${primaryLink.label}`}
+                      className="flex items-center gap-1.5 text-label text-ink-primary hover:text-white font-medium transition-colors group cursor-pointer"
+                    >
+                      <HarnessLogo harness={h.harness} size={14} />
+                      <span>{HARNESS_TITLES[h.harness]}</span>
+                      <ExternalLink className="w-2.5 h-2.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-label text-ink-primary font-medium">
+                      <HarnessLogo harness={h.harness} size={14} />
+                      <span>{HARNESS_TITLES[h.harness]}</span>
+                    </div>
+                  )}
                   <div className="flex items-baseline gap-1.5 tabular-nums text-caption">
                     {pct !== null ? (
                       <>
@@ -381,6 +395,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
   }
 
   const info = usage[target];
+  if (!info) return null;
   const { hero, secondary } = pickHeroWindow(info.windows);
   const heroPace = hero ? computeWindowPace(hero) : null;
   const heroReset = hero ? formatResetLabel(hero.resetsAt) : null;

@@ -1,6 +1,21 @@
-import React from 'react';
-import { Archive, Columns2, Pin, PinOff, SquarePen, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Archive,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Columns2,
+  Folder,
+  FolderInput,
+  Inbox,
+  Pin,
+  PinOff,
+  Plus,
+  SquarePen,
+  Trash2,
+} from 'lucide-react';
 import type { OrganizeAction, UnifiedSession } from '../../shared/types';
+import type { HarnessSectionOption } from '../utils/sidebarGrouping';
 import { MenuDivider, MenuHeader, MenuItem, PopoverSurface } from '../ui';
 
 function harnessLabelForPin(session: UnifiedSession): string {
@@ -17,6 +32,8 @@ export interface SidebarContextMenuProps {
   targets: UnifiedSession[];
   /** When opened by right-clicking a section header (e.g. "Backend"), enables section-level actions. */
   sectionLabel?: string;
+  /** Sections available for the target session(s)' harness group (when all targets share one harness). */
+  availableSections?: HarnessSectionOption[];
   onClose: () => void;
   onClearSelection: () => void;
   onOpenInSplit: (sessionId: string) => void;
@@ -34,6 +51,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   y,
   targets,
   sectionLabel,
+  availableSections,
   onClose,
   onClearSelection,
   onOpenInSplit,
@@ -41,6 +59,10 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   onOrganize,
   onArchiveMany,
 }) => {
+  const [showMoveSections, setShowMoveSections] = useState(false);
+  const [creatingSection, setCreatingSection] = useState(false);
+  const [newSectionName, setNewSectionName] = useState('');
+
   if (targets.length === 0) return null;
 
   const isSection = Boolean(sectionLabel);
@@ -49,6 +71,39 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   const hasTmux = targets.some((t) => t.harness === 'claude-tmux' && t.tmuxSessionName);
   const allPinnedTop = targets.every((t) => t.pinnedToTop);
   const harnessPinnedTargets = targets.filter((t) => t.pinned);
+  const canMoveSection = Boolean(availableSections && availableSections.length > 0);
+
+  const currentSingleSection =
+    !isMulti && !single.pinned
+      ? !single.nativeSection || single.nativeSection === 'Ungrouped'
+        ? 'Ungrouped'
+        : single.nativeSection
+      : null;
+
+  const moveTargetsToSection = (section: string | null, sectionOrder: number) => {
+    const actions: OrganizeAction[] = targets.flatMap((t) => {
+      const list: OrganizeAction[] = [];
+      if (t.pinned) {
+        list.push({ type: 'unpin', sessionId: t.id });
+      }
+      list.push({
+        type: 'move_section',
+        sessionId: t.id,
+        sectionName: section,
+        sectionOrder,
+      });
+      return list;
+    });
+    onOrganize(actions);
+    if (isMulti) onClearSelection();
+    onClose();
+  };
+
+  const commitNewSection = () => {
+    const trimmed = newSectionName.trim();
+    if (!trimmed) return;
+    moveTargetsToSection(trimmed, 500);
+  };
 
   if (isSection) {
     return (
@@ -207,6 +262,86 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
         >
           Rename
         </MenuItem>
+      )}
+
+      {canMoveSection && (
+        <div>
+          <MenuItem
+            icon={<FolderInput className="w-3.5 h-3.5" />}
+            rightSlot={
+              showMoveSections ? (
+                <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
+              )
+            }
+            onClick={() => setShowMoveSections((v) => !v)}
+          >
+            {isMulti
+              ? `Move ${targets.length} to section`
+              : `Move to ${harnessLabelForPin(single)} section`}
+          </MenuItem>
+
+          {showMoveSections && (
+            <div className="mt-1 ml-2 pl-2 border-l border-line-hairline space-y-0.5 max-h-48 overflow-y-auto">
+              {availableSections!.map((sec) => {
+                const isCurrent = currentSingleSection === sec.label;
+                return (
+                  <MenuItem
+                    key={sec.label}
+                    icon={
+                      sec.isUngrouped ? (
+                        <Inbox className="w-3.5 h-3.5 text-ink-muted" />
+                      ) : (
+                        <Folder className="w-3.5 h-3.5 text-ink-secondary" />
+                      )
+                    }
+                    rightSlot={
+                      isCurrent ? (
+                        <Check className="w-3.5 h-3.5 text-ink-primary" />
+                      ) : undefined
+                    }
+                    onClick={() =>
+                      moveTargetsToSection(
+                        sec.isUngrouped ? null : sec.label,
+                        sec.isUngrouped ? 9999 : sec.order
+                      )
+                    }
+                  >
+                    <span className="truncate">{sec.label}</span>
+                  </MenuItem>
+                );
+              })}
+
+              {creatingSection ? (
+                <div className="px-1.5 py-1 flex items-center gap-1">
+                  <input
+                    autoFocus
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') commitNewSection();
+                      if (e.key === 'Escape') {
+                        setCreatingSection(false);
+                        setNewSectionName('');
+                      }
+                    }}
+                    placeholder="Section name..."
+                    className="w-full px-2 py-1 text-caption rounded-md bg-surface-base border border-line-subtle text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+                  />
+                </div>
+              ) : (
+                <MenuItem
+                  icon={<Plus className="w-3.5 h-3.5 text-ink-muted" />}
+                  onClick={() => setCreatingSection(true)}
+                >
+                  New section…
+                </MenuItem>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       <MenuDivider />

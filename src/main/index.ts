@@ -88,19 +88,31 @@ html, body {
 <script data-sh-embed-bridge>
 (function () {
   var TOKEN = ${safeToken};
-  function reportHeight() {
+  var lastHeight = 0;
+  function measureContentHeight() {
     try {
       var body = document.body;
-      var root = document.documentElement;
-      var h = Math.max(
-        body ? body.scrollHeight : 0,
-        body ? body.offsetHeight : 0,
-        root ? root.scrollHeight : 0
-      );
-      if (h > 0) {
-        window.parent.postMessage({ type: 'sh-embed-resize', token: TOKEN, height: Math.ceil(h) }, '*');
+      if (!body) return 0;
+      var maxBottom = 0;
+      var children = body.children;
+      for (var i = 0; i < children.length; i++) {
+        var el = children[i];
+        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+        var rect = el.getBoundingClientRect();
+        if (rect.bottom > maxBottom) maxBottom = rect.bottom;
       }
-    } catch (e) {}
+      var h = Math.ceil(maxBottom > 0 ? maxBottom : body.offsetHeight || 0);
+      return h;
+    } catch (e) {
+      return 0;
+    }
+  }
+  function reportHeight() {
+    var h = measureContentHeight();
+    if (h > 0 && Math.abs(h - lastHeight) > 2) {
+      lastHeight = h;
+      window.parent.postMessage({ type: 'sh-embed-resize', token: TOKEN, height: h }, '*');
+    }
   }
   try {
     var origClip = navigator.clipboard && navigator.clipboard.writeText
@@ -118,10 +130,10 @@ html, body {
   } catch (e) {}
   window.addEventListener('load', function () {
     reportHeight();
-    setTimeout(reportHeight, 120);
-    setTimeout(reportHeight, 500);
-    if (typeof ResizeObserver !== 'undefined' && document.body) {
-      new ResizeObserver(reportHeight).observe(document.body);
+    setTimeout(reportHeight, 150);
+    setTimeout(reportHeight, 600);
+    if (typeof ResizeObserver !== 'undefined' && document.body && document.body.firstElementChild) {
+      new ResizeObserver(reportHeight).observe(document.body.firstElementChild);
     }
   });
   document.addEventListener('DOMContentLoaded', reportHeight);
@@ -333,10 +345,18 @@ function createWindow(): void {
         if (devUrl) {
           void mainWindow.loadURL(devUrl);
         } else {
-          void mainWindow.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'));
+          void mainWindow.loadFile(
+            path.resolve(__dirname, '../../../dist/renderer/index.html')
+          );
         }
       }
     }, 300);
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level >= 3) {
+      console.error(`[renderer-error] ${message} (${sourceId}:${line})`);
+    }
   });
 
   // Never allow clicking file:// or http(s):// links inside markdown to hijack the Electron window!

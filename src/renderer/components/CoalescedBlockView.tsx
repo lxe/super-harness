@@ -149,8 +149,8 @@ const AgentEmbedFrame: React.FC<AgentEmbedFrameProps> = React.memo(
           | null;
         if (!data || data.token !== token) return;
         if (data.type === 'sh-embed-resize' && typeof data.height === 'number') {
-          const clamped = Math.max(96, Math.min(760, Math.ceil(data.height) + 4));
-          setHeight(clamped);
+          const clamped = Math.max(96, Math.min(760, Math.ceil(data.height) + 2));
+          setHeight((prev) => (Math.abs(prev - clamped) <= 2 ? prev : clamped));
         } else if (data.type === 'sh-embed-copy' && typeof data.text === 'string') {
           void navigator.clipboard?.writeText(data.text).catch(() => {});
         }

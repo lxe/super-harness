@@ -951,4 +951,14 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(store.sessions.map(\.id), orders[2])
         XCTAssertEqual(recorder.orders, [orders[2]], "one redraw, straight to the final order")
     }
+
+    func testPinnedPillRowsHoldFourEachAndKeepEverySession() async throws {
+        let payload = try await MockSuperHarnessClient().fetchBootstrap()
+        let sessions = Array(payload.sessions.prefix(6))
+        XCTAssertEqual(sessions.count, 6)
+        let rows = SessionRowFormatting.pillRows(of: sessions, perRow: 4)
+        XCTAssertEqual(rows.map(\.count), [4, 2])
+        XCTAssertEqual(rows.flatMap { $0 }.map(\.id), sessions.map(\.id))
+        XCTAssertTrue(SessionRowFormatting.pillRows(of: [], perRow: 4).isEmpty)
+    }
 }

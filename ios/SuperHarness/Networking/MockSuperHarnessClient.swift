@@ -652,6 +652,16 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         if simulateOffline {
             throw URLError(.cannotConnectToHost)
         }
+        #if DEBUG
+        // UI checks for the pinned pill grid: pin enough sessions to fill more than two rows.
+        if ProcessInfo.processInfo.environment["SH_MOCK_MANY_PINS"] != nil {
+            var pinned = 0
+            for idx in sessions.indices where !sessions[idx].isMaster && pinned < 9 {
+                sessions[idx].pinnedToTop = true
+                pinned += 1
+            }
+        }
+        #endif
         return BootstrapPayload(
             protocolVersion: 1,
             seq: 1,

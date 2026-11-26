@@ -102,6 +102,15 @@ public enum SessionRowFormatting {
     /// Compact 1-token label for a collapsed pinned-session pill (5 per row).
     /// Strips a leading "Super Harness " prefix when followed by more text so multiple
     /// Super Harness threads stay distinguishable inside narrow pills.
+    /// Sessions split into rows of `perRow` for the pinned pill grid. Every session is in
+    /// exactly one row, in order.
+    public static func pillRows(of sessions: [UnifiedSession], perRow: Int) -> [[UnifiedSession]] {
+        guard perRow > 0 else { return sessions.isEmpty ? [] : [sessions] }
+        return stride(from: 0, to: sessions.count, by: perRow).map {
+            Array(sessions[$0..<min($0 + perRow, sessions.count)])
+        }
+    }
+
     public static func compactPillLabel(for session: UnifiedSession) -> String {
         let raw = normalizeWhitespace(session.displayTitle)
         guard !raw.isEmpty else { return session.harness.rawValue.capitalized }
@@ -506,12 +515,6 @@ public struct SessionListView: View {
                                 Task { await store.archiveSession(session) }
                             }
                         )
-                        .transition(
-                            .asymmetric(
-                                insertion: .scale(scale: 0.94, anchor: .top).combined(with: .opacity),
-                                removal: .opacity
-                            )
-                        )
                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -531,7 +534,7 @@ public struct SessionListView: View {
 
             // Grouped session sections
             let sections = store.groupedSections
-            if sections.isEmpty && !store.isBootstrapping && store.hasCompletedBootstrap {
+            if sections.isEmpty && topPinned.isEmpty && !store.isBootstrapping && store.hasCompletedBootstrap {
                 Section {
                     VStack(spacing: SHSpacing.sm) {
                         Image(systemName: "tray")
@@ -842,7 +845,7 @@ private struct MasterSessionRow: View {
     }
 }
 
-// MARK: - Compact Pinned Sessions Pill Grid (5 per row)
+// MARK: - Compact Pinned Sessions Pill Grid (4 per row)
 
 private struct PinnedSessionsPillGrid: View {
     let sessions: [UnifiedSession]
@@ -854,14 +857,28 @@ private struct PinnedSessionsPillGrid: View {
     let onUnpinTop: (UnifiedSession) -> Void
     let onArchive: (UnifiedSession) -> Void
 
-    private static let columns: [GridItem] = Array(
-        repeating: GridItem(.flexible(), spacing: 6),
-        count: 5
-    )
+    static let pillsPerRow = 4
 
+    // Plain stacks, not a lazy grid: inside a List row a lazy grid could leave its first row
+    // unrendered, which showed as an empty gap above the remaining pills.
     var body: some View {
-        LazyVGrid(columns: Self.columns, spacing: 6) {
-            ForEach(sessions) { session in
+        VStack(spacing: 6) {
+            ForEach(Array(SessionRowFormatting.pillRows(of: sessions, perRow: Self.pillsPerRow).enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 6) {
+                    ForEach(row) { session in
+                        pill(for: session)
+                    }
+                    // Empty slots keep a short last row's pills the same width as the others.
+                    ForEach(0..<(Self.pillsPerRow - row.count), id: \.self) { _ in
+                        Color.clear.frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("pinned.pillGrid")
+    }
+
+    private func pill(for session: UnifiedSession) -> some View {
                 PinnedSessionPill(
                     session: session,
                     isSelected: selectedSessionId == session.id,
@@ -895,9 +912,6 @@ private struct PinnedSessionsPillGrid: View {
                         Label("Archive Session", systemImage: "archivebox")
                     }
                 }
-            }
-        }
-        .accessibilityIdentifier("pinned.pillGrid")
     }
 }
 
@@ -914,9 +928,7 @@ private struct PinnedSessionPill: View {
         Button(action: onSelect) {
             HStack(spacing: 4) {
                 ZStack {
-                    if isBusy {
-                        SHActivityPulse(tint: vis.color, size: 13)
-                    } else if session.status == .waitingInput {
+                    if session.status == .waitingInput, !isBusy {
                         Image(systemName: "questionmark.circle.fill")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(SHColor.statusWarning)
@@ -926,13 +938,18 @@ private struct PinnedSessionPill: View {
                 }
                 .frame(width: 14, height: 14)
 
-                Text(label)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(isSelected || session.isUnread ? SHColor.inkPrimary : SHColor.inkSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                // A working session shimmers its title, the same signal the full rows use.
+                if isBusy {
+                    SHShimmerText(text: label, font: .system(size: 11, weight: .medium), isActive: true)
+                } else {
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isSelected || session.isUnread ? SHColor.inkPrimary : SHColor.inkSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
             .background(
                 Capsule()
@@ -1029,22 +1046,26 @@ private struct HarnessSwitcherStrip: View {
     var body: some View {
         // Full-width Liquid Glass bottom dock. Distributes evenly up to 5 slots and scrolls
         // horizontally automatically as more harnesses are added.
+        // The drag coordinate space is the padded row itself, not the dock: once the dock
+        // scrolls sideways, positions measured against the dock would be off by the scroll
+        // offset and a dragged gauge would land in the wrong slot.
         Group {
             if needsHorizontalScroll {
                 ScrollView(.horizontal, showsIndicators: false) {
                     chipsRow
                         .padding(.horizontal, Self.stripPadding)
                         .padding(.vertical, 5)
+                        .coordinateSpace(name: Self.stripSpace)
                 }
             } else {
                 chipsRow
                     .padding(.horizontal, Self.stripPadding)
                     .padding(.vertical, 5)
+                    .coordinateSpace(name: Self.stripSpace)
             }
         }
         .frame(maxWidth: .infinity)
         .modifier(SHGlassSurfaceModifier(shape: Capsule()))
-        .coordinateSpace(name: Self.stripSpace)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         .onChange(of: drag) { _, state in
             ignoreTapsUntil = Date().addingTimeInterval(0.5)

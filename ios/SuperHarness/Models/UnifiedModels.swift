@@ -1239,10 +1239,38 @@ public struct OrganizeAction: Codable, Sendable, Equatable {
 public struct OrganizeResponse: Codable, Sendable, Equatable {
     public var ok: Bool
     public var folders: [SessionFolder]?
+    public var state: SuperHarnessState?
 
-    public init(ok: Bool = true, folders: [SessionFolder]? = nil) {
+    public init(ok: Bool = true, folders: [SessionFolder]? = nil, state: SuperHarnessState? = nil) {
         self.ok = ok
         self.folders = folders
+        self.state = state
+    }
+}
+
+public struct FoldersResponse: Codable, Sendable, Equatable {
+    public var folders: [SessionFolder]
+    public var sidebarGroupBy: SidebarGroupBy?
+    public var sessionFolderCounts: [String: Int]?
+
+    public init(
+        folders: [SessionFolder] = [],
+        sidebarGroupBy: SidebarGroupBy? = nil,
+        sessionFolderCounts: [String: Int]? = nil
+    ) {
+        self.folders = folders
+        self.sidebarGroupBy = sidebarGroupBy
+        self.sessionFolderCounts = sessionFolderCounts
+    }
+}
+
+public struct UpdateSettingsResponse: Codable, Sendable, Equatable {
+    public var ok: Bool
+    public var settings: SuperHarnessSettings?
+
+    public init(ok: Bool = true, settings: SuperHarnessSettings? = nil) {
+        self.ok = ok
+        self.settings = settings
     }
 }
 

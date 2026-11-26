@@ -26,6 +26,7 @@ public struct SessionListSection: Identifiable, Sendable, Equatable {
     public let title: String
     public let harnessGroup: HarnessGroup?
     public let accentHex: String?
+    public let folderId: String?
     public let isProjectOrSectionGroup: Bool
     public let isHeadless: Bool
     public let sessions: [UnifiedSession]
@@ -35,6 +36,7 @@ public struct SessionListSection: Identifiable, Sendable, Equatable {
         title: String,
         harnessGroup: HarnessGroup? = nil,
         accentHex: String? = nil,
+        folderId: String? = nil,
         isProjectOrSectionGroup: Bool = false,
         isHeadless: Bool = false,
         sessions: [UnifiedSession]
@@ -43,6 +45,7 @@ public struct SessionListSection: Identifiable, Sendable, Equatable {
         self.title = title
         self.harnessGroup = harnessGroup
         self.accentHex = accentHex
+        self.folderId = folderId
         self.isProjectOrSectionGroup = isProjectOrSectionGroup
         self.isHeadless = isHeadless
         self.sessions = sessions
@@ -701,8 +704,14 @@ public final class AppStore {
             }
         }
         if let st = payload.state {
+            let hostGroupChanged = settings.sidebarGroupBy != st.settings.sidebarGroupBy
             if settings != st.settings {
                 settings = st.settings
+            }
+            if hostGroupChanged || (!hasBootstrapped && groupBy != st.settings.sidebarGroupBy) {
+                if groupBy != st.settings.sidebarGroupBy {
+                    groupBy = st.settings.sidebarGroupBy
+                }
             }
             if folders != st.folders {
                 folders = st.folders
@@ -811,12 +820,17 @@ public final class AppStore {
                 usage = snapshot
             }
         case .state(let state):
+            let hostGroupChanged = settings.sidebarGroupBy != state.settings.sidebarGroupBy
             if settings != state.settings {
                 settings = state.settings
+            }
+            if hostGroupChanged && groupBy != state.settings.sidebarGroupBy {
+                groupBy = state.settings.sidebarGroupBy
             }
             if folders != state.folders {
                 folders = state.folders
             }
+            scheduleSnapshotPersist()
         case .stream(let ev):
             applyStreamEvent(ev)
         }
@@ -1272,37 +1286,29 @@ public final class AppStore {
 
         case .folders:
             var result: [SessionListSection] = []
-            let pinnedItems = sorted.filter(\.pinned)
-            if !pinnedItems.isEmpty {
-                result.append(
-                    SessionListSection(
-                        id: "folder-pinned",
-                        title: "Pinned",
-                        isHeadless: true,
-                        sessions: pinnedItems
-                    )
-                )
-            }
-            let remaining = sorted.filter { !$0.pinned }
-            for folder in folders.sorted(by: { $0.order < $1.order }) {
-                let items = remaining.filter { $0.folderId == folder.id }
-                if !items.isEmpty {
+            let orderedFolders = folders.sorted { $0.order < $1.order }
+            let validFolderIds = Set(orderedFolders.map(\.id))
+            let showEmptyFolders = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedHarnessFilter == nil
+            for folder in orderedFolders {
+                let items = sorted.filter { $0.folderId == folder.id }
+                if !items.isEmpty || showEmptyFolders {
                     result.append(
                         SessionListSection(
                             id: "folder-\(folder.id)",
                             title: folder.name,
                             accentHex: folder.color,
+                            folderId: folder.id,
                             sessions: items
                         )
                     )
                 }
             }
-            let unfiled = remaining.filter { s in
+            let unfiled = sorted.filter { s in
                 guard let fid = s.folderId else { return true }
-                return !folders.contains(where: { $0.id == fid })
+                return !validFolderIds.contains(fid)
             }
             if !unfiled.isEmpty {
-                result.append(SessionListSection(id: "folder-unfiled", title: "Conversations", sessions: unfiled))
+                result.append(SessionListSection(id: "folder-unfiled", title: "Unfiled", sessions: unfiled))
             }
             return result
 
@@ -1392,6 +1398,157 @@ public final class AppStore {
         }
         mediaCache[cacheKey] = data
         return data
+    }
+
+
+    // MARK: - Sidebar Grouping & Folder Management
+
+    public static let defaultFolderColors: [String] = [
+        "#60A5FA",
+        "#22C55E",
+        "#D97757",
+        "#A855F7",
+        "#F59E0B",
+        "#EC4899",
+    ]
+
+    public func setGroupBy(_ mode: SidebarGroupBy) async {
+        groupBy = mode
+        settings.sidebarGroupBy = mode
+        scheduleSnapshotPersist()
+        do {
+            if let updated = try await client.updateSettings(sidebarGroupBy: mode) {
+                settings = updated
+            }
+        } catch {
+            // Older hosts without /api/settings keep local grouping cleanly.
+        }
+    }
+
+    @discardableResult
+    public func createFolder(name: String, color: String = "#60A5FA") async -> SessionFolder? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let existing = folders.first(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            return existing
+        }
+        let newId = "folder-\(UUID().uuidString.prefix(8).lowercased())"
+        let folder = SessionFolder(id: newId, name: trimmed, color: color, order: folders.count)
+        folders.append(folder)
+        scheduleSnapshotPersist()
+        let action = OrganizeAction(
+            type: .createFolder,
+            folderId: newId,
+            folderName: trimmed,
+            folderColor: color
+        )
+        do {
+            let res = try await client.organize(actions: [action])
+            if let nextFolders = res.folders {
+                folders = nextFolders
+            }
+            if let st = res.state {
+                settings = st.settings
+                folders = st.folders
+            }
+            scheduleSnapshotPersist()
+            return folders.first(where: { $0.id == newId || $0.name.lowercased() == trimmed.lowercased() }) ?? folder
+        } catch {
+            reportError(error)
+            return nil
+        }
+    }
+
+    public func renameFolder(id: String, name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let idx = folders.firstIndex(where: { $0.id == id }) {
+            folders[idx].name = trimmed
+        }
+        scheduleSnapshotPersist()
+        let action = OrganizeAction(type: .renameFolder, folderId: id, folderName: trimmed)
+        do {
+            let res = try await client.organize(actions: [action])
+            if let nextFolders = res.folders {
+                folders = nextFolders
+            }
+            scheduleSnapshotPersist()
+        } catch {
+            reportError(error)
+        }
+    }
+
+    public func deleteFolder(id: String) async {
+        folders.removeAll { $0.id == id }
+        for idx in sessions.indices where sessions[idx].folderId == id {
+            sessions[idx].folderId = nil
+        }
+        scheduleSnapshotPersist()
+        let action = OrganizeAction(type: .deleteFolder, folderId: id)
+        do {
+            let res = try await client.organize(actions: [action])
+            if let nextFolders = res.folders {
+                folders = nextFolders
+            }
+            for idx in sessions.indices where sessions[idx].folderId == id {
+                sessions[idx].folderId = nil
+            }
+            scheduleSnapshotPersist()
+        } catch {
+            reportError(error)
+        }
+    }
+
+    public func assignFolder(sessionId: String, folderId: String?) async {
+        mutateSession(sessionId) { item in
+            item.folderId = folderId
+        }
+        scheduleSnapshotPersist()
+        let action = OrganizeAction(type: .assignFolder, folderId: folderId, sessionId: sessionId)
+        do {
+            let res = try await client.organize(actions: [action])
+            if let nextFolders = res.folders {
+                folders = nextFolders
+            }
+            scheduleSnapshotPersist()
+        } catch {
+            reportError(error)
+        }
+    }
+
+    public func createFolderAndAssign(sessionId: String, name: String, color: String = "#60A5FA") async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let targetId: String
+        var actions: [OrganizeAction] = []
+        if let existing = folders.first(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            targetId = existing.id
+        } else {
+            let newId = "folder-\(UUID().uuidString.prefix(8).lowercased())"
+            targetId = newId
+            folders.append(SessionFolder(id: newId, name: trimmed, color: color, order: folders.count))
+            actions.append(OrganizeAction(type: .createFolder, folderId: newId, folderName: trimmed, folderColor: color))
+        }
+        mutateSession(sessionId) { item in
+            item.folderId = targetId
+        }
+        actions.append(OrganizeAction(type: .assignFolder, folderId: targetId, sessionId: sessionId))
+        scheduleSnapshotPersist()
+        do {
+            let res = try await client.organize(actions: actions)
+            if let nextFolders = res.folders {
+                folders = nextFolders
+                if let canonical = nextFolders.first(where: { $0.id == targetId || $0.name.lowercased() == trimmed.lowercased() }),
+                   canonical.id != targetId {
+                    mutateSession(sessionId) { item in
+                        item.folderId = canonical.id
+                    }
+                }
+            }
+            scheduleSnapshotPersist()
+        } catch {
+            reportError(error)
+        }
     }
 
     public func renameSession(_ session: UnifiedSession, title: String) async {

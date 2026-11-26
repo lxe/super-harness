@@ -20,7 +20,9 @@ public struct SessionDetailView: View {
     @State private var stableQueuedMessages: [QueuedMessageItem] = []
     @State private var composerHeight: CGFloat = 96
     @State private var isRenameAlertPresented: Bool = false
-    @State private var renameDraft: String = "" 
+    @State private var renameDraft: String = ""
+    @State private var isNewFolderAlertPresented: Bool = false
+    @State private var newFolderDraft: String = "" 
 
     public init(store: AppStore, session: UnifiedSession) {
         self.store = store
@@ -383,6 +385,20 @@ public struct SessionDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .alert("New Folder", isPresented: $isNewFolderAlertPresented) {
+            TextField("Folder name", text: $newFolderDraft)
+            Button("Create & Move") {
+                let name = newFolderDraft
+                newFolderDraft = ""
+                let color = AppStore.defaultFolderColors[store.folders.count % AppStore.defaultFolderColors.count]
+                Task {
+                    await store.createFolderAndAssign(sessionId: currentSession.id, name: name, color: color)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                newFolderDraft = ""
+            }
+        }
     }
 
     // MARK: - Floating Liquid Glass Top Chrome
@@ -414,6 +430,37 @@ public struct SessionDetailView: View {
                         isRenameAlertPresented = true
                     } label: {
                         Label("Rename", systemImage: "pencil")
+                    }
+                    Menu {
+                        ForEach(store.folders.sorted(by: { $0.order < $1.order })) { folder in
+                            Button {
+                                Task { await store.assignFolder(sessionId: currentSession.id, folderId: folder.id) }
+                            } label: {
+                                if currentSession.folderId == folder.id {
+                                    Label(folder.name, systemImage: "checkmark")
+                                } else {
+                                    Label(folder.name, systemImage: "folder")
+                                }
+                            }
+                        }
+                        if !store.folders.isEmpty {
+                            Divider()
+                        }
+                        Button {
+                            newFolderDraft = ""
+                            isNewFolderAlertPresented = true
+                        } label: {
+                            Label("New Folder…", systemImage: "folder.badge.plus")
+                        }
+                        if currentSession.folderId != nil {
+                            Button(role: .destructive) {
+                                Task { await store.assignFolder(sessionId: currentSession.id, folderId: nil) }
+                            } label: {
+                                Label("Remove from Folder", systemImage: "folder.badge.minus")
+                            }
+                        }
+                    } label: {
+                        Label("Move to Folder", systemImage: "folder")
                     }
                     Button {
                         Task { await store.togglePin(currentSession) }

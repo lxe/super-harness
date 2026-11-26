@@ -62,6 +62,8 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func abortRun(sessionId: String) async throws -> Bool
     func startSession(_ request: StartSessionRequest) async throws -> StartSessionResponse
     func organize(actions: [OrganizeAction]) async throws -> OrganizeResponse
+    func fetchFolders() async throws -> FoldersResponse
+    func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings?
     func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse
     func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse
     func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment
@@ -87,6 +89,8 @@ public extension SuperHarnessClientProtocol {
 
     func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool { false }
     func sendTestPush() async throws -> Bool { false }
+    func fetchFolders() async throws -> FoldersResponse { FoldersResponse() }
+    func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings? { nil }
 }
 
 private final class LockedEventIdBox: @unchecked Sendable {
@@ -448,6 +452,20 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
     public func organize(actions: [OrganizeAction]) async throws -> OrganizeResponse {
         struct OrganizeBody: Encodable { let actions: [OrganizeAction] }
         return try await request(path: "/api/organize", method: "POST", body: OrganizeBody(actions: actions))
+    }
+
+    public func fetchFolders() async throws -> FoldersResponse {
+        try await request(path: "/api/folders", method: "GET")
+    }
+
+    public func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings? {
+        struct SettingsBody: Encodable { let sidebarGroupBy: String }
+        let res: UpdateSettingsResponse = try await request(
+            path: "/api/settings",
+            method: "POST",
+            body: SettingsBody(sidebarGroupBy: sidebarGroupBy.rawValue)
+        )
+        return res.settings
     }
 
     public func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse {

@@ -102,7 +102,13 @@ public enum SessionRowFormatting {
 public struct SessionListView: View {
     @AppStorage("sh.collapsedSections") private var collapsedSectionsRaw: String = ""
     @State private var renamingSession: UnifiedSession? = nil
-    @State private var renameDraft: String = "" 
+    @State private var renameDraft: String = ""
+    @State private var isNewFolderAlertPresented: Bool = false
+    @State private var newFolderDraft: String = ""
+    @State private var newFolderAssignSessionId: String? = nil
+    @State private var renamingFolder: SessionFolder? = nil
+    @State private var renameFolderDraft: String = ""
+    @State private var isManageFoldersPresented: Bool = false
 
     private var collapsedSectionIds: Set<String> {
         Set(collapsedSectionsRaw.split(separator: "\n").map(String.init))
@@ -150,6 +156,54 @@ public struct SessionListView: View {
             Button("Cancel", role: .cancel) {
                 renamingSession = nil
             }
+        }
+        .alert("New Folder", isPresented: $isNewFolderAlertPresented) {
+            TextField("Folder name", text: $newFolderDraft)
+            Button("Create") {
+                let name = newFolderDraft
+                let assignId = newFolderAssignSessionId
+                newFolderDraft = ""
+                newFolderAssignSessionId = nil
+                let color = AppStore.defaultFolderColors[store.folders.count % AppStore.defaultFolderColors.count]
+                Task {
+                    if let sid = assignId {
+                        await store.createFolderAndAssign(sessionId: sid, name: name, color: color)
+                    } else {
+                        _ = await store.createFolder(name: name, color: color)
+                        if store.groupBy != .folders {
+                            await store.setGroupBy(.folders)
+                        }
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                newFolderDraft = ""
+                newFolderAssignSessionId = nil
+            }
+        }
+        .alert(
+            "Rename Folder",
+            isPresented: Binding(
+                get: { renamingFolder != nil },
+                set: { if !$0 { renamingFolder = nil } }
+            )
+        ) {
+            TextField("Folder name", text: $renameFolderDraft)
+            Button("Save") {
+                if let target = renamingFolder {
+                    let nextName = renameFolderDraft
+                    renamingFolder = nil
+                    Task { await store.renameFolder(id: target.id, name: nextName) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                renamingFolder = nil
+            }
+        }
+        .sheet(isPresented: $isManageFoldersPresented) {
+            ManageFoldersSheet(store: store)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -201,10 +255,24 @@ public struct SessionListView: View {
                     Section("Group Sessions By") {
                         ForEach(SidebarGroupBy.allCases) { mode in
                             Button {
-                                store.groupBy = mode
+                                Task { await store.setGroupBy(mode) }
                             } label: {
                                 Label(mode.label, systemImage: store.groupBy == mode ? "checkmark" : mode.symbolName)
                             }
+                        }
+                    }
+                    Section("Folders") {
+                        Button {
+                            newFolderAssignSessionId = nil
+                            newFolderDraft = ""
+                            isNewFolderAlertPresented = true
+                        } label: {
+                            Label("New Folder…", systemImage: "folder.badge.plus")
+                        }
+                        Button {
+                            isManageFoldersPresented = true
+                        } label: {
+                            Label("Manage Folders", systemImage: "folder")
                         }
                     }
                     Section("Visibility") {
@@ -349,10 +417,16 @@ public struct SessionListView: View {
                                             .font(.system(size: 11, weight: .semibold))
                                             .foregroundStyle(SHColor.inkMuted)
                                     }
-                                    Text(section.isProjectOrSectionGroup ? section.title : section.title.uppercased())
+                                    let preserveCase = section.isProjectOrSectionGroup || section.folderId != nil
+                                    Text(preserveCase ? section.title : section.title.uppercased())
                                         .font(SHTypography.micro.weight(.semibold))
                                         .foregroundStyle(SHColor.inkMuted)
                                         .lineLimit(1)
+                                    if section.folderId != nil {
+                                        Text("\(section.sessions.count)")
+                                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(SHColor.inkFaint)
+                                    }
                                     if store.isAnyWorking(in: section) {
                                         ProgressView()
                                             .controlSize(.mini)
@@ -369,13 +443,45 @@ public struct SessionListView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("section.header.\(section.id)")
                             .accessibilityValue(isCollapsed ? "collapsed" : "expanded")
+                            .contextMenu {
+                                if let fid = section.folderId,
+                                   let folder = store.folders.first(where: { $0.id == fid }) {
+                                    Button {
+                                        renameFolderDraft = folder.name
+                                        renamingFolder = folder
+                                    } label: {
+                                        Label("Rename Folder", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) {
+                                        Task { await store.deleteFolder(id: folder.id) }
+                                    } label: {
+                                        Label("Delete Folder", systemImage: "trash")
+                                    }
+                                }
+                            }
                             .listRowInsets(EdgeInsets(top: 14, leading: 20, bottom: 4, trailing: 20))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
 
                             if !isCollapsed {
-                                ForEach(section.sessions) { session in
-                                    sessionRowButton(session)
+                                if section.sessions.isEmpty && section.folderId != nil {
+                                    Text("No threads yet · Long-press any thread to move here")
+                                        .font(SHTypography.micro)
+                                        .foregroundStyle(SHColor.inkFaint)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
+                                                .strokeBorder(SHColor.lineHairline, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                                        )
+                                        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                } else {
+                                    ForEach(section.sessions) { session in
+                                        sessionRowButton(session)
+                                    }
                                 }
                             }
                         }
@@ -459,6 +565,38 @@ public struct SessionListView: View {
                 renamingSession = session
             } label: {
                 Label("Rename", systemImage: "pencil")
+            }
+            Menu {
+                ForEach(store.folders.sorted(by: { $0.order < $1.order })) { folder in
+                    Button {
+                        Task { await store.assignFolder(sessionId: session.id, folderId: folder.id) }
+                    } label: {
+                        if session.folderId == folder.id {
+                            Label(folder.name, systemImage: "checkmark")
+                        } else {
+                            Label(folder.name, systemImage: "folder")
+                        }
+                    }
+                }
+                if !store.folders.isEmpty {
+                    Divider()
+                }
+                Button {
+                    newFolderAssignSessionId = session.id
+                    newFolderDraft = ""
+                    isNewFolderAlertPresented = true
+                } label: {
+                    Label("New Folder…", systemImage: "folder.badge.plus")
+                }
+                if session.folderId != nil {
+                    Button(role: .destructive) {
+                        Task { await store.assignFolder(sessionId: session.id, folderId: nil) }
+                    } label: {
+                        Label("Remove from Folder", systemImage: "folder.badge.minus")
+                    }
+                }
+            } label: {
+                Label("Move to Folder", systemImage: "folder")
             }
             Button {
                 Task { await store.togglePin(session) }
@@ -736,5 +874,168 @@ private struct SessionListRow: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+
+// MARK: - Manage Folders Sheet
+
+private struct ManageFoldersSheet: View {
+    @Bindable var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var newName: String = ""
+    @State private var selectedColor: String = AppStore.defaultFolderColors[0]
+    @State private var renamingFolder: SessionFolder? = nil
+    @State private var renameDraft: String = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Create Folder") {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Color(cssHex: selectedColor))
+                            .frame(width: 12, height: 12)
+                        TextField("Folder name (e.g. Super Harness)", text: $newName)
+                            .foregroundStyle(SHColor.inkPrimary)
+                            .submitLabel(.done)
+                            .onSubmit { createCurrent() }
+                        Button("Add") {
+                            createCurrent()
+                        }
+                        .font(SHTypography.caption.weight(.semibold))
+                        .foregroundStyle(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? SHColor.inkFaint : SHColor.brandAntigravity)
+                        .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .listRowBackground(SHColor.surfaceSubtle)
+
+                    HStack(spacing: 12) {
+                        ForEach(AppStore.defaultFolderColors, id: \.self) { hex in
+                            Button {
+                                selectedColor = hex
+                            } label: {
+                                Circle()
+                                    .fill(Color(cssHex: hex))
+                                    .frame(width: 24, height: 24)
+                                    .overlay {
+                                        if selectedColor == hex {
+                                            Circle()
+                                                .strokeBorder(Color.white, lineWidth: 2)
+                                                .padding(-3)
+                                        }
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .listRowBackground(SHColor.surfaceSubtle)
+                }
+
+                Section("Folders") {
+                    let ordered = store.folders.sorted { $0.order < $1.order }
+                    if ordered.isEmpty {
+                        Text("No folders yet. Create one above or ask Master Orchestrator to organize your threads.")
+                            .font(SHTypography.caption)
+                            .foregroundStyle(SHColor.inkMuted)
+                            .listRowBackground(SHColor.surfaceSubtle)
+                    } else {
+                        ForEach(ordered) { folder in
+                            let count = store.sessions.filter { !$0.isMaster && !$0.hidden && $0.status != .archived && $0.folderId == folder.id }.count
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(Color(cssHex: folder.color))
+                                    .frame(width: 10, height: 10)
+                                Text(folder.name)
+                                    .font(SHTypography.body)
+                                    .foregroundStyle(SHColor.inkPrimary)
+                                Spacer()
+                                Text("\(count)")
+                                    .font(SHTypography.monoSmall)
+                                    .foregroundStyle(SHColor.inkMuted)
+                            }
+                            .listRowBackground(SHColor.surfaceSubtle)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task { await store.deleteFolder(id: folder.id) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                Button {
+                                    renameDraft = folder.name
+                                    renamingFolder = folder
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                .tint(SHColor.brandAntigravity)
+                            }
+                            .contextMenu {
+                                Button {
+                                    renameDraft = folder.name
+                                    renamingFolder = folder
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    Task { await store.deleteFolder(id: folder.id) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(SHColor.surfaceCanvas)
+            .navigationTitle("Folders")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if store.groupBy != .folders {
+                        Button("Group by Folders") {
+                            Task {
+                                await store.setGroupBy(.folders)
+                                dismiss()
+                            }
+                        }
+                        .font(SHTypography.caption.weight(.semibold))
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+            .alert(
+                "Rename Folder",
+                isPresented: Binding(
+                    get: { renamingFolder != nil },
+                    set: { if !$0 { renamingFolder = nil } }
+                )
+            ) {
+                TextField("Folder name", text: $renameDraft)
+                Button("Save") {
+                    if let target = renamingFolder {
+                        let next = renameDraft
+                        renamingFolder = nil
+                        Task { await store.renameFolder(id: target.id, name: next) }
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    renamingFolder = nil
+                }
+            }
+        }
+    }
+
+    private func createCurrent() {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let color = selectedColor
+        newName = ""
+        Task { _ = await store.createFolder(name: trimmed, color: color) }
     }
 }

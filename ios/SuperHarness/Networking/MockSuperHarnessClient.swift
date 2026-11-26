@@ -9,6 +9,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
     private var harnesses: [HarnessDetection]
     private var sessions: [UnifiedSession]
     private var transcripts: [String: SessionTranscriptResult]
+    private var settings = SuperHarnessSettings()
     private var folders: [SessionFolder]
     private var usage: UsageSnapshot
     private var catalog: HarnessCatalog
@@ -899,16 +900,53 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         return StartSessionResponse(ok: true, sessionId: id, error: nil)
     }
 
+    public func fetchFolders() async throws -> FoldersResponse {
+        FoldersResponse(folders: folders, sidebarGroupBy: settings.sidebarGroupBy)
+    }
+
+    public func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings? {
+        settings.sidebarGroupBy = sidebarGroupBy
+        return settings
+    }
+
     public func organize(actions: [OrganizeAction]) async throws -> OrganizeResponse {
         for action in actions {
-            if action.type == .reorderFolders, let orderedIds = action.folderIds {
-                for (order, fid) in orderedIds.enumerated() {
-                    if let fIdx = folders.firstIndex(where: { $0.id == fid }) {
-                        folders[fIdx].order = order
+            switch action.type {
+            case .createFolder:
+                let name = (action.folderName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty && !folders.contains(where: { $0.name.lowercased() == name.lowercased() }) {
+                    let fid = action.folderId ?? "folder-\(UUID().uuidString.prefix(8).lowercased())"
+                    folders.append(SessionFolder(id: fid, name: name, color: action.folderColor ?? "#60A5FA", order: folders.count))
+                }
+                continue
+            case .renameFolder:
+                if let fid = action.folderId,
+                   let name = action.folderName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !name.isEmpty,
+                   let fIdx = folders.firstIndex(where: { $0.id == fid }) {
+                    folders[fIdx].name = name
+                }
+                continue
+            case .deleteFolder:
+                if let fid = action.folderId {
+                    folders.removeAll { $0.id == fid }
+                    for i in sessions.indices where sessions[i].folderId == fid {
+                        sessions[i].folderId = nil
                     }
                 }
-                folders.sort { $0.order < $1.order }
                 continue
+            case .reorderFolders:
+                if let orderedIds = action.folderIds {
+                    for (order, fid) in orderedIds.enumerated() {
+                        if let fIdx = folders.firstIndex(where: { $0.id == fid }) {
+                            folders[fIdx].order = order
+                        }
+                    }
+                    folders.sort { $0.order < $1.order }
+                }
+                continue
+            default:
+                break
             }
             guard let sid = action.sessionId,
                   let idx = sessions.firstIndex(where: { $0.id == sid }) else {

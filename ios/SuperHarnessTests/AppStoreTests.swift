@@ -824,4 +824,36 @@ final class AppStoreTests: XCTestCase {
         XCTAssertFalse(store.isSessionBusy(sid), "Unwatched idle session must never stay spinning from stale cached transcript liveActivity")
         XCTAssertEqual(store.transcriptsBySessionId[sid]?.liveActivity?.isWorking, false)
     }
+
+    func testFolderGroupingCrudAndSettingsSync() async throws {
+        let suite = "sh.test.folders.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, defaults: defaults, environment: [:])
+        await store.bootstrap(quiet: true)
+
+        await store.setGroupBy(.folders)
+        XCTAssertEqual(store.groupBy, .folders)
+        XCTAssertEqual(store.settings.sidebarGroupBy, .folders)
+
+        let target = try XCTUnwrap(store.sessions.first(where: { !$0.isMaster && !$0.pinnedToTop }))
+        let targetSessionId = target.id
+        await store.createFolderAndAssign(sessionId: targetSessionId, name: "Release Squad", color: "#22C55E")
+        let created = try XCTUnwrap(store.folders.first(where: { $0.name == "Release Squad" }))
+        XCTAssertEqual(store.sessions.first(where: { $0.id == targetSessionId })?.folderId, created.id)
+
+        let sections = store.groupedSections
+        let shSection = try XCTUnwrap(sections.first(where: { $0.folderId == created.id }))
+        XCTAssertEqual(shSection.title, "Release Squad")
+        XCTAssertEqual(shSection.accentHex, "#22C55E")
+        XCTAssertTrue(shSection.sessions.contains(where: { $0.id == targetSessionId }))
+        XCTAssertTrue(sections.contains(where: { $0.id == "folder-unfiled" && $0.title == "Unfiled" }))
+
+        await store.renameFolder(id: created.id, name: "Core Platform")
+        XCTAssertEqual(store.folders.first(where: { $0.id == created.id })?.name, "Core Platform")
+
+        await store.deleteFolder(id: created.id)
+        XCTAssertFalse(store.folders.contains(where: { $0.id == created.id }))
+        XCTAssertNil(store.sessions.first(where: { $0.id == targetSessionId })?.folderId)
+    }
 }

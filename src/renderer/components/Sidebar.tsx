@@ -1022,7 +1022,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
     <aside
       ref={asideRef}
       style={{ width }}
-      className="shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail select-none"
+      className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail shadow-[8px_0_24px_-12px_rgba(0,0,0,0.5)] select-none"
     >
       {/* Top Bar (draggable window region) */}
       <div className="sh-drag-region h-12 px-3.5 flex items-center justify-between">
@@ -1189,7 +1189,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
           workingByHarness.claude ||
           workingByHarness.muse;
         return (
-          <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.26),0_4px_12px_-4px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-gradient-to-t before:from-black/22 before:to-transparent after:pointer-events-none after:content-[''] after:absolute after:inset-x-0 after:-bottom-2.5 after:h-2.5 after:bg-gradient-to-b after:from-black/26 after:to-transparent">
             <SegmentedControl<FilterTab>
               variant="gauge"
               className="bg-transparent shadow-none rounded-none !p-0"

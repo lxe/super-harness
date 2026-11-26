@@ -194,8 +194,8 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
         }}
         className={`relative rounded-2xl transition-all ${
           dragOver
-            ? 'bg-surface-raised ring-1 ring-inset ring-white/15 shadow-[0_6px_18px_-6px_rgba(0,0,0,0.34)]'
-            : 'bg-[#1c1e24] shadow-[0_4px_14px_-5px_rgba(0,0,0,0.28),0_1px_3px_-1px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.045)] focus-within:bg-[#1e2027] focus-within:shadow-[0_6px_18px_-6px_rgba(0,0,0,0.34),0_1px_4px_-1px_rgba(0,0,0,0.20),inset_0_1px_0_rgba(255,255,255,0.065)]'
+            ? 'bg-surface-raised ring-1 ring-inset ring-white/15 shadow-[0_5px_14px_-4px_rgba(0,0,0,0.32)]'
+            : 'bg-[#1c1e24] shadow-[0_4px_12px_-4px_rgba(0,0,0,0.26),0_1px_3px_-1px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.045)] focus-within:bg-[#1e2027] focus-within:shadow-[0_5px_14px_-4px_rgba(0,0,0,0.32),0_1px_4px_-1px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.065)]'
         }`}
       >
         {attachments.length > 0 && (

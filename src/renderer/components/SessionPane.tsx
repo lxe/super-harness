@@ -1149,7 +1149,7 @@ export const SessionPane: React.FC<Props> = ({
       </div>
 
       {/* Bottom Composer Dock */}
-      <div className="relative z-10 px-6 pb-4 pt-2 shrink-0 bg-surface-canvas">
+      <div className="relative z-10 px-6 pb-5 pt-2 shrink-0 bg-surface-canvas">
         <div className="pointer-events-none absolute -top-5 inset-x-0 h-5 bg-gradient-to-t from-surface-canvas via-surface-canvas/70 to-transparent" />
         <div className="max-w-[740px] mx-auto space-y-2">
           {!isMaster && <LiveStepsBar key={session.id} steps={liveActivity?.steps} />}

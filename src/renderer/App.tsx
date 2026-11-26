@@ -345,12 +345,13 @@ export const App: React.FC = () => {
       const session = sessionById.get(sid);
       if (!session || session.harness === 'master') continue;
 
+      const cachedActivity = rendererTranscriptCache.get(sid)?.result.liveActivity;
       const isBusy =
         streamingIds.has(sid) ||
         Boolean(liveWorkingMap[sid]) ||
+        Boolean(cachedActivity?.isWorking) ||
         session.status === 'running';
-      const nativeQueueCount =
-        rendererTranscriptCache.get(sid)?.result.liveActivity?.queuedMessages?.length ?? 0;
+      const nativeQueueCount = cachedActivity?.queuedMessages?.length ?? 0;
 
       if (isBusy || nativeQueueCount > 0 || drainingQueuesRef.current.has(sid)) {
         const existingTimer = queueTimersRef.current.get(sid);

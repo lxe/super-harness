@@ -612,13 +612,34 @@ export class CodexAppServerClient {
   }
 
   async interruptTurn(nativeThreadId: string): Promise<boolean> {
-    const run = this.activeTurns.get(nativeThreadId);
-    if (!run || !run.turnId) return false;
     try {
       await this.ensureConnected();
+      let turnId = this.activeTurns.get(nativeThreadId)?.turnId;
+      if (!turnId) {
+        try {
+          const readRes = await this.request(
+            'thread/read',
+            { threadId: nativeThreadId, includeTurns: true },
+            5_000
+          );
+          const thread = readRes.thread as Record<string, unknown> | undefined;
+          const turns = Array.isArray(thread?.turns)
+            ? (thread.turns as Array<Record<string, unknown>>)
+            : [];
+          const active = [...turns]
+            .reverse()
+            .find((t) => String(t.status || '').toLowerCase() === 'inprogress');
+          if (typeof active?.id === 'string' && active.id) {
+            turnId = active.id;
+          }
+        } catch {
+          // Ignore if thread/read fails
+        }
+      }
+      if (!turnId) return false;
       await this.request('turn/interrupt', {
         threadId: nativeThreadId,
-        turnId: run.turnId,
+        turnId,
       });
       return true;
     } catch {

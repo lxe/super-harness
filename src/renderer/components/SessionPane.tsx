@@ -1023,72 +1023,84 @@ export const SessionPane: React.FC<Props> = ({
                 {visibleStreaming.showText && (
                   <CoalescedBlockView block={{ type: 'text', text: visibleStreaming.showText }} />
                 )}
-                <WorkingIndicator tone={session.harnessGroup} focus={liveActivity?.focus} />
               </div>
             )}
 
-            {/* Quiet live Working indicator */}
-            {!isMaster && !isStreaming && (effectiveStreaming || liveActivity?.isWorking) && (
-              <WorkingIndicator tone={session.harnessGroup} focus={liveActivity?.focus} />
-            )}
+            {/* Coalesced Working indicator + running background tasks */}
+            {!isMaster && (() => {
+              const showWorking = isStreaming || effectiveStreaming || Boolean(liveActivity?.isWorking);
+              const tasks = liveActivity?.runningTasks ?? [];
+              const hasTasks = tasks.length > 0;
+              if (!showWorking && !hasTasks) return null;
 
-            {/* Running background tasks indicator (Antigravity parity) */}
-            {!isMaster && liveActivity?.runningTasks && liveActivity.runningTasks.length > 0 && (
-              <div className="pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => setTasksExpanded((v) => !v)}
-                  className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
-                  <span>
-                    {liveActivity.runningTasks.length}{' '}
-                    {liveActivity.runningTasks.length === 1 ? 'task' : 'tasks'} running
-                  </span>
-                  {tasksExpanded ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
-                  ) : (
-                    <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
-                  )}
-                </button>
-                {tasksExpanded && (
-                  <div className="mt-1.5 rounded-xl border border-line-hairline bg-surface-subtle/80 divide-y divide-line-hairline overflow-hidden">
-                    {liveActivity.runningTasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className="px-3 py-2 flex items-start justify-between gap-2.5 text-caption"
+              return (
+                <div className="pt-0.5">
+                  <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+                    {showWorking && (
+                      <WorkingIndicator tone={session.harnessGroup} focus={liveActivity?.focus} />
+                    )}
+                    {showWorking && hasTasks && (
+                      <span className="text-caption text-ink-faint select-none">·</span>
+                    )}
+                    {hasTasks && (
+                      <button
+                        type="button"
+                        onClick={() => setTasksExpanded((v) => !v)}
+                        className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5"
                       >
-                        <div className="min-w-0 flex-1 space-y-0.5">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Terminal className="w-3 h-3 text-ink-faint shrink-0" />
-                            <span className="text-ink-secondary font-medium truncate">
-                              {task.summary}
-                            </span>
-                            {task.isDaemon && <Badge tone="neutral">daemon</Badge>}
-                          </div>
-                          {task.command && (
-                            <div className="text-micro font-mono text-ink-faint truncate">
-                              {task.command}
+                        {!showWorking && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
+                        )}
+                        <span>
+                          {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'} running
+                        </span>
+                        {tasksExpanded ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {hasTasks && tasksExpanded && (
+                    <div className="mt-1.5 rounded-xl border border-line-hairline bg-surface-subtle/80 divide-y divide-line-hairline overflow-hidden">
+                      {tasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="px-3 py-2 flex items-start justify-between gap-2.5 text-caption"
+                        >
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Terminal className="w-3 h-3 text-ink-faint shrink-0" />
+                              <span className="text-ink-secondary font-medium truncate">
+                                {task.summary}
+                              </span>
+                              {task.isDaemon && <Badge tone="neutral">daemon</Badge>}
                             </div>
+                            {task.command && (
+                              <div className="text-micro font-mono text-ink-faint truncate">
+                                {task.command}
+                              </div>
+                            )}
+                          </div>
+                          {task.logPath && (
+                            <button
+                              type="button"
+                              onClick={() => handleMessageOpenPath(task.logPath!)}
+                              className="inline-flex items-center gap-1 text-micro text-ink-muted hover:text-ink-primary px-1.5 py-0.5 rounded hover:bg-white/[0.06] shrink-0 cursor-pointer"
+                              title="Inspect task log"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Log</span>
+                            </button>
                           )}
                         </div>
-                        {task.logPath && (
-                          <button
-                            type="button"
-                            onClick={() => handleMessageOpenPath(task.logPath!)}
-                            className="inline-flex items-center gap-1 text-micro text-ink-muted hover:text-ink-primary px-1.5 py-0.5 rounded hover:bg-white/[0.06] shrink-0 cursor-pointer"
-                            title="Inspect task log"
-                          >
-                            <FileText className="w-3 h-3" />
-                            <span>Log</span>
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {streamError && (
               <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-caption text-rose-300 font-mono whitespace-pre-wrap">

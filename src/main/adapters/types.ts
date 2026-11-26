@@ -119,8 +119,12 @@ export interface HarnessDriver {
     opts?: { killTmux?: boolean }
   ): Promise<{ ok: boolean; method?: string; error?: string; hideLocally?: boolean } | null>;
 
-  /** Optional hook to cancel a harness-managed run (e.g., Antigravity ACP or Codex app-server). */
-  abort?(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean;
+  /** Optional hook to cancel a harness-managed run (e.g., Antigravity ACP, Codex app-server, or Claude tmux). */
+  abort?(
+    sessionId: string,
+    emitStream: (ev: StreamEvent) => void,
+    session?: UnifiedSession
+  ): boolean;
 
   /** Optional hook to sync section moves natively with the harness daemon (e.g., Codex `thread/section/move`). */
   moveSection?(session: UnifiedSession, sectionName: string | null): Promise<boolean>;

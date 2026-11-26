@@ -1851,8 +1851,33 @@ export function createClaudeDriver(): HarnessDriver {
       }
     },
 
-    abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
-      return streamPool.abort(sessionId, emitStream);
+    abort(
+      sessionId: string,
+      emitStream: (ev: StreamEvent) => void,
+      session?: UnifiedSession
+    ): boolean {
+      if (streamPool.abort(sessionId, emitStream)) return true;
+
+      // For live tmux-backed Claude sessions (or Claude sessions owned by a live tmux pane),
+      // send Escape to interrupt the active turn cleanly without killing the Claude Code TUI.
+      const tmuxTarget = (() => {
+        if (session?.dispatchMode === 'tmux-send' && session.tmuxTarget) {
+          return session.tmuxTarget;
+        }
+        if (session) {
+          const guard = resolveClaudeDispatchGuard(findLiveClaudeOwners(session.nativeId));
+          if (guard.action === 'tmux') return guard.tmuxTarget;
+        }
+        return undefined;
+      })();
+      if (tmuxTarget) {
+        void execFileAsync('tmux', ['send-keys', '-t', tmuxTarget, 'Escape'], {
+          timeout: 3000,
+        }).catch(() => {});
+        emitStream({ sessionId, runId: 'abort', kind: 'done' });
+        return true;
+      }
+      return false;
     },
 
     async promoteToTmux(

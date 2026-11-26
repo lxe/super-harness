@@ -61,8 +61,11 @@ export class HarnessDispatcher {
   }
 
   abort(sessionId: string): boolean {
+    const session = this.registry.getSession(sessionId);
     for (const driver of this.registry.getDrivers()) {
-      if (driver.abort?.(sessionId, this.emitStream)) {
+      if (driver.abort?.(sessionId, this.emitStream, session)) {
+        setTimeout(() => this.triggerRefresh(), 500);
+        setTimeout(() => this.triggerRefresh(), 1500);
         return true;
       }
     }

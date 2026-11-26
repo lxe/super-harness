@@ -18,7 +18,7 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 import { querySqliteReadOnly } from '../utils/sqlite';
-import { readProgressiveJsonlTail } from '../utils/tailReader';
+import { readJsonlTailLines, readProgressiveJsonlTail } from '../utils/tailReader';
 import {
   cleanTextPreview,
   getBinaryVersion,
@@ -26,6 +26,13 @@ import {
   whichBinary,
   type ProcessRow,
 } from '../utils/system';
+import {
+  classifyMspError,
+  extractMspHistoryItems,
+  foldMspItems,
+  mapMspTodoItems,
+  MuseMspClient,
+} from '../services/museMspClient';
 import {
   computeFileFingerprint,
   createUniqueIdGenerator,
@@ -37,30 +44,6 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-/** Runs a command feeding `stdinText` to its stdin (for `muse session-message send`). */
-function execFileWithStdin(
-  file: string,
-  args: string[],
-  stdinText: string,
-  timeoutMs: number
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      file,
-      args,
-      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
-      (err, stdout, stderr) => {
-        if (err) reject(err);
-        else resolve({ stdout: String(stdout), stderr: String(stderr) });
-      }
-    );
-    child.stdin?.on('error', () => {
-      // Child exited before consuming stdin; the exec callback reports it.
-    });
-    child.stdin?.end(stdinText);
-  });
-}
-
 export const MUSE_DATA_DIR = path.join(
   process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
   'muse'
@@ -68,7 +51,7 @@ export const MUSE_DATA_DIR = path.join(
 export const MUSE_SESSIONS_DIR = path.join(MUSE_DATA_DIR, 'sessions');
 export const MUSE_INDEX_DB = path.join(MUSE_DATA_DIR, 'session-index.db');
 
-/** Reasoning effort levels accepted by `muse exec --reasoning-effort`. */
+/** Reasoning effort levels accepted by MSP `turn/start.reasoningEffort`. */
 export const MUSE_EFFORT_LEVELS = [
   'none',
   'minimal',
@@ -103,6 +86,58 @@ interface MuseIndexRow {
   status: string | null;
   session_name: string | null;
   logged_session_name: string | null;
+  latest_segment_terminated: number | null;
+}
+
+/**
+ * Resolves sidebar working status for a Muse session. `running` must mean
+ * "a turn is executing right now" (same semantics as Claude's busy owners),
+ * NOT merely "a terminal has the session open" — the latter left the Muse
+ * tab and every live session row spinning forever.
+ *
+ * Signals: the session-index `latest_segment_terminated` flag (0 while a
+ * host process segment is open, 1 once it exited — exec runs flip it per
+ * run; an idle-but-open TUI keeps it 0) combined with transcript-write
+ * freshness (writes append constantly during a turn, including
+ * omitted-live-only markers, and stop when the turn ends).
+ */
+export function resolveMuseSessionStatus(input: {
+  isLiveRegistered: boolean;
+  latestSegmentTerminated?: number | null;
+  updatedAt: number;
+  now: number;
+  /** Turn-boundary verdict from the transcript tail, when readable. */
+  transcriptWorking?: boolean | null;
+}): 'running' | 'idle' {
+  if (input.latestSegmentTerminated === 1) return 'idle';
+  if (input.transcriptWorking === false) return 'idle';
+  const fresh = input.now - input.updatedAt < 90_000;
+  if (input.transcriptWorking === true) {
+    return fresh || input.isLiveRegistered ? 'running' : 'idle';
+  }
+  if (!fresh) return 'idle';
+  // Open segment (or unknown) with actively-appending transcript.
+  if (input.latestSegmentTerminated === 0) return 'running';
+  return input.isLiveRegistered ? 'running' : 'idle';
+}
+
+/**
+ * Cheap turn-boundary probe over the transcript tail: true when the latest
+ * user prompt has no following `terminal` record, false when the last turn
+ * terminated, null when the tail holds neither marker (caller falls back to
+ * segment/freshness heuristics). String-scans only — no JSON.parse — so
+ * discovery stays fast; frames that wrap records (permission transactions)
+ * never carry these markers.
+ */
+export function museTranscriptIsWorking(transcriptPath: string): boolean | null {
+  const tail = readJsonlTailLines(transcriptPath, 256 * 1024);
+  if (!tail) return null;
+  let verdict: boolean | null = null;
+  for (const line of tail.lines) {
+    if (line.includes('"kind":"terminal"')) verdict = false;
+    if (line.includes('runtime.user_intent.accepted')) verdict = true;
+  }
+  return verdict;
 }
 
 export interface MuseLiveSession {
@@ -712,9 +747,23 @@ export async function detectMuse(
     createdAt: number;
     updatedAt: number;
     sessionName?: string;
+    latestSegmentTerminated?: number | null;
   }): UnifiedSession => {
     const live = liveSessions.get(row.nativeId);
     const isLive = Boolean(live) || now - row.updatedAt < 10 * 60 * 1000;
+    // Only pay the tail probe for sessions that could plausibly be working.
+    const transcriptWorking =
+      row.transcriptPath &&
+      (Boolean(live) || row.latestSegmentTerminated === 0 || now - row.updatedAt < 90_000)
+        ? museTranscriptIsWorking(row.transcriptPath)
+        : null;
+    const status = resolveMuseSessionStatus({
+      isLiveRegistered: Boolean(live),
+      latestSegmentTerminated: row.latestSegmentTerminated,
+      updatedAt: row.updatedAt,
+      now,
+      transcriptWorking,
+    });
     const hasWorkspaceProject = row.cwd !== os.homedir();
     const projName = projectNameFromCwd(row.cwd);
     const name = row.sessionName || live?.name;
@@ -731,7 +780,7 @@ export async function detectMuse(
       model: row.model || undefined,
       nativeSection: hasWorkspaceProject ? projName : 'Ungrouped',
       nativeSectionOrder: hasWorkspaceProject ? 10 : 9999,
-      status: live ? 'running' : 'idle',
+      status,
       isLive,
       isRemote: false,
       transcriptPath: row.transcriptPath,
@@ -741,8 +790,9 @@ export async function detectMuse(
       folderId: null,
       tags: name ? [`@${name}`] : [],
       hidden: false,
-      dispatchMode: 'muse-exec',
+      dispatchMode: 'muse-msp',
       liveOwner: live ? 'desktop' : undefined,
+      isTerminalHeld: live && live.attachable !== true ? true : undefined,
     };
   };
 
@@ -753,7 +803,7 @@ export async function detectMuse(
     MUSE_INDEX_DB,
     `SELECT session_id, session_log_path, workspace_root, model_id, git_branch,
             title, first_user_prompt, created_at_us, updated_at_us, prompt_count,
-            status, session_name, logged_session_name
+            status, session_name, logged_session_name, latest_segment_terminated
      FROM sessions
      WHERE prompt_count > 0
      ORDER BY updated_at_us DESC
@@ -791,6 +841,7 @@ export async function detectMuse(
           createdAt: museUsToMs(r.created_at_us),
           updatedAt,
           sessionName: r.session_name || r.logged_session_name || undefined,
+          latestSegmentTerminated: r.latest_segment_terminated,
         })
       );
     }
@@ -872,92 +923,347 @@ export async function detectMuse(
   return { detection, sessions };
 }
 
+export type MuseUndeliverableKind = 'tui-held' | 'other';
+
 /**
- * Builds `muse exec` argv for a headless turn. Super Harness has no approval
- * UI primitive, so dispatched turns run with `--yolo` (approval + sandbox off
- * for this run) rather than blocking forever on a prompt nobody can answer —
- * the same effective posture as the other harnesses' dispatched runs.
+ * Human, self-contained explanation for a message that could not be
+ * delivered as a native MSP user turn. A session held by a plain Muse
+ * terminal exposes no MSP attach endpoint (`muse sessions --json` reports
+ * `attachable: false`; `muse attach --stdio` exits 4), so no client can
+ * submit a real user turn to it — Super Harness refuses rather than
+ * stamping the message as a peer/cross-session delivery.
  */
-export function buildMuseExecArgs(opts: {
-  nativeId: string;
-  cwd: string;
-  prompt: string;
-  model?: string;
-  reasoningEffort?: string;
-  attachments?: ImageAttachment[];
-}): string[] {
-  const args = [
-    'exec',
-    '--json',
-    '--session-id',
-    opts.nativeId,
-    '--workspace',
-    opts.cwd,
-    '--yolo',
-  ];
-  if (opts.model?.trim()) args.push('--model', opts.model.trim());
-  const effort = opts.reasoningEffort?.trim().toLowerCase();
-  if (effort && MUSE_EFFORT_LEVELS.includes(effort)) {
-    args.push('--reasoning-effort', effort);
+export function buildMuseUndeliverableError(
+  session: { title: string; tags?: string[] },
+  kind: MuseUndeliverableKind
+): string {
+  const nameTag = session.tags?.find((t) => t.startsWith('@'));
+  const label = nameTag ? `${nameTag} ("${session.title}")` : `"${session.title}"`;
+  if (kind === 'tui-held') {
+    return (
+      `Your message was not delivered: ${label} is open in a Muse terminal that Super Harness cannot type into ` +
+      `(it has no MSP attach endpoint and is not running inside tmux). Use Restart in tmux in this session's ` +
+      `header menu and Super Harness will close that terminal process and relaunch the same session inside tmux, ` +
+      `after which it can type into that terminal for you. Or type the message in that terminal instead; or close ` +
+      `the terminal session entirely and press Retry here, and Super Harness will host the session itself over ` +
+      `Muse's native MSP API.`
+    );
   }
-  for (const att of opts.attachments ?? []) {
-    if (att.path) args.push('--image', att.path);
-  }
-  args.push(opts.prompt);
-  return args;
+  return (
+    `Your message was not delivered to ${label}: Muse's MSP host did not accept it. ` +
+    `Press Retry — if the session is no longer held by a terminal, Super Harness will resume it over MSP and deliver it.`
+  );
 }
 
-/**
- * Parses one `muse exec --json` stdout line into Super Harness stream
- * deltas. Returns true when a text delta was emitted.
- */
-export function parseMuseExecStreamLine(
-  sessionId: string,
-  runId: string,
-  line: string,
-  gotAnyDelta: boolean,
-  emit: (ev: StreamEvent) => void
-): boolean {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith('{')) return false;
-  let record: Record<string, unknown>;
-  try {
-    record = JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    return false;
+/** Parses `tmux list-panes -a -F '#{pane_id} #{pane_pid}'` output. */
+export function parseTmuxPaneList(output: string): Map<number, string> {
+  const panes = new Map<number, string>();
+  for (const line of output.split('\n')) {
+    const m = line.trim().match(/^(%\d+)\s+(\d+)$/);
+    if (m) panes.set(Number(m[2]), m[1]);
   }
-  const payloadType = String(record.payload_type || '');
-  const payload = (record.payload ?? {}) as Record<string, unknown>;
+  return panes;
+}
 
-  const emitDelta = (text: unknown): boolean => {
-    if (typeof text !== 'string' || !text) return false;
-    emit({ sessionId, runId, kind: 'delta', text });
-    return true;
-  };
+/** First ancestor pid (starting from the process itself) that owns a tmux pane. */
+export function findTmuxPaneForPids(
+  panes: Map<number, string>,
+  candidatePids: number[]
+): string | null {
+  for (const pid of candidatePids) {
+    const pane = panes.get(pid);
+    if (pane) return pane;
+  }
+  return null;
+}
 
-  if (payloadType === 'run.output.delta') {
-    return emitDelta(payload.text);
-  }
-  if (payloadType.startsWith('run.terminal')) {
-    // Final text safety net when no deltas streamed (e.g. echo-style runs).
-    return gotAnyDelta ? false : emitDelta(payload.text);
-  }
-  if (payloadType === 'runtime.session' && payload.kind === 'run') {
-    const event = (payload.event ?? {}) as Record<string, unknown>;
-    if (event.kind === 'assistant_message_committed') {
-      return emitDelta(event.text);
+/** Delivery ack for terminal typing: the prompt appears in session.jsonl. */
+export async function waitForMuseTranscriptDelivery(
+  transcriptPath: string | undefined,
+  prompt: string,
+  timeoutMs = 4000
+): Promise<boolean> {
+  if (!transcriptPath) return false;
+  const needle = JSON.stringify(prompt.trim().slice(0, 60)).slice(1, -1);
+  if (needle.length < 3) return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const st = fs.statSync(transcriptPath);
+      const start = Math.max(0, st.size - 262144);
+      const fd = fs.openSync(transcriptPath, 'r');
+      const buf = Buffer.alloc(st.size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      fs.closeSync(fd);
+      if (buf.toString('utf8').includes(needle)) return true;
+    } catch {
+      // log not flushed yet
     }
+    await new Promise((r) => setTimeout(r, 150));
   }
   return false;
 }
 
+function readParentPid(pid: number): number {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const closeParen = stat.lastIndexOf(')');
+    const ppid = Number(stat.slice(closeParen + 2).split(' ')[1]);
+    return Number.isFinite(ppid) ? ppid : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function ancestorPids(pid: number, max = 12): number[] {
+  const out = [pid];
+  let cur = pid;
+  for (let i = 0; i < max; i++) {
+    const ppid = readParentPid(cur);
+    if (!ppid || ppid === 1 || out.includes(ppid)) break;
+    out.push(ppid);
+    cur = ppid;
+  }
+  return out;
+}
+
+/** Finds the live muse process holding this session's log open (Linux /proc). */
+function findMusePidHoldingLog(transcriptPath: string): number | null {
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync('/proc');
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    if (!/^\d+$/.test(name)) continue;
+    const pid = Number(name);
+    try {
+      const comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+      if (!comm.includes('muse')) continue;
+      for (const fd of fs.readdirSync(`/proc/${pid}/fd`)) {
+        try {
+          if (fs.readlinkSync(`/proc/${pid}/fd/${fd}`) === transcriptPath) return pid;
+        } catch {
+          // fd raced away
+        }
+      }
+    } catch {
+      // process raced away / not readable
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolves the tmux pane hosting the terminal that runs this session, if
+ * any. A Muse TUI held session has no MSP attach endpoint, so typing into
+ * its own tmux pane is the only metadata-free submission route — the exact
+ * same user turn a human keystroke produces.
+ */
+async function resolveMuseTmuxTarget(transcriptPath: string | undefined): Promise<string | null> {
+  if (!transcriptPath) return null;
+  const tmuxBin = await whichBinary('tmux');
+  if (!tmuxBin) return null;
+  const pid = findMusePidHoldingLog(transcriptPath);
+  if (!pid) return null;
+  try {
+    const { stdout } = await execFileAsync(tmuxBin, [
+      'list-panes',
+      '-a',
+      '-F',
+      '#{pane_id} #{pane_pid}',
+    ]);
+    return findTmuxPaneForPids(parseTmuxPaneList(stdout), ancestorPids(pid));
+  } catch {
+    return null;
+  }
+}
+
+function shouldUseTmuxPaste(text: string): boolean {
+  return text.includes('\n') || text.length > 500;
+}
+
+/** Live-registry directory every Muse process registers its sessions in. */
+export const MUSE_RUNTIME_REGISTRY_DIR = path.join(MUSE_DATA_DIR, 'runtime', 'muse', 'sessions');
+
+/** Parses the holding pid out of a live-registry entry (`process_generation_hint: "pid=N"`). */
+export function parseMuseRegistryPid(raw: string): number | null {
+  try {
+    const parsed = JSON.parse(raw) as { process_generation_hint?: unknown };
+    if (typeof parsed.process_generation_hint !== 'string') return null;
+    const m = parsed.process_generation_hint.match(/^pid=(\d+)$/);
+    if (!m) return null;
+    const pid = Number(m[1]);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function readMuseRegistryPid(nativeId: string): number | null {
+  try {
+    return parseMuseRegistryPid(
+      fs.readFileSync(path.join(MUSE_RUNTIME_REGISTRY_DIR, `${nativeId}.json`), 'utf8')
+    );
+  } catch {
+    return null;
+  }
+}
+
+export type MuseHolderKind = 'tui' | 'serve' | 'other';
+
+/**
+ * Classifies a `/proc/<pid>/cmdline` (NUL-separated) so the restart lane
+ * only ever signals a plain interactive Muse terminal — never a `muse
+ * serve` host (Super Harness's own pooled host included) and never a
+ * headless/bridge invocation. Misclassification fails safe: anything
+ * unrecognized is 'other' and is refused.
+ */
+export function classifyMuseHolderCmdline(cmdline: string): MuseHolderKind {
+  const tokens = cmdline.split('\0').filter(Boolean);
+  const argv = tokens.length > 0 ? tokens : cmdline.split(/\s+/).filter(Boolean);
+  if (argv.length === 0) return 'other';
+  const base = path.basename(argv[0] ?? '');
+  if (!base.startsWith('muse')) return 'other';
+  const rest = argv.slice(1);
+  if (rest.includes('serve')) return 'serve';
+  const NON_TUI_SUBCOMMANDS = new Set([
+    'exec', 'attach', 'acp', 'mxp', 'sessions', 'session-message', 'export',
+    'trace', 'usage', 'login', 'logout', 'auth', 'mcp', 'skills', 'plugins',
+    'sandbox', 'schema', 'config', 'voice', 'init', 'model-profile',
+  ]);
+  if (rest.some((t) => NON_TUI_SUBCOMMANDS.has(t))) return 'other';
+  return 'tui';
+}
+
+function readProcessCmdline(pid: number): string {
+  try {
+    return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/** Deterministic tmux session name for a restarted Muse session. */
+export function buildMuseTmuxSessionName(title: string, nativeId: string): string {
+  const slug =
+    (title || 'muse')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 20) || 'muse';
+  const suffix = nativeId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6) || 'session';
+  return `sh-muse-${slug}-${suffix}`;
+}
+
+const MUSE_RESUME_BOOL_FLAGS = new Set([
+  '--yolo',
+  '--disable-approval',
+  '--disable-sandbox',
+  '--trust-workspace',
+  '--parallel-tool-calls',
+  '--no-parallel-tool-calls',
+]);
+const MUSE_RESUME_VALUE_FLAGS = new Set([
+  '--model',
+  '--provider',
+  '--reasoning-effort',
+  '--effort',
+  '--permission-profile',
+  '--approval-mode',
+  '--sandbox-network',
+  '--preset',
+]);
+
+/**
+ * Extracts the posture flags worth replaying from the original terminal's
+ * launch cmdline, so the tmux relaunch resumes with the same trust /
+ * approval / sandbox / model posture the user started with — a terminal
+ * started with `--yolo` would otherwise stall on the workspace-trust
+ * prompt after restart. Anything unrecognized (binary path, subcommand,
+ * prompt text, endpoints) never carries over.
+ */
+export function extractMuseResumeFlags(cmdline: string): string[] {
+  const tokens = cmdline.split('\0').filter(Boolean);
+  const argv = tokens.length > 0 ? tokens : cmdline.split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  for (let i = 1; i < argv.length; i++) {
+    const token = argv[i] ?? '';
+    const eq = token.indexOf('=');
+    const name = token.startsWith('--') && eq > 2 ? token.slice(0, eq) : token;
+    if (MUSE_RESUME_BOOL_FLAGS.has(name)) {
+      out.push(name);
+    } else if (MUSE_RESUME_VALUE_FLAGS.has(name)) {
+      if (token.startsWith('--') && eq > 2) {
+        const value = token.slice(eq + 1);
+        if (value) out.push(name, value);
+      } else if (i + 1 < argv.length) {
+        out.push(name, argv[i + 1] ?? '');
+        i++;
+      }
+    }
+  }
+  return out;
+}
+
+/** Shell command tmux runs to resume a Muse session in a new terminal. */
+export function buildMuseResumeCommand(bin: string, nativeId: string, flags: string[] = []): string {
+  return [bin, 'resume', nativeId, ...flags].map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+}
+
+async function waitForMuseHolderExit(transcriptPath: string, pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    if (!alive || findMusePidHoldingLog(transcriptPath) !== pid) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return findMusePidHoldingLog(transcriptPath) !== pid;
+}
+
+function mspSessionTimestamp(raw: unknown, fallback: number): number {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return raw > 1e14 ? Math.floor(raw / 1000) : Math.floor(raw);
+  }
+  if (typeof raw === 'string') {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 /**
  * Cohesive HarnessDriver encapsulating all Muse (Meta) integration:
- * session-index.db discovery, event-log transcripts, live-session steering
- * via `muse session-message send`, and headless continuation via
- * `muse exec --json --session-id <uuid>`.
+ * session-index.db discovery plus an exact bi-directional MSP mirror —
+ * dispatch submits genuine user turns with MSP `turn/start` on the host
+ * that holds the session (Super Harness's pooled `muse serve`, or
+ * `muse attach --stdio` when the holding host is attachable), and
+ * transcripts fold the host's own `Item[]` from `session/read`. The raw
+ * event-log fold (`parseMuseJsonlLines`) remains only as the fallback when
+ * no MSP host can answer. Sessions a plain terminal holds expose no attach
+ * endpoint, so dispatch to them is refused honestly — never rerouted
+ * through peer messaging or headless double-driving.
  */
 export function createMuseDriver(): HarnessDriver {
+  const resolveBin = (): Promise<string | null> => whichBinary('muse');
+  const pooled = new MuseMspClient({ resolveBin, lane: 'serve' });
+  const attachClients = new Map<string, MuseMspClient>();
+
+  const attachClientFor = (nativeId: string): MuseMspClient => {
+    let client = attachClients.get(nativeId);
+    if (!client) {
+      client = new MuseMspClient({ resolveBin, lane: 'attach', attachSessionId: nativeId });
+      attachClients.set(nativeId, client);
+    }
+    return client;
+  };
+
   return {
     id: 'muse',
     displayName: 'Muse',
@@ -971,7 +1277,56 @@ export function createMuseDriver(): HarnessDriver {
       return computeFileFingerprint(resolved);
     },
 
-    loadTranscript(session, limit) {
+    async loadTranscript(session, limit) {
+      // Native mirror: ask the MSP host for its folded item history. A
+      // foreign host can serve session/read even for sessions another host
+      // (or a terminal) holds, so terminal activity mirrors here too.
+      try {
+        const res = await pooled.readSession(session.nativeId, false);
+        const history = res.history as Record<string, unknown> | undefined;
+        const items = extractMspHistoryItems(history);
+        if (items.length > 0) {
+          const all = foldMspItems(items, session.updatedAt);
+          const totalCount = all.length;
+          const sliced = totalCount > limit ? all.slice(totalCount - limit) : all;
+          const sess = (res.session ?? {}) as Record<string, unknown>;
+          const resolved = resolveMuseTranscriptPath(session.nativeId, session.transcriptPath);
+          let sourceMtimeMs = Date.now();
+          try {
+            if (resolved) sourceMtimeMs = fs.statSync(resolved).mtimeMs;
+          } catch {
+            // keep now
+          }
+          const snapshot = history?.snapshot as Record<string, unknown> | null | undefined;
+          const snapshotState = snapshot?.state as Record<string, unknown> | undefined;
+          const steps = mapMspTodoItems(snapshotState?.todoList);
+          const hasInProgressStep = Boolean(steps?.some((s) => s.status === 'in_progress'));
+          const recentlyWritten = Date.now() - sourceMtimeMs < 35_000;
+          const diskWorking = resolved ? museTranscriptIsWorking(resolved) : null;
+          const isWorking =
+            res.modelTurnRunning === true ||
+            (typeof sess.activeTurnId === 'string' && sess.activeTurnId.length > 0) ||
+            (recentlyWritten &&
+              (diskWorking === true || (diskWorking !== false && hasInProgressStep)));
+          return {
+            sessionId: session.id,
+            messages: sliced,
+            totalCount,
+            hasMore: totalCount > limit,
+            sourceMtimeMs,
+            liveActivity: {
+              isWorking,
+              steps,
+              lastEventAt: mspSessionTimestamp(
+                sess.lastActivityAt ?? sess.updatedAt,
+                session.updatedAt
+              ),
+            },
+          };
+        }
+      } catch {
+        // No MSP answer (host down, unknown session) — raw log fallback.
+      }
       const resolved = resolveMuseTranscriptPath(session.nativeId, session.transcriptPath);
       return loadMuseTranscript(session.nativeId, resolved, limit);
     },
@@ -1004,60 +1359,127 @@ export function createMuseDriver(): HarnessDriver {
       prompt: string,
       attachments: ImageAttachment[] | undefined,
       ctx: DispatchContext,
-      _opts?: { force?: boolean }
+      opts?: { force?: boolean }
     ): Promise<SendMessageResult> {
       const bin = await whichBinary('muse');
       if (!bin) return { ok: false, error: 'muse CLI not found' };
-
-      // Session open in a terminal right now -> steer it in place via the
-      // cross-session message bridge (the `tmux send-keys` equivalent)
-      // instead of double-driving the same log with a second process.
-      const liveSessions = await getLiveMuseSessions(bin, true);
-      if (liveSessions.has(session.nativeId)) {
-        try {
-          await execFileWithStdin(
-            bin,
-            ['session-message', 'send', '--target', session.nativeId, '--json'],
-            formatPromptWithImagePaths(prompt, attachments),
-            8000
-          );
-          ctx.triggerRefresh(800);
-          ctx.triggerRefresh(2500);
-          return { ok: true, dispatchedVia: 'muse session-message → live terminal session' };
-        } catch (err) {
-          return {
-            ok: false,
-            error: `muse session-message failed (session may have exited — retry to resume headlessly): ${err instanceof Error ? err.message : String(err)}`,
-          };
-        }
-      }
-
-      const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
-      ctx.spawnStreaming({
-        sessionId: session.id,
-        runId,
-        bin,
-        args: buildMuseExecArgs({
-          nativeId: session.nativeId,
-          cwd,
+
+      const live = (await getLiveMuseSessions(bin, true)).get(session.nativeId);
+      if (live && live.attachable !== true) {
+        // Terminal-held with no MSP attach endpoint. If that terminal is a
+        // tmux pane, type into it — the exact user turn a keystroke makes,
+        // with a transcript ack so a swallowed Enter is never silent.
+        const transcriptPath = resolveMuseTranscriptPath(
+          session.nativeId,
+          session.transcriptPath
+        );
+        const tmuxTarget = await resolveMuseTmuxTarget(transcriptPath);
+        if (tmuxTarget) {
+          const tmuxBin = (await whichBinary('tmux')) as string;
+          const body = formatPromptWithImagePaths(prompt, attachments);
+          try {
+            if (shouldUseTmuxPaste(body)) {
+              const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-muse-tmux-'));
+              const tmpFile = path.join(tmpDir, 'prompt.txt');
+              try {
+                fs.writeFileSync(tmpFile, body);
+                await execFileAsync(tmuxBin, ['load-buffer', tmpFile], { timeout: 4000 });
+                await execFileAsync(tmuxBin, ['paste-buffer', '-t', tmuxTarget, '-p', '-d'], {
+                  timeout: 4000,
+                });
+              } finally {
+                fs.rmSync(tmpDir, { recursive: true, force: true });
+              }
+            } else {
+              await execFileAsync(tmuxBin, ['send-keys', '-t', tmuxTarget, '-l', body], {
+                timeout: 4000,
+              });
+            }
+            await new Promise((r) => setTimeout(r, 150));
+            await execFileAsync(tmuxBin, ['send-keys', '-t', tmuxTarget, 'C-m'], {
+              timeout: 4000,
+            });
+            const delivered = await waitForMuseTranscriptDelivery(transcriptPath, prompt, 4000);
+            ctx.triggerRefresh(800);
+            ctx.triggerRefresh(2500);
+            if (!delivered) {
+              return {
+                ok: false,
+                error:
+                  'Super Harness typed your message into the tmux Muse terminal but could not confirm it landed in the session log within 4 seconds. Check that terminal before resending, to avoid a duplicate.',
+              };
+            }
+            return {
+              ok: true,
+              runId,
+              dispatchedVia: `Muse terminal typing via tmux (no MSP attach endpoint) → ${tmuxTarget}`,
+            };
+          } catch (err) {
+            return {
+              ok: false,
+              error: `tmux typing into the Muse terminal failed: ${err instanceof Error ? err.message : String(err)}`,
+            };
+          }
+        }
+        return { ok: false, error: buildMuseUndeliverableError(session, 'tui-held') };
+      }
+      const client = live ? attachClientFor(session.nativeId) : pooled;
+
+      try {
+        if (opts?.force) {
+          const steered = await client.steerTurn(session.nativeId, prompt, attachments);
+          if (steered) {
+            ctx.triggerRefresh(300);
+            return { ok: true, runId, dispatchedVia: 'Muse MSP turn/steer' };
+          }
+          if (client.hasActiveTurn(session.nativeId)) {
+            await client.interruptSession(session.nativeId);
+          }
+        }
+        if (session.model?.trim()) {
+          try {
+            const conn = await client.ensureConnected();
+            await conn.setModel(session.nativeId, session.model.trim());
+          } catch {
+            // Best-effort: the session's retained model binding still applies.
+          }
+        }
+        await client.sendTurn({
+          shSessionId: session.id,
+          nativeSessionId: session.nativeId,
           prompt,
-          model: session.model,
-          reasoningEffort: session.reasoningEffort,
           attachments,
-        }),
-        cwd,
-        parseLine: (line, gotAnyDelta) =>
-          parseMuseExecStreamLine(session.id, runId, line, gotAnyDelta, ctx.emitStream),
-      });
-      return {
-        ok: true,
-        runId,
-        dispatchedVia:
-          attachments && attachments.length > 0
-            ? `muse exec (${attachments.length} image${attachments.length === 1 ? '' : 's'})`
-            : 'muse exec',
-      };
+          reasoningEffort: session.reasoningEffort,
+          runId,
+          onEvent: ctx.emitStream,
+          onComplete: () => {
+            ctx.triggerRefresh(400);
+            ctx.triggerRefresh(1800);
+          },
+        });
+        return {
+          ok: true,
+          runId,
+          dispatchedVia:
+            attachments && attachments.length > 0
+              ? `Muse MSP turn/start (${attachments.length} image${attachments.length === 1 ? '' : 's'})`
+              : 'Muse MSP turn/start',
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (
+          classifyMspError(err) === 'session-in-use' ||
+          message.includes('no attach endpoint') ||
+          message.includes('held by a TUI')
+        ) {
+          return { ok: false, error: buildMuseUndeliverableError(session, 'tui-held') };
+        }
+        return {
+          ok: false,
+          error: buildMuseUndeliverableError(session, 'other'),
+        };
+      }
     },
 
     async startSession(
@@ -1067,33 +1489,233 @@ export function createMuseDriver(): HarnessDriver {
       const bin = await whichBinary('muse');
       if (!bin) return { ok: false, error: 'muse CLI not found' };
       const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
-      const nativeId = crypto.randomUUID();
-      const sessionId = `muse:${nativeId}`;
       const runId = crypto.randomBytes(6).toString('hex');
-      ctx.spawnStreaming({
-        sessionId,
-        runId,
-        bin,
-        args: buildMuseExecArgs({
-          nativeId,
-          cwd,
-          prompt: req.prompt || 'Hello! Summarize the workspace briefly.',
-          model: req.model,
+      try {
+        const nativeId = await pooled.startSession({ cwd, model: req.model });
+        const sessionId = `muse:${nativeId}`;
+        const promptText = req.prompt?.trim() || '';
+        const hasAttachments = Boolean(req.attachments && req.attachments.length > 0);
+        await pooled.sendTurn({
+          shSessionId: sessionId,
+          nativeSessionId: nativeId,
+          prompt:
+            promptText ||
+            (hasAttachments
+              ? 'Inspect the attached image(s).'
+              : 'Hello! Summarize the workspace briefly.'),
+          attachments: req.attachments,
           reasoningEffort: req.reasoningEffort,
-        }),
-        cwd,
-        parseLine: (line, gotAnyDelta) =>
-          parseMuseExecStreamLine(sessionId, runId, line, gotAnyDelta, ctx.emitStream),
-      });
-      ctx.triggerRefresh(800);
-      ctx.triggerRefresh(2500);
-      return { ok: true, sessionId };
+          runId,
+          onEvent: ctx.emitStream,
+          onComplete: () => {
+            ctx.triggerRefresh(400);
+            ctx.triggerRefresh(1800);
+          },
+        });
+        ctx.triggerRefresh(800);
+        ctx.triggerRefresh(2500);
+        return { ok: true, sessionId };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Muse MSP session/start failed',
+        };
+      }
     },
 
-    async controlDaemon(action) {
+    abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
+      if (!sessionId.startsWith('muse:')) return false;
+      const nativeId = sessionId.slice('muse:'.length);
+      const attach = attachClients.get(nativeId);
+      const client =
+        attach && attach.hasActiveTurn(nativeId) ? attach : pooled.hasActiveTurn(nativeId) ? pooled : null;
+      if (!client) return false;
+      void client.interruptSession(nativeId);
+      emitStream({ sessionId, runId: 'abort', kind: 'done' });
+      return true;
+    },
+
+    shutdown(): void {
+      pooled.close();
+      for (const client of attachClients.values()) client.close();
+      attachClients.clear();
+    },
+
+    async controlDaemon() {
+      // Super Harness hosts Muse sessions itself over MSP (`muse serve`);
+      // there is no separate remote daemon/desktop to start or stop. The
+      // Settings UI hides these controls via canControlDaemon=false — this
+      // clean one-liner is for MCP/API callers that ask anyway.
+      return { ok: false, error: 'Muse has no remote daemon to start or stop.' };
+    },
+
+    /**
+     * Restart a terminal-held Muse session inside tmux so Super Harness
+     * can reach it with the terminal typing lane. The holding process is
+     * identified as the muse process with this session's log open,
+     * cross-checked against Muse's live registry pid, and re-verified
+     * (cmdline still a plain interactive TUI, still the log holder)
+     * immediately before SIGTERM. A `muse serve` host is never signalled.
+     */
+    async promoteToTmux(
+      session: UnifiedSession,
+      ctx: DispatchContext
+    ): Promise<{ ok: boolean; tmuxSession?: string; error?: string }> {
+      const bin = await whichBinary('muse');
+      const tmuxBin = await whichBinary('tmux');
+      if (!bin) return { ok: false, error: 'muse CLI not found' };
+      if (!tmuxBin) return { ok: false, error: 'tmux not found' };
+
+      const transcriptPath = resolveMuseTranscriptPath(session.nativeId, session.transcriptPath);
+      if (!transcriptPath) {
+        return { ok: false, error: 'Could not locate the Muse session log for this session.' };
+      }
+
+      const live = (await getLiveMuseSessions(bin, true)).get(session.nativeId);
+      if (live && live.attachable === true) {
+        return {
+          ok: false,
+          error:
+            'This Muse session is already reachable over Muse\u2019s MSP API, so there is nothing to restart. Send your message here and Super Harness will deliver it natively.',
+        };
+      }
+
+      const existingPane = await resolveMuseTmuxTarget(transcriptPath);
+      if (existingPane) {
+        let tmuxSession = existingPane;
+        try {
+          const { stdout } = await execFileAsync(
+            tmuxBin,
+            ['display-message', '-t', existingPane, '-p', '#{session_name}'],
+            { timeout: 3000 }
+          );
+          if (stdout.trim()) tmuxSession = stdout.trim();
+        } catch {
+          // Pane id is still a usable label.
+        }
+        return { ok: true, tmuxSession };
+      }
+
+      if (museTranscriptIsWorking(transcriptPath) === true) {
+        return {
+          ok: false,
+          error:
+            'This Muse session is in the middle of a turn in its terminal. Restarting now would kill that work, so Super Harness left it running. Wait for the turn to finish (or stop it in that terminal), then use Restart in tmux again.',
+        };
+      }
+
+      const holderPid = findMusePidHoldingLog(transcriptPath);
+      if (live && !holderPid) {
+        return {
+          ok: false,
+          error:
+            'Super Harness could not identify the exact terminal process holding this Muse session, so it did not close anything. Close that terminal yourself, then use Restart in tmux again.',
+        };
+      }
+
+      let resumeFlags: string[] = [];
+      if (holderPid) {
+        resumeFlags = extractMuseResumeFlags(readProcessCmdline(holderPid));
+        const registryPid = readMuseRegistryPid(session.nativeId);
+        if (registryPid && registryPid !== holderPid) {
+          return {
+            ok: false,
+            error: `Super Harness found conflicting records for the process holding this Muse session (log holder pid ${holderPid}, live registry pid ${registryPid}), so it did not close anything. Close that terminal yourself, then use Restart in tmux again.`,
+          };
+        }
+        if (holderPid === process.pid) {
+          return { ok: false, error: 'This session is held by Super Harness itself; nothing to restart.' };
+        }
+        const kind = classifyMuseHolderCmdline(readProcessCmdline(holderPid));
+        if (kind === 'serve') {
+          return {
+            ok: false,
+            error:
+              'This Muse session is held by a `muse serve` host process, not a plain terminal, so Super Harness will not close it. It should already be reachable over MSP; press Retry on your message.',
+          };
+        }
+        if (kind !== 'tui') {
+          return {
+            ok: false,
+            error: `The process holding this Muse session (pid ${holderPid}) is not a plain Muse terminal, so Super Harness did not close it. Close it yourself, then use Restart in tmux again.`,
+          };
+        }
+        // Re-verify immediately before signalling: same pid, still the log
+        // holder, still an interactive Muse TUI.
+        if (
+          findMusePidHoldingLog(transcriptPath) !== holderPid ||
+          classifyMuseHolderCmdline(readProcessCmdline(holderPid)) !== 'tui'
+        ) {
+          return {
+            ok: false,
+            error:
+              'The terminal holding this Muse session changed while Super Harness was checking it, so nothing was closed. Use Restart in tmux again.',
+          };
+        }
+        try {
+          process.kill(holderPid, 'SIGTERM');
+        } catch (err) {
+          return {
+            ok: false,
+            error: `Could not close the Muse terminal process (pid ${holderPid}): ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+        // A Muse TUI's graceful shutdown takes ~25s (measured on an idle
+        // echo session: SIGTERM and double-SIGINT both release the session
+        // log only at process exit), so give it 30s before giving up.
+        const exited = await waitForMuseHolderExit(transcriptPath, holderPid, 30_000);
+        if (!exited) {
+          return {
+            ok: false,
+            error: `The Muse terminal process (pid ${holderPid}) did not close within 30 seconds of being asked, so Super Harness did not start a second copy of the session. Close that terminal yourself, then use Restart in tmux again.`,
+          };
+        }
+        invalidateMuseLiveSessionsCache();
+      }
+
+      const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
+      const tmuxSession = buildMuseTmuxSessionName(session.title || 'muse', session.nativeId);
+      try {
+        await execFileAsync(tmuxBin, ['has-session', '-t', tmuxSession], { timeout: 3000 });
+        return { ok: true, tmuxSession };
+      } catch {
+        // No such tmux session yet — create it below.
+      }
+      try {
+        await execFileAsync(
+          tmuxBin,
+          [
+            'new-session',
+            '-d',
+            '-s',
+            tmuxSession,
+            '-c',
+            cwd,
+            buildMuseResumeCommand(bin, session.nativeId, resumeFlags),
+          ],
+          { timeout: 5000 }
+        );
+      } catch (err) {
+        return {
+          ok: false,
+          error: `The old terminal was closed, but Super Harness could not relaunch the session in tmux: ${err instanceof Error ? err.message : String(err)}. Nothing was lost — resume it manually with: tmux new-session -s ${tmuxSession} 'muse resume ${session.nativeId}'`,
+        };
+      }
+
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        const pane = await resolveMuseTmuxTarget(transcriptPath);
+        if (pane) {
+          ctx.triggerRefresh(400);
+          ctx.triggerRefresh(1800);
+          return { ok: true, tmuxSession };
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      ctx.triggerRefresh(800);
       return {
         ok: false,
-        error: `Action '${action}' not supported for Muse — it runs as a terminal TUI (\`muse resume\`) with no daemon or desktop app.`,
+        error: `Super Harness relaunched the session in tmux session '${tmuxSession}' but could not confirm the Muse terminal finished starting there. Inspect it with: tmux attach -t ${tmuxSession} — if it is waiting on a prompt, answer it there and Super Harness will be able to type into it.`,
       };
     },
 
@@ -1103,3 +1725,4 @@ export function createMuseDriver(): HarnessDriver {
     },
   };
 }
+

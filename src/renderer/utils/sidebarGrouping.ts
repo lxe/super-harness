@@ -121,6 +121,15 @@ export function getAvailableSectionsForHarness(
   return named;
 }
 
+export function isSingleHarnessFilter(filter: SidebarFilterTab): filter is HarnessGroup {
+  return (
+    filter === 'antigravity' ||
+    filter === 'codex' ||
+    filter === 'claude' ||
+    filter === 'muse'
+  );
+}
+
 const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'antigravity', label: 'Antigravity' },
   { id: 'codex', label: 'Codex' },

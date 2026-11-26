@@ -1610,7 +1610,8 @@ export function parseClaudeStreamLine(
   runId: string,
   line: string,
   gotAnyDelta: boolean,
-  emitStream: (ev: StreamEvent) => void
+  emitStream: (ev: StreamEvent) => void,
+  partials = false
 ): boolean {
   const trimmed = line.trim();
   if (!trimmed) return false;
@@ -1625,6 +1626,24 @@ export function parseClaudeStreamLine(
     return false;
   }
 
+  // Partial streaming (--include-partial-messages): text deltas stream
+  // live; the following complete `assistant` line for the same segment is
+  // suppressed by the caller via gotAnyDelta so text never doubles.
+  if (obj.type === 'stream_event') {
+    const event = obj.event as Record<string, unknown> | undefined;
+    const delta = event?.delta as Record<string, unknown> | undefined;
+    if (
+      event?.type === 'content_block_delta' &&
+      delta?.type === 'text_delta' &&
+      typeof delta.text === 'string' &&
+      delta.text
+    ) {
+      emitStream({ sessionId, runId, kind: 'delta', text: delta.text });
+      return true;
+    }
+    return false;
+  }
+
   if (obj.type === 'assistant') {
     const msg = obj.message as Record<string, unknown> | undefined;
     const content = msg?.content;
@@ -1633,8 +1652,10 @@ export function parseClaudeStreamLine(
       for (const part of content) {
         const p = part as Record<string, unknown>;
         if (p.type === 'text' && typeof p.text === 'string' && p.text) {
-          emitStream({ sessionId, runId, kind: 'delta', text: p.text });
-          emitted = true;
+          if (!partials || !gotAnyDelta) {
+            emitStream({ sessionId, runId, kind: 'delta', text: p.text });
+            emitted = true;
+          }
         } else if (p.type === 'thinking' && typeof p.thinking === 'string' && p.thinking) {
           emitStream({
             sessionId,
@@ -1694,6 +1715,84 @@ export function parseClaudeStreamLine(
       emitStream({ sessionId, runId, kind: 'delta', text: obj.result });
       return true;
     }
+  }
+  return false;
+}
+
+/**
+ * Claude Code records a bracketed paste as `<pasted_content id="N">…</pasted_content id="N">`.
+ * Show the text a person sent, without the wrapper.
+ */
+export function stripPastedContentWrappers(text: string): string {
+  if (!text.includes('<pasted_content')) return text;
+  return text
+    .replace(/<pasted_content\b[^>]*>\n?/g, '')
+    .replace(/\n?<\/pasted_content\b[^>]*>/g, '');
+}
+
+/** Long/multiline prompts go through tmux paste-buffer instead of literal keystrokes. */
+export function shouldUseTmuxPasteBuffer(text: string): boolean {
+  return text.includes('\n') || text.length > 500;
+}
+
+/**
+ * Split text into the keystroke steps `typeIntoClaudeTmux` sends: literal chunks of at most
+ * `chunk` chars, with '\n' as its own step (typed as Ctrl+J, Claude's newline key).
+ */
+export function claudeTmuxTypingSteps(text: string, chunk = 100): string[] {
+  const steps: string[] = [];
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  lines.forEach((line, i) => {
+    if (i > 0) steps.push('\n');
+    for (let at = 0; at < line.length; at += chunk) steps.push(line.slice(at, at + chunk));
+  });
+  return steps;
+}
+
+/**
+ * Type a prompt into a Claude TUI as keystrokes. A bracketed paste (or one big burst of
+ * keys) makes Claude Code record the message as `<pasted_content>` / `[Pasted text #1]`,
+ * which shows up in the transcript and tells the model the text was pasted from elsewhere.
+ * Short chunks with small gaps stay below the paste detector; Ctrl+J inserts newlines.
+ */
+export async function typeIntoClaudeTmux(target: string, text: string, tmuxBin = 'tmux'): Promise<void> {
+  for (const step of claudeTmuxTypingSteps(text)) {
+    if (step === '\n') {
+      await execFileAsync(tmuxBin, ['send-keys', '-t', target, 'C-j'], { timeout: 4000 });
+    } else {
+      await execFileAsync(tmuxBin, ['send-keys', '-t', target, '-l', step], { timeout: 4000 });
+    }
+    await new Promise((r) => setTimeout(r, 30));
+  }
+}
+
+/**
+ * Delivery ack for tmux typing: poll the tail of the session JSONL for the
+ * submitted prompt (user line or queue-operation enqueue) so a raced or
+ * swallowed Enter is reported instead of silently lost.
+ */
+export async function waitForClaudeTranscriptDelivery(
+  transcriptPath: string | undefined,
+  prompt: string,
+  timeoutMs = 4000
+): Promise<boolean> {
+  if (!transcriptPath) return false;
+  const needle = JSON.stringify(prompt.trim().slice(0, 60)).slice(1, -1);
+  if (needle.length < 3) return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const st = fs.statSync(transcriptPath);
+      const start = Math.max(0, st.size - 262144);
+      const fd = fs.openSync(transcriptPath, 'r');
+      const buf = Buffer.alloc(st.size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      fs.closeSync(fd);
+      if (buf.toString('utf8').includes(needle)) return true;
+    } catch {
+      // transcript not flushed yet
+    }
+    await new Promise((r) => setTimeout(r, 150));
   }
   return false;
 }
@@ -1812,52 +1911,10 @@ export function buildClaudeResumeArgs(
   return args;
 }
 
-/**
- * Split text into the keystroke steps `typeIntoClaudeTmux` sends: literal chunks of at most
- * `chunk` chars, with '\n' as its own step (typed as Ctrl+J, Claude's newline key).
- */
-export function claudeTmuxTypingSteps(text: string, chunk = 100): string[] {
-  const steps: string[] = [];
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  lines.forEach((line, i) => {
-    if (i > 0) steps.push('\n');
-    for (let at = 0; at < line.length; at += chunk) steps.push(line.slice(at, at + chunk));
-  });
-  return steps;
-}
-
-/**
- * Type a prompt into a Claude TUI as keystrokes. A bracketed paste (or one big burst of
- * keys) makes Claude Code record the message as `<pasted_content>` / `[Pasted text #1]`,
- * which shows up in the transcript and tells the model the text was pasted from elsewhere.
- * Short chunks with small gaps stay below the paste detector; Ctrl+J inserts newlines.
- */
-export async function typeIntoClaudeTmux(target: string, text: string, tmuxBin = 'tmux'): Promise<void> {
-  for (const step of claudeTmuxTypingSteps(text)) {
-    if (step === '\n') {
-      await execFileAsync(tmuxBin, ['send-keys', '-t', target, 'C-j'], { timeout: 4000 });
-    } else {
-      await execFileAsync(tmuxBin, ['send-keys', '-t', target, '-l', step], { timeout: 4000 });
-    }
-    await new Promise((r) => setTimeout(r, 30));
-  }
-}
-
-/**
- * Claude Code records a bracketed paste as `<pasted_content id="N">…</pasted_content id="N">`.
- * Show the text a person sent, without the wrapper.
- */
-export function stripPastedContentWrappers(text: string): string {
-  if (!text.includes('<pasted_content')) return text;
-  return text
-    .replace(/<pasted_content\b[^>]*>\n?/g, '')
-    .replace(/\n?<\/pasted_content\b[^>]*>/g, '');
-}
-
 export function createClaudeDriver(): HarnessDriver {
   const remote = new RemoteClaudeMirror();
   const streamPool = new ClaudeStreamPool((sid, rid, line, gotAny, emit) =>
-    parseClaudeStreamLine(sid, rid, line, gotAny, emit)
+    parseClaudeStreamLine(sid, rid, line, gotAny, emit, true)
   );
 
   const startClaudeSession = async (
@@ -1929,11 +1986,18 @@ export function createClaudeDriver(): HarnessDriver {
     const bin = await whichBinary('claude');
     if (!bin) return { ok: false, error: 'claude CLI not found' };
     const runId = crypto.randomBytes(6).toString('hex');
+    const cliPrompt = formatPromptWithImagePaths(
+      req.prompt?.trim() ||
+        (req.attachments && req.attachments.length > 0
+          ? 'Inspect the attached image(s).'
+          : 'Hello! Summarize the workspace briefly.'),
+      req.attachments
+    );
     const args = [
       '--session-id',
       nativeId,
       '-p',
-      req.prompt || 'Hello! Summarize the workspace briefly.',
+      cliPrompt,
       '--output-format',
       'stream-json',
       '--verbose',
@@ -2048,6 +2112,10 @@ export function createClaudeDriver(): HarnessDriver {
       }
       const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
 
+      // No metadata-free native wire exists into a live Claude TUI (the
+      // cc-socks peer socket stamps origin.kind=peer), so tmux sessions are
+      // driven by typing — honestly labelled degraded, hardened with
+      // paste-buffer for long/multiline text and a transcript ack.
       const sendViaTmux = async (target: string): Promise<SendMessageResult> => {
         try {
           await typeIntoClaudeTmux(target, promptWithImages);
@@ -2055,8 +2123,26 @@ export function createClaudeDriver(): HarnessDriver {
           await execFileAsync('tmux', ['send-keys', '-t', target, 'C-m'], {
             timeout: 4000,
           });
+          const transcriptPath =
+            session.transcriptPath ||
+            resolveClaudeTranscriptPath(session.nativeId, session.cwd);
+          const delivered = await waitForClaudeTranscriptDelivery(
+            transcriptPath,
+            prompt,
+            4000
+          );
           ctx.triggerRefresh(1200);
-          return { ok: true, dispatchedVia: `tmux → ${target}` };
+          if (transcriptPath && !delivered) {
+            return {
+              ok: false,
+              error:
+                'Super Harness typed your message into the tmux Claude session but could not confirm it landed in the transcript within 4 seconds (tmux typing is a degraded route — Claude offers no metadata-free API into a live terminal). Check that terminal before resending, to avoid a duplicate.',
+            };
+          }
+          return {
+            ok: true,
+            dispatchedVia: `tmux typing (degraded, no native API) → ${target}`,
+          };
         } catch (err) {
           return {
             ok: false,

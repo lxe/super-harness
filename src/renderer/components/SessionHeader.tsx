@@ -326,19 +326,19 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                       </>
                     )}
                     <MenuDivider />
-                    {session.harnessGroup === 'claude' &&
-                      session.dispatchMode !== 'tmux-send' &&
-                      onPromoteToTmux && (
-                        <MenuItem
-                          icon={<Terminal className="w-3.5 h-3.5 text-emerald-300" />}
-                          onClick={() => {
-                            onPromoteToTmux();
-                            setMenuOpen(false);
-                          }}
-                        >
-                          Move to tmux + Remote
-                        </MenuItem>
-                      )}
+                    {session.dispatchMode !== 'tmux-send' && onPromoteToTmux && (
+                      <MenuItem
+                        icon={<Terminal className="w-3.5 h-3.5 text-emerald-300" />}
+                        onClick={() => {
+                          onPromoteToTmux();
+                          setMenuOpen(false);
+                        }}
+                      >
+                        {session.harnessGroup === 'muse'
+                          ? 'Restart in tmux (take over terminal)'
+                          : 'Move to tmux + Remote'}
+                      </MenuItem>
+                    )}
                     <MenuItem
                       icon={<RefreshCw className="w-3.5 h-3.5" />}
                       onClick={() => {

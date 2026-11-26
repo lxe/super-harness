@@ -16,13 +16,11 @@ import {
   resolveClaudeDispatchGuard,
 } from '../src/main/adapters/claudeAdapter';
 import {
-  buildCodexStartArgs,
   coalesceCodexItemRows,
   getCodexTranscriptFingerprint,
   isCodexActiveWriterError,
   loadCodexTranscriptFromPaths,
   parseCodexQueuedPayload,
-  parseCodexStreamLine,
 } from '../src/main/adapters/codexAdapter';
 import { extractAttachedImagesFromText } from '../src/main/adapters/types';
 import {
@@ -1035,53 +1033,6 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     ]);
   });
 
-  it('ignores Codex item.started / item.updated stream lines so commands and messages are not doubled', () => {
-    const events: Array<{ kind: string; text?: string; blockType?: string }> = [];
-    const emit = (ev: { kind: string; text?: string; block?: { type: string } }) =>
-      events.push({ kind: ev.kind, text: ev.text, blockType: ev.block?.type });
-
-    parseCodexStreamLine(
-      'codex:1',
-      'r1',
-      JSON.stringify({
-        type: 'item.started',
-        item: { type: 'command_execution', command: 'ls -la', status: 'in_progress' },
-      }),
-      emit as never
-    );
-    parseCodexStreamLine(
-      'codex:1',
-      'r1',
-      JSON.stringify({
-        type: 'item.completed',
-        item: { type: 'command_execution', command: 'ls -la', status: 'completed', exit_code: 0 },
-      }),
-      emit as never
-    );
-    parseCodexStreamLine(
-      'codex:1',
-      'r1',
-      JSON.stringify({
-        type: 'item.updated',
-        item: { type: 'agent_message', text: 'Checking files...' },
-      }),
-      emit as never
-    );
-    parseCodexStreamLine(
-      'codex:1',
-      'r1',
-      JSON.stringify({
-        type: 'item.completed',
-        item: { type: 'agent_message', text: 'Checking files...' },
-      }),
-      emit as never
-    );
-
-    expect(events).toHaveLength(2);
-    expect(events[0]).toEqual({ kind: 'block', text: undefined, blockType: 'command' });
-    expect(events[1]).toEqual({ kind: 'delta', text: 'Checking files...\n\n', blockType: undefined });
-  });
-
   it('suppresses duplicate streaming overlay once LiveSync persists the active assistant turn', () => {
     const before = [
       { id: 'u1', role: 'user' as const, timestamp: 1000, blocks: [{ type: 'text' as const, text: 'Hi' }] },
@@ -1241,29 +1192,4 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     expect(parsed.messages[1].blocks).toEqual([{ type: 'text', text: 'Main reply' }]);
   });
 
-  it('builds new Codex thread args without --remote so -C, -m, and reasoning effort are accepted', () => {
-    const args = buildCodexStartArgs(
-      {
-        harness: 'codex',
-        cwd: '/tmp/proj',
-        model: 'gpt-5.4',
-        reasoningEffort: 'high',
-        prompt: 'Testing one, two, three.',
-      },
-      '/tmp/proj'
-    );
-    expect(args).not.toContain('--remote');
-    expect(args).toEqual([
-      'exec',
-      '--skip-git-repo-check',
-      '--json',
-      '-C',
-      '/tmp/proj',
-      '-m',
-      'gpt-5.4',
-      '-c',
-      'model_reasoning_effort="high"',
-      'Testing one, two, three.',
-    ]);
-  });
 });

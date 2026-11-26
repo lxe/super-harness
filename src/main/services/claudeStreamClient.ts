@@ -57,10 +57,9 @@ export function buildClaudeStreamUserMessage(
   }
 
   const trimmed = prompt.trim();
+  // No synthesized prompt text: an image-only turn sends only image blocks.
   if (trimmed) {
     content.push({ type: 'text', text: trimmed });
-  } else if (content.length > 0) {
-    content.push({ type: 'text', text: 'Inspect the attached image(s).' });
   }
 
   return {
@@ -87,6 +86,11 @@ export function buildClaudeStreamWorkerArgs(opts: {
     '--output-format',
     'stream-json',
     '--verbose',
+    // Desktop's own host flags: route permission asks to this host over
+    // stdio and stream partial messages as `stream_event` deltas.
+    '--permission-prompt-tool',
+    'stdio',
+    '--include-partial-messages',
   ];
   if (opts.model?.trim()) {
     args.push('--model', opts.model.trim());
@@ -101,9 +105,75 @@ export function buildClaudeStreamWorkerArgs(opts: {
   return args;
 }
 
+/**
+ * Builds a host -> CLI control request frame, exactly as the Desktop SDK
+ * host writes it (`initialize`, `interrupt`, `set_model`, …).
+ */
+export function buildClaudeControlRequest(
+  requestId: string,
+  request: Record<string, unknown>
+): { type: 'control_request'; request_id: string; request: Record<string, unknown> } {
+  return { type: 'control_request', request_id: requestId, request };
+}
+
+const PERMISSIVE_CLAUDE_MODES = new Set(['bypassPermissions', 'acceptEdits', 'auto', 'dontAsk']);
+
+/**
+ * Builds the response frame for a CLI -> host control request, mirroring
+ * Claude Desktop's SDK host (`handleControlRequest` in its bundled JS):
+ * success `{type:'control_response',response:{subtype:'success',request_id,response}}`,
+ * error `{subtype:'error',request_id,error}`, and deliberate silence
+ * (`null`) for `request_user_dialog` when no dialog handler exists.
+ *
+ * `can_use_tool`: Desktop prompts its user; Super Harness has no permission
+ * card on this lane, so permissive session modes allow and manual/plan
+ * modes deny (fail-closed, same outcome as today's non-interactive runs).
+ * `elicitation`: declined, Desktop's verbatim no-handler fallback.
+ */
+export function buildClaudeControlResponse(
+  msg: Record<string, unknown>,
+  permissionMode?: string
+): Record<string, unknown> | null {
+  const requestId = typeof msg.request_id === 'string' ? msg.request_id : '';
+  const request = (msg.request ?? {}) as Record<string, unknown>;
+  const subtype = typeof request.subtype === 'string' ? request.subtype : '';
+  const success = (response: Record<string, unknown>) => ({
+    type: 'control_response',
+    response: { subtype: 'success', request_id: requestId, response },
+  });
+  switch (subtype) {
+    case 'can_use_tool':
+      return success(
+        permissionMode && PERMISSIVE_CLAUDE_MODES.has(permissionMode)
+          ? { behavior: 'allow' }
+          : {
+              behavior: 'deny',
+              message:
+                'Super Harness cannot prompt for tool permission in this session mode; the tool call was denied.',
+            }
+      );
+    case 'elicitation':
+      return success({ action: 'decline' });
+    case 'request_user_dialog':
+      return null;
+    default:
+      return {
+        type: 'control_response',
+        response: {
+          subtype: 'error',
+          request_id: requestId,
+          error: `Super Harness does not handle ${subtype || 'unknown control request'}`,
+        },
+      };
+  }
+}
+
 interface ActiveTurnState {
   runId: string;
+  /** Per-segment flag: partial deltas streamed for the current block. */
   gotAnyDelta: boolean;
+  /** Whole-turn flag: any text streamed (suppresses the result fallback). */
+  anyDelta?: boolean;
   onEvent: (ev: StreamEvent) => void;
   onComplete: () => void;
 }
@@ -112,12 +182,19 @@ interface WarmClaudeWorker {
   shSessionId: string;
   nativeSessionId: string;
   configKey: string;
+  model?: string;
+  reasoningEffort?: string;
+  permissionMode?: string;
   transcriptPath?: string;
   lastTranscriptMtimeMs: number;
   proc: ChildProcess;
   stdoutBuf: string;
   stderrTail: string;
   activeTurn: ActiveTurnState | null;
+  /** User frames submitted while busy; the CLI queues them natively in order. */
+  queuedTurns: Array<{ turn: ActiveTurnState; payload: Record<string, unknown> }>;
+  controlSeq: number;
+  abortTimer: ReturnType<typeof setTimeout> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -171,6 +248,8 @@ export class ClaudeStreamPool {
     const w = this.workers.get(shSessionId);
     if (!w) return;
     if (w.idleTimer) clearTimeout(w.idleTimer);
+    if (w.abortTimer) clearTimeout(w.abortTimer);
+    this.settleQueuedTurns(w, 'Claude worker closed before the queued turn could run.');
     this.workers.delete(shSessionId);
     try {
       w.proc.stdin?.end();
@@ -212,45 +291,102 @@ export class ClaudeStreamPool {
       shSessionId: opts.shSessionId,
       nativeSessionId: opts.nativeSessionId,
       configKey: opts.configKey,
+      model: opts.model,
+      reasoningEffort: opts.reasoningEffort,
+      permissionMode: opts.permissionMode,
       transcriptPath: opts.transcriptPath,
       lastTranscriptMtimeMs: this.getFileMtime(opts.transcriptPath),
       proc,
       stdoutBuf: '',
       stderrTail: '',
       activeTurn: null,
+      queuedTurns: [],
+      controlSeq: 0,
+      abortTimer: null,
       idleTimer: null,
     };
 
     const handleLine = (rawLine: string) => {
       const trimmed = rawLine.trim();
       if (!trimmed) return;
+
+      let obj: { type?: string; is_error?: boolean; result?: unknown } | null = null;
+      try {
+        obj = JSON.parse(trimmed) as { type?: string; is_error?: boolean; result?: unknown };
+      } catch {
+        obj = null;
+      }
+
+      // CLI -> host control requests are answered even between turns.
+      if (obj?.type === 'control_request') {
+        const response = buildClaudeControlResponse(
+          obj as Record<string, unknown>,
+          worker.permissionMode
+        );
+        if (response) {
+          try {
+            proc.stdin?.write(`${JSON.stringify(response)}\n`);
+          } catch {
+            // worker is closing
+          }
+        }
+        return;
+      }
+      if (obj?.type === 'control_response' || obj?.type === 'control_cancel_request') {
+        return;
+      }
+
       const turn = worker.activeTurn;
       if (!turn) return;
 
-      if (this.parseStreamLine(worker.shSessionId, turn.runId, trimmed, turn.gotAnyDelta, turn.onEvent)) {
+      const emitted = this.parseStreamLine(
+        worker.shSessionId,
+        turn.runId,
+        trimmed,
+        obj?.type === 'result' ? Boolean(turn.gotAnyDelta || turn.anyDelta) : turn.gotAnyDelta,
+        turn.onEvent
+      );
+      if (emitted) turn.anyDelta = true;
+      if (obj?.type === 'assistant') {
+        // Segment boundary: partial deltas for the next block start fresh.
+        turn.gotAnyDelta = false;
+      } else if (emitted) {
         turn.gotAnyDelta = true;
       }
 
-      // Check for turn completion (`type === 'result'`)
-      try {
-        const obj = JSON.parse(trimmed) as { type?: string; is_error?: boolean; result?: unknown };
-        if (obj.type === 'result') {
-          if (obj.is_error && typeof obj.result === 'string' && obj.result.trim()) {
-            turn.onEvent({
-              sessionId: worker.shSessionId,
-              runId: turn.runId,
-              kind: 'error',
-              error: obj.result.trim().slice(0, 1500),
-            });
+      if (obj?.type === 'result') {
+        if (worker.abortTimer) {
+          clearTimeout(worker.abortTimer);
+          worker.abortTimer = null;
+        }
+        if (obj.is_error && typeof obj.result === 'string' && obj.result.trim()) {
+          turn.onEvent({
+            sessionId: worker.shSessionId,
+            runId: turn.runId,
+            kind: 'error',
+            error: obj.result.trim().slice(0, 1500),
+          });
+        }
+        worker.activeTurn = null;
+        worker.lastTranscriptMtimeMs = this.getFileMtime(worker.transcriptPath);
+        turn.onEvent({ sessionId: worker.shSessionId, runId: turn.runId, kind: 'done' });
+        turn.onComplete();
+        const next = worker.queuedTurns.shift();
+        if (next) {
+          worker.activeTurn = next.turn;
+          next.turn.onEvent({
+            sessionId: worker.shSessionId,
+            runId: next.turn.runId,
+            kind: 'start',
+          });
+          try {
+            proc.stdin?.write(`${JSON.stringify(next.payload)}\n`);
+          } catch {
+            this.closeWorker(worker.shSessionId);
           }
-          worker.activeTurn = null;
-          worker.lastTranscriptMtimeMs = this.getFileMtime(worker.transcriptPath);
-          turn.onEvent({ sessionId: worker.shSessionId, runId: turn.runId, kind: 'done' });
-          turn.onComplete();
+        } else {
           this.scheduleIdleClose(worker);
         }
-      } catch {
-        // ignore non-JSON lines
       }
     };
 
@@ -308,7 +444,30 @@ export class ClaudeStreamPool {
     });
 
     this.workers.set(opts.shSessionId, worker);
+    // Desktop hosts open with the initialize control handshake.
+    this.writeControl(worker, { subtype: 'initialize' });
     return worker;
+  }
+
+  private writeControl(worker: WarmClaudeWorker, request: Record<string, unknown>): void {
+    try {
+      worker.proc.stdin?.write(
+        `${JSON.stringify(buildClaudeControlRequest(`sh-ctl-${++worker.controlSeq}`, request))}\n`
+      );
+    } catch {
+      // worker is closing
+    }
+  }
+
+  private settleQueuedTurns(worker: WarmClaudeWorker, error?: string): void {
+    const queued = worker.queuedTurns.splice(0);
+    for (const { turn } of queued) {
+      if (error) {
+        turn.onEvent({ sessionId: worker.shSessionId, runId: turn.runId, kind: 'error', error });
+      }
+      turn.onEvent({ sessionId: worker.shSessionId, runId: turn.runId, kind: 'done' });
+      turn.onComplete();
+    }
   }
 
   async sendTurn(opts: {
@@ -333,20 +492,47 @@ export class ClaudeStreamPool {
 
     let worker = this.workers.get(opts.shSessionId);
     if (worker) {
-      if (worker.activeTurn) {
-        throw new Error(
-          'This Claude session already has an active turn running in Super Harness. Wait for it to finish or queue your message.'
-        );
-      }
       const currentMtime = this.getFileMtime(opts.transcriptPath);
       const externallyUpdated =
-        worker.lastTranscriptMtimeMs > 0 && currentMtime > worker.lastTranscriptMtimeMs + 500;
-      const configChanged = worker.configKey !== configKey;
+        !worker.activeTurn &&
+        worker.lastTranscriptMtimeMs > 0 &&
+        currentMtime > worker.lastTranscriptMtimeMs + 500;
       const dead = worker.proc.killed || !worker.proc.stdin?.writable;
 
-      if (externallyUpdated || configChanged || dead) {
+      if (dead) {
         this.closeWorker(opts.shSessionId);
         worker = undefined;
+      } else if (externallyUpdated) {
+        this.closeWorker(opts.shSessionId);
+        worker = undefined;
+      } else if (worker.configKey !== configKey) {
+        // Model/permission changes go over the native control channel
+        // (set_model / set_permission_mode) instead of a respawn; an effort
+        // change still recycles (no wire subtype for it).
+        if ((worker.reasoningEffort || '') !== (opts.reasoningEffort || '')) {
+          if (!worker.activeTurn) {
+            this.closeWorker(opts.shSessionId);
+            worker = undefined;
+          }
+          // Busy: keep the worker; the new effort applies after recycle.
+        } else {
+          if ((worker.model || '') !== (opts.model || '') && opts.model?.trim()) {
+            this.writeControl(worker, { subtype: 'set_model', model: opts.model.trim() });
+            worker.model = opts.model;
+          }
+          if (
+            (worker.permissionMode || '') !== (opts.permissionMode || '') &&
+            opts.permissionMode &&
+            VALID_CLAUDE_PERM_MODES.has(opts.permissionMode)
+          ) {
+            this.writeControl(worker, {
+              subtype: 'set_permission_mode',
+              mode: opts.permissionMode,
+            });
+            worker.permissionMode = opts.permissionMode;
+          }
+          if (worker) worker.configKey = configKey;
+        }
       }
     }
 
@@ -369,15 +555,23 @@ export class ClaudeStreamPool {
       worker.idleTimer = null;
     }
 
-    worker.activeTurn = {
+    const turn: ActiveTurnState = {
       runId: opts.runId,
       gotAnyDelta: false,
       onEvent: opts.onEvent,
       onComplete: opts.onComplete,
     };
-    opts.onEvent({ sessionId: opts.shSessionId, runId: opts.runId, kind: 'start' });
-
     const payload = buildClaudeStreamUserMessage(opts.prompt, opts.attachments);
+
+    // Busy worker: submit into the native input queue (the CLI runs user
+    // frames in FIFO order) instead of throwing.
+    if (worker.activeTurn) {
+      worker.queuedTurns.push({ turn, payload });
+      return;
+    }
+
+    worker.activeTurn = turn;
+    opts.onEvent({ sessionId: opts.shSessionId, runId: opts.runId, kind: 'start' });
     try {
       worker.proc.stdin!.write(`${JSON.stringify(payload)}\n`);
     } catch (err) {
@@ -390,15 +584,20 @@ export class ClaudeStreamPool {
   abort(shSessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
     const worker = this.workers.get(shSessionId);
     if (!worker) return false;
-    const turn = worker.activeTurn;
-    worker.activeTurn = null;
-    this.closeWorker(shSessionId);
-    if (turn) {
-      emitStream({ sessionId: shSessionId, runId: turn.runId, kind: 'done' });
-      turn.onComplete();
-    } else {
+    if (!worker.activeTurn && worker.queuedTurns.length === 0) {
+      this.closeWorker(shSessionId);
       emitStream({ sessionId: shSessionId, runId: 'abort', kind: 'done' });
+      return true;
     }
+    this.settleQueuedTurns(worker);
+    // Native interrupt over the control channel; the turn settles when the
+    // CLI emits its result. Kill only if it does not settle promptly.
+    this.writeControl(worker, { subtype: 'interrupt', cancel_queued: true });
+    if (worker.abortTimer) clearTimeout(worker.abortTimer);
+    worker.abortTimer = setTimeout(() => {
+      worker.abortTimer = null;
+      if (worker.activeTurn) this.closeWorker(shSessionId);
+    }, 2500);
     return true;
   }
 

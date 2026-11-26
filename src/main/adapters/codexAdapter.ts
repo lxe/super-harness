@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -31,7 +31,6 @@ import {
 import {
   createUniqueIdGenerator,
   extractAttachedImagesFromText,
-  formatPromptWithImagePaths,
   type DaemonControlAction,
   type DispatchContext,
   type HarnessDriver,
@@ -1110,128 +1109,6 @@ export async function loadCodexTranscript(
   return loadCodexTranscriptFromPaths(nativeId, rolloutPath, limit);
 }
 
-/**
- * Parses one JSONL stdout line emitted by `codex exec --json`.
- * Only emits completed items (ignoring `item.started` / `item.updated`) so
- * commands, reasoning, and agent messages are never double-counted.
- */
-export function parseCodexStreamLine(
-  sessionId: string,
-  runId: string,
-  line: string,
-  emitStream: (ev: StreamEvent) => void
-): boolean {
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    if (!trimmed.startsWith('Warning:')) {
-      emitStream({ sessionId, runId, kind: 'delta', text: `${trimmed}\n` });
-      return true;
-    }
-    return false;
-  }
-
-  const eventType = typeof obj.type === 'string' ? obj.type : '';
-  if (eventType === 'error' || eventType === 'turn.failed') {
-    const errMsg =
-      typeof obj.message === 'string'
-        ? obj.message
-        : typeof (obj.error as Record<string, unknown>)?.message === 'string'
-          ? String((obj.error as Record<string, unknown>).message)
-          : JSON.stringify(obj);
-    emitStream({ sessionId, runId, kind: 'error', error: errMsg });
-    return false;
-  }
-
-  // Codex emits item.started -> item.updated -> item.completed for each item;
-  // skip intermediate lifecycle events so commands and messages never duplicate.
-  if (eventType === 'item.started' || eventType === 'item.updated') {
-    return false;
-  }
-
-  const item = obj.item as Record<string, unknown> | undefined;
-  if (item) {
-    if (item.type === 'agent_message' && typeof item.text === 'string' && item.text) {
-      emitStream({ sessionId, runId, kind: 'delta', text: `${item.text}\n\n` });
-      return true;
-    }
-    if (item.type === 'reasoning' && typeof item.text === 'string' && item.text) {
-      emitStream({
-        sessionId,
-        runId,
-        kind: 'block',
-        block: { type: 'thinking', text: item.text },
-      });
-      return false;
-    }
-    if (item.type === 'command_execution') {
-      emitStream({
-        sessionId,
-        runId,
-        kind: 'block',
-        block: {
-          type: 'command',
-          command: String(item.command ?? ''),
-          output: typeof item.aggregated_output === 'string' ? item.aggregated_output : undefined,
-          exitCode: typeof item.exit_code === 'number' ? item.exit_code : null,
-          status: typeof item.status === 'string' ? item.status : undefined,
-        },
-      });
-      return false;
-    }
-    if (item.type === 'file_change' && Array.isArray(item.changes)) {
-      emitStream({
-        sessionId,
-        runId,
-        kind: 'block',
-        block: {
-          type: 'file_change',
-          changes: (item.changes as Array<Record<string, unknown>>).map((c) => ({
-            path: String(c.path ?? 'file'),
-            kind: String(c.kind ?? 'update'),
-          })),
-        },
-      });
-      return false;
-    }
-    if (item.type === 'mcp_tool_call') {
-      emitStream({
-        sessionId,
-        runId,
-        kind: 'block',
-        block: {
-          type: 'tool_call',
-          name: String(item.tool ?? 'mcp'),
-          server: typeof item.server === 'string' ? item.server : undefined,
-          args: JSON.stringify(item.arguments ?? {}, null, 2).slice(0, 2000),
-          status: typeof item.status === 'string' ? item.status : undefined,
-        },
-      });
-      return false;
-    }
-    if (item.type === 'error' && typeof item.message === 'string') {
-      // Ignore harmless config deprecation warnings from ~/.codex/config.toml
-      if (!item.message.includes('is deprecated')) {
-        emitStream({ sessionId, runId, kind: 'error', error: item.message });
-      }
-      return false;
-    }
-  }
-  if (typeof obj.delta === 'string' && obj.delta) {
-    emitStream({ sessionId, runId, kind: 'delta', text: obj.delta });
-    return true;
-  }
-  return false;
-}
-
-/**
- * Matches transient Codex daemon concurrency rejections (`already has an active writer`
- * or `remote thread already has an active turn`) that should transparently fall back
- * to `codex queue --resume` instead of surfacing an error to the user.
- */
 export function isCodexActiveWriterError(text: string): boolean {
   return /already has an active (?:writer|turn)|turn already in progress|thread is busy/i.test(
     text
@@ -1239,94 +1116,36 @@ export function isCodexActiveWriterError(text: string): boolean {
 }
 
 /**
- * Builds `codex exec` arguments for starting a brand-new Codex thread.
- * Intentionally omits `--remote` because `codex exec --remote` rejects `-C`,
- * `-m`, and `-c model_reasoning_effort=...` (new threads have no active writer).
- */
-export function buildCodexStartArgs(req: StartSessionRequest, cwd: string): string[] {
-  const args = ['exec', '--skip-git-repo-check', '--json', '-C', cwd];
-  if (req.model) args.push('-m', req.model);
-  if (req.reasoningEffort) {
-    args.push('-c', `model_reasoning_effort="${req.reasoningEffort}"`);
-  }
-  args.push(req.prompt || 'Inspect this directory and wait for further instructions.');
-  return args;
-}
-
-/**
- * Builds the `codex queue` CLI arguments used to enqueue a follow-up prompt into
- * Codex's native SQLite queue (`~/.codex/queue_1.sqlite`) so it stays synchronized
- * with Codex Desktop and survives restarts.
- */
-export function buildCodexQueueArgs(
-  nativeThreadId: string,
-  promptWithImages: string,
-  useDaemon: boolean,
-  opts?: { model?: string; reasoningEffort?: string }
-): string[] {
-  const args = ['queue'];
-  if (useDaemon) args.push('--remote', 'unix://');
-  if (opts?.model) args.push('-c', `model="${opts.model}"`);
-  if (opts?.reasoningEffort) {
-    args.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
-  }
-  args.push('--thread', nativeThreadId, '--message', promptWithImages, '--resume');
-  return args;
-}
-
-export function buildCodexResumeArgs(
-  nativeThreadId: string,
-  prompt: string,
-  attachments: ImageAttachment[] | undefined,
-  useDaemon: boolean,
-  opts?: { model?: string; reasoningEffort?: string }
-): string[] {
-  const hasImages = Boolean(attachments && attachments.length > 0);
-  const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
-  const args = ['exec', 'resume'];
-  if (useDaemon) {
-    args.push('--remote', 'unix://', '--skip-git-repo-check', '--json');
-    if (opts?.model) args.push('-m', opts.model);
-    if (opts?.reasoningEffort) {
-      args.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
-    }
-    args.push(nativeThreadId, promptWithImages);
-  } else {
-    args.push('--skip-git-repo-check', '--json');
-    if (opts?.model) args.push('-m', opts.model);
-    if (opts?.reasoningEffort) {
-      args.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
-    }
-    if (hasImages) {
-      for (const att of attachments!) {
-        args.push('-i', att.path);
-      }
-      args.push('--');
-    }
-    args.push(nativeThreadId, prompt.trim() || 'Inspect the attached image(s).');
-  }
-  return args;
-}
-
-/**
  * Cohesive HarnessDriver encapsulating all OpenAI Codex integration
  * (SQLite state/history/queue stores, rollouts, app-server daemon, CLI).
  */
 export function createCodexDriver(): HarnessDriver {
-  const activeRuns = new Map<string, ChildProcess>();
-  const appServer = new CodexAppServerClient(undefined, (itemType, raw) =>
-    parseCodexItemToBlocks(itemType, raw)
+  let activitySink: ((sessionId: string) => void) | null = null;
+  const activityCounters = new Map<string, number>();
+  const appServer = new CodexAppServerClient(
+    undefined,
+    (itemType, raw) => parseCodexItemToBlocks(itemType, raw),
+    (threadId) => {
+      activityCounters.set(threadId, (activityCounters.get(threadId) ?? 0) + 1);
+      activitySink?.(`codex:${threadId}`);
+    }
   );
 
-  const killActiveRun = (sessionId: string) => {
-    const prev = activeRuns.get(sessionId);
-    if (!prev) return;
+  /** Starts the managed app-server daemon if its socket is missing. */
+  const ensureDaemon = async (): Promise<boolean> => {
+    if (appServer.isSocketAvailable()) return true;
+    const bin = await resolveCodexBinary();
+    if (!bin) return false;
     try {
-      prev.kill('SIGTERM');
+      await execFileAsync(bin, ['app-server', 'daemon', 'start'], { timeout: 15_000 });
     } catch {
-      // ignore
+      // fall through to socket check
     }
-    activeRuns.delete(sessionId);
+    for (let i = 0; i < 20; i++) {
+      if (appServer.isSocketAvailable()) return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return appServer.isSocketAvailable();
   };
 
   return {
@@ -1337,11 +1156,87 @@ export function createCodexDriver(): HarnessDriver {
       return detectCodex(processes, maxSessions, showArchived);
     },
 
-    getTranscriptFingerprint(session) {
-      return getCodexTranscriptFingerprint(session.nativeId, session.transcriptPath);
+    async getTranscriptFingerprint(session) {
+      const base = await getCodexTranscriptFingerprint(session.nativeId, session.transcriptPath);
+      // Daemon push notifications advance the fingerprint even when the
+      // SQLite projection has not caught up yet.
+      return `${base}|a:${activityCounters.get(session.nativeId) ?? 0}`;
     },
 
-    loadTranscript(session, limit) {
+    async loadTranscript(session, limit) {
+      // Native mirror first: thread/items/list on the shared app-server
+      // daemon (the API Codex Desktop renders). SQLite/rollout below stays
+      // only as the offline cold fallback when no daemon can answer.
+      if (appServer.isSocketAvailable()) {
+        try {
+          // Read without resuming first: items/list is store-backed on the
+          // daemon, while resume would load (and potentially claim) a
+          // thread another client owns. Subscribe afterwards, best-effort.
+          const pageLimit = Math.min(2000, Math.max(400, limit * 16));
+          const rowsDesc: CodexItemRow[] = [];
+          let cursor: string | null = null;
+          let ordinal = 0;
+          for (let page = 0; page < 4; page++) {
+            const res = await appServer.listItemsPage(session.nativeId, pageLimit, cursor);
+            for (const entry of res.data) {
+              const item = (entry.item ?? {}) as Record<string, unknown>;
+              rowsDesc.push({
+                turn_id: typeof entry.turnId === 'string' ? entry.turnId : '',
+                item_id: typeof item.id === 'string' ? item.id : `rpc-${ordinal}`,
+                item_type: typeof item.type === 'string' ? item.type : '',
+                item_json: JSON.stringify(item),
+                created_at_ms:
+                  typeof entry.startedAtMs === 'number' ? entry.startedAtMs : null,
+                rollout_ordinal: ordinal++,
+              });
+            }
+            cursor = res.nextCursor;
+            if (!cursor) break;
+          }
+          if (rowsDesc.length > 0) {
+            void appServer.resumeThread(session.nativeId).catch(() => {});
+            const messagesAll = coalesceCodexItemRows(rowsDesc.reverse());
+            let queuedMessages: QueuedMessageItem[] | undefined;
+            try {
+              const q = await appServer.queueList(session.nativeId);
+              if (q.length > 0) queuedMessages = q;
+            } catch {
+              // queue stays undefined; transcript is unaffected
+            }
+            let isWorking = appServer.hasActiveTurn(session.nativeId);
+            if (!isWorking) {
+              try {
+                const turns = await appServer.listTurns(session.nativeId, 3);
+                isWorking = turns.some(
+                  (t) => String(t.status || '').toLowerCase() === 'inprogress'
+                );
+              } catch {
+                // keep own-turn signal
+              }
+            }
+            const sliced =
+              messagesAll.length > limit
+                ? messagesAll.slice(messagesAll.length - limit)
+                : messagesAll;
+            return {
+              sessionId: session.id,
+              messages: sliced,
+              totalCount: messagesAll.length,
+              hasMore: messagesAll.length > limit || cursor !== null,
+              sourceMtimeMs: Date.now(),
+              liveActivity: {
+                isWorking,
+                focus: isWorking ? 'Codex turn in progress' : undefined,
+                queuedMessages,
+                lastEventAt: Date.now(),
+              },
+            };
+          }
+        } catch {
+          // Daemon refused (e.g. Desktop-private thread unknown to it):
+          // cold store fallback below.
+        }
+      }
       return loadCodexTranscript(session.nativeId, session.transcriptPath, limit);
     },
 
@@ -1392,184 +1287,73 @@ export function createCodexDriver(): HarnessDriver {
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
       const hasImages = Boolean(attachments && attachments.length > 0);
-      const useDaemon = hasCodexDaemonSocket();
-      const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
 
-      // Primary path: speak directly to Codex's shared `app-server` daemon WebSocket
-      // (the exact same upstream JSON-RPC API Codex Desktop uses), giving native
-      // `localImage` attachments, real-time bidirectional streaming, `turn/steer`, and `turn/interrupt`.
-      if (appServer.isSocketAvailable()) {
-        if (opts?.force) {
-          const steered = await appServer.steerTurn(session.nativeId, prompt, attachments);
-          if (steered) {
-            ctx.triggerRefresh(300);
-            return {
-              ok: true,
-              runId,
-              dispatchedVia: 'Codex live steer',
-            };
-          }
-          if (appServer.hasActiveTurn(session.nativeId)) {
-            await appServer.interruptTurn(session.nativeId);
-          }
-        }
-        try {
-          await appServer.sendTurn({
-            shSessionId: session.id,
-            nativeThreadId: session.nativeId,
-            cwd,
-            prompt,
-            attachments,
-            model: session.model,
-            reasoningEffort: session.reasoningEffort,
-            runId,
-            onEvent: ctx.emitStream,
-            onComplete: () => {
-              ctx.triggerRefresh(400);
-              ctx.triggerRefresh(1800);
-            },
-          });
-          return {
-            ok: true,
-            runId,
-            dispatchedVia: hasImages
-              ? `Codex app-server (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
-              : 'Codex app-server',
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (isCodexActiveWriterError(msg)) {
-            const bin = await resolveCodexBinary();
-            if (bin) {
-              const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, true, {
-                model: session.model,
-                reasoningEffort: session.reasoningEffort,
-              });
-              try {
-                await execFileAsync(bin, queueArgs, { cwd, timeout: 15_000 });
-                ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
-                ctx.triggerRefresh(200);
-                ctx.triggerRefresh(1000);
-                return { ok: true, runId, dispatchedVia: 'Codex queue' };
-              } catch {
-                // Fall through to CLI fallback below
-              }
-            }
-          }
-          // Fall through cleanly to CLI fallback if socket RPC failed
-        }
+      // Sole transport: Codex's shared app-server daemon — the exact
+      // JSON-RPC API Codex Desktop uses. There is deliberately no
+      // `codex exec`/queue-CLI fallback: switching APIs on failure would
+      // deliver through a different surface than the native UI.
+      if (!(await ensureDaemon())) {
+        return {
+          ok: false,
+          error:
+            'Your message was not delivered: the Codex app-server daemon is not running and could not be started. Open Codex Desktop or run `codex app-server daemon start`, then press Retry.',
+        };
       }
 
-      const bin = await resolveCodexBinary();
-      if (!bin) return { ok: false, error: 'codex binary not found in PATH' };
-
-      // Fallback CLI path when the app-server daemon socket isn't available.
-      const args = buildCodexResumeArgs(session.nativeId, prompt, attachments, useDaemon, {
-        model: session.model,
-        reasoningEffort: session.reasoningEffort,
-      });
-
-      killActiveRun(session.id);
-      const child = spawn(bin, args, {
-        cwd,
-        env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      activeRuns.set(session.id, child);
-      ctx.emitStream({ sessionId: session.id, runId, kind: 'start' });
-
-      let stdoutBuf = '';
-      let stderrBuf = '';
-      let gotAnyDelta = false;
-      let hitActiveWriter = false;
-
-      const handleLine = (line: string) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        if (isCodexActiveWriterError(trimmed)) {
-          hitActiveWriter = true;
-          return;
+      if (opts?.force) {
+        const steered = await appServer.steerTurn(session.nativeId, prompt, attachments);
+        if (steered) {
+          ctx.triggerRefresh(300);
+          return { ok: true, runId, dispatchedVia: 'Codex live steer' };
         }
-        if (parseCodexStreamLine(session.id, runId, trimmed, ctx.emitStream)) {
-          gotAnyDelta = true;
-        }
-      };
+        await appServer.interruptTurn(session.nativeId);
+      }
 
-      child.stdout?.on('data', (chunk: Buffer) => {
-        stdoutBuf += chunk.toString('utf8');
-        const lines = stdoutBuf.split('\n');
-        stdoutBuf = lines.pop() ?? '';
-        for (const line of lines) handleLine(line);
-      });
-
-      child.stderr?.on('data', (chunk: Buffer) => {
-        stderrBuf = (stderrBuf + chunk.toString('utf8')).slice(-4000);
-        if (isCodexActiveWriterError(stderrBuf)) {
-          hitActiveWriter = true;
-        }
-      });
-
-      child.on('error', (err) => {
-        activeRuns.delete(session.id);
-        ctx.emitStream({ sessionId: session.id, runId, kind: 'error', error: err.message });
-        ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
-      });
-
-      child.on('close', (code) => {
-        if (stdoutBuf.trim()) handleLine(stdoutBuf);
-        activeRuns.delete(session.id);
-
-        if (hitActiveWriter || isCodexActiveWriterError(stderrBuf)) {
-          // Another Codex client (e.g. Codex Desktop) holds the active writer lock on this thread.
-          // Route seamlessly through `codex queue --resume` so the active writer receives and runs
-          // the message directly with zero error banner.
-          const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon, {
-            model: session.model,
-            reasoningEffort: session.reasoningEffort,
-          });
-          execFile(bin, queueArgs, { cwd, timeout: 15_000 }, (qErr, _qOut, qStderr) => {
-            if (qErr) {
-              ctx.emitStream({
-                sessionId: session.id,
-                runId,
-                kind: 'error',
-                error: (qStderr || qErr.message || 'Failed to queue message for active Codex thread').slice(
-                  0,
-                  1000
-                ),
-              });
-            }
+      try {
+        await appServer.sendTurn({
+          shSessionId: session.id,
+          nativeThreadId: session.nativeId,
+          cwd,
+          prompt,
+          attachments,
+          model: session.model,
+          reasoningEffort: session.reasoningEffort,
+          runId,
+          onEvent: ctx.emitStream,
+          onComplete: () => {
+            ctx.triggerRefresh(400);
+            ctx.triggerRefresh(1800);
+          },
+        });
+        return {
+          ok: true,
+          runId,
+          dispatchedVia: hasImages
+            ? `Codex app-server (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
+            : 'Codex app-server',
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isCodexActiveWriterError(msg)) {
+          // Another Codex client (e.g. Codex Desktop's private app-server)
+          // owns the active turn. Deliver natively through the thread queue
+          // so that owner runs it next — same queue Desktop renders.
+          try {
+            await appServer.queueAdd(session.nativeId, prompt, attachments);
             ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
-            ctx.triggerRefresh(250);
-            ctx.triggerRefresh(1200);
-            ctx.triggerRefresh(3000);
-          });
-          return;
+            ctx.triggerRefresh(200);
+            ctx.triggerRefresh(1000);
+            return { ok: true, runId, dispatchedVia: 'Codex queue (app-server)' };
+          } catch {
+            return {
+              ok: false,
+              error:
+                'Your message was not delivered: another Codex client (for example Codex Desktop) is running this thread and the shared daemon could not queue for it. Send it from that Codex window, or wait for its turn to finish and press Retry.',
+            };
+          }
         }
-
-        if (code && code !== 0) {
-          const errText = stderrBuf.trim() || `Codex exited with code ${code}`;
-          ctx.emitStream({
-            sessionId: session.id,
-            runId,
-            kind: 'error',
-            error: errText.slice(0, 1500),
-          });
-        }
-        ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
-        ctx.triggerRefresh(600);
-        ctx.triggerRefresh(2200);
-      });
-
-      return {
-        ok: true,
-        runId,
-        dispatchedVia: useDaemon
-          ? hasImages
-            ? `Codex live daemon (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
-            : 'Codex live daemon'
-          : 'Codex CLI',
-      };
+        return { ok: false, error: msg.slice(0, 1000) };
+      }
     },
 
     async queueMessage(
@@ -1578,25 +1362,18 @@ export function createCodexDriver(): HarnessDriver {
       attachments: ImageAttachment[] | undefined,
       ctx: DispatchContext
     ): Promise<SendMessageResult | null> {
-      const bin = await resolveCodexBinary();
-      if (!bin) return { ok: false, error: 'codex binary not found in PATH' };
-
-      const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
-      const useDaemon = hasCodexDaemonSocket();
-      const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
-      const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon, {
-        model: session.model,
-        reasoningEffort: session.reasoningEffort,
-      });
-
+      if (!(await ensureDaemon())) {
+        return {
+          ok: false,
+          error:
+            'Your message was not queued: the Codex app-server daemon is not running and could not be started. Open Codex Desktop or run `codex app-server daemon start`, then press Retry.',
+        };
+      }
       try {
-        await execFileAsync(bin, queueArgs, { cwd, timeout: 15_000 });
+        await appServer.queueAdd(session.nativeId, prompt, attachments);
         ctx.triggerRefresh(150);
         ctx.triggerRefresh(800);
-        return {
-          ok: true,
-          dispatchedVia: 'Codex queue',
-        };
+        return { ok: true, dispatchedVia: 'Codex queue (app-server)' };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: msg.slice(0, 1000) };
@@ -1608,167 +1385,58 @@ export function createCodexDriver(): HarnessDriver {
       ctx: DispatchContext
     ): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
       const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
-
-      // Primary path: create and start thread directly on the shared Codex app-server daemon
-      // so Codex Desktop sees the new conversation immediately with zero CLI startup delay.
-      if (appServer.isSocketAvailable()) {
-        try {
-          const threadId = await appServer.startThread({
+      // Threads are born on the shared daemon so Codex Desktop sees the new
+      // conversation immediately — never on a private CLI app-server.
+      if (!(await ensureDaemon())) {
+        return {
+          ok: false,
+          error:
+            'Could not start the Codex session: the Codex app-server daemon is not running and could not be started. Open Codex Desktop or run `codex app-server daemon start`, then try again.',
+        };
+      }
+      try {
+        const threadId = await appServer.startThread({
+          cwd,
+          model: req.model,
+          reasoningEffort: req.reasoningEffort,
+        });
+        const shId = `codex:${threadId}`;
+        const prompt = req.prompt?.trim();
+        if (prompt) {
+          const runId = crypto.randomBytes(6).toString('hex');
+          await appServer.sendTurn({
+            shSessionId: shId,
+            nativeThreadId: threadId,
             cwd,
+            prompt,
             model: req.model,
             reasoningEffort: req.reasoningEffort,
+            runId,
+            onEvent: ctx.emitStream,
+            onComplete: () => {
+              ctx.triggerRefresh(400);
+              ctx.triggerRefresh(1600);
+            },
           });
-          const shId = `codex:${threadId}`;
-          const prompt = req.prompt?.trim();
-          if (prompt) {
-            const runId = crypto.randomBytes(6).toString('hex');
-            await appServer.sendTurn({
-              shSessionId: shId,
-              nativeThreadId: threadId,
-              cwd,
-              prompt,
-              model: req.model,
-              reasoningEffort: req.reasoningEffort,
-              runId,
-              onEvent: ctx.emitStream,
-              onComplete: () => {
-                ctx.triggerRefresh(400);
-                ctx.triggerRefresh(1600);
-              },
-            });
-          }
-          ctx.triggerRefresh(400);
-          ctx.triggerRefresh(1800);
-          return { ok: true, sessionId: shId };
-        } catch {
-          // Fall back cleanly to standalone CLI below
         }
+        ctx.triggerRefresh(400);
+        ctx.triggerRefresh(1800);
+        return { ok: true, sessionId: shId };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message.slice(0, 1000) : 'Codex thread/start failed',
+        };
       }
-
-      const bin = await resolveCodexBinary();
-      if (!bin) return { ok: false, error: 'codex CLI not found' };
-      const args = buildCodexStartArgs(req, cwd);
-
-      const runId = crypto.randomBytes(6).toString('hex');
-      const child = spawn(bin, args, {
-        cwd,
-        env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      return new Promise((resolve) => {
-        let settled = false;
-        let sessionId: string | null = null;
-        let stdoutBuf = '';
-        let stderrBuf = '';
-        let gotAnyDelta = false;
-        const bufferedLines: string[] = [];
-
-        const finishResolve = (res: { ok: boolean; sessionId?: string; error?: string }) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          resolve(res);
-        };
-
-        const timeout = setTimeout(() => {
-          finishResolve({
-            ok: true,
-            sessionId: sessionId ?? undefined,
-          });
-        }, 8000);
-
-        const handleLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (!sessionId) {
-            try {
-              const obj = JSON.parse(trimmed) as { type?: string; thread_id?: string };
-              if (obj.type === 'thread.started' && typeof obj.thread_id === 'string' && obj.thread_id) {
-                sessionId = `codex:${obj.thread_id}`;
-                activeRuns.set(sessionId, child);
-                ctx.emitStream({ sessionId, runId, kind: 'start' });
-                for (const pending of bufferedLines) {
-                  if (parseCodexStreamLine(sessionId, runId, pending, ctx.emitStream)) {
-                    gotAnyDelta = true;
-                  }
-                }
-                bufferedLines.length = 0;
-                ctx.triggerRefresh(400);
-                ctx.triggerRefresh(2000);
-                finishResolve({ ok: true, sessionId });
-                return;
-              }
-            } catch {
-              // Not JSON yet; buffer until thread.started arrives
-            }
-            bufferedLines.push(trimmed);
-            return;
-          }
-          if (parseCodexStreamLine(sessionId, runId, trimmed, ctx.emitStream)) {
-            gotAnyDelta = true;
-          }
-        };
-
-        child.stdout?.on('data', (chunk: Buffer) => {
-          stdoutBuf += chunk.toString('utf8');
-          const lines = stdoutBuf.split('\n');
-          stdoutBuf = lines.pop() ?? '';
-          for (const line of lines) handleLine(line);
-        });
-
-        child.stderr?.on('data', (chunk: Buffer) => {
-          stderrBuf = (stderrBuf + chunk.toString('utf8')).slice(-4000);
-        });
-
-        child.on('error', (err) => {
-          if (sessionId) {
-            activeRuns.delete(sessionId);
-            ctx.emitStream({ sessionId, runId, kind: 'error', error: err.message });
-            ctx.emitStream({ sessionId, runId, kind: 'done' });
-          }
-          finishResolve({ ok: false, error: err.message });
-        });
-
-        child.on('close', (code) => {
-          if (stdoutBuf.trim()) handleLine(stdoutBuf);
-          if (sessionId) {
-            activeRuns.delete(sessionId);
-            if (code !== 0 && !gotAnyDelta && stderrBuf.trim()) {
-              ctx.emitStream({
-                sessionId,
-                runId,
-                kind: 'error',
-                error: stderrBuf.trim().slice(-1000),
-              });
-            }
-            ctx.emitStream({ sessionId, runId, kind: 'done' });
-            ctx.triggerRefresh(300);
-            ctx.triggerRefresh(1500);
-            finishResolve({ ok: true, sessionId });
-          } else {
-            const errMsg =
-              stderrBuf.trim() ||
-              bufferedLines.join('\n').trim() ||
-              `codex exec exited with code ${code ?? 'unknown'}`;
-            finishResolve({ ok: false, error: errMsg.slice(0, 500) });
-          }
-        });
-      });
     },
 
     abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
-      if (sessionId.startsWith('codex:')) {
-        const nativeId = sessionId.slice('codex:'.length);
-        if (appServer.hasActiveTurn(nativeId)) {
-          void appServer.interruptTurn(nativeId);
-          emitStream({ sessionId, runId: 'abort', kind: 'done' });
-          return true;
-        }
-      }
-      const proc = activeRuns.get(sessionId);
-      if (!proc) return false;
-      killActiveRun(sessionId);
+      if (!sessionId.startsWith('codex:')) return false;
+      if (!appServer.isSocketAvailable()) return false;
+      const nativeId = sessionId.slice('codex:'.length);
+      // Native interrupt for any turn (own or Desktop/TUI-started); the
+      // client discovers the active turn from notifications/turns/list.
+      void appServer.interruptTurn(nativeId);
       emitStream({ sessionId, runId: 'abort', kind: 'done' });
       return true;
     },
@@ -1780,9 +1448,10 @@ export function createCodexDriver(): HarnessDriver {
 
     shutdown(): void {
       appServer.close();
-      for (const sid of Array.from(activeRuns.keys())) {
-        killActiveRun(sid);
-      }
+    },
+
+    setActivitySink(sink: ((sessionId: string) => void) | null): void {
+      activitySink = sink;
     },
 
     async controlDaemon(
@@ -1812,10 +1481,8 @@ export function createCodexDriver(): HarnessDriver {
         const ok = await appServer.archiveThread(session.nativeId);
         if (ok) return { ok: true, method: 'Codex app-server archive' };
       }
-      const bin = await resolveCodexBinary();
-      if (!bin) return null;
-      await execFileAsync(bin, ['archive', session.nativeId], { timeout: 8000 });
-      return { ok: true, method: 'codex archive' };
+      // No daemon: fall back to Super Harness local hide (dispatcher).
+      return null;
     },
   };
 }

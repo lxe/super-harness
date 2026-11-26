@@ -423,8 +423,8 @@ export const SettingsModal: React.FC<Props> = ({
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto px-8 pb-8 pt-0 space-y-8">
             {actionMsg && (
-              <div className="rounded-xl border border-line-subtle bg-surface-subtle px-3.5 py-2.5 text-caption text-ink-secondary font-mono flex items-center justify-between gap-2">
-                <span className="truncate">{actionMsg}</span>
+              <div className="rounded-xl border border-line-subtle bg-surface-subtle px-3.5 py-2.5 text-caption text-ink-secondary font-mono flex items-start justify-between gap-2">
+                <span className="break-words min-w-0">{actionMsg}</span>
                 <IconButton size="xs" label="Dismiss" onClick={() => setActionMsg(null)}>
                   <X className="w-3 h-3" />
                 </IconButton>
@@ -745,7 +745,7 @@ export const SettingsModal: React.FC<Props> = ({
 
                         {/* Compact inline right controls: remote state + single action + switch */}
                         <div className="flex items-center gap-3.5 shrink-0">
-                          {h.installed && (
+                          {h.installed && h.capabilities.canControlDaemon && (
                             <>
                               <span className="inline-flex items-center gap-1.5 text-caption text-ink-muted whitespace-nowrap">
                                 <span

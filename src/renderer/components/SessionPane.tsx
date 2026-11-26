@@ -1235,8 +1235,8 @@ export const SessionPane: React.FC<Props> = ({
             <p>
               Super Harness will close that exact Muse terminal process and relaunch the same
               session with <code>muse resume</code> inside a new tmux session. The conversation
-              is preserved. If the session is mid-turn, Super Harness will refuse rather than kill
-              active work.
+              is preserved. Closing the old terminal can take up to half a minute. If the session
+              is mid-turn, Super Harness will refuse rather than kill active work.
             </p>
             <p>
               Afterwards Super Harness can type into that tmux terminal for you, and you can watch

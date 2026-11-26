@@ -20,6 +20,7 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 import { AgyAcpPool } from '../services/agyAcpClient';
+import { AntigravityLsClient } from '../services/antigravityLsClient';
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import {
@@ -1097,6 +1098,14 @@ export async function loadAntigravityTranscript(
  */
 export function createAntigravityDriver(): HarnessDriver {
   const acpPool = new AgyAcpPool();
+  const lsClient = new AntigravityLsClient();
+  let activitySink: ((sessionId: string) => void) | null = null;
+
+  const ensureLsSubscription = (nativeId: string): void => {
+    lsClient.subscribeAgentState(nativeId, () => {
+      activitySink?.(`antigravity:${nativeId}`);
+    });
+  };
 
   return {
     id: 'antigravity',
@@ -1112,9 +1121,22 @@ export function createAntigravityDriver(): HarnessDriver {
       return `${computeFileFingerprint(resolved)}|${computeAntigravityMessagesFingerprint(messagesDir)}`;
     },
 
-    loadTranscript(session, limit) {
+    async loadTranscript(session, limit) {
       const resolved = resolveAntigravityTranscriptPath(session.nativeId, session.transcriptPath);
-      return loadAntigravityTranscript(session.nativeId, resolved, limit);
+      const res = await loadAntigravityTranscript(session.nativeId, resolved, limit);
+      // Native live lane: the hub LS agent-state stream drives refreshes
+      // (signal-gated inside the client) and supplies working state, so
+      // Desktop-side turns mirror here without mtime heuristics. Status
+      // comes from already-observed stream signals - no extra RPC here.
+      if (session.originApp !== 'antigravity-cli' && lsClient.isHubAvailable()) {
+        ensureLsSubscription(session.nativeId);
+        const status = lsClient.getObservedStatus(session.nativeId);
+        if (status) {
+          const isWorking = status !== 'CASCADE_RUN_STATUS_IDLE';
+          res.liveActivity = { ...(res.liveActivity ?? { isWorking }), isWorking, lastEventAt: Date.now() };
+        }
+      }
+      return res;
     },
 
     getGlobalWatchDirs(): HarnessWatchSpec[] {
@@ -1151,6 +1173,32 @@ export function createAntigravityDriver(): HarnessDriver {
       const originApp =
         session.originApp === 'antigravity-cli' ? 'antigravity-cli' : 'antigravity-app';
 
+      // Desktop sessions with a live hub LS: dispatch exactly as Desktop
+      // does (SendUserCascadeMessage into the running cascade) - a true
+      // single-writer live attach, so no fork guard is needed on this lane.
+      if (originApp === 'antigravity-app' && lsClient.isHubAvailable()) {
+        try {
+          ensureLsSubscription(session.nativeId);
+          ctx.emitStream({ sessionId: session.id, runId, kind: 'start' });
+          await lsClient.sendUserMessage({
+            cascadeId: session.nativeId,
+            text: prompt,
+            attachments,
+            modelSlug: session.model,
+          });
+          ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
+          ctx.triggerRefresh(400);
+          ctx.triggerRefresh(1800);
+          return {
+            ok: true,
+            runId,
+            dispatchedVia: 'Antigravity Desktop (hub LS SendUserCascadeMessage)',
+          };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
       try {
         await acpPool.sendPrompt(
           originApp,
@@ -1173,8 +1221,8 @@ export function createAntigravityDriver(): HarnessDriver {
           runId,
           dispatchedVia:
             originApp === 'antigravity-app'
-              ? 'Antigravity Desktop (ACP)'
-              : 'Antigravity CLI (ACP)',
+              ? 'Antigravity Desktop (ACP — separate engine, Desktop not running)'
+              : 'Antigravity CLI (ACP cold resume)',
         };
       } catch (err) {
         return {
@@ -1189,6 +1237,32 @@ export function createAntigravityDriver(): HarnessDriver {
       ctx: DispatchContext
     ): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
       const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
+      if (lsClient.isHubAvailable()) {
+        try {
+          const nativeId = crypto.randomUUID();
+          const shId = `antigravity:${nativeId}`;
+          await lsClient.startCascade(nativeId);
+          ensureLsSubscription(nativeId);
+          const promptText = req.prompt?.trim() || '';
+          const hasAttachments = Boolean(req.attachments && req.attachments.length > 0);
+          if (promptText || hasAttachments) {
+            const runId = crypto.randomBytes(6).toString('hex');
+            ctx.emitStream({ sessionId: shId, runId, kind: 'start' });
+            await lsClient.sendUserMessage({
+              cascadeId: nativeId,
+              text: promptText,
+              attachments: req.attachments,
+              modelSlug: req.model,
+            });
+            ctx.emitStream({ sessionId: shId, runId, kind: 'done' });
+          }
+          ctx.triggerRefresh(800);
+          ctx.triggerRefresh(2500);
+          return { ok: true, sessionId: shId };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
       try {
         const nativeId = await acpPool.createSession('antigravity-app', cwd, req.model);
         const shId = `antigravity:${nativeId}`;
@@ -1245,13 +1319,21 @@ export function createAntigravityDriver(): HarnessDriver {
     abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
       if (!sessionId.startsWith('antigravity:')) return false;
       const nativeId = sessionId.slice('antigravity:'.length);
+      if (lsClient.isHubAvailable()) {
+        void lsClient.cancelInvocation(nativeId).catch(() => {});
+      }
       void acpPool.cancel(nativeId);
       emitStream({ sessionId, runId: 'abort', kind: 'done' });
       return true;
     },
 
     shutdown(): void {
+      lsClient.closeAll();
       acpPool.closeAll();
+    },
+
+    setActivitySink(sink: ((sessionId: string) => void) | null): void {
+      activitySink = sink;
     },
   };
 }

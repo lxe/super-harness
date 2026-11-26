@@ -71,6 +71,14 @@ describe('Component-level UI & Electron overlay contract audit', () => {
     expect(src).not.toMatch(/\bgroup-hover:(?:hidden|flex|block)\b/);
   });
 
+  it('gates Settings remote Start/Stop controls on the canControlDaemon capability', () => {
+    const src = readRel('src/renderer/components/SettingsModal.tsx');
+    expect(
+      src,
+      'Harnesses without a controllable daemon (e.g. Muse) must not render Remote on/off or Start/Stop'
+    ).toContain('canControlDaemon');
+  });
+
   it('uses appearance-none with an inset Lucide ChevronDown on Select primitives', () => {
     const src = readRel('src/renderer/ui/Input.tsx');
     expect(src).toContain('appearance-none');

@@ -26,6 +26,7 @@ export class LiveSyncService {
   private globalDebounce: NodeJS.Timeout | null = null;
   private paneWatches = new Map<string, PaneWatch>();
   private safetyTimer: NodeJS.Timeout | null = null;
+  private lastExternalGlobalAt = 0;
 
   constructor(
     private readonly registry: HarnessRegistry,
@@ -186,9 +187,18 @@ export class LiveSyncService {
     this.paneWatches.set(paneId, pw);
   }
 
-  /** Native push activity for a session (e.g. Codex daemon notifications). */
+  /**
+   * Native push activity for a session (e.g. Codex daemon notifications).
+   * Pane pushes are debounced; the expensive global rediscovery is
+   * rate-limited to once per 5s so high-frequency daemon streams can
+   * never saturate the main thread (sidebar liveness also has FS watchers).
+   */
   notifyExternalActivity(sessionId: string): void {
-    this.scheduleGlobalRefresh();
+    const now = Date.now();
+    if (now - this.lastExternalGlobalAt >= 5000) {
+      this.lastExternalGlobalAt = now;
+      this.scheduleGlobalRefresh();
+    }
     for (const pw of this.paneWatches.values()) {
       if (pw.sessionId === sessionId) this.schedulePanePush(pw, 150);
     }

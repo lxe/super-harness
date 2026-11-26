@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { buildClaudeResumeArgs } from '../src/main/adapters/claudeAdapter';
-import { buildCodexQueueArgs, buildCodexResumeArgs } from '../src/main/adapters/codexAdapter';
 import {
   resolveEffortSelectionChange,
   resolveModelSelectionChange,
@@ -65,48 +64,6 @@ const SAMPLE_CATALOG: HarnessCatalog = {
 };
 
 describe('Harness CLI model & thinking effort resume arguments', () => {
-  it('passes -m and -c model_reasoning_effort on Codex resume & queue', () => {
-    expect(
-      buildCodexResumeArgs('thread-1', 'Continue', undefined, true, {
-        model: 'gpt-6.2-sol',
-        reasoningEffort: 'xhigh',
-      })
-    ).toEqual([
-      'exec',
-      'resume',
-      '--remote',
-      'unix://',
-      '--skip-git-repo-check',
-      '--json',
-      '-m',
-      'gpt-6.2-sol',
-      '-c',
-      'model_reasoning_effort="xhigh"',
-      'thread-1',
-      'Continue',
-    ]);
-
-    expect(
-      buildCodexQueueArgs('thread-1', 'Queued follow up', true, {
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'low',
-      })
-    ).toEqual([
-      'queue',
-      '--remote',
-      'unix://',
-      '-c',
-      'model="gpt-5.4-mini"',
-      '-c',
-      'model_reasoning_effort="low"',
-      '--thread',
-      'thread-1',
-      '--message',
-      'Queued follow up',
-      '--resume',
-    ]);
-  });
-
   it('passes --model and valid --effort on Claude resume', () => {
     expect(
       buildClaudeResumeArgs(

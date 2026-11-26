@@ -4,7 +4,7 @@ import http from 'node:http';
 import type { Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import type { ImageAttachment, StreamEvent } from '../../shared/types';
+import type { ImageAttachment, QueuedMessageItem, StreamEvent } from '../../shared/types';
 
 export const DEFAULT_CODEX_DAEMON_SOCK = path.join(
   os.homedir(),
@@ -143,6 +143,73 @@ interface ActiveTurnRun {
   onComplete: () => void;
 }
 
+/**
+ * Builds the client response for a server->client request (approvals,
+ * elicitation, user input, dynamic tool calls). Super Harness dispatches
+ * turns with the same no-interactive-approval posture as its other
+ * harnesses (Codex turns here inherit the user's own approval config; when
+ * the server still asks, command/file approvals are accepted so the turn
+ * never stalls unanswered), grants no *extra* permissions, declines MCP
+ * elicitation, and settles requestUserInput with no answers (no question UI
+ * is wired to this client yet). Unknown methods get a JSON-RPC error
+ * instead of leaving the server waiting forever.
+ */
+export function buildCodexServerRequestResponse(
+  method: string,
+  _params: Record<string, unknown>
+): { result?: Record<string, unknown>; error?: { code: number; message: string } } {
+  switch (method) {
+    case 'item/commandExecution/requestApproval':
+    case 'item/fileChange/requestApproval':
+      return { result: { decision: 'accept' } };
+    case 'applyPatchApproval':
+    case 'execCommandApproval':
+      return { result: { decision: 'approved' } };
+    case 'item/permissions/requestApproval':
+      return { result: { permissions: {}, scope: 'session' } };
+    case 'mcpServer/elicitation/request':
+      return { result: { action: 'decline', content: null, _meta: null } };
+    case 'item/tool/requestUserInput':
+      return { result: { answers: {} } };
+    default:
+      return {
+        error: { code: -32601, message: `Super Harness does not handle ${method}` },
+      };
+  }
+}
+
+/** Maps one native `thread/queue/list` submission into the queue tray. */
+export function mapCodexQueuedSubmission(raw: unknown): QueuedMessageItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const sub = raw as Record<string, unknown>;
+  const input = Array.isArray(sub.input) ? sub.input : [];
+  const texts: string[] = [];
+  const attachments: ImageAttachment[] = [];
+  for (const part of input) {
+    if (!part || typeof part !== 'object') continue;
+    const p = part as Record<string, unknown>;
+    if (p.type === 'text' && typeof p.text === 'string' && p.text.trim()) {
+      texts.push(p.text.trim());
+    } else if (p.type === 'localImage' && typeof p.path === 'string' && p.path) {
+      attachments.push({
+        id: `codex-q-att-${attachments.length + 1}`,
+        name: path.basename(p.path),
+        path: p.path,
+        mimeType: 'image/png',
+      });
+    }
+  }
+  const text = texts.join('\n').trim();
+  if (!text && attachments.length === 0) return null;
+  return {
+    id: `codex-q-${typeof sub.id === 'string' ? sub.id : 'unknown'}`,
+    text,
+    attachments: attachments.length > 0 ? attachments : undefined,
+    createdAt: Date.now(),
+    source: 'native',
+  };
+}
+
 export interface CodexAppServerItemBlockMapper {
   (itemType: string, raw: Record<string, unknown>): {
     role: 'user' | 'assistant' | 'system';
@@ -166,6 +233,34 @@ export class CodexAppServerClient {
   private pending = new Map<number, PendingRpc>();
   private resumedThreads = new Set<string>();
   private activeTurns = new Map<string, ActiveTurnRun>(); // nativeThreadId -> run
+  /** Turns started by other clients (Desktop/TUI), learned from turn/started. */
+  private foreignTurnIds = new Map<string, string>(); // nativeThreadId -> turnId
+  private lastActivityAt = new Map<string, number>();
+  private activityTrailingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * Coalesces daemon activity to at most one callback per thread per
+   * 750ms (with a trailing call), so delta-heavy turns cannot flood
+   * LiveSync/transcript reloads and peg the main thread.
+   */
+  private emitDaemonActivity(threadId: string): void {
+    if (!this.onDaemonActivity) return;
+    const now = Date.now();
+    const last = this.lastActivityAt.get(threadId) ?? 0;
+    if (now - last >= 750) {
+      this.lastActivityAt.set(threadId, now);
+      this.onDaemonActivity(threadId);
+      return;
+    }
+    if (this.activityTrailingTimers.has(threadId)) return;
+    const timer = setTimeout(() => {
+      this.activityTrailingTimers.delete(threadId);
+      this.lastActivityAt.set(threadId, Date.now());
+      this.onDaemonActivity?.(threadId);
+    }, 750 - (now - last));
+    timer.unref?.();
+    this.activityTrailingTimers.set(threadId, timer);
+  }
 
   constructor(
     private readonly socketPath: string = DEFAULT_CODEX_DAEMON_SOCK,
@@ -375,22 +470,45 @@ export class CodexAppServerClient {
       return;
     }
 
-    // 2. Server -> Client notification (live bidirectional events from shared daemon!)
     const method = typeof msg.method === 'string' ? msg.method : '';
     const params = (msg.params ?? {}) as Record<string, unknown>;
-    const threadId = typeof params.threadId === 'string' ? params.threadId : '';
 
-    if (
-      threadId &&
-      (method === 'turn/started' ||
-        method === 'turn/completed' ||
-        method === 'item/completed' ||
-        method === 'thread/archived')
-    ) {
-      this.onDaemonActivity?.(threadId);
+    // 2. Server -> Client request (id + method): approvals, elicitation,
+    // user input, dynamic tools. Must always be answered or the turn stalls.
+    if (method && msg.id !== undefined && msg.id !== null) {
+      const response = buildCodexServerRequestResponse(method, params);
+      try {
+        this.sendJson(
+          response.error
+            ? { jsonrpc: '2.0', id: msg.id, error: response.error }
+            : { jsonrpc: '2.0', id: msg.id, result: response.result ?? {} }
+        );
+      } catch {
+        // socket gone; disconnect handler settles runs
+      }
+      const reqThreadId = typeof params.threadId === 'string' ? params.threadId : '';
+      if (reqThreadId) this.emitDaemonActivity(reqThreadId);
+      return;
     }
 
+    // 3. Server -> Client notification (live bidirectional events from shared daemon!)
+    const threadId = typeof params.threadId === 'string' ? params.threadId : '';
     if (!threadId) return;
+
+    // Every thread notification is daemon activity the UI mirrors, whether
+    // or not Super Harness started the turn (Desktop/TUI turns included).
+    this.emitDaemonActivity(threadId);
+
+    if (method === 'turn/started') {
+      const turn = params.turn as Record<string, unknown> | undefined;
+      if (typeof turn?.id === 'string' && turn.id) {
+        this.foreignTurnIds.set(threadId, turn.id);
+      }
+    }
+    if (method === 'turn/completed') {
+      this.foreignTurnIds.delete(threadId);
+    }
+
     const run = this.activeTurns.get(threadId);
     if (!run) return;
 
@@ -459,23 +577,15 @@ export class CodexAppServerClient {
     prompt: string,
     attachments?: ImageAttachment[]
   ): Array<Record<string, unknown>> {
+    // Native Desktop order: text part first, then localImage parts. No
+    // prompt text is ever synthesized — an image-only turn sends images only.
     const inputs: Array<Record<string, unknown>> = [];
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        if (att.path) {
-          inputs.push({ type: 'localImage', path: att.path });
-        }
-      }
-    }
     const trimmed = prompt.trim();
     if (trimmed) {
       inputs.push({ type: 'text', text: trimmed, text_elements: [] });
-    } else if (inputs.length > 0) {
-      inputs.push({
-        type: 'text',
-        text: 'Inspect the attached image(s).',
-        text_elements: [],
-      });
+    }
+    for (const att of attachments ?? []) {
+      if (att.path) inputs.push({ type: 'localImage', path: att.path });
     }
     return inputs;
   }
@@ -525,10 +635,13 @@ export class CodexAppServerClient {
     }
 
     const input = CodexAppServerClient.buildUserInputs(opts.prompt, opts.attachments);
+    // Omit `cwd`: the thread's sticky cwd (possibly changed in Desktop)
+    // rules unless a client explicitly re-pins it, which mirroring must not.
+    void opts.cwd;
     const turnParams: Record<string, unknown> = {
       threadId: opts.nativeThreadId,
+      clientUserMessageId: crypto.randomUUID(),
       input,
-      cwd: opts.cwd,
     };
     if (opts.model) turnParams.model = opts.model;
     if (opts.reasoningEffort) turnParams.effort = opts.reasoningEffort;
@@ -556,6 +669,104 @@ export class CodexAppServerClient {
     }
   }
 
+  /** Subscribes this connection to a thread's live notifications. */
+  async resumeThread(nativeThreadId: string): Promise<void> {
+    await this.ensureConnected();
+    if (this.resumedThreads.has(nativeThreadId)) return;
+    await this.request('thread/resume', { threadId: nativeThreadId, excludeTurns: true });
+    this.resumedThreads.add(nativeThreadId);
+  }
+
+  async unsubscribeThread(nativeThreadId: string): Promise<void> {
+    try {
+      await this.ensureConnected();
+      await this.request('thread/unsubscribe', { threadId: nativeThreadId }, 5_000);
+    } catch {
+      // best-effort
+    }
+    this.resumedThreads.delete(nativeThreadId);
+  }
+
+  /** One descending page of native thread items (newest first). */
+  async listItemsPage(
+    nativeThreadId: string,
+    limit: number,
+    cursor?: string | null
+  ): Promise<{ data: Array<Record<string, unknown>>; nextCursor: string | null }> {
+    await this.ensureConnected();
+    const res = await this.request('thread/items/list', {
+      threadId: nativeThreadId,
+      sortDirection: 'desc',
+      limit,
+      ...(cursor ? { cursor } : {}),
+    });
+    return {
+      data: Array.isArray(res.data) ? (res.data as Array<Record<string, unknown>>) : [],
+      nextCursor: typeof res.nextCursor === 'string' ? res.nextCursor : null,
+    };
+  }
+
+  async listTurns(
+    nativeThreadId: string,
+    limit: number
+  ): Promise<Array<Record<string, unknown>>> {
+    await this.ensureConnected();
+    const res = await this.request('thread/turns/list', {
+      threadId: nativeThreadId,
+      sortDirection: 'desc',
+      limit,
+      itemsView: 'summary',
+    });
+    return Array.isArray(res.data) ? (res.data as Array<Record<string, unknown>>) : [];
+  }
+
+  async listLoadedThreadIds(): Promise<string[]> {
+    await this.ensureConnected();
+    const res = await this.request('thread/loaded/list', {}, 5_000);
+    const data = Array.isArray(res.data) ? res.data : [];
+    return data.filter((v): v is string => typeof v === 'string');
+  }
+
+  async queueAdd(
+    nativeThreadId: string,
+    prompt: string,
+    attachments?: ImageAttachment[]
+  ): Promise<void> {
+    await this.ensureConnected();
+    await this.request('thread/queue/add', {
+      threadId: nativeThreadId,
+      clientUserMessageId: crypto.randomUUID(),
+      input: CodexAppServerClient.buildUserInputs(prompt, attachments),
+    });
+  }
+
+  async queueList(nativeThreadId: string): Promise<QueuedMessageItem[]> {
+    await this.ensureConnected();
+    const res = await this.request('thread/queue/list', { threadId: nativeThreadId }, 10_000);
+    const data = Array.isArray(res.data) ? res.data : [];
+    return data
+      .map((raw) => mapCodexQueuedSubmission(raw))
+      .filter((q): q is QueuedMessageItem => q !== null);
+  }
+
+  /** Active turn discovery: own run, then observed foreign turn, then turns/list. */
+  private async findActiveTurnId(nativeThreadId: string): Promise<string | undefined> {
+    const own = this.activeTurns.get(nativeThreadId)?.turnId;
+    if (own) return own;
+    const foreign = this.foreignTurnIds.get(nativeThreadId);
+    if (foreign) return foreign;
+    try {
+      const turns = await this.listTurns(nativeThreadId, 5);
+      const active = turns.find(
+        (t) => String(t.status || '').toLowerCase() === 'inprogress'
+      );
+      if (typeof active?.id === 'string' && active.id) return active.id;
+    } catch {
+      // fall through
+    }
+    return undefined;
+  }
+
   async steerTurn(
     nativeThreadId: string,
     prompt: string,
@@ -571,29 +782,7 @@ export class CodexAppServerClient {
           // Proceed to thread/read + turn/steer anyway
         }
       }
-      let expectedTurnId = this.activeTurns.get(nativeThreadId)?.turnId;
-      if (!expectedTurnId) {
-        // Also support steering turns started externally (e.g. from Codex Desktop)
-        try {
-          const readRes = await this.request(
-            'thread/read',
-            { threadId: nativeThreadId, includeTurns: true },
-            5_000
-          );
-          const thread = readRes.thread as Record<string, unknown> | undefined;
-          const turns = Array.isArray(thread?.turns)
-            ? (thread.turns as Array<Record<string, unknown>>)
-            : [];
-          const active = [...turns]
-            .reverse()
-            .find((t) => String(t.status || '').toLowerCase() === 'inprogress');
-          if (typeof active?.id === 'string' && active.id) {
-            expectedTurnId = active.id;
-          }
-        } catch {
-          // Ignore if thread/read fails
-        }
-      }
+      const expectedTurnId = await this.findActiveTurnId(nativeThreadId);
       if (!expectedTurnId) return false;
       const input = CodexAppServerClient.buildUserInputs(prompt, attachments);
       await this.request(
@@ -614,28 +803,7 @@ export class CodexAppServerClient {
   async interruptTurn(nativeThreadId: string): Promise<boolean> {
     try {
       await this.ensureConnected();
-      let turnId = this.activeTurns.get(nativeThreadId)?.turnId;
-      if (!turnId) {
-        try {
-          const readRes = await this.request(
-            'thread/read',
-            { threadId: nativeThreadId, includeTurns: true },
-            5_000
-          );
-          const thread = readRes.thread as Record<string, unknown> | undefined;
-          const turns = Array.isArray(thread?.turns)
-            ? (thread.turns as Array<Record<string, unknown>>)
-            : [];
-          const active = [...turns]
-            .reverse()
-            .find((t) => String(t.status || '').toLowerCase() === 'inprogress');
-          if (typeof active?.id === 'string' && active.id) {
-            turnId = active.id;
-          }
-        } catch {
-          // Ignore if thread/read fails
-        }
-      }
+      const turnId = await this.findActiveTurnId(nativeThreadId);
       if (!turnId) return false;
       await this.request('turn/interrupt', {
         threadId: nativeThreadId,
@@ -691,6 +859,8 @@ export class CodexAppServerClient {
   }
 
   close(): void {
+    for (const t of this.activityTrailingTimers.values()) clearTimeout(t);
+    this.activityTrailingTimers.clear();
     try {
       this.socket?.destroy();
     } catch {

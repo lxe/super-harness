@@ -57,10 +57,17 @@ interface CachedAgyLiveQuota {
   creditsBalance?: number;
 }
 
+export interface MuseQuotaSample {
+  t: number;
+  w?: number;
+  wk?: number;
+}
+
 interface DiskUsageCache {
   version: number;
   files: Record<string, CachedFileSummary>;
   agyLiveQuota?: CachedAgyLiveQuota;
+  museQuotaSamples?: MuseQuotaSample[];
 }
 
 interface SpendBucketAccumulator {
@@ -289,25 +296,30 @@ const CACHE_VERSION = 2;
 function loadDiskCache(): {
   files: Record<string, CachedFileSummary>;
   agyLiveQuota?: CachedAgyLiveQuota;
+  museQuotaSamples: MuseQuotaSample[];
 } {
   try {
-    if (!fs.existsSync(USAGE_CACHE_PATH)) return { files: {} };
+    if (!fs.existsSync(USAGE_CACHE_PATH)) return { files: {}, museQuotaSamples: [] };
     const parsed = JSON.parse(fs.readFileSync(USAGE_CACHE_PATH, 'utf8')) as DiskUsageCache;
     if (parsed?.version === CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
       return {
         files: parsed.files,
         agyLiveQuota: parsed.agyLiveQuota,
+        museQuotaSamples: Array.isArray(parsed.museQuotaSamples)
+          ? parsed.museQuotaSamples
+          : [],
       };
     }
   } catch {
     // ignore corrupt cache
   }
-  return { files: {} };
+  return { files: {}, museQuotaSamples: [] };
 }
 
 function saveDiskCache(
   files: Record<string, CachedFileSummary>,
-  agyLiveQuota?: CachedAgyLiveQuota
+  agyLiveQuota?: CachedAgyLiveQuota,
+  museQuotaSamples: MuseQuotaSample[] = []
 ): void {
   try {
     fs.mkdirSync(path.dirname(USAGE_CACHE_PATH), { recursive: true });
@@ -320,7 +332,7 @@ function saveDiskCache(
     const tmp = `${USAGE_CACHE_PATH}.tmp`;
     fs.writeFileSync(
       tmp,
-      JSON.stringify({ version: CACHE_VERSION, files: pruned, agyLiveQuota }),
+      JSON.stringify({ version: CACHE_VERSION, files: pruned, agyLiveQuota, museQuotaSamples }),
       'utf8'
     );
     fs.renameSync(tmp, USAGE_CACHE_PATH);
@@ -373,6 +385,7 @@ export function parseMuseUsageOutput(
         label: 'Window',
         usedPercent: Number(windowMatch[1]),
         resetsAt: resetMs !== undefined ? now + resetMs : undefined,
+        windowMinutes: 300,
       });
       continue;
     }
@@ -389,6 +402,113 @@ export function parseMuseUsageOutput(
     }
   }
   return { planLabel, windows };
+}
+
+/**
+ * Parses structured `muse usage --json` output (schemaVersion 1) with
+ * absolute reset timestamps — preferred over the human text form, which
+ * the collector keeps as a fallback for older CLIs.
+ */
+export function parseMuseUsageJson(
+  stdout: string
+): { planLabel?: string; windows: UsageQuotaWindow[]; asOfMs?: number } | null {
+  try {
+    const parsed = JSON.parse(stdout.trim()) as {
+      allowance?: {
+        asOfMs?: number;
+        tier?: string;
+        window?: { usedPercent?: number; resetsAtMs?: number };
+        weekly?: { usedPercent?: number; resetsAtMs?: number };
+      };
+    };
+    const allowance = parsed.allowance;
+    if (!allowance) return null;
+    const windows: UsageQuotaWindow[] = [];
+    if (typeof allowance.window?.usedPercent === 'number') {
+      windows.push({
+        id: 'five_hour',
+        label: 'Window',
+        usedPercent: allowance.window.usedPercent,
+        resetsAt:
+          typeof allowance.window.resetsAtMs === 'number'
+            ? allowance.window.resetsAtMs
+            : undefined,
+        windowMinutes: 300,
+      });
+    }
+    if (typeof allowance.weekly?.usedPercent === 'number') {
+      windows.push({
+        id: 'weekly',
+        label: 'Weekly (7d)',
+        usedPercent: allowance.weekly.usedPercent,
+        resetsAt:
+          typeof allowance.weekly.resetsAtMs === 'number'
+            ? allowance.weekly.resetsAtMs
+            : undefined,
+        windowMinutes: 7 * 24 * 60,
+      });
+    }
+    if (windows.length === 0) return null;
+    return {
+      planLabel: typeof allowance.tier === 'string' ? allowance.tier : undefined,
+      windows,
+      asOfMs: typeof allowance.asOfMs === 'number' ? allowance.asOfMs : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const MUSE_QUOTA_SAMPLE_MIN_GAP_MS = 10 * 60_000;
+const MUSE_QUOTA_SAMPLE_MAX_AGE_MS = 14 * DAY_MS;
+
+/**
+ * Appends a Muse quota sample to the persisted history (throttled to one
+ * per 10 min unless a percentage changed, pruned to 14 days). Super Harness
+ * builds this history itself — Muse exposes no quota history file like
+ * Claude Desktop's plan-usage-history — so "+N% today" appears once the app
+ * has sampled across a day boundary. Returns the same array reference when
+ * nothing changed so callers can detect no-ops.
+ */
+export function appendMuseQuotaSample(
+  samples: MuseQuotaSample[],
+  sample: MuseQuotaSample,
+  now: number
+): MuseQuotaSample[] {
+  const pruned = samples.filter((s) => now - s.t <= MUSE_QUOTA_SAMPLE_MAX_AGE_MS);
+  const last = pruned[pruned.length - 1];
+  if (
+    last &&
+    sample.t - last.t < MUSE_QUOTA_SAMPLE_MIN_GAP_MS &&
+    last.w === sample.w &&
+    last.wk === sample.wk
+  ) {
+    return samples;
+  }
+  const next = [...pruned, sample];
+  return next.length > 1000 ? next.slice(next.length - 1000) : next;
+}
+
+/**
+ * "+N% today" delta for one quota window, mirroring Claude's sample math:
+ * latest sample at or before (now − 24h) vs the current value. Negative
+ * movement (a reset was crossed) yields undefined so the card hides it.
+ */
+export function computeMuseQuotaDelta24h(
+  samples: MuseQuotaSample[],
+  key: 'w' | 'wk',
+  currentPercent: number,
+  now: number
+): number | undefined {
+  const target24h = now - DAY_MS;
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    if (s.t <= target24h && typeof s[key] === 'number') {
+      const diff = Math.round(currentPercent - (s[key] as number));
+      return diff >= 0 ? diff : undefined;
+    }
+  }
+  return undefined;
 }
 
 export function parseAntigravityCliUsageJson(
@@ -532,12 +652,14 @@ export class UsageService {
   private inFlight: Promise<UsageSnapshot> | null = null;
   private fileCache: Record<string, CachedFileSummary>;
   private agyLiveQuota?: CachedAgyLiveQuota;
+  private museQuotaSamples: MuseQuotaSample[];
   private agyQuotaInFlight: Promise<CachedAgyLiveQuota | undefined> | null = null;
 
   constructor() {
     const loaded = loadDiskCache();
     this.fileCache = loaded.files;
     this.agyLiveQuota = loaded.agyLiveQuota;
+    this.museQuotaSamples = loaded.museQuotaSamples;
   }
 
   async getUsage(force = false): Promise<UsageSnapshot> {
@@ -559,7 +681,7 @@ export class UsageService {
         this.collectMuseUsage(now, markDirty),
       ]);
       if (dirty) {
-        saveDiskCache(this.fileCache, this.agyLiveQuota);
+        saveDiskCache(this.fileCache, this.agyLiveQuota, this.museQuotaSamples);
       }
       const snapshot: UsageSnapshot = {
         antigravity,
@@ -729,17 +851,60 @@ export class UsageService {
     try {
       const bin = await whichBinary('muse');
       if (!bin) return base;
-      const { stdout } = await execFileAsync(bin, ['usage'], {
-        timeout: 8000,
-        maxBuffer: 256 * 1024,
-      });
-      const { planLabel, windows } = parseMuseUsageOutput(stdout, now);
+      // Prefer structured JSON (absolute reset timestamps); fall back to the
+      // human text form for older CLIs without `--json`.
+      let quota: { planLabel?: string; windows: UsageQuotaWindow[] } | null = null;
+      try {
+        const { stdout } = await execFileAsync(bin, ['usage', '--json'], {
+          timeout: 8000,
+          maxBuffer: 256 * 1024,
+        });
+        quota = parseMuseUsageJson(stdout);
+      } catch {
+        quota = null;
+      }
+      if (!quota) {
+        const { stdout } = await execFileAsync(bin, ['usage'], {
+          timeout: 8000,
+          maxBuffer: 256 * 1024,
+        });
+        quota = parseMuseUsageOutput(stdout, now);
+      }
+      const { planLabel, windows } = quota;
       if (windows.length === 0) return base;
-      const primary = windows.find((w) => w.id === 'five_hour') ?? windows[0];
+
+      // Record quota history so the hover card can show Claude-style
+      // "+N% today" deltas, then decorate each window with its delta.
+      const fiveHour = windows.find((w) => w.id === 'five_hour');
+      const weekly = windows.find((w) => w.id === 'weekly');
+      const prevSamples = this.museQuotaSamples;
+      this.museQuotaSamples = appendMuseQuotaSample(
+        prevSamples,
+        { t: now, w: fiveHour?.usedPercent, wk: weekly?.usedPercent },
+        now
+      );
+      if (this.museQuotaSamples !== prevSamples) markDirty();
+      if (fiveHour) {
+        fiveHour.delta24h = computeMuseQuotaDelta24h(
+          this.museQuotaSamples,
+          'w',
+          fiveHour.usedPercent,
+          now
+        );
+      }
+      if (weekly) {
+        weekly.delta24h = computeMuseQuotaDelta24h(
+          this.museQuotaSamples,
+          'wk',
+          weekly.usedPercent,
+          now
+        );
+      }
+
       return {
         ...base,
         planLabel: planLabel || base.planLabel,
-        barPercent: primary.usedPercent,
+        barPercent: Math.max(...windows.map((w) => w.usedPercent)),
         windows,
       };
     } catch {
@@ -1262,8 +1427,10 @@ export class UsageService {
     const daily = buildDailySeries7d(acc, now);
     const liveQuota = await liveQuotaPromise;
     const windows = liveQuota?.windows ?? [];
+    const primaryWindows = windows.filter((w) => w.id === 'five_hour' || w.id === 'weekly');
+    const barPool = primaryWindows.length > 0 ? primaryWindows : windows;
     const barPercent =
-      windows.length > 0 ? Math.max(...windows.map((w) => w.usedPercent)) : null;
+      barPool.length > 0 ? Math.max(...barPool.map((w) => w.usedPercent)) : null;
 
     return {
       harness: 'antigravity',

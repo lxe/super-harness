@@ -129,7 +129,12 @@ export interface HarnessDriver {
   /** Optional hook to sync section moves natively with the harness daemon (e.g., Codex `thread/section/move`). */
   moveSection?(session: UnifiedSession, sectionName: string | null): Promise<boolean>;
 
-  /** Optional hook to promote a Claude session into a live tmux + Remote Control session. */
+  /**
+   * Optional hook to promote a session into tmux: Claude spawns a live
+   * tmux + Remote Control session; Muse restarts a terminal-held session
+   * inside tmux (closing the verified holding terminal process first) so
+   * the terminal typing lane can reach it.
+   */
   promoteToTmux?(
     session: UnifiedSession,
     ctx: DispatchContext

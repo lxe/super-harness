@@ -40,9 +40,10 @@ describe('Codex app-server WebSocket RFC 6455 framing & UserInput builder', () =
     const inputs = CodexAppServerClient.buildUserInputs('Describe this', [
       { id: '1', name: 'shot.png', path: '/tmp/shot.png', mimeType: 'image/png' },
     ]);
+    // Native Desktop UserInput order: text first, then localImage parts.
     expect(inputs).toEqual([
-      { type: 'localImage', path: '/tmp/shot.png' },
       { type: 'text', text: 'Describe this', text_elements: [] },
+      { type: 'localImage', path: '/tmp/shot.png' },
     ]);
   });
 });
@@ -96,6 +97,9 @@ describe('Claude persistent stream-json worker message & args builders', () => {
       '--output-format',
       'stream-json',
       '--verbose',
+      '--permission-prompt-tool',
+      'stdio',
+      '--include-partial-messages',
       '--model',
       'claude-opus-5-5',
       '--effort',

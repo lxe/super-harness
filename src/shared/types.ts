@@ -76,9 +76,11 @@ export interface UnifiedSession {
     | 'claude-resume'
     | 'codex-resume'
     | 'agy-resume'
-    | 'muse-exec';
+    | 'muse-msp';
   /** Live sync ownership indicator for accurate bidirectional status in the UI. */
   liveOwner?: 'daemon' | 'tmux' | 'desktop' | 'super-harness';
+  /** Held by a plain terminal with no programmatic attach endpoint (Muse TUI). */
+  isTerminalHeld?: boolean;
   /** Subagent / hierarchy metadata */
   isSubagent?: boolean;
   parentSessionId?: string;

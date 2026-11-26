@@ -1,21 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildMuseExecArgs,
+  buildMuseResumeCommand,
+  buildMuseTmuxSessionName,
+  buildMuseUndeliverableError,
+  classifyMuseHolderCmdline,
   createMuseDriver,
-  parseMuseExecStreamLine,
+  extractMuseResumeFlags,
+  parseMuseRegistryPid,
   parseMuseJsonlLines,
+  museTranscriptIsWorking,
   parseMuseLiveSessionsJson,
+  findTmuxPaneForPids,
+  parseTmuxPaneList,
+  resolveMuseSessionStatus,
+  waitForMuseTranscriptDelivery,
   stripRuntimeInjectedText,
   unwrapMuseRecordLine,
 } from '../src/main/adapters/museAdapter';
 import { createDefaultDrivers } from '../src/main/adapters/index';
 import { parseMuseModelsOutput } from '../src/main/services/catalogService';
-import { parseMuseUsageOutput } from '../src/main/services/usageService';
+import {
+  appendMuseQuotaSample,
+  computeMuseQuotaDelta24h,
+  parseMuseUsageJson,
+  parseMuseUsageOutput,
+} from '../src/main/services/usageService';
 import {
   filterSidebarSessions,
   groupSessionsForSidebar,
+  isSingleHarnessFilter,
 } from '../src/renderer/utils/sidebarGrouping';
-import type { StreamEvent, UnifiedSession } from '../src/shared/types';
+import type { UnifiedSession } from '../src/shared/types';
 
 const US = 1795669080321460; // epoch microseconds, as Muse records them
 
@@ -270,64 +285,26 @@ describe('Muse transcript parsing', () => {
   });
 });
 
-describe('Muse exec dispatch primitives', () => {
-  it('builds exec argv with session continuation, yolo, model, effort, and images', () => {
-    const args = buildMuseExecArgs({
-      nativeId: 'uuid-1',
-      cwd: '/repo',
-      prompt: 'hello',
-      model: 'muse-wonder-1.0',
-      reasoningEffort: 'HIGH',
-      attachments: [
-        { id: 'a', name: 'x.png', path: '/tmp/x.png', mimeType: 'image/png' },
+describe('Muse MSP dispatch primitives', () => {
+  it('parses live sessions including attachable flags for the MSP lanes', () => {
+    const stdout = JSON.stringify({
+      sessions: [
+        {
+          sessionId: 'live-tui',
+          name: 'west-vega',
+          workspaceLabel: 'super-harness',
+          openedBy: 'tui',
+          attachable: false,
+        },
+        { sessionId: 'hosted', name: 'east', openedBy: 'serve', attachable: true },
       ],
     });
-    expect(args).toEqual([
-      'exec',
-      '--json',
-      '--session-id',
-      'uuid-1',
-      '--workspace',
-      '/repo',
-      '--yolo',
-      '--model',
-      'muse-wonder-1.0',
-      '--reasoning-effort',
-      'high',
-      '--image',
-      '/tmp/x.png',
-      'hello',
-    ]);
+    const parsed = parseMuseLiveSessionsJson(stdout);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].attachable).toBe(false);
+    expect(parsed[1].attachable).toBe(true);
   });
 
-  it('drops unknown reasoning effort values', () => {
-    const args = buildMuseExecArgs({
-      nativeId: 'uuid-1',
-      cwd: '/repo',
-      prompt: 'hi',
-      reasoningEffort: 'ludicrous',
-    });
-    expect(args).not.toContain('--reasoning-effort');
-  });
-
-  it('streams run.output.delta and falls back to terminal text', () => {
-    const events: StreamEvent[] = [];
-    const emit = (ev: StreamEvent) => events.push(ev);
-    const delta = JSON.stringify({
-      payload_type: 'run.output.delta',
-      payload: { kind: 'run_output_delta', text: 'partial ' },
-    });
-    expect(parseMuseExecStreamLine('muse:s', 'r1', delta, false, emit)).toBe(true);
-    const terminal = JSON.stringify({
-      payload_type: 'run.terminal.completed',
-      payload: { kind: 'run_terminal', text: 'partial done' },
-    });
-    // Already streamed → terminal text must not duplicate.
-    expect(parseMuseExecStreamLine('muse:s', 'r1', terminal, true, emit)).toBe(false);
-    expect(parseMuseExecStreamLine('muse:s', 'r1', terminal, false, emit)).toBe(true);
-    expect(parseMuseExecStreamLine('muse:s', 'r1', 'muse: notice', false, emit)).toBe(false);
-    expect(events.map((e) => e.text)).toEqual(['partial ', 'partial done']);
-  });
 
   it('parses `muse sessions --json` output', () => {
     const stdout = JSON.stringify({
@@ -378,6 +355,7 @@ describe('Muse catalog & usage parsing', () => {
         label: 'Window',
         usedPercent: 1,
         resetsAt: now + (4 * 60 + 56) * 60_000,
+        windowMinutes: 300,
       },
       {
         id: 'weekly',
@@ -387,6 +365,21 @@ describe('Muse catalog & usage parsing', () => {
         windowMinutes: 10080,
       },
     ]);
+  });
+});
+
+describe('Muse daemon control (no remote daemon exists)', () => {
+  it('reports canControlDaemon=false in detection shape and fails cleanly', async () => {
+    const driver = createMuseDriver();
+    const ctx = {
+      spawnStreaming: () => {},
+      emitStream: () => {},
+      triggerRefresh: () => {},
+    };
+    const res = await driver.controlDaemon('start_remote', ctx);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('Muse has no remote daemon to start or stop.');
+    expect(res.error).not.toContain('start_remote');
   });
 });
 
@@ -419,7 +412,7 @@ describe('Muse driver registration & sidebar integration', () => {
       folderId: null,
       tags: [],
       hidden: false,
-      dispatchMode: 'muse-exec',
+      dispatchMode: 'muse-msp',
     };
     expect(filterSidebarSessions([session], 'muse', '')).toHaveLength(1);
     expect(filterSidebarSessions([session], 'codex', '')).toHaveLength(0);
@@ -428,5 +421,278 @@ describe('Muse driver registration & sidebar integration', () => {
     expect(groups.map((g) => g.id)).toContain('harness:muse');
     const single = groupSessionsForSidebar([session], 'native', [], 'muse');
     expect(single[0]?.items).toEqual([session]);
+    expect(isSingleHarnessFilter('muse')).toBe(true);
+    expect(isSingleHarnessFilter('antigravity')).toBe(true);
+    expect(isSingleHarnessFilter('codex')).toBe(true);
+    expect(isSingleHarnessFilter('claude')).toBe(true);
+    expect(isSingleHarnessFilter('all')).toBe(false);
+    expect(isSingleHarnessFilter('live')).toBe(false);
+    expect(isSingleHarnessFilter('tmux')).toBe(false);
+  });
+});
+
+describe('Muse session status (spinner) semantics', () => {
+  const now = 1_800_000_000_000;
+
+  it('idle live TUI (open segment, stale transcript) is NOT running', () => {
+    expect(
+      resolveMuseSessionStatus({
+        isLiveRegistered: true,
+        latestSegmentTerminated: 0,
+        updatedAt: now - 10 * 60_000,
+        now,
+      })
+    ).toBe('idle');
+  });
+
+  it('live TUI mid-turn (open segment, fresh transcript writes) is running', () => {
+    expect(
+      resolveMuseSessionStatus({
+        isLiveRegistered: true,
+        latestSegmentTerminated: 0,
+        updatedAt: now - 5_000,
+        now,
+      })
+    ).toBe('running');
+  });
+
+  it('terminated segment is idle even with fresh writes (just-finished exec)', () => {
+    expect(
+      resolveMuseSessionStatus({
+        isLiveRegistered: false,
+        latestSegmentTerminated: 1,
+        updatedAt: now - 1_000,
+        now,
+      })
+    ).toBe('idle');
+  });
+
+  it('headless exec in flight (open segment, fresh, unregistered) is running', () => {
+    expect(
+      resolveMuseSessionStatus({
+        isLiveRegistered: false,
+        latestSegmentTerminated: 0,
+        updatedAt: now - 3_000,
+        now,
+      })
+    ).toBe('running');
+  });
+
+  it('crashed session (open segment, unregistered, stale) is idle', () => {
+    expect(
+      resolveMuseSessionStatus({
+        isLiveRegistered: false,
+        latestSegmentTerminated: 0,
+        updatedAt: now - 3600_000,
+        now,
+      })
+    ).toBe('idle');
+  });
+
+  it('just-finished turn (terminal in tail) is idle immediately, no 90s linger', () => {
+    expect(
+      resolveMuseSessionStatus({
+        isLiveRegistered: true,
+        latestSegmentTerminated: 0,
+        updatedAt: now - 1_000,
+        now,
+        transcriptWorking: false,
+      })
+    ).toBe('idle');
+  });
+
+  it('reads turn-boundary verdict from a transcript tail file', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const pathMod = await import('node:path');
+    const dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'muse-tail-'));
+    const file = pathMod.join(dir, 'session.jsonl');
+    fs.writeFileSync(
+      file,
+      [
+        userIntentLine('first', 1),
+        runEventLine({ kind: 'terminal', terminal: 'completed' }, 2),
+      ].join('\n')
+    );
+    expect(museTranscriptIsWorking(file)).toBe(false);
+    fs.appendFileSync(file, `\n${userIntentLine('second', 3)}\n`);
+    expect(museTranscriptIsWorking(file)).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('Muse tmux terminal typing lane', () => {
+  it('parses tmux pane list and resolves the pane by ancestor pid', () => {
+    const panes = parseTmuxPaneList('%1 1000\n%7 2000\n%9 3000\n');
+    expect(panes.get(2000)).toBe('%7');
+    // muse pid 2500 -> shell 2000 (pane pid) -> tmux server
+    expect(findTmuxPaneForPids(panes, [2500, 2000, 999])).toBe('%7');
+    expect(findTmuxPaneForPids(panes, [2500, 2600])).toBeNull();
+    expect(findTmuxPaneForPids(parseTmuxPaneList('garbage'), [1])).toBeNull();
+  });
+
+  it('acks delivery when the prompt lands in the session log tail', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const pathMod = await import('node:path');
+    const dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'muse-ack-'));
+    const file = pathMod.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, '{"payload_type":"runtime.session"}\n');
+    setTimeout(() => {
+      fs.appendFileSync(
+        file,
+        `${JSON.stringify({ payload_type: 'runtime.user_intent.accepted', payload: { model_messages: [{ content: [{ kind: 'text', text: 'typed via tmux hello' }] }] } })}\n`
+      );
+    }, 200);
+    await expect(waitForMuseTranscriptDelivery(file, 'typed via tmux hello', 3000)).resolves.toBe(true);
+    await expect(waitForMuseTranscriptDelivery(file, 'never typed this', 300)).resolves.toBe(false);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('Muse terminal-held undeliverable error', () => {
+  it('builds a human undeliverable error without the raw CLI dump', () => {
+    const err = buildMuseUndeliverableError(
+      { title: 'Hey, what is this project', tags: ['@west-vega'] },
+      'tui-held'
+    );
+    expect(err).toContain('west-vega');
+    expect(err).toContain('was not delivered');
+    expect(err).toContain('close the terminal session');
+    expect(err).toContain('Restart in tmux');
+    expect(err).not.toContain('Command failed');
+    expect(err).not.toContain('--target');
+  });
+});
+
+describe('Muse restart-in-tmux holder safety', () => {
+  it('parses the holding pid from a live-registry entry', () => {
+    expect(
+      parseMuseRegistryPid(
+        '{"schema_version":1,"session_id":"s1","process_generation_hint":"pid=2540883"}'
+      )
+    ).toBe(2540883);
+    expect(parseMuseRegistryPid('{"session_id":"s1"}')).toBeNull();
+    expect(parseMuseRegistryPid('{"process_generation_hint":"pid=0"}')).toBeNull();
+    expect(parseMuseRegistryPid('{"process_generation_hint":"gen=7"}')).toBeNull();
+    expect(parseMuseRegistryPid('not json')).toBeNull();
+    expect(parseMuseRegistryPid('')).toBeNull();
+  });
+
+  it('classifies holder cmdlines so only a plain terminal muse is ever signalled', () => {
+    // /proc cmdline is NUL-separated.
+    expect(classifyMuseHolderCmdline('/home/u/.local/bin/muse-bin-1.4.25\0--yolo\0resume\0')).toBe('tui');
+    expect(classifyMuseHolderCmdline('/home/u/.local/bin/muse-bin-1.4.25\0--yolo\0')).toBe('tui');
+    expect(classifyMuseHolderCmdline('muse\0resume\0abc\0')).toBe('tui');
+    expect(
+      classifyMuseHolderCmdline('/home/u/.local/bin/muse-bin-1.4.25\0serve\0--enable-attach\0')
+    ).toBe('serve');
+    expect(classifyMuseHolderCmdline('muse\0exec\0--session-id\0abc\0')).toBe('other');
+    expect(classifyMuseHolderCmdline('muse\0attach\0--stdio\0abc\0')).toBe('other');
+    expect(classifyMuseHolderCmdline('/usr/bin/node\0server.js\0')).toBe('other');
+    expect(classifyMuseHolderCmdline('')).toBe('other');
+  });
+
+  it('builds a deterministic sanitized tmux session name and resume command', () => {
+    expect(buildMuseTmuxSessionName('Fix the Auth Bug!', '01a2168a-0e0a-7461')).toBe(
+      'sh-muse-fix-the-auth-bug-01a216'
+    );
+    expect(buildMuseTmuxSessionName('', '01a2168a-0e0a-7461')).toBe('sh-muse-muse-01a216');
+    expect(buildMuseResumeCommand('/home/u/.local/bin/muse', '01a2168a-x')).toBe(
+      `'/home/u/.local/bin/muse' 'resume' '01a2168a-x'`
+    );
+    expect(buildMuseResumeCommand('/home/u/.local/bin/muse', '01a2168a-x', ['--yolo'])).toBe(
+      `'/home/u/.local/bin/muse' 'resume' '01a2168a-x' '--yolo'`
+    );
+  });
+
+  it('replays only whitelisted posture flags from the original terminal launch', () => {
+    expect(
+      extractMuseResumeFlags(
+        '/home/u/.local/bin/muse-bin\0--yolo\0--model\0muse-wonder\0--provider\0echo\0resume\0'
+      )
+    ).toEqual(['--yolo', '--model', 'muse-wonder', '--provider', 'echo']);
+    expect(
+      extractMuseResumeFlags('muse\0--reasoning-effort=xhigh\0--trust-workspace\0fix the bug\0')
+    ).toEqual(['--reasoning-effort', 'xhigh', '--trust-workspace']);
+    // Unknown flags, the binary, subcommands, and prompt text never carry over.
+    expect(extractMuseResumeFlags('muse\0--base-url\0http://x\0hello\0')).toEqual([]);
+    expect(extractMuseResumeFlags('muse\0')).toEqual([]);
+    expect(extractMuseResumeFlags('')).toEqual([]);
+    // A valued flag with no value is dropped rather than dangling.
+    expect(extractMuseResumeFlags('muse\0--model\0')).toEqual([]);
+  });
+
+  it('exposes promoteToTmux on the muse driver', () => {
+    const muse = createMuseDriver();
+    expect(typeof muse.promoteToTmux).toBe('function');
+  });
+});
+
+
+describe('Muse usage parity (JSON, pace window, 24h delta)', () => {
+  it('parses `muse usage --json` with absolute resets and pace window lengths', () => {
+    const parsed = parseMuseUsageJson(
+      JSON.stringify({
+        allowance: {
+          asOfMs: 1795671261315,
+          source: 'mint',
+          tier: 'Muse Code Power Usage',
+          weekly: { resetsAtMs: 1795996800000, usedPercent: 4 },
+          window: { resetsAtMs: 1795687080000, usedPercent: 14 },
+        },
+        hint: null,
+        reason: null,
+        schemaVersion: 1,
+      })
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.planLabel).toBe('Muse Code Power Usage');
+    expect(parsed!.windows).toEqual([
+      {
+        id: 'five_hour',
+        label: 'Window',
+        usedPercent: 14,
+        resetsAt: 1795687080000,
+        windowMinutes: 300,
+      },
+      {
+        id: 'weekly',
+        label: 'Weekly (7d)',
+        usedPercent: 4,
+        resetsAt: 1795996800000,
+        windowMinutes: 10080,
+      },
+    ]);
+    expect(parseMuseUsageJson('not json')).toBeNull();
+  });
+
+  it('text fallback also carries the 5h window length for pace', () => {
+    const { windows } = parseMuseUsageOutput(
+      'Tier: X\nWindow: 10% used, resets in 4h 0m\nWeekly: 2% used, resets in 3d 1h\n',
+      1_800_000_000_000
+    );
+    expect(windows[0].windowMinutes).toBe(300);
+  });
+
+  it('samples quota history with throttling and computes +24h delta like Claude', () => {
+    const day = 24 * 3600_000;
+    const t0 = 1_800_000_000_000;
+    let samples = appendMuseQuotaSample([], { t: t0, w: 10, wk: 30 }, t0);
+    // Same values 1 minute later → throttled, no new sample.
+    samples = appendMuseQuotaSample(samples, { t: t0 + 60_000, w: 10, wk: 30 }, t0 + 60_000);
+    expect(samples).toHaveLength(1);
+    // Changed value → recorded immediately.
+    samples = appendMuseQuotaSample(samples, { t: t0 + 120_000, w: 12, wk: 30 }, t0 + 120_000);
+    expect(samples).toHaveLength(2);
+
+    const now = t0 + day + 3600_000;
+    samples = appendMuseQuotaSample(samples, { t: now, w: 25, wk: 41 }, now);
+    expect(computeMuseQuotaDelta24h(samples, 'wk', 41, now)).toBe(11);
+    expect(computeMuseQuotaDelta24h(samples, 'w', 25, now)).toBe(13);
+    // No sample old enough → undefined (delta hidden, as with Claude).
+    expect(computeMuseQuotaDelta24h(samples.slice(-1), 'wk', 41, now)).toBeUndefined();
+    // Negative movement (reset crossed) → undefined, never a negative "+% today".
+    expect(computeMuseQuotaDelta24h(samples, 'wk', 5, now)).toBeUndefined();
   });
 });

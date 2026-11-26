@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildCodexQueueArgs } from '../src/main/adapters/codexAdapter';
+import { mapCodexQueuedSubmission } from '../src/main/services/codexAppServerClient';
 import { isExternalAntigravityTurnActive } from '../src/main/services/agyAcpClient';
 import {
   isBusyDispatchError,
@@ -65,29 +65,14 @@ describe('Antigravity active external turn guard', () => {
   });
 });
 
-describe('Codex native queue CLI args', () => {
-  it('routes through --remote unix:// when daemon socket is present', () => {
-    expect(buildCodexQueueArgs('thread-123', 'Follow up', true)).toEqual([
-      'queue',
-      '--remote',
-      'unix://',
-      '--thread',
-      'thread-123',
-      '--message',
-      'Follow up',
-      '--resume',
-    ]);
-  });
-
-  it('omits --remote when running standalone CLI', () => {
-    expect(buildCodexQueueArgs('thread-123', 'Follow up', false)).toEqual([
-      'queue',
-      '--thread',
-      'thread-123',
-      '--message',
-      'Follow up',
-      '--resume',
-    ]);
+describe('Codex native queue (app-server thread/queue/*)', () => {
+  it('maps native queued submissions into the queue tray', () => {
+    const mapped = mapCodexQueuedSubmission({
+      id: 'sub-1',
+      clientUserMessageId: 'cum-1',
+      input: [{ type: 'text', text: 'Follow up', text_elements: [] }],
+    });
+    expect(mapped).toMatchObject({ id: 'codex-q-sub-1', text: 'Follow up', source: 'native' });
   });
 });
 
@@ -244,5 +229,27 @@ describe('Persistent Super Harness queue storage', () => {
     expect(composerSrc).toContain('if ((e.ctrlKey || e.altKey || e.metaKey) && onQueue && !isMaster)');
     expect(paneSrc).toContain('isAgentBusy ? { force: true } : undefined');
     expect(paneSrc).toContain('onQueue={() => void handleQueue()}');
+  });
+
+  it('supports image paste, drop, and picker in DraftSessionPane and forwards attachments on startSession', () => {
+    const draftSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/components/DraftSessionPane.tsx'),
+      'utf8'
+    );
+    const agySrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/adapters/antigravityAdapter.ts'),
+      'utf8'
+    );
+    const claudeSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/adapters/claudeAdapter.ts'),
+      'utf8'
+    );
+
+    expect(draftSrc).toContain('onPaste={(e) => void handlePaste(e)}');
+    expect(draftSrc).toContain('window.superHarness.readClipboardImage()');
+    expect(draftSrc).toContain('window.superHarness.pickImageFiles()');
+    expect(draftSrc).toContain('attachments: attachments.length > 0 ? attachments : undefined');
+    expect(agySrc).toContain('req.attachments');
+    expect(claudeSrc).toContain("formatPromptWithImagePaths(req.prompt?.trim() || '', req.attachments)");
   });
 });

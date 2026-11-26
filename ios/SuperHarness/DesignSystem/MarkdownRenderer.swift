@@ -490,6 +490,10 @@ public enum SHMarkdownCache {
         )
         var attr = (try? AttributedString(markdown: raw, options: opts)) ?? AttributedString(raw)
 
+        // Auto-linkify bare http(s):// and cross-harness session:// URLs in non-code runs
+        // because Foundation's AttributedString(markdown:) does not auto-link bare URLs.
+        autolinkBareURLs(in: &attr)
+
         // Style inline code, links, bold, and strikethrough runs to match Obsidian design tokens.
         for run in attr.runs {
             let range = run.range
@@ -516,6 +520,52 @@ public enum SHMarkdownCache {
         inlineCache.setObject(StyledAttributedBox(attr), forKey: cacheKey)
         return attr
     }
+
+    private static let bareURLRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"(?i)\b(?:https?|conversation|session|sh|super-harness|antigravity|agy|codex|claude|muse)://[^\s<>"'\[\]]+"#
+    )
+
+    private static func autolinkBareURLs(in attr: inout AttributedString) {
+        guard let regex = bareURLRegex else { return }
+        let plain = String(attr.characters)
+        let nsPlain = plain as NSString
+        let matches = regex.matches(in: plain, range: NSRange(location: 0, length: nsPlain.length))
+        guard !matches.isEmpty else { return }
+
+        let trailingTrimChars = CharacterSet(charactersIn: ".,;:!?)")
+        for match in matches {
+            var rawSlice = nsPlain.substring(with: match.range)
+            var trimCount = 0
+            while let last = rawSlice.unicodeScalars.last, trailingTrimChars.contains(last) {
+                // Keep balanced ')' if URL contains '(' (e.g. Wikipedia links)
+                if last == ")" && rawSlice.filter({ $0 == "(" }).count >= rawSlice.filter({ $0 == ")" }).count {
+                    break
+                }
+                rawSlice.removeLast()
+                trimCount += 1
+            }
+            guard !rawSlice.isEmpty, let url = URL(string: rawSlice) else { continue }
+            let adjustedNSRange = NSRange(location: match.range.location, length: match.range.length - trimCount)
+            guard let swiftRange = Range(adjustedNSRange, in: plain),
+                  let attrStart = AttributedString.Index(swiftRange.lowerBound, within: attr),
+                  let attrEnd = AttributedString.Index(swiftRange.upperBound, within: attr),
+                  attrStart < attrEnd else {
+                continue
+            }
+            let attrRange = attrStart..<attrEnd
+            // Do not linkify inside inline code spans or overwrite an existing markdown link.
+            var skip = false
+            for run in attr[attrRange].runs {
+                if run.link != nil || run.inlinePresentationIntent?.contains(.code) == true {
+                    skip = true
+                    break
+                }
+            }
+            if !skip {
+                attr[attrRange].link = url
+            }
+        }
+    }
 }
 
 // MARK: - SwiftUI GFM Markdown Renderer
@@ -536,7 +586,6 @@ public struct SHMarkdownView: View, Equatable {
     public var body: some View {
         let blocks = SHMarkdownCache.blocks(for: text)
         SHMarkdownBlockListView(blocks: blocks, isUserBubble: isUserBubble)
-            .textSelection(.enabled)
     }
 }
 
@@ -637,8 +686,16 @@ private struct SHMarkdownBlockListView: View {
         }
     }
 
-    private func inlineText(_ raw: String) -> Text {
-        Text(SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble))
+    @ViewBuilder
+    private func inlineText(_ raw: String) -> some View {
+        let attr = SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble)
+        let hasLinks = attr.runs.contains { $0.link != nil }
+        if hasLinks {
+            Text(attr)
+        } else {
+            Text(attr)
+                .textSelection(.enabled)
+        }
     }
 
     private func headingFont(_ level: Int) -> Font {

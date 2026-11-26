@@ -112,4 +112,25 @@ final class MarkdownRendererTests: XCTestCase {
         XCTAssertTrue(hasCodeBg, "Inline code should have pill background styling")
         XCTAssertTrue(hasLink, "Markdown links should preserve URL attribute")
     }
+
+    @MainActor
+    func testAutolinksBareHTTPSAndSessionURLs() {
+        let boldURL = SHMarkdownCache.inlineAttributedString(
+            for: "Open **https://example.ts.net:8451/** or see conversation://dc969a3b-736f-45e1-b1af-60d2fe972418.",
+            isUserBubble: false
+        )
+        let links = boldURL.runs.compactMap { $0.link?.absoluteString }
+        XCTAssertTrue(links.contains("https://example.ts.net:8451/"), "Bare bold HTTPS URL must be auto-linked; got \(links)")
+        XCTAssertTrue(
+            links.contains("conversation://dc969a3b-736f-45e1-b1af-60d2fe972418"),
+            "Bare conversation:// URL must be auto-linked without trailing period; got \(links)"
+        )
+
+        // Inline code spans must NOT be auto-linked
+        let codeOnly = SHMarkdownCache.inlineAttributedString(
+            for: "Run `https://not-a-link.example.com` in shell",
+            isUserBubble: false
+        )
+        XCTAssertTrue(codeOnly.runs.compactMap(\.link).isEmpty, "URLs inside inline code must not be auto-linked")
+    }
 }

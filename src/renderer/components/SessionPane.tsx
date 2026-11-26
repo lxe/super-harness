@@ -148,7 +148,11 @@ export const SessionPane: React.FC<Props> = ({
   currentSessionRef.current = session?.id ?? '';
 
   const mergeWithOptimistic = useCallback(
-    (reqId: string, incoming: UnifiedMessage[]): UnifiedMessage[] => {
+    (
+      reqId: string,
+      incoming: UnifiedMessage[],
+      incomingActivity?: LiveActivityState
+    ): UnifiedMessage[] => {
       let result = incoming;
       const failedList = failedUserMessagesBySession.get(reqId);
       if (failedList && failedList.length > 0) {
@@ -165,6 +169,17 @@ export const SessionPane: React.FC<Props> = ({
       if (!pending || pending.sessionId !== reqId) return result;
       // Expire after 25s if the harness never wrote it
       if (Date.now() - pending.sentAt > 25_000) {
+        pendingOptimisticRef.current = null;
+        return result;
+      }
+      // If the harness routed the message into its native queue (e.g. Codex active-writer fallback),
+      // drop the optimistic transcript bubble so it isn't shown twice.
+      const matchedInNativeQueue = (incomingActivity?.queuedMessages ?? []).some(
+        (q) =>
+          (pending.promptText && q.text.trim() === pending.promptText) ||
+          q.createdAt >= pending.sentAt - 2000
+      );
+      if (matchedInNativeQueue) {
         pendingOptimisticRef.current = null;
         return result;
       }
@@ -278,7 +293,7 @@ export const SessionPane: React.FC<Props> = ({
     const cached = rendererTranscriptCache.get(sessionId);
     if (cached) {
       lastResultRef.current = cached.result;
-      setMessages(mergeWithOptimistic(sessionId, cached.result.messages));
+      setMessages(mergeWithOptimistic(sessionId, cached.result.messages, cached.result.liveActivity));
       setTotalCount(cached.result.totalCount);
       setLiveActivity(cached.result.liveActivity);
       setLimit(Math.max(DEFAULT_TRANSCRIPT_LIMIT, cached.fetchedLimit));
@@ -320,7 +335,7 @@ export const SessionPane: React.FC<Props> = ({
         if (currentSessionRef.current !== reqId) return;
         if (!isTranscriptEquivalent(lastResultRef.current, res)) {
           lastResultRef.current = res;
-          setMessages(mergeWithOptimistic(reqId, res.messages));
+          setMessages(mergeWithOptimistic(reqId, res.messages, res.liveActivity));
           setTotalCount(res.totalCount);
           setLiveActivity(res.liveActivity);
         }
@@ -356,7 +371,7 @@ export const SessionPane: React.FC<Props> = ({
       if (res.sessionId !== sessionId) return;
       if (!isTranscriptEquivalent(lastResultRef.current, res)) {
         lastResultRef.current = res;
-        setMessages(mergeWithOptimistic(sessionId, res.messages));
+        setMessages(mergeWithOptimistic(sessionId, res.messages, res.liveActivity));
         setTotalCount(res.totalCount);
         setLiveActivity(res.liveActivity);
       }
@@ -948,6 +963,7 @@ export const SessionPane: React.FC<Props> = ({
 
           <QueuedMessagesTray
             items={combinedQueue}
+            isAgentBusy={isAgentBusy}
             harnessLabel={
               session.harnessGroup === 'antigravity'
                 ? 'Antigravity'

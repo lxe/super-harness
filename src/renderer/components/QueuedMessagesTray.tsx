@@ -7,6 +7,7 @@ import type { PreviewImageItem } from './ImageLightbox';
 
 interface Props {
   items: QueuedMessageItem[];
+  isAgentBusy?: boolean;
   harnessLabel?: string;
   onSendNow: (id: string) => void;
   onEdit: (id: string) => void;
@@ -16,6 +17,7 @@ interface Props {
 
 export const QueuedMessagesTray: React.FC<Props> = ({
   items,
+  isAgentBusy = true,
   harnessLabel,
   onSendNow,
   onEdit,
@@ -25,6 +27,12 @@ export const QueuedMessagesTray: React.FC<Props> = ({
   const [collapsed, setCollapsed] = useState(false);
 
   if (items.length === 0) return null;
+
+  const allNative = items.every((i) => i.source === 'native');
+  const subtitle =
+    !isAgentBusy && allNative && harnessLabel
+      ? `Held in ${harnessLabel} queue · active in ${harnessLabel} app`
+      : 'Sends after agent finishes working';
 
   return (
     <div className="rounded-2xl border border-line-subtle bg-surface-subtle overflow-hidden">
@@ -42,7 +50,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
             {items.length}
           </Badge>
           <span className="text-micro text-ink-faint leading-[1.35] pt-[1px] truncate">
-            Sends after agent finishes working
+            {subtitle}
           </span>
         </div>
         {collapsed ? (

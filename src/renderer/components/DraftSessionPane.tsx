@@ -63,6 +63,7 @@ function groupForDraftHarness(h: StartSessionRequest['harness'] | null): Harness
   if (!h) return null;
   if (h === 'antigravity') return 'antigravity';
   if (h === 'codex') return 'codex';
+  if (h === 'muse') return 'muse';
   return 'claude';
 }
 
@@ -195,7 +196,7 @@ export const DraftSessionPane: React.FC<Props> = ({
 
   const handleSelectThinking = (level: string) => {
     if (selectedGroup === 'antigravity' && level) {
-      // Antigravity encodes thinking effort directly into the model slug (e.g. gemini-4-neon-xhigh)
+      // Antigravity encodes thinking effort directly into the model slug (e.g. gemini-2.5-pro-high)
       const baseModel = selectedModelOption || defaultModelOption || availableModels[0];
       const m = baseModel?.id.match(AGY_SUFFIX_RE);
       if (m) {
@@ -303,11 +304,13 @@ export const DraftSessionPane: React.FC<Props> = ({
       ? 'Antigravity'
       : selectedGroup === 'codex'
         ? 'Codex'
-        : selectedGroup === 'claude'
-          ? draft.harness === 'claude-cli'
-            ? 'Claude CLI'
-            : 'Claude'
-          : null;
+        : selectedGroup === 'muse'
+          ? 'Muse'
+          : selectedGroup === 'claude'
+            ? draft.harness === 'claude-cli'
+              ? 'Claude CLI'
+              : 'Claude'
+            : null;
 
   return (
     <section className="flex-1 min-w-0 h-full flex flex-col bg-surface-canvas">
@@ -353,7 +356,7 @@ export const DraftSessionPane: React.FC<Props> = ({
 
           {/* 3-Card Harness Selector (Claude has split dropdown for tmux vs Headless CLI) */}
           <div
-            className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-1 rounded-2xl transition-all ${
+            className={`grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 p-1 rounded-2xl transition-all ${
               highlightPicker ? 'ring-2 ring-amber-400/60 bg-amber-400/[0.04]' : ''
             }`}
           >
@@ -392,6 +395,25 @@ export const DraftSessionPane: React.FC<Props> = ({
               </div>
               <div className="text-caption text-ink-faint mt-1 leading-snug">
                 OpenAI Codex thread
+              </div>
+            </button>
+
+            {/* Muse */}
+            <button
+              type="button"
+              onClick={() => handleSelectHarness('muse')}
+              className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+                selectedGroup === 'muse'
+                  ? 'bg-white/[0.09] border-line-strong text-ink-primary'
+                  : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-label font-semibold">
+                <HarnessLogo harness="muse" size={16} />
+                <span className="truncate">Muse</span>
+              </div>
+              <div className="text-caption text-ink-faint mt-1 leading-snug">
+                Headless exec, resumable
               </div>
             </button>
 

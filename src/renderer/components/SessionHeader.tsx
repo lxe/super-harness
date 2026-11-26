@@ -288,7 +288,9 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                           ? 'Codex'
                           : session.harnessGroup === 'claude'
                             ? 'Claude'
-                            : 'Antigravity'}
+                            : session.harnessGroup === 'muse'
+                              ? 'Muse'
+                              : 'Antigravity'}
                       </MenuItem>
                     )}
                     {folders.length > 0 && (

@@ -4,9 +4,10 @@ export type HarnessKind =
   | 'claude-tmux'
   | 'claude-desktop'
   | 'claude-cli'
-  | 'antigravity';
+  | 'antigravity'
+  | 'muse';
 
-export type HarnessGroup = 'codex' | 'claude' | 'antigravity';
+export type HarnessGroup = 'codex' | 'claude' | 'antigravity' | 'muse';
 
 export type SessionStatus =
   | 'running'
@@ -69,7 +70,13 @@ export interface UnifiedSession {
   tags: string[];
   hidden: boolean;
   /** Extra dispatch metadata */
-  dispatchMode: 'master' | 'tmux-send' | 'claude-resume' | 'codex-resume' | 'agy-resume';
+  dispatchMode:
+    | 'master'
+    | 'tmux-send'
+    | 'claude-resume'
+    | 'codex-resume'
+    | 'agy-resume'
+    | 'muse-exec';
   /** Live sync ownership indicator for accurate bidirectional status in the UI. */
   liveOwner?: 'daemon' | 'tmux' | 'desktop' | 'super-harness';
   /** Subagent / hierarchy metadata */
@@ -316,7 +323,7 @@ export interface SuperHarnessState {
 }
 
 export interface StartSessionRequest {
-  harness: 'codex' | 'claude-tmux' | 'claude-cli' | 'antigravity';
+  harness: 'codex' | 'claude-tmux' | 'claude-cli' | 'antigravity' | 'muse';
   cwd: string;
   title?: string;
   prompt?: string;

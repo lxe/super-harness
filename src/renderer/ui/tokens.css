@@ -23,6 +23,7 @@
   --color-brand-antigravity: #60a5fa;
   --color-brand-codex: #10a37f;
   --color-brand-claude: #d97757;
+  --color-brand-muse: #a855f7;
   --color-brand-master: #818cf8;
 
   /* Semantic accents */
@@ -72,6 +73,7 @@
   --sh-brand-antigravity: #60a5fa;
   --sh-brand-codex: #10a37f;
   --sh-brand-claude: #d97757;
+  --sh-brand-muse: #a855f7;
   --sh-brand-master: #818cf8;
 
   --sh-shadow-popover: 0 18px 40px -10px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);

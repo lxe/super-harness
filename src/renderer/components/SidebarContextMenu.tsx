@@ -7,6 +7,7 @@ function harnessLabelForPin(session: UnifiedSession): string {
   if (session.harnessGroup === 'codex') return 'Codex';
   if (session.harnessGroup === 'claude') return 'Claude';
   if (session.harnessGroup === 'antigravity') return 'Antigravity';
+  if (session.harnessGroup === 'muse') return 'Muse';
   return 'harness';
 }
 
@@ -14,7 +15,7 @@ export interface SidebarContextMenuProps {
   x: number;
   y: number;
   targets: UnifiedSession[];
-  /** When opened by right-clicking a section header (e.g. "Muse"), enables section-level actions. */
+  /** When opened by right-clicking a section header (e.g. "Backend"), enables section-level actions. */
   sectionLabel?: string;
   onClose: () => void;
   onClearSelection: () => void;

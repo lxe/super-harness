@@ -49,6 +49,91 @@ export function mediaUrlForPath(filePath: string): string {
   return `sh-media://local?path=${encodeURIComponent(filePath)}`;
 }
 
+export function embedUrlForPath(filePath: string, token: string): string {
+  return `sh-media://local?path=${encodeURIComponent(filePath)}&embed=1&token=${encodeURIComponent(token)}`;
+}
+
+export type TextEmbedSegment =
+  | { kind: 'markdown'; text: string }
+  | { kind: 'embed'; filePath: string; title: string };
+
+function decodeEmbedFilePath(src: string): string | null {
+  const trimmed = src.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('file://')) {
+    try {
+      const u = new URL(trimmed);
+      return decodeURIComponent(u.pathname);
+    } catch {
+      return null;
+    }
+  }
+  if (trimmed.startsWith('/')) return trimmed;
+  return null;
+}
+
+/**
+ * Splits markdown text containing `<agent-embed src="file:///...html">` tags
+ * into alternating markdown and inline HTML preview segments while ignoring
+ * examples inside fenced code blocks or inline code spans.
+ */
+export function splitAgentEmbeds(raw: string): TextEmbedSegment[] {
+  if (!raw || !raw.toLowerCase().includes('<agent-embed')) {
+    return [{ kind: 'markdown', text: raw }];
+  }
+
+  // Match fenced code blocks, inline code spans, or <agent-embed ...> tags in one pass
+  const tokenRe =
+    /(```[\s\S]*?```|`[^`\n]+`|<agent-embed\b([^>]*?)(?:\/>|>\s*<\/agent-embed>))/gi;
+
+  const segments: TextEmbedSegment[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  const pushMarkdown = (chunk: string) => {
+    if (!chunk) return;
+    const prev = segments[segments.length - 1];
+    if (prev && prev.kind === 'markdown') {
+      prev.text += chunk;
+    } else {
+      segments.push({ kind: 'markdown', text: chunk });
+    }
+  };
+
+  while ((match = tokenRe.exec(raw)) !== null) {
+    const full = match[0];
+    const attrs = match[2];
+    if (attrs === undefined) {
+      // Code block or inline code — keep untouched
+      pushMarkdown(raw.slice(cursor, match.index + full.length));
+      cursor = match.index + full.length;
+      continue;
+    }
+
+    const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+    const rawSrc = srcMatch?.[1] || srcMatch?.[2] || srcMatch?.[3] || '';
+    const filePath = decodeEmbedFilePath(rawSrc);
+    if (!filePath || !/\.html?$/i.test(filePath)) {
+      pushMarkdown(raw.slice(cursor, match.index + full.length));
+      cursor = match.index + full.length;
+      continue;
+    }
+
+    const before = raw.slice(cursor, match.index);
+    if (before.trim()) pushMarkdown(before);
+    const title = filePath.split('/').pop() || 'Interactive preview';
+    segments.push({ kind: 'embed', filePath, title });
+    cursor = match.index + full.length;
+  }
+
+  const tail = raw.slice(cursor);
+  if (tail.trim() || segments.length === 0) {
+    pushMarkdown(tail);
+  }
+
+  return segments;
+}
+
 export interface HarnessVisual {
   label: string;
   glyph: string;
@@ -69,6 +154,8 @@ export function getHarnessVisual(harness: HarnessKind): HarnessVisual {
       return { label: 'Claude CLI', glyph: '✳', subtleColor: 'text-zinc-500' };
     case 'antigravity':
       return { label: 'Antigravity', glyph: '▲', subtleColor: 'text-zinc-400' };
+    case 'muse':
+      return { label: 'Muse', glyph: 'μ', subtleColor: 'text-zinc-400' };
   }
 }
 

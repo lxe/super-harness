@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  embedUrlForPath,
   parseTaskNotification,
+  splitAgentEmbeds,
   unwrapSystemEnvelope,
 } from '../src/renderer/utils/format';
 
@@ -30,5 +32,35 @@ No completion record was found for them in the previous session.
 - Second item
 </cross-session-message>`;
     expect(unwrapSystemEnvelope(raw)).toBe('- First item\n- Second item');
+  });
+
+  it('extracts inline <agent-embed> HTML previews while ignoring code spans and fenced blocks', () => {
+    const raw = [
+      'Here are the options:',
+      '',
+      '<agent-embed src="file:///tmp/my%20preview/widget.html"></agent-embed>',
+      '',
+      'Inline code example: `<agent-embed src="file:///tmp/ignored.html"></agent-embed>`',
+      '```html',
+      '<agent-embed src="file:///tmp/ignored2.html"></agent-embed>',
+      '```',
+    ].join('\n');
+
+    const segs = splitAgentEmbeds(raw);
+    expect(segs).toHaveLength(3);
+    expect(segs[0]).toEqual({ kind: 'markdown', text: 'Here are the options:\n\n' });
+    expect(segs[1]).toEqual({
+      kind: 'embed',
+      filePath: '/tmp/my preview/widget.html',
+      title: 'widget.html',
+    });
+    expect(segs[2].kind).toBe('markdown');
+    if (segs[2].kind === 'markdown') {
+      expect(segs[2].text).toContain('ignored.html');
+      expect(segs[2].text).toContain('ignored2.html');
+    }
+    expect(embedUrlForPath('/tmp/widget.html', 'tok1')).toBe(
+      'sh-media://local?path=%2Ftmp%2Fwidget.html&embed=1&token=tok1'
+    );
   });
 });

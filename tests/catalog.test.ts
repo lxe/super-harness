@@ -13,32 +13,32 @@ describe('catalogService parsers & project helpers', () => {
   it('parses `agy models` output (both tab-separated non-TTY and space-padded TTY) with thinking levels', () => {
     const raw = [
       '\x1b[2K\r⠋ Fetching available models...',
-      'gemini-4-neon-high\tGemini 4 Neon (High)',
-      'gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)',
-      '\x1b[2K\r  claude-opus-5-5-high     Claude Opus 5.5 (High)',
+      'gemini-2.5-pro-high\tGemini 2.5 Pro (High)',
+      'gemini-2.5-pro-xhigh\tGemini 2.5 Pro (XHigh)',
+      '\x1b[2K\r  claude-opus-4-6-high     Claude Opus 4.6 (High)',
       'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)',
-      'gemini-4-neon-high\tGemini 4 Neon (High)',
+      'gemini-2.5-pro-high\tGemini 2.5 Pro (High)',
     ].join('\n');
 
     const models = parseAgyModelsOutput(raw);
     expect(models).toEqual([
       {
-        id: 'gemini-4-neon-high',
-        label: 'Gemini 4 Neon (High)',
+        id: 'gemini-2.5-pro-high',
+        label: 'Gemini 2.5 Pro (High)',
         group: 'Gemini',
         reasoningLevels: ['high', 'xhigh'],
         defaultReasoningLevel: 'high',
       },
       {
-        id: 'gemini-4-neon-xhigh',
-        label: 'Gemini 4 Neon (XHigh)',
+        id: 'gemini-2.5-pro-xhigh',
+        label: 'Gemini 2.5 Pro (XHigh)',
         group: 'Gemini',
         reasoningLevels: ['high', 'xhigh'],
         defaultReasoningLevel: 'xhigh',
       },
       {
-        id: 'claude-opus-5-5-high',
-        label: 'Claude Opus 5.5 (High)',
+        id: 'claude-opus-4-6-high',
+        label: 'Claude Opus 4.6 (High)',
         group: 'Claude',
         reasoningLevels: ['high'],
         defaultReasoningLevel: 'high',
@@ -57,10 +57,10 @@ describe('catalogService parsers & project helpers', () => {
     const raw = JSON.stringify({
       models: [
         { slug: 'hidden-model', display_name: 'Hidden', visibility: 'hide', priority: 0 },
-        { slug: 'gpt-6.2-astra', display_name: 'GPT-6.2 Astra', visibility: 'list', priority: 2 },
+        { slug: 'gpt-5.3-codex', display_name: 'GPT-5.3 Codex', visibility: 'list', priority: 2 },
         {
-          slug: 'gpt-6.2-sol',
-          display_name: 'GPT-6.2 Sol',
+          slug: 'gpt-5.4',
+          display_name: 'GPT-5.4',
           description: 'Flagship coding model',
           visibility: 'list',
           priority: 1,
@@ -75,19 +75,19 @@ describe('catalogService parsers & project helpers', () => {
       ],
     });
 
-    const models = parseCodexModelsCache(raw, 'gpt-6.2-sol');
+    const models = parseCodexModelsCache(raw, 'gpt-5.4');
     expect(models).toHaveLength(2);
     expect(models[0]).toMatchObject({
-      id: 'gpt-6.2-sol',
-      label: 'GPT-6.2 Sol',
+      id: 'gpt-5.4',
+      label: 'GPT-5.4',
       description: 'Flagship coding model',
       isDefault: true,
       defaultReasoningLevel: 'low',
       reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
     });
     expect(models[1]).toMatchObject({
-      id: 'gpt-6.2-astra',
-      label: 'GPT-6.2 Astra',
+      id: 'gpt-5.3-codex',
+      label: 'GPT-5.3 Codex',
       isDefault: false,
     });
   });

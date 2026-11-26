@@ -5,7 +5,14 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 
-export type SidebarFilterTab = 'all' | 'live' | 'codex' | 'claude' | 'tmux' | 'antigravity';
+export type SidebarFilterTab =
+  | 'all'
+  | 'live'
+  | 'codex'
+  | 'claude'
+  | 'tmux'
+  | 'antigravity'
+  | 'muse';
 
 export interface SubSection {
   id: string;
@@ -74,6 +81,7 @@ const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'antigravity', label: 'Antigravity' },
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude' },
+  { id: 'muse', label: 'Muse' },
 ];
 
 /**
@@ -113,6 +121,7 @@ export function filterSidebarSessions(
     if (filter === 'claude' && s.harnessGroup !== 'claude') return false;
     if (filter === 'tmux' && s.harness !== 'claude-tmux') return false;
     if (filter === 'antigravity' && s.harness !== 'antigravity') return false;
+    if (filter === 'muse' && s.harness !== 'muse') return false;
     if (q) {
       const hay =
         `${s.title} ${s.projectName} ${s.nativeSection || ''} ${s.cwd} ${s.harness} ${s.tmuxSessionName || ''}`.toLowerCase();
@@ -186,7 +195,12 @@ export function groupSessionsForSidebar(
   if (groupBy === 'native') {
     // Single-harness tab: native harness pins sit flat at the top (no Pinned header),
     // followed directly by the harness's project / native sections.
-    if (filter === 'antigravity' || filter === 'codex' || filter === 'claude') {
+    if (
+      filter === 'antigravity' ||
+      filter === 'codex' ||
+      filter === 'claude' ||
+      filter === 'muse'
+    ) {
       const { pinnedItems, sections } = splitNativePinnedAndSections(filter, rest);
       const out: TopGroup[] = [];
       if (pinnedItems.length > 0) {

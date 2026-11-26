@@ -197,7 +197,7 @@ function priceCodexTokens(
     inRate = 0.4;
     cachedRate = 0.04;
     outRate = 1.6;
-  } else if (m.includes('pro') || m.includes('astra')) {
+  } else if (m.includes('pro')) {
     inRate = 5.0;
     cachedRate = 0.5;
     outRate = 25.0;
@@ -219,7 +219,7 @@ function priceAntigravityTokens(
   if (m.includes('flash')) {
     return (uncachedInput * 0.3 + cacheRead * 0.03 + output * 2.5) / 1_000_000;
   }
-  // Gemini Pro / Neon / Carbon / Argon API-equivalent rates ($1.25/M in, $0.125/M cached, $10/M out)
+  // Gemini Pro flagship API-equivalent rates ($1.25/M in, $0.125/M cached, $10/M out)
   return (uncachedInput * 1.25 + cacheRead * 0.125 + output * 10.0) / 1_000_000;
 }
 
@@ -299,6 +299,64 @@ function saveDiskCache(
  * Parses structured JSON emitted by the official `agy -p "/usage" --output-format json`
  * and `agy -p "/credits" --output-format json` CLI commands into UsageQuotaWindow[].
  */
+function parseMuseResetDurationMs(raw: string): number | undefined {
+  let total = 0;
+  let matched = false;
+  for (const m of raw.matchAll(/(\d+)\s*(d|h|m)\b/g)) {
+    matched = true;
+    const value = Number(m[1]);
+    if (m[2] === 'd') total += value * 24 * HOUR_MS;
+    else if (m[2] === 'h') total += value * HOUR_MS;
+    else total += value * 60_000;
+  }
+  return matched ? total : undefined;
+}
+
+/**
+ * Parses human `muse usage` output, e.g.:
+ *   Tier: Muse Code Power Usage
+ *   Window: 1% used, resets in 4h 56m
+ *   Weekly: 0% used, resets in 3d 18h
+ */
+export function parseMuseUsageOutput(
+  stdout: string,
+  now: number
+): { planLabel?: string; windows: UsageQuotaWindow[] } {
+  const windows: UsageQuotaWindow[] = [];
+  let planLabel: string | undefined;
+  for (const rawLine of stdout.split('\n')) {
+    const line = rawLine.trim();
+    const tierMatch = line.match(/^Tier:\s*(.+)$/i);
+    if (tierMatch) {
+      planLabel = tierMatch[1].trim();
+      continue;
+    }
+    const windowMatch = line.match(/^Window:\s*(\d+(?:\.\d+)?)%\s*used(?:,\s*resets in\s*(.+))?$/i);
+    if (windowMatch) {
+      const resetMs = windowMatch[2] ? parseMuseResetDurationMs(windowMatch[2]) : undefined;
+      windows.push({
+        id: 'five_hour',
+        label: 'Window',
+        usedPercent: Number(windowMatch[1]),
+        resetsAt: resetMs !== undefined ? now + resetMs : undefined,
+      });
+      continue;
+    }
+    const weeklyMatch = line.match(/^Weekly:\s*(\d+(?:\.\d+)?)%\s*used(?:,\s*resets in\s*(.+))?$/i);
+    if (weeklyMatch) {
+      const resetMs = weeklyMatch[2] ? parseMuseResetDurationMs(weeklyMatch[2]) : undefined;
+      windows.push({
+        id: 'weekly',
+        label: 'Weekly (7d)',
+        usedPercent: Number(weeklyMatch[1]),
+        resetsAt: resetMs !== undefined ? now + resetMs : undefined,
+        windowMinutes: 7 * 24 * 60,
+      });
+    }
+  }
+  return { planLabel, windows };
+}
+
 export function parseAntigravityCliUsageJson(
   usageStdout: string,
   creditsStdout?: string
@@ -460,10 +518,11 @@ export class UsageService {
       const markDirty = () => {
         dirty = true;
       };
-      const [antigravity, codex, claude] = await Promise.all([
+      const [antigravity, codex, claude, muse] = await Promise.all([
         this.collectAntigravityUsage(now, markDirty, force),
         this.collectCodexUsage(now, markDirty),
         this.collectClaudeUsage(now, markDirty),
+        this.collectMuseUsage(now),
       ]);
       if (dirty) {
         saveDiskCache(this.fileCache, this.agyLiveQuota);
@@ -472,6 +531,7 @@ export class UsageService {
         antigravity,
         codex,
         claude,
+        muse,
       };
       this.cache = snapshot;
       this.lastComputedAt = Date.now();
@@ -529,6 +589,44 @@ export class UsageService {
       return await this.agyQuotaInFlight;
     } finally {
       this.agyQuotaInFlight = null;
+    }
+  }
+
+  private async collectMuseUsage(now: number): Promise<HarnessUsageSummary> {
+    const empty: HarnessUsageSummary = {
+      harness: 'muse',
+      updatedAt: now,
+      planLabel: 'Muse',
+      barPercent: null,
+      barIsEstimated: false,
+      windows: [],
+      spend5hUsd: 0,
+      spend24hUsd: 0,
+      spend7dUsd: 0,
+      spend14dUsd: 0,
+      tokens7d: 0,
+      dailySpend7d: [],
+      spendIsEstimated: true,
+      note: 'Quota from `muse usage`; no local spend pricing for Muse models yet',
+    };
+    try {
+      const bin = await whichBinary('muse');
+      if (!bin) return empty;
+      const { stdout } = await execFileAsync(bin, ['usage'], {
+        timeout: 8000,
+        maxBuffer: 256 * 1024,
+      });
+      const { planLabel, windows } = parseMuseUsageOutput(stdout, now);
+      if (windows.length === 0) return empty;
+      const primary = windows.find((w) => w.id === 'five_hour') ?? windows[0];
+      return {
+        ...empty,
+        planLabel: planLabel || empty.planLabel,
+        barPercent: primary.usedPercent,
+        windows,
+      };
+    } catch {
+      return empty;
     }
   }
 

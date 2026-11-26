@@ -13,11 +13,11 @@ const agentMsg: UnifiedMessage = {
   id: 'm-agent',
   role: 'user',
   timestamp: Date.now(),
-  harnessMeta: { sourceKind: 'agent', senderName: 'Pocket Model Marketing' },
+  harnessMeta: { sourceKind: 'agent', senderName: 'Release Ops Agent' },
   blocks: [
     {
       type: 'text',
-      text: 'Another Claude session sent a message:\n<cross-session-message name="Pocket Model Marketing">Published the updated landing copy and verified links on staging.</cross-session-message>',
+      text: 'Another Claude session sent a message:\n<cross-session-message name="Release Ops Agent">Published the updated landing copy and verified links on staging.</cross-session-message>',
     },
   ],
 };

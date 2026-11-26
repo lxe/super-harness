@@ -13,7 +13,7 @@ export default meta;
 export const ContextMenu: StoryObj = {
   render: () => (
     <PopoverSurface width="md">
-      <MenuHeader icon={<HarnessLogo harness="claude" size={13} />}>PhoneUse Dev 0</MenuHeader>
+      <MenuHeader icon={<HarnessLogo harness="claude" size={13} />}>API Gateway Refactor</MenuHeader>
       <MenuItem icon={<Columns2 className="w-3.5 h-3.5" />}>Open in Split View</MenuItem>
       <MenuItem icon={<Pin className="w-3.5 h-3.5 text-amber-400" />} active>
         Unpin from top
@@ -34,7 +34,7 @@ export const ContextMenu: StoryObj = {
 export const DismissablePopover: StoryObj = {
   render: () => {
     const [open, setOpen] = useState(true);
-    const [selected, setSelected] = useState('GPT-6.2-Sol');
+    const [selected, setSelected] = useState('GPT-5.4');
     const triggerRef = useRef<HTMLSpanElement | null>(null);
 
     return (
@@ -64,7 +64,7 @@ export const DismissablePopover: StoryObj = {
               className="absolute left-0 bottom-[calc(100%+8px)] z-40"
             >
               <MenuSectionLabel>Models</MenuSectionLabel>
-              {['GPT-6.2-Sol', 'GPT-6.2-Astra', 'Claude Opus 5.5', 'Gemini 4 Neon (High)'].map(
+              {['GPT-5.4', 'GPT-5.3 Codex', 'Claude Opus 4.6', 'Gemini 2.5 Pro (High)'].map(
                 (m) => (
                   <MenuItem
                     key={m}

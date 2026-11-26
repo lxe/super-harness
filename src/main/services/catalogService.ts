@@ -29,6 +29,21 @@ const CLAUDE_DESKTOP_SESSIONS_DIR = path.join(
 const CLAUDE_SETTINGS_PATH = path.join(HOME, '.claude', 'settings.json');
 const AGY_APP_DB = path.join(HOME, '.gemini', 'antigravity', 'conversation_summaries.db');
 const AGY_CLI_DB = path.join(HOME, '.gemini', 'antigravity-cli', 'conversation_summaries.db');
+const MUSE_SETTINGS_PATH = path.join(
+  process.env.XDG_CONFIG_HOME || path.join(HOME, '.config'),
+  'muse',
+  'settings.json'
+);
+const MUSE_MODEL_EFFORT_LEVELS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+];
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const AGY_EFFORT_SUFFIX_RE = /^(.*)-(low|medium|high|xhigh|max)$/i;
@@ -128,6 +143,48 @@ export function parseCodexModelsCache(
     });
   } catch {
     return [];
+  }
+}
+
+/**
+ * Parses `muse exec --list-models` stdout (one model id per line, with
+ * human `muse:` notices filtered out) into picker options.
+ */
+export function parseMuseModelsOutput(
+  stdout: string,
+  defaultModelId?: string
+): HarnessModelOption[] {
+  const out: HarnessModelOption[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of stdout.split('\n')) {
+    const id = rawLine.trim();
+    if (!id || id.startsWith('muse:')) continue;
+    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      label: id,
+      isDefault: Boolean(defaultModelId && id === defaultModelId),
+      reasoningLevels: MUSE_MODEL_EFFORT_LEVELS,
+    });
+  }
+  return out;
+}
+
+function readMuseSettingsDefaults(): { model?: string; reasoningEffort?: string } {
+  try {
+    if (!fs.existsSync(MUSE_SETTINGS_PATH)) return {};
+    const s = JSON.parse(fs.readFileSync(MUSE_SETTINGS_PATH, 'utf8')) as {
+      model?: string;
+      model_reasoning_efforts?: Record<string, string>;
+    };
+    const model = typeof s.model === 'string' && s.model.trim() ? s.model.trim() : undefined;
+    const efforts = s.model_reasoning_efforts ?? {};
+    const reasoningEffort =
+      (model && typeof efforts[model] === 'string' ? efforts[model] : efforts['*'])?.toLowerCase();
+    return { model, reasoningEffort: reasoningEffort || undefined };
+  } catch {
+    return {};
   }
 }
 
@@ -334,8 +391,10 @@ export class HarnessCatalogService {
     if (this.inFlight) return this.inFlight;
 
     this.inFlight = (async () => {
-      const [agyModels, codexProjects, agyProjects] = await Promise.all([
+      const museCfg = readMuseSettingsDefaults();
+      const [agyModels, museModels, codexProjects, agyProjects] = await Promise.all([
         this.fetchAgyModels(),
+        this.fetchMuseModels(museCfg.model),
         this.fetchCodexProjects(),
         this.fetchAgyProjects(),
       ]);
@@ -372,11 +431,13 @@ export class HarnessCatalogService {
           antigravity: agyModels,
           codex: codexModels,
           claude: claudeModels,
+          muse: museModels,
         },
         defaultReasoningEffort: {
           codex: codexCfg.reasoningEffort,
           claude: claudeEffort,
           antigravity: agyModels[0]?.defaultReasoningLevel || 'high',
+          muse: museCfg.reasoningEffort,
         },
         projects: mergeHarnessProjects(rawProjects),
         updatedAt: Date.now(),
@@ -405,6 +466,20 @@ export class HarnessCatalogService {
         maxBuffer: 1024 * 1024,
       });
       return parseAgyModelsOutput(stdout);
+    } catch {
+      return [];
+    }
+  }
+
+  private async fetchMuseModels(defaultModelId?: string): Promise<HarnessModelOption[]> {
+    try {
+      const bin = await whichBinary('muse');
+      if (!bin) return [];
+      const { stdout } = await execFileAsync(bin, ['exec', '--list-models'], {
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+      });
+      return parseMuseModelsOutput(stdout, defaultModelId);
     } catch {
       return [];
     }

@@ -1114,7 +1114,9 @@ export const SessionPane: React.FC<Props> = ({
                   ? 'Codex'
                   : session.harnessGroup === 'claude'
                     ? 'Claude'
-                    : undefined
+                    : session.harnessGroup === 'muse'
+                      ? 'Muse'
+                      : undefined
             }
             onSendNow={handleQueueSendNow}
             onEdit={handleQueueEdit}

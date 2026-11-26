@@ -13,7 +13,7 @@ export const Variants: StoryObj = {
     <div className="w-[560px] space-y-3 p-4 bg-surface-canvas rounded-2xl border border-line-hairline">
       <CollapsibleCard
         icon={<Bot className="w-3.5 h-3.5 text-indigo-300" />}
-        title="From agent · Muse Supervisor"
+        title="From agent · Build Supervisor"
         preview="Finished validation on decode_layer and pushed changes to dev branch…"
         meta="2.4k chars"
       >

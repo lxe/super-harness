@@ -32,6 +32,108 @@ let mainWindow: BrowserWindow | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
 let usageTimer: NodeJS.Timeout | null = null;
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'sh-media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+]);
+
+function injectEmbedPreviewRuntime(html: string, token: string): string {
+  const safeToken = JSON.stringify(token);
+  const headInjection = `<style data-sh-embed-theme>
+:root {
+  color-scheme: dark;
+  --background: #16171b;
+  --content: #16171b;
+  --card: #1d1f25;
+  --sidebar: #131418;
+  --card-border: rgba(255, 255, 255, 0.09);
+  --border: rgba(255, 255, 255, 0.11);
+  --foreground: #f4f4f5;
+  --muted-foreground: #a1a1aa;
+  --placeholder: #71717a;
+  --code-foreground: #e4e4e7;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #27272a;
+  --secondary-foreground: #f4f4f5;
+  --accent: #27272a;
+  --link: #60a5fa;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --error: #f87171;
+  --chart-1: #60a5fa;
+  --chart-2: #34d399;
+  --chart-3: #c084fc;
+  --chart-4: #fbbf24;
+  --chart-5: #f87171;
+  --chart-6: #22d3ee;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  font-size: 14px;
+  overflow-x: hidden;
+}
+</style>
+<script data-sh-embed-bridge>
+(function () {
+  var TOKEN = ${safeToken};
+  function reportHeight() {
+    try {
+      var body = document.body;
+      var root = document.documentElement;
+      var h = Math.max(
+        body ? body.scrollHeight : 0,
+        body ? body.offsetHeight : 0,
+        root ? root.scrollHeight : 0
+      );
+      if (h > 0) {
+        window.parent.postMessage({ type: 'sh-embed-resize', token: TOKEN, height: Math.ceil(h) }, '*');
+      }
+    } catch (e) {}
+  }
+  try {
+    var origClip = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText.bind(navigator.clipboard)
+      : null;
+    var proxyWrite = function (text) {
+      window.parent.postMessage({ type: 'sh-embed-copy', token: TOKEN, text: String(text || '') }, '*');
+      return origClip ? origClip(text).catch(function () {}) : Promise.resolve();
+    };
+    if (navigator.clipboard) {
+      try { navigator.clipboard.writeText = proxyWrite; } catch (e) {}
+    } else {
+      try { Object.defineProperty(navigator, 'clipboard', { value: { writeText: proxyWrite } }); } catch (e) {}
+    }
+  } catch (e) {}
+  window.addEventListener('load', function () {
+    reportHeight();
+    setTimeout(reportHeight, 120);
+    setTimeout(reportHeight, 500);
+    if (typeof ResizeObserver !== 'undefined' && document.body) {
+      new ResizeObserver(reportHeight).observe(document.body);
+    }
+  });
+  document.addEventListener('DOMContentLoaded', reportHeight);
+})();
+</script>`;
+
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/<head\b[^>]*>/i, (m) => `${m}\n${headInjection}`);
+  }
+  return `${headInjection}\n${html}`;
+}
+
 const store = new ConfigStore();
 const registry = new HarnessRegistry(store);
 const usageService = new UsageService();
@@ -535,6 +637,18 @@ app.whenReady().then(async () => {
         return new Response('Not found', { status: 404 });
       }
       const ext = path.extname(filePath).toLowerCase();
+      if (u.searchParams.get('embed') === '1' && (ext === '.html' || ext === '.htm')) {
+        const rawHtml = fs.readFileSync(filePath, 'utf8');
+        const token = u.searchParams.get('token') || '';
+        const html = injectEmbedPreviewRuntime(rawHtml, token);
+        return new Response(html, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
       const videoMime: Record<string, string> = {
         '.mp4': 'video/mp4',
         '.m4v': 'video/mp4',

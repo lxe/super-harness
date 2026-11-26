@@ -58,7 +58,7 @@ const INITIAL_STATE: SuperHarnessState = {
     sidebarGroupBy: 'native',
     showArchived: false,
     showHidden: false,
-    enabledHarnesses: { codex: true, claude: true, antigravity: true },
+    enabledHarnesses: { codex: true, claude: true, antigravity: true, muse: true },
     master: { harness: 'claude', model: '', cwd: '~/projects/super-harness', autoApplyActions: true },
     defaultNewSessionCwd: '~',
     apps: {
@@ -71,7 +71,7 @@ const INITIAL_STATE: SuperHarnessState = {
   },
   folders: [
     { id: 'f1', name: 'Active workstreams', color: '#22c55e', order: 0 },
-    { id: 'f2', name: 'Pocket Model', color: '#3b82f6', order: 1 },
+    { id: 'f2', name: 'Backend API', color: '#3b82f6', order: 1 },
     { id: 'f3', name: 'Parked', color: '#71717a', order: 2 },
   ],
   overrides: {

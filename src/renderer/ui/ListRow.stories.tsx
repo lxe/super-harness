@@ -43,7 +43,7 @@ export const SidebarTree: StoryObj = {
             />
             <NavRow
               icon={<HarnessLogo harness="claude-tmux" size={15} />}
-              title="PhoneUse Dev 0"
+              title="API Gateway Refactor"
               active={active === 's2'}
               meta={
                 <>
@@ -55,7 +55,7 @@ export const SidebarTree: StoryObj = {
             />
             <NavRow
               icon={<HarnessLogo harness="codex" size={15} />}
-              title="Build H3 Studio Lite"
+              title="CLI Streaming Parser"
               selected
               meta={<span className="text-caption text-ink-faint">2h</span>}
               onClick={() => setActive('s3')}
@@ -68,7 +68,7 @@ export const SidebarTree: StoryObj = {
             level={2}
             onToggle={() => {}}
             icon={<Folder className="w-3.5 h-3.5 text-ink-secondary" />}
-            label="PhoneUse"
+            label="Backend"
             count={4}
             sticky={false}
           />

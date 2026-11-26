@@ -22,9 +22,11 @@ import {
 import type { MessageSourceKind, UnifiedBlock, UnifiedMessage } from '../../shared/types';
 import { Badge, Button, CollapsibleCard, DisclosureRow, WorkingIndicator } from '../ui';
 import {
+  embedUrlForPath,
   mediaUrlForPath,
   parseTaskNotification,
   renderMarkdownHtml,
+  splitAgentEmbeds,
   unwrapSystemEnvelope,
 } from '../utils/format';
 import type { PreviewImageItem } from './ImageLightbox';
@@ -125,6 +127,84 @@ function parseFileLinkHref(
   }
 }
 
+interface AgentEmbedFrameProps {
+  filePath: string;
+  title: string;
+  onOpenPath?: (filePath: string) => void;
+}
+
+const AgentEmbedFrame: React.FC<AgentEmbedFrameProps> = React.memo(
+  ({ filePath, title, onOpenPath }) => {
+    const token = useMemo(
+      () => `emb-${Math.random().toString(36).slice(2, 10)}`,
+      [filePath]
+    );
+    const [height, setHeight] = useState(340);
+    const [reloadKey, setReloadKey] = useState(0);
+
+    useEffect(() => {
+      const onMessage = (ev: MessageEvent) => {
+        const data = ev.data as
+          | { type?: string; token?: string; height?: number; text?: string }
+          | null;
+        if (!data || data.token !== token) return;
+        if (data.type === 'sh-embed-resize' && typeof data.height === 'number') {
+          const clamped = Math.max(96, Math.min(760, Math.ceil(data.height) + 4));
+          setHeight(clamped);
+        } else if (data.type === 'sh-embed-copy' && typeof data.text === 'string') {
+          void navigator.clipboard?.writeText(data.text).catch(() => {});
+        }
+      };
+      window.addEventListener('message', onMessage);
+      return () => window.removeEventListener('message', onMessage);
+    }, [token]);
+
+    const src = useMemo(
+      () => `${embedUrlForPath(filePath, token)}&r=${reloadKey}`,
+      [filePath, token, reloadKey]
+    );
+
+    return (
+      <div className="my-2.5 rounded-xl border border-line-hairline bg-surface-subtle/40 overflow-hidden">
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-line-hairline bg-surface-subtle/60 text-micro text-ink-faint">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Globe className="w-3 h-3 shrink-0 text-ink-muted" />
+            <span className="truncate font-mono">{title}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              title="Reload preview"
+              className="p-1 rounded hover:bg-white/5 hover:text-ink-primary transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+            {onOpenPath && (
+              <button
+                type="button"
+                onClick={() => onOpenPath(filePath)}
+                title="Open HTML source"
+                className="px-1.5 py-0.5 rounded hover:bg-white/5 hover:text-ink-primary transition-colors cursor-pointer"
+              >
+                Source
+              </button>
+            )}
+          </div>
+        </div>
+        <iframe
+          key={reloadKey}
+          src={src}
+          title={title}
+          sandbox="allow-scripts"
+          style={{ height }}
+          className="w-full border-0 block bg-transparent"
+        />
+      </div>
+    );
+  }
+);
+
 interface Props {
   block: UnifiedBlock;
   onQuickReply?: (text: string) => void;
@@ -136,10 +216,17 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
   ({ block, onQuickReply, onOpenPath, onPreviewImage }) => {
   const [imageBroken, setImageBroken] = useState(false);
   const textContent = block.type === 'text' ? block.text : '';
+  const textSegments = useMemo(() => {
+    if (!textContent) return [];
+    return splitAgentEmbeds(textContent);
+  }, [textContent]);
   const renderedHtml = useMemo(() => {
     if (!textContent) return '';
-    return renderMarkdownHtml(textContent);
-  }, [textContent]);
+    if (textSegments.length === 1 && textSegments[0].kind === 'markdown') {
+      return renderMarkdownHtml(textSegments[0].text);
+    }
+    return '';
+  }, [textContent, textSegments]);
 
   const handleMarkdownClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (e.target as HTMLElement | null)?.closest('a');
@@ -163,12 +250,35 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
   };
 
   if (block.type === 'text') {
+    if (textSegments.length === 1 && textSegments[0].kind === 'markdown') {
+      return (
+        <div
+          className="sh-markdown"
+          onClick={handleMarkdownClick}
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        />
+      );
+    }
     return (
-      <div
-        className="sh-markdown"
-        onClick={handleMarkdownClick}
-        dangerouslySetInnerHTML={{ __html: renderedHtml }}
-      />
+      <div className="space-y-2">
+        {textSegments.map((seg, i) =>
+          seg.kind === 'embed' ? (
+            <AgentEmbedFrame
+              key={`${seg.filePath}-${i}`}
+              filePath={seg.filePath}
+              title={seg.title}
+              onOpenPath={onOpenPath}
+            />
+          ) : (
+            <div
+              key={i}
+              className="sh-markdown"
+              onClick={handleMarkdownClick}
+              dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(seg.text) }}
+            />
+          )
+        )}
+      </div>
     );
   }
 

@@ -112,6 +112,35 @@ const MOCK_USAGE: UsageSnapshot = {
     ],
     spendIsEstimated: true,
   },
+  muse: {
+    harness: 'muse',
+    updatedAt: now - 45_000,
+    planLabel: 'Muse Code Power Usage',
+    barPercent: 1,
+    barIsEstimated: false,
+    windows: [
+      {
+        id: 'five_hour',
+        label: 'Window',
+        usedPercent: 1,
+        resetsAt: now + 4.9 * 3600_000,
+      },
+      {
+        id: 'weekly',
+        label: 'Weekly (7d)',
+        usedPercent: 0,
+        resetsAt: now + 3.75 * DAY,
+        windowMinutes: 10080,
+      },
+    ],
+    spend5hUsd: 0,
+    spend24hUsd: 0,
+    spend7dUsd: 0,
+    spend14dUsd: 0,
+    tokens7d: 0,
+    dailySpend7d: [],
+    spendIsEstimated: true,
+  },
 };
 
 const meta: Meta = {

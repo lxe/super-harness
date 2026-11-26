@@ -40,6 +40,15 @@ const ORB_PALETTES: Record<WorkingOrbTone, OrbPalette> = {
     halo: 'rgba(251, 146, 60, 0.18)',
     rim: 'rgba(253, 186, 116, 0.2)',
   },
+  muse: {
+    core: 'radial-gradient(circle, rgba(240,171,252,0.92) 0%, rgba(168,85,247,0.45) 55%, transparent 100%)',
+    arcPrimary:
+      'conic-gradient(from 0deg, transparent 0deg, rgba(216,180,254,0.85) 70deg, rgba(56,189,248,0.35) 145deg, transparent 220deg)',
+    arcSecondary:
+      'conic-gradient(from 180deg, transparent 0deg, rgba(125,211,252,0.6) 80deg, transparent 190deg)',
+    halo: 'rgba(168, 85, 247, 0.2)',
+    rim: 'rgba(216, 180, 254, 0.22)',
+  },
   master: {
     core: 'radial-gradient(circle, rgba(233,213,255,0.92) 0%, rgba(167,139,250,0.45) 55%, transparent 100%)',
     arcPrimary:

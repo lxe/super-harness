@@ -190,6 +190,27 @@ export class MasterEngine {
       return { ok: true, runId, dispatchedVia: `Master → Codex + super-harness-mcp` };
     }
 
+    if (engine === 'muse') {
+      const bin = await whichBinary('muse');
+      if (!bin) {
+        this.failMasterMsg(assistantId, 'muse binary not found. Switch Master engine in Settings.');
+        return { ok: false, error: 'muse binary not found' };
+      }
+      // Muse configures MCP servers via persisted settings (`muse mcp add`),
+      // not a per-run flag, so the Master-on-Muse path runs preamble-only for
+      // now: it can reason over the live snapshot below but has no `sh_*`
+      // tools unless the user registers super-harness-mcp in Muse settings.
+      const fullPrompt = `${systemPreamble}\n\nNote: in this Muse-backed Master mode you do not have live sh_* MCP tools wired per-run; work from the snapshot above and say so if a request needs live control.\n\nUser request:\n${effectivePrompt}`;
+      const args = ['exec', '--json', '--workspace', cwd, '--yolo'];
+      if (model) args.push('--model', model);
+      if (attachments && attachments.length > 0) {
+        for (const att of attachments) args.push('--image', att.path);
+      }
+      args.push(fullPrompt);
+      this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'muse');
+      return { ok: true, runId, dispatchedVia: 'Master → Muse (preamble snapshot)' };
+    }
+
     // Antigravity engine
     const bin = await whichBinary('agy');
     if (!bin) {
@@ -215,7 +236,7 @@ export class MasterEngine {
       .join('\n');
 
     return [
-      'You are the Master Orchestrator inside Super Harness — a unified desktop multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, and Antigravity.',
+      'You are the Master Orchestrator inside Super Harness — a unified desktop multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, Antigravity, and Muse.',
       'You have MCP tools (`sh_list_harnesses`, `sh_list_sessions`, `sh_read_session`, `sh_send_message`, `sh_start_session`, `sh_organize`, `sh_update_settings`, `sh_control_harness`) to inspect, organize, configure, and drive Super Harness live.',
       'Use these tools proactively whenever the user asks to organize folders, inspect/search sessions, send instructions to another harness, launch new sessions, or update Super Harness settings.',
       '',
@@ -314,6 +335,20 @@ export class MasterEngine {
           textAccum += obj.delta;
           flushToStore(true);
         }
+      } else if (flavor === 'muse') {
+        const payload = (obj.payload ?? {}) as Record<string, unknown>;
+        if (obj.payload_type === 'run.output.delta' && typeof payload.text === 'string') {
+          textAccum += payload.text;
+          flushToStore(true);
+        } else if (
+          typeof obj.payload_type === 'string' &&
+          obj.payload_type.startsWith('run.terminal') &&
+          typeof payload.text === 'string' &&
+          !textAccum.trim()
+        ) {
+          textAccum = payload.text;
+          flushToStore(true);
+        }
       } else {
         // Antigravity (`agy --output-format stream-json`)
         if (obj.event === 'step_update') {
@@ -397,7 +432,7 @@ export class MasterEngine {
           '- `/auto-organize` — Automatically group live tmux, remote, and project sessions into folders',
           '- `/pin <sessionId>` — Pin a session to the top of the sidebar',
           '- `/send <sessionId> <prompt>` — Send a prompt to any session',
-          '- `/engine <claude|codex|antigravity>` — Switch which harness drives this Master Session',
+          '- `/engine <claude|codex|antigravity|muse>` — Switch which harness drives this Master Session',
           '- `/group <folders|project|harness|recent>` — Switch sidebar grouping mode',
         ].join('\n')
       );
@@ -494,13 +529,13 @@ export class MasterEngine {
     }
 
     if (cmd === '/engine') {
-      if (arg === 'claude' || arg === 'codex' || arg === 'antigravity') {
+      if (arg === 'claude' || arg === 'codex' || arg === 'antigravity' || arg === 'muse') {
         const cur = this.store.getState().settings.master;
         this.store.updateSettings({ master: { ...cur, harness: arg } });
         await this.triggerRefresh();
         reply(`Switched Master Orchestrator engine to **${arg}**.`);
       } else {
-        reply('Usage: `/engine <claude|codex|antigravity>`');
+        reply('Usage: `/engine <claude|codex|antigravity|muse>`');
       }
       return true;
     }

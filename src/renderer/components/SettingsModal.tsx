@@ -118,6 +118,7 @@ const HARNESS_DISPLAY_NAMES: Record<HarnessGroup, string> = {
   codex: 'OpenAI Codex',
   claude: 'Claude',
   antigravity: 'Google Antigravity',
+  muse: 'Muse (Meta)',
 };
 
 function formatHarnessVersion(raw?: string | null): string | null {
@@ -1057,6 +1058,11 @@ export const SettingsModal: React.FC<Props> = ({
                             value: 'antigravity',
                             label: 'AGY',
                             icon: <HarnessLogo harness="antigravity" size={13} />,
+                          },
+                          {
+                            value: 'muse',
+                            label: 'Muse',
+                            icon: <HarnessLogo harness="muse" size={13} />,
                           },
                         ]}
                       />

@@ -5,6 +5,8 @@ import type {
 } from '../../shared/types';
 
 export const EFFORT_META: Record<string, { label: string; hint: string }> = {
+  none: { label: 'None', hint: 'No extended reasoning' },
+  minimal: { label: 'Minimal', hint: 'Briefest reasoning pass' },
   low: { label: 'Low', hint: 'Fastest responses, light reasoning' },
   medium: { label: 'Medium', hint: 'Balanced speed & reasoning depth' },
   high: { label: 'High', hint: 'Thorough multi-step reasoning' },
@@ -58,7 +60,9 @@ export function resolveSessionModelControls(
                 ? ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
                 : harnessGroup === 'claude'
                   ? ['low', 'medium', 'high', 'xhigh', 'max']
-                  : undefined,
+                  : harnessGroup === 'muse'
+                    ? ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+                    : undefined,
           },
           ...catalogModels,
         ]
@@ -75,6 +79,8 @@ export function resolveSessionModelControls(
     thinkingLevels = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
   } else if (harnessGroup === 'claude') {
     thinkingLevels = ['low', 'medium', 'high', 'xhigh', 'max'];
+  } else if (harnessGroup === 'muse') {
+    thinkingLevels = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
   } else {
     // Antigravity: only show thinking selector if the active model has sibling effort variants
     // (or if no model is chosen yet and catalog has effort-capable models)

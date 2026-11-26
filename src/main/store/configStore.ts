@@ -24,6 +24,7 @@ export function createDefaultState(): SuperHarnessState {
         codex: true,
         claude: true,
         antigravity: true,
+        muse: true,
       },
       master: {
         harness: 'claude',
@@ -63,7 +64,7 @@ export function createDefaultState(): SuperHarnessState {
             text: [
               '### Master Orchestrator Ready',
               '',
-              'I have live MCP control over **Super Harness** across all your detected harnesses (**Codex**, **Claude Desktop**, **Claude tmux / Remote Control**, and **Antigravity**).',
+              'I have live MCP control over **Super Harness** across all your detected harnesses (**Codex**, **Claude Desktop**, **Claude tmux / Remote Control**, **Antigravity**, and **Muse**).',
               '',
               'Ask me in natural language — or use instant slash commands:',
               '- `/status` — inspect detected harnesses, live PIDs, and remote-control daemons',
@@ -71,7 +72,7 @@ export function createDefaultState(): SuperHarnessState {
               '- `/folder <name>` — create a sidebar folder',
               '- `/auto-organize` — group live tmux & project workstreams into folders',
               '- `/send <sessionId> <message>` — dispatch a prompt to any session',
-              '- `/engine <claude|codex|antigravity>` — switch which harness powers this Master Session',
+              '- `/engine <claude|codex|antigravity|muse>` — switch which harness powers this Master Session',
             ].join('\n'),
           },
         ],

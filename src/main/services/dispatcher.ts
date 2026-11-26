@@ -13,6 +13,7 @@ import type { ConfigStore } from '../store/configStore';
 function harnessGroupForStartRequest(harness: StartSessionRequest['harness']): HarnessGroup {
   if (harness === 'codex') return 'codex';
   if (harness === 'antigravity') return 'antigravity';
+  if (harness === 'muse') return 'muse';
   return 'claude';
 }
 

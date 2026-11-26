@@ -16,20 +16,20 @@ const TOOLS = [
   {
     name: 'sh_list_harnesses',
     description:
-      'List all detected local AI coding harnesses (Codex, Claude Desktop/tmux, Antigravity), their running process counts, daemon status, and remote-control state.',
+      'List all detected local AI coding harnesses (Codex, Claude Desktop/tmux, Antigravity, Muse), their running process counts, daemon status, and remote-control state.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'sh_list_sessions',
     description:
-      'List and search sessions across all harnesses (Codex, Claude tmux, Claude Desktop, Claude CLI, Antigravity).',
+      'List and search sessions across all harnesses (Codex, Claude tmux, Claude Desktop, Claude CLI, Antigravity, Muse).',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Optional text filter across title, project, cwd, tags' },
         harness: {
           type: 'string',
-          description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity',
+          description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity, muse',
         },
         liveOnly: { type: 'boolean', description: 'Only return currently live/running sessions' },
       },
@@ -63,12 +63,12 @@ const TOOLS = [
   {
     name: 'sh_start_session',
     description:
-      'Launch a brand-new session on a chosen harness (e.g., claude-tmux with remote-control, codex, claude-cli, or antigravity).',
+      'Launch a brand-new session on a chosen harness (e.g., claude-tmux with remote-control, codex, claude-cli, antigravity, or muse).',
     inputSchema: {
       type: 'object',
       required: ['harness', 'cwd'],
       properties: {
-        harness: { type: 'string', enum: ['codex', 'claude-tmux', 'claude-cli', 'antigravity'] },
+        harness: { type: 'string', enum: ['codex', 'claude-tmux', 'claude-cli', 'antigravity', 'muse'] },
         cwd: { type: 'string' },
         title: { type: 'string' },
         prompt: { type: 'string' },
@@ -141,7 +141,7 @@ const TOOLS = [
       type: 'object',
       required: ['harness', 'action'],
       properties: {
-        harness: { type: 'string', enum: ['codex', 'claude', 'antigravity'] },
+        harness: { type: 'string', enum: ['codex', 'claude', 'antigravity', 'muse'] },
         action: { type: 'string', enum: ['start_remote', 'stop_remote'] },
       },
     },

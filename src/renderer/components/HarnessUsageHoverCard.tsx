@@ -28,12 +28,14 @@ const HARNESS_ACCOUNT_LINKS: Record<HarnessGroup, HarnessLink[]> = {
     { label: 'AI Credits', url: 'https://one.google.com/ai/credits' },
     { label: 'Plans', url: 'https://one.google.com/about/google-ai-plans/' },
   ],
+  muse: [],
 };
 
 const HARNESS_TITLES: Record<HarnessGroup, string> = {
   antigravity: 'Antigravity',
   codex: 'Codex',
   claude: 'Claude',
+  muse: 'Muse',
 };
 
 function formatUsd(n: number): string {
@@ -187,7 +189,9 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
         ? 'bg-brand-codex'
         : harness === 'antigravity'
           ? 'bg-brand-antigravity'
-          : 'bg-ink-primary';
+          : harness === 'muse'
+            ? 'bg-brand-muse'
+            : 'bg-ink-primary';
 
   return (
     <div className="pt-3.5 border-t border-line-hairline space-y-2.5">
@@ -281,7 +285,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
   const top = anchorRect.bottom + 8;
 
   if (target === 'all') {
-    const list: HarnessUsageSummary[] = [usage.antigravity, usage.codex, usage.claude];
+    const list: HarnessUsageSummary[] = [usage.antigravity, usage.codex, usage.claude, usage.muse];
     const total5h = list.reduce((a, x) => a + x.spend5hUsd, 0);
     const total24h = list.reduce((a, x) => a + x.spend24hUsd, 0);
     const total7d = list.reduce((a, x) => a + x.spend7dUsd, 0);

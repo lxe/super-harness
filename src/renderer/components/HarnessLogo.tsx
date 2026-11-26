@@ -104,6 +104,33 @@ export const HarnessLogo: React.FC<Props> = ({ harness, size = 15, className = '
     );
   }
 
+  // Muse (Meta): orbital ring with a bright core and satellite spark,
+  // in a sky-to-violet gradient echoing the Muse working orb.
+  if (harness === 'muse') {
+    const museGrad = `muse-grad-${uid}`;
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        className={`shrink-0 ${className}`}
+        aria-label="Muse"
+      >
+        <defs>
+          <linearGradient id={museGrad} x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#38BDF8" />
+            <stop offset="55%" stopColor="#818CF8" />
+            <stop offset="100%" stopColor="#A855F7" />
+          </linearGradient>
+        </defs>
+        <circle cx="12" cy="12" r="8.6" stroke={`url(#${museGrad})`} strokeWidth="2.3" />
+        <circle cx="12" cy="12" r="3.1" fill={`url(#${museGrad})`} />
+        <circle cx="18.6" cy="5.4" r="1.9" fill="#F0ABFC" />
+      </svg>
+    );
+  }
+
   // Master Orchestrator: crisp violet/indigo four-point star
   const masterGrad = `master-grad-${uid}`;
   return (

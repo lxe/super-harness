@@ -882,7 +882,9 @@ export const App: React.FC = () => {
                     ? 'codex'
                     : launchedDraft.harness === 'antigravity'
                       ? 'antigravity'
-                      : 'claude';
+                      : launchedDraft.harness === 'muse'
+                        ? 'muse'
+                        : 'claude';
                 const cwdParts = launchedDraft.cwd.split('/').filter(Boolean);
                 const projectName = cwdParts[cwdParts.length - 1] || launchedDraft.cwd || 'Project';
                 const titleText =
@@ -912,9 +914,11 @@ export const App: React.FC = () => {
                       ? 'codex-resume'
                       : launchedDraft.harness === 'antigravity'
                         ? 'agy-resume'
-                        : launchedDraft.harness === 'claude-tmux'
-                          ? 'tmux-send'
-                          : 'claude-resume',
+                        : launchedDraft.harness === 'muse'
+                          ? 'muse-exec'
+                          : launchedDraft.harness === 'claude-tmux'
+                            ? 'tmux-send'
+                            : 'claude-resume',
                 };
 
                 setPendingSessions((prev) => ({ ...prev, [newSid]: optimisticSession }));

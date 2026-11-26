@@ -743,10 +743,16 @@ export const Sidebar: React.FC<Props> = React.memo(({
       });
     };
 
+    const showInlinePin = showPin && showLogo;
     const leadingIcon = showLogo ? (
       <HarnessLogo harness={s.harness} size={15} />
     ) : showPin ? (
       <Pin className="w-3.5 h-3.5 text-amber-400/80" />
+    ) : undefined;
+    const titleBadge = showInlinePin ? (
+      <span title="Pinned in harness" className="text-amber-400/80">
+        <Pin className="w-3 h-3" />
+      </span>
     ) : undefined;
 
     const recencyOpacity = computeThreadRecencyOpacity(s.updatedAt);
@@ -759,6 +765,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         aria-current={isPrimary ? 'page' : undefined}
         icon={leadingIcon}
         title={s.title}
+        titleBadge={titleBadge}
         titleOpacity={recencyOpacity}
         active={isPrimary}
         secondaryActive={isSplit}
@@ -1420,7 +1427,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                               {!isSecClosed && (
                                 <div className="mt-0.5 space-y-0.5">
                                   {sec.items.map((s) =>
-                                    renderSessionRow(s, { showLogo: false })
+                                    renderSessionRow(s, { showLogo: false, showPin: Boolean(s.pinned) })
                                   )}
                                 </div>
                               )}

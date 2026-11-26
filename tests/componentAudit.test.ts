@@ -70,4 +70,10 @@ describe('Component-level UI & Electron overlay contract audit', () => {
     const src = readRel('src/renderer/components/SettingsModal.tsx');
     expect(src).not.toMatch(/\bgroup-hover:(?:hidden|flex|block)\b/);
   });
+
+  it('uses appearance-none with an inset Lucide ChevronDown on Select primitives', () => {
+    const src = readRel('src/renderer/ui/Input.tsx');
+    expect(src).toContain('appearance-none');
+    expect(src).toContain('ChevronDown');
+  });
 });

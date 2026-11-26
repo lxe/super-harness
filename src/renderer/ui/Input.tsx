@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronDown } from 'lucide-react';
 import { cn } from './cn';
 
 const BASE_CONTROL =
@@ -31,18 +32,26 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
 
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ inputSize = 'md', className, children, ...rest }, ref) => (
-    <select
-      ref={ref}
-      className={cn(
-        BASE_CONTROL,
-        inputSize === 'sm' ? 'h-8 px-2.5 text-caption' : 'h-9 px-3 text-label',
-        'cursor-pointer',
-        className
-      )}
-      {...rest}
-    >
-      {children}
-    </select>
+    <div className={cn('relative inline-flex items-center w-full', className)}>
+      <select
+        ref={ref}
+        className={cn(
+          BASE_CONTROL,
+          'appearance-none cursor-pointer [&>option]:bg-surface-overlay [&>option]:text-ink-primary',
+          inputSize === 'sm' ? 'h-8 pl-3 pr-8 text-caption' : 'h-9 pl-3.5 pr-9 text-label'
+        )}
+        {...rest}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute top-1/2 -translate-y-1/2 text-ink-muted',
+          inputSize === 'sm' ? 'right-2.5 w-3.5 h-3.5' : 'right-3 w-4 h-4'
+        )}
+      />
+    </div>
   )
 );
 Select.displayName = 'Select';

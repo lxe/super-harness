@@ -58,13 +58,6 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
         onClick={(e) => e.stopPropagation()}
         className="fixed z-50 space-y-0.5"
       >
-        <MenuHeader>
-          <span className="truncate">{sectionLabel}</span>
-          <span className="ml-auto text-micro tabular-nums text-ink-faint shrink-0">
-            {targets.length}
-          </span>
-        </MenuHeader>
-
         <MenuItem
           tone="warning"
           icon={<Archive className="w-3.5 h-3.5" />}
@@ -74,9 +67,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
             onArchiveMany(targets, false);
           }}
         >
-          {targets.length === 1
-            ? 'Archive section (1 session)'
-            : `Archive section (${targets.length})`}
+          Archive section
         </MenuItem>
 
         {hasTmux && (
@@ -89,7 +80,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
               onArchiveMany(targets, true);
             }}
           >
-            Kill tmux & Archive ({targets.length})
+            Kill tmux & Archive
           </MenuItem>
         )}
 
@@ -110,9 +101,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
             onClose();
           }}
         >
-          {allPinnedTop
-            ? `Unpin all (${targets.length}) from top`
-            : `Pin all (${targets.length}) to top`}
+          {allPinnedTop ? 'Unpin all from top' : 'Pin all to top'}
         </MenuItem>
 
         {harnessPinnedTargets.length > 0 && (
@@ -128,7 +117,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
               onClose();
             }}
           >
-            Unpin harness pins ({harnessPinnedTargets.length})
+            Unpin harness pins
           </MenuItem>
         )}
       </PopoverSurface>

@@ -396,11 +396,20 @@ export class ControlServer {
         res.statusCode = statusCode;
         res.setHeader('Content-Type', 'application/json');
         if (acceptsGzip && buf.length > 1024) {
-          const gz = zlib.gzipSync(buf, { level: 6 });
-          res.setHeader('Content-Encoding', 'gzip');
-          res.setHeader('Vary', 'Accept-Encoding');
-          res.setHeader('Content-Length', String(gz.length));
-          res.end(gz);
+          // Compress on libuv's thread pool: this process's main thread is also the
+          // desktop window's UI thread, so a synchronous gzip of a large transcript stalls it.
+          zlib.gzip(buf, { level: 6 }, (err, gz) => {
+            if (res.writableEnded) return;
+            if (err) {
+              res.setHeader('Content-Length', String(buf.length));
+              res.end(buf);
+              return;
+            }
+            res.setHeader('Content-Encoding', 'gzip');
+            res.setHeader('Vary', 'Accept-Encoding');
+            res.setHeader('Content-Length', String(gz.length));
+            res.end(gz);
+          });
         } else {
           res.setHeader('Content-Length', String(buf.length));
           res.end(buf);

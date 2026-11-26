@@ -123,7 +123,7 @@ describe('Composer model & thinking option resolution per harness', () => {
     });
   });
 
-  it('switches Antigravity sibling effort slugs when changing thinking level', () => {
+  it('separates Antigravity models from thinking effort and maps sibling slugs cleanly', () => {
     const agyControls = resolveSessionModelControls(
       'antigravity',
       'gemini-3.1-pro-low',
@@ -131,6 +131,10 @@ describe('Composer model & thinking option resolution per harness', () => {
       SAMPLE_CATALOG,
       'Antigravity'
     );
+    expect(agyControls.models).toHaveLength(1);
+    expect(agyControls.models[0]?.id).toBe('gemini-3.1-pro');
+    expect(agyControls.models[0]?.label).toBe('Gemini 3.1 Pro');
+    expect(agyControls.displayModelLabel).toBe('Gemini 3.1 Pro');
     expect(agyControls.activeEffort).toBe('low');
     expect(agyControls.thinkingLevels).toEqual(['low', 'medium', 'high']);
 
@@ -139,11 +143,25 @@ describe('Composer model & thinking option resolution per harness', () => {
         'antigravity',
         'high',
         'gemini-3.1-pro-low',
-        agyControls.models
+        agyControls.models,
+        agyControls.rawModels
       )
     ).toEqual({
       model: 'gemini-3.1-pro-high',
       reasoningEffort: 'high',
+    });
+
+    expect(
+      resolveModelSelectionChange(
+        'antigravity',
+        'gemini-3.1-pro',
+        'low',
+        agyControls.models,
+        agyControls.rawModels
+      )
+    ).toEqual({
+      model: 'gemini-3.1-pro-low',
+      reasoningEffort: 'low',
     });
   });
 

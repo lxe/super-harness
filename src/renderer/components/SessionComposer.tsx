@@ -154,8 +154,9 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
       const patch = resolveModelSelectionChange(
         session.harnessGroup,
         modelId,
-        session.reasoningEffort,
-        modelControls.models
+        modelControls.activeEffort || session.reasoningEffort,
+        modelControls.models,
+        modelControls.rawModels
       );
       onChangeModel(patch);
       setModelMenuOpen(false);
@@ -168,7 +169,8 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
         session.harnessGroup,
         level,
         session.model,
-        modelControls.models
+        modelControls.models,
+        modelControls.rawModels
       );
       onChangeModel(patch);
       setThinkingMenuOpen(false);

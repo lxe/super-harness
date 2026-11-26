@@ -24,6 +24,11 @@ import type {
 } from '../../shared/types';
 import { Badge, Button, IconButton, MenuDivider, PopoverSurface, WorkingOrb } from '../ui';
 import { mediaUrlForPath } from '../utils/format';
+import {
+  resolveEffortSelectionChange,
+  resolveModelSelectionChange,
+  resolveSessionModelControls,
+} from '../utils/modelOptions';
 import { HarnessLogo } from './HarnessLogo';
 import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
 
@@ -47,8 +52,6 @@ const EFFORT_META: Record<string, { label: string; hint: string }> = {
   max: { label: 'Max', hint: 'Maximum thinking budget' },
   ultra: { label: 'Ultra', hint: 'Deepest possible reasoning' },
 };
-
-const AGY_SUFFIX_RE = /^(.*)-(low|medium|high|xhigh|max)$/i;
 
 function formatEffortLabel(level: string): string {
   return EFFORT_META[level.toLowerCase()]?.label ?? level;
@@ -136,10 +139,21 @@ export const DraftSessionPane: React.FC<Props> = ({
 
   const selectedGroup = groupForDraftHarness(draft.harness);
 
-  const availableModels = useMemo<HarnessModelOption[]>(() => {
-    if (!selectedGroup || !catalog) return [];
-    return catalog.models[selectedGroup] ?? [];
-  }, [selectedGroup, catalog]);
+  const draftModelControls = useMemo(() => {
+    if (!selectedGroup) return null;
+    return resolveSessionModelControls(
+      selectedGroup,
+      draft.model || undefined,
+      draft.reasoningEffort,
+      catalog,
+      selectedGroup
+    );
+  }, [selectedGroup, draft.model, draft.reasoningEffort, catalog]);
+
+  const availableModels = useMemo<HarnessModelOption[]>(
+    () => draftModelControls?.models ?? [],
+    [draftModelControls]
+  );
 
   const filteredModels = useMemo(() => {
     const q = modelSearch.trim().toLowerCase();
@@ -157,69 +171,39 @@ export const DraftSessionPane: React.FC<Props> = ({
     [availableModels]
   );
 
-  const selectedModelOption = useMemo(
-    () => availableModels.find((m) => m.id === draft.model),
-    [availableModels, draft.model]
-  );
+  const selectedModelOption = draftModelControls?.activeModelOption;
 
   // Resolve available thinking / reasoning modes for the active harness + model
-  const activeModelForThinking = selectedModelOption || defaultModelOption || availableModels[0];
-  const availableThinkingLevels = useMemo<string[]>(() => {
-    if (!selectedGroup) return [];
-    if (activeModelForThinking?.reasoningLevels && activeModelForThinking.reasoningLevels.length > 0) {
-      return activeModelForThinking.reasoningLevels;
-    }
-    if (selectedGroup === 'codex') return ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
-    if (selectedGroup === 'claude') return ['low', 'medium', 'high', 'xhigh', 'max'];
-    return ['low', 'medium', 'high', 'xhigh'];
-  }, [selectedGroup, activeModelForThinking]);
+  const availableThinkingLevels = useMemo<string[]>(
+    () => draftModelControls?.thinkingLevels ?? [],
+    [draftModelControls]
+  );
 
-  const defaultThinkingLevel = useMemo(() => {
-    if (!selectedGroup) return undefined;
-    if (selectedGroup === 'antigravity') {
-      return activeModelForThinking?.defaultReasoningLevel || catalog?.defaultReasoningEffort?.antigravity;
-    }
-    return (
-      catalog?.defaultReasoningEffort?.[selectedGroup] ||
-      activeModelForThinking?.defaultReasoningLevel
-    );
-  }, [selectedGroup, activeModelForThinking, catalog?.defaultReasoningEffort]);
+  const defaultThinkingLevel = draftModelControls?.defaultEffort;
 
   const handleSelectModel = (modelId: string) => {
-    const picked = availableModels.find((m) => m.id === modelId);
-    if (selectedGroup === 'antigravity') {
-      const suffixMatch = modelId.match(AGY_SUFFIX_RE);
-      onUpdateDraft({
-        model: modelId,
-        reasoningEffort: suffixMatch ? suffixMatch[2].toLowerCase() : '',
-      });
-    } else {
-      const nextEffort =
-        draft.reasoningEffort &&
-        picked?.reasoningLevels &&
-        !picked.reasoningLevels.includes(draft.reasoningEffort)
-          ? ''
-          : draft.reasoningEffort;
-      onUpdateDraft({ model: modelId, reasoningEffort: nextEffort });
-    }
+    if (!selectedGroup || !draftModelControls) return;
+    const patch = resolveModelSelectionChange(
+      selectedGroup,
+      modelId,
+      draftModelControls.activeEffort || draft.reasoningEffort,
+      draftModelControls.models,
+      draftModelControls.rawModels
+    );
+    onUpdateDraft(patch);
     setModelMenuOpen(false);
   };
 
   const handleSelectThinking = (level: string) => {
-    if (selectedGroup === 'antigravity' && level) {
-      // Antigravity encodes thinking effort directly into the model slug (e.g. gemini-2.5-pro-high)
-      const baseModel = selectedModelOption || defaultModelOption || availableModels[0];
-      const m = baseModel?.id.match(AGY_SUFFIX_RE);
-      if (m) {
-        const candidateId = `${m[1]}-${level}`;
-        if (availableModels.some((x) => x.id === candidateId)) {
-          onUpdateDraft({ model: candidateId, reasoningEffort: level });
-          setThinkingMenuOpen(false);
-          return;
-        }
-      }
-    }
-    onUpdateDraft({ reasoningEffort: level });
+    if (!selectedGroup || !draftModelControls) return;
+    const patch = resolveEffortSelectionChange(
+      selectedGroup,
+      level,
+      draft.model || undefined,
+      draftModelControls.models,
+      draftModelControls.rawModels
+    );
+    onUpdateDraft(patch);
     setThinkingMenuOpen(false);
   };
 
@@ -924,7 +908,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                         )}
 
                         {filteredModels.map((m) => {
-                          const active = draft.model === m.id;
+                          const active = Boolean(draft.model) && selectedModelOption?.id === m.id;
                           return (
                             <button
                               key={m.id}

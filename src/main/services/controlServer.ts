@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import type {
   FilePreviewData,
   HarnessCatalog,
@@ -16,6 +18,8 @@ import type { HarnessRegistry } from '../adapters/registry';
 import type { ConfigStore } from '../store/configStore';
 import type { HarnessDispatcher } from './dispatcher';
 
+export const MOBILE_PROTOCOL_VERSION = 1;
+
 export interface ControlServerHooks {
   getUsage?: (force: boolean) => Promise<UsageSnapshot>;
   getCatalog?: (force: boolean) => Promise<HarnessCatalog>;
@@ -31,7 +35,27 @@ export interface ControlServerHooks {
     startLine?: number,
     endLine?: number
   ) => Promise<FilePreviewData>;
+  watchSession?: (paneId: string, sessionId: string | null, limit?: number) => Promise<void>;
 }
+
+interface BufferedEvent {
+  seq: number;
+  event: string;
+  frame: string;
+}
+
+const MEDIA_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+};
 
 /**
  * Token-authenticated HTTP + SSE Control Server.
@@ -41,6 +65,10 @@ export interface ControlServerHooks {
  *    for the bundled `super-harness-mcp` server.
  * 2. An optional Tailscale/LAN mobile companion server (default `0.0.0.0:47890`)
  *    authenticated with a persistent Bearer token stored in SuperHarnessSettings.
+ *
+ * Implements Sync Protocol v1: monotonic SSE sequence IDs with Last-Event-ID
+ * replay buffer, resync_required signaling on gap, per-client `/api/watch`
+ * liveSync bindings, and authenticated `/api/media` streaming.
  */
 export class ControlServer {
   private server: http.Server | null = null;
@@ -48,6 +76,10 @@ export class ControlServer {
   private mobileConfigKey = '';
   private sseClients = new Set<http.ServerResponse>();
   private sseKeepaliveTimer: NodeJS.Timeout | null = null;
+  private eventSeq = 0;
+  private eventBuffer: BufferedEvent[] = [];
+  private readonly maxBufferedEvents = 200;
+  private readonly startedAt = Date.now();
   public port = 0;
   public mobilePort = 0;
   public readonly token = crypto.randomBytes(24).toString('hex');
@@ -61,11 +93,16 @@ export class ControlServer {
   ) {}
 
   broadcastEvent(event: string, data: unknown): void {
+    const seq = ++this.eventSeq;
+    const frame = `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    this.eventBuffer.push({ seq, event, frame });
+    if (this.eventBuffer.length > this.maxBufferedEvents) {
+      this.eventBuffer.splice(0, this.eventBuffer.length - this.maxBufferedEvents);
+    }
     if (this.sseClients.size === 0) return;
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const client of this.sseClients) {
       try {
-        client.write(payload);
+        client.write(frame);
       } catch {
         this.sseClients.delete(client);
       }
@@ -115,17 +152,65 @@ export class ControlServer {
       };
 
       try {
+        if (req.method === 'GET' && url.pathname === '/api/health') {
+          res.end(
+            JSON.stringify({
+              ok: true,
+              protocolVersion: MOBILE_PROTOCOL_VERSION,
+              seq: this.eventSeq,
+              uptimeMs: Date.now() - this.startedAt,
+            })
+          );
+          return;
+        }
+
         if (req.method === 'GET' && url.pathname === '/api/events') {
+          const clientId = (url.searchParams.get('clientId') || '').trim();
+          const lastEventRaw =
+            (req.headers['last-event-id'] as string | undefined) ||
+            url.searchParams.get('lastEventId') ||
+            '';
+          const lastSeq = lastEventRaw ? Number(lastEventRaw) : 0;
+
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             Connection: 'keep-alive',
           });
-          res.write(`event: connected\ndata: {"ok":true}\n\n`);
+          res.write(
+            `id: ${this.eventSeq}\nevent: connected\ndata: ${JSON.stringify({
+              ok: true,
+              protocolVersion: MOBILE_PROTOCOL_VERSION,
+              seq: this.eventSeq,
+            })}\n\n`
+          );
+
+          if (Number.isFinite(lastSeq) && lastSeq > 0 && lastSeq < this.eventSeq) {
+            const oldestSeq = this.eventBuffer[0]?.seq ?? this.eventSeq + 1;
+            if (lastSeq + 1 < oldestSeq) {
+              res.write(
+                `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
+                  reason: 'buffer_gap',
+                  lastSeq,
+                  currentSeq: this.eventSeq,
+                })}\n\n`
+              );
+            } else {
+              for (const item of this.eventBuffer) {
+                if (item.seq > lastSeq) {
+                  res.write(item.frame);
+                }
+              }
+            }
+          }
+
           this.sseClients.add(res);
           this.ensureKeepalive();
           req.on('close', () => {
             this.sseClients.delete(res);
+            if (clientId && this.hooks.watchSession) {
+              void this.hooks.watchSession(`mobile:${clientId}`, null);
+            }
           });
           return;
         }
@@ -138,6 +223,8 @@ export class ControlServer {
           ]);
           res.end(
             JSON.stringify({
+              protocolVersion: MOBILE_PROTOCOL_VERSION,
+              seq: this.eventSeq,
               harnesses,
               sessions,
               state: this.store.getState(),
@@ -145,6 +232,44 @@ export class ControlServer {
               catalog,
             })
           );
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/watch') {
+          if (!this.hooks.watchSession) {
+            res.end(JSON.stringify({ ok: true }));
+            return;
+          }
+          const body = await readBody();
+          const clientId = String(body.clientId || 'default').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const sessionId = body.sessionId ? String(body.sessionId) : null;
+          const limit = body.limit ? Number(body.limit) : 80;
+          await this.hooks.watchSession(`mobile:${clientId}`, sessionId, limit);
+          res.end(JSON.stringify({ ok: true, paneId: `mobile:${clientId}`, sessionId }));
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/media') {
+          const filePath = url.searchParams.get('path') || '';
+          const ext = path.extname(filePath).toLowerCase();
+          const contentType = MEDIA_MIME_TYPES[ext];
+          if (!filePath || !contentType || !fs.existsSync(filePath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'Media not found' }));
+            return;
+          }
+          const stat = fs.statSync(filePath);
+          if (!stat.isFile()) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'Media not found' }));
+            return;
+          }
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Content-Length': String(stat.size),
+            'Cache-Control': 'private, max-age=300',
+          });
+          fs.createReadStream(filePath).pipe(res);
           return;
         }
 

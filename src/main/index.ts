@@ -72,6 +72,7 @@ function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachm
 
 let controlServerRef: ControlServer | null = null;
 let masterEngineRef: MasterEngine | null = null;
+let liveSyncRef: LiveSyncService | null = null;
 
 const emitStream = (ev: StreamEvent) => {
   broadcastToRenderer('sh:stream', ev);
@@ -133,6 +134,11 @@ const controlServer = new ControlServer(
     saveAttachment: async (dataUrl, filename) => saveDataUrlAttachment(dataUrl, filename),
     readFilePreview: async (filePath, startLine, endLine) =>
       readFilePreview(filePath, startLine, endLine),
+    watchSession: async (paneId, sessionId, limit) => {
+      if (liveSyncRef) {
+        await liveSyncRef.watchPane(paneId, sessionId, limit ?? 80);
+      }
+    },
   }
 );
 controlServerRef = controlServer;
@@ -152,6 +158,7 @@ const liveSync = new LiveSyncService(
     });
   }
 );
+liveSyncRef = liveSync;
 
 const masterEngine = new MasterEngine(
   store,

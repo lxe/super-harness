@@ -135,6 +135,7 @@ function makeFixtureServer() {
     updatedAt: 2000,
   };
 
+  const watchSession = vi.fn(async () => {});
   const server = new ControlServer(
     store,
     registry,
@@ -152,10 +153,11 @@ function makeFixtureServer() {
         mimeType: 'image/png',
         previewDataUrl: dataUrl,
       })),
+      watchSession,
     }
   );
 
-  return { server, sampleSession, dispatcher };
+  return { server, sampleSession, dispatcher, watchSession };
 }
 
 describe('ControlServer mobile API gateway', () => {
@@ -227,5 +229,41 @@ describe('ControlServer mobile API gateway', () => {
     const att = (await attRes.json()) as { id: string; name: string };
     expect(att.id).toBe('att-1');
     expect(att.name).toBe('snap.png');
+
+    // Health + watch + SSE Last-Event-ID replay
+    const health = (await (await fetch(`${base}/api/health`, { headers })).json()) as {
+      ok: boolean;
+      protocolVersion: number;
+      seq: number;
+    };
+    expect(health.ok).toBe(true);
+    expect(health.protocolVersion).toBe(1);
+
+    const watchRes = await fetch(`${base}/api/watch`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: 'iphone-1', sessionId: 'codex:t1', limit: 60 }),
+    });
+    expect(await watchRes.json()).toEqual({
+      ok: true,
+      paneId: 'mobile:iphone-1',
+      sessionId: 'codex:t1',
+    });
+
+    server.broadcastEvent('stream', { sessionId: 'codex:t1', runId: 'r1', kind: 'delta', text: 'hi' });
+    server.broadcastEvent('stream', { sessionId: 'codex:t1', runId: 'r1', kind: 'done' });
+
+    const ac = new AbortController();
+    const sseRes = await fetch(`${base}/api/events?clientId=iphone-1`, {
+      headers: { ...headers, 'Last-Event-ID': '1' },
+      signal: ac.signal,
+    });
+    expect(sseRes.status).toBe(200);
+    const reader = sseRes.body!.getReader();
+    const chunk = new TextDecoder().decode((await reader.read()).value);
+    ac.abort();
+    expect(chunk).toContain('event: connected');
+    expect(chunk).toContain('id: 2');
+    expect(chunk).toContain('"kind":"done"');
   });
 });

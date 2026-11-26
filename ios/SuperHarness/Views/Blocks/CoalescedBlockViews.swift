@@ -720,44 +720,45 @@ struct CommandBlockView: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            let canExpand = !(output ?? "").isEmpty || ScrollingCommandText.isMultiLine(command)
+            let folder = (cwd ?? "").isEmpty ? nil : ((cwd ?? "") as NSString).lastPathComponent
+            let canExpand = !(output ?? "").isEmpty || ScrollingCommandText.isMultiLine(command) || folder != nil
             Group {
                 VStack(alignment: .leading, spacing: 5) {
+                    // Collapsed, the block is this one line: icon, command, duration, status, chevron.
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(SHColor.inkMuted)
                             .frame(height: ScrollingCommandText.lineHeight)
                         ScrollingCommandText(text: "$ \(command.trimmingCharacters(in: .whitespacesAndNewlines))", color: SHColor.inkPrimary, showsAllLines: isExpanded)
-                        exitBadge
-                            .frame(minHeight: ScrollingCommandText.lineHeight)
-                    }
-
-                    if !(cwd ?? "").isEmpty || durationMs != nil || canExpand {
-                    HStack(spacing: 8) {
-                        if let cwd, !cwd.isEmpty {
-                            Text((cwd as NSString).lastPathComponent)
-                                .font(SHTypography.monoSmall)
-                                .foregroundStyle(SHColor.inkFaint)
-                                .lineLimit(1)
-                        }
                         if let durationMs {
                             Text(durationMs >= 1000 ? String(format: "%.1fs", durationMs / 1000.0) : "\(Int(durationMs))ms")
-                                .font(SHTypography.monoSmall)
+                                .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(SHColor.inkFaint)
+                                .frame(height: ScrollingCommandText.lineHeight)
                         }
-                        Spacer()
+                        exitBadge
+                            .frame(minHeight: ScrollingCommandText.lineHeight)
                         if canExpand {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(SHColor.inkFaint)
                                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                                .frame(height: ScrollingCommandText.lineHeight)
                                 .accessibilityLabel(isExpanded ? "Collapse" : "Expand")
                         }
                     }
+
+                    // The working folder is detail: shown only when the block is expanded.
+                    if isExpanded, let folder {
+                        Text(folder)
+                            .font(SHTypography.monoSmall)
+                            .foregroundStyle(SHColor.inkFaint)
+                            .lineLimit(1)
                     }
                 }
-                .padding(13)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
                 .contentShape(Rectangle())
             }
             .onTapGesture {

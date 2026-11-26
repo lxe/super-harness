@@ -83,6 +83,18 @@ public enum SessionRowFormatting {
         return cleanPreview(for: session).map(normalizeWhitespace)
     }
 
+    /// True when every word of the query appears in the session's title, last message,
+    /// preview, project, working directory, branch or tags.
+    public static func matches(_ session: UnifiedSession, query: String) -> Bool {
+        let words = query.lowercased().split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty else { return true }
+        let hay = [
+            session.displayTitle, session.lastUserText ?? "", session.preview, session.projectName,
+            session.cwd, session.gitBranch ?? "", session.tags.joined(separator: " "),
+        ].joined(separator: " ").lowercased()
+        return words.allSatisfy { hay.contains($0) }
+    }
+
     private static func normalizeWhitespace(_ value: String) -> String {
         value
             .components(separatedBy: .whitespacesAndNewlines)
@@ -109,6 +121,7 @@ public struct SessionListView: View {
     @State private var renamingFolder: SessionFolder? = nil
     @State private var renameFolderDraft: String = ""
     @State private var isManageFoldersPresented: Bool = false
+    @State private var isSearchPresented: Bool = false
 
     private var collapsedSectionIds: Set<String> {
         Set(collapsedSectionsRaw.split(separator: "\n").map(String.init))
@@ -205,6 +218,15 @@ public struct SessionListView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $isSearchPresented) {
+            SessionSearchSheet(store: store) { sessionId in
+                isSearchPresented = false
+                onSelectSession(sessionId)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.ultraThinMaterial)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 ConnectionStatusPill(health: store.connectionHealth) {
@@ -238,6 +260,22 @@ public struct SessionListView: View {
                     .accessibilityLabel("Master Orchestrator")
                     .accessibilityIdentifier("header.master")
                 }
+            }
+
+            // Search is its own glass circle, set apart from the usage/filter/new-chat group.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isSearchPresented = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(SHColor.inkSecondary)
+                }
+                .accessibilityLabel("Search sessions")
+                .accessibilityIdentifier("header.search")
+            }
+
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -489,11 +527,6 @@ public struct SessionListView: View {
         .contentMargins(.top, 4, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(SHColor.surfaceRail)
-        .searchable(
-            text: $store.searchQuery,
-            placement: .navigationBarDrawer(displayMode: .automatic),
-            prompt: "Search sessions, branches, projects"
-        )
         .refreshable {
             await store.refresh()
         }
@@ -1029,5 +1062,139 @@ private struct ManageFoldersSheet: View {
         let color = selectedColor
         newName = ""
         Task { _ = await store.createFolder(name: trimmed, color: color) }
+    }
+}
+
+// MARK: - Session Search Sheet
+
+/// Search opened from the top bar: a glass search field with the keyboard up at once,
+/// results that update as the query changes, and a tap that opens the thread.
+private struct SessionSearchSheet: View {
+    @Bindable var store: AppStore
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query: String = ""
+    @FocusState private var isFieldFocused: Bool
+
+    private var results: [UnifiedSession] {
+        store.sessions
+            .filter { s in
+                if s.isMaster { return false }
+                if !store.showHidden && s.hidden { return false }
+                if !store.showArchived && s.status == .archived { return false }
+                return SessionRowFormatting.matches(s, query: query)
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var body: some View {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = results
+
+        VStack(spacing: SHSpacing.md) {
+            HStack(spacing: SHSpacing.sm) {
+                HStack(spacing: SHSpacing.sm) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(SHColor.inkMuted)
+                    TextField("Search sessions, messages, projects", text: $query)
+                        .font(SHTypography.body)
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .tint(SHColor.brandMaster)
+                        .focused($isFieldFocused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .accessibilityIdentifier("search.field")
+                        .onSubmit {
+                            if let first = matches.first, !trimmedQuery.isEmpty {
+                                onSelect(first.id)
+                            }
+                        }
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(SHColor.inkFaint)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.horizontal, SHSpacing.lg)
+                .frame(height: 44)
+                .modifier(SearchGlassModifier(shape: Capsule()))
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(SHColor.inkSecondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .modifier(SearchGlassModifier(shape: Circle()))
+                .accessibilityLabel("Close search")
+                .accessibilityIdentifier("search.close")
+            }
+            .padding(.horizontal, SHSpacing.lg)
+            .padding(.top, SHSpacing.xl)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: SHSpacing.sm) {
+                    Text(trimmedQuery.isEmpty ? "RECENT" : (matches.isEmpty ? "NO MATCHES" : "\(matches.count) \(matches.count == 1 ? "MATCH" : "MATCHES")"))
+                        .font(SHTypography.micro.weight(.semibold))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .padding(.horizontal, SHSpacing.xs)
+
+                    ForEach(trimmedQuery.isEmpty ? Array(matches.prefix(12)) : matches) { session in
+                        Button {
+                            onSelect(session.id)
+                        } label: {
+                            SessionListRow(session: session, isBusy: store.isSessionBusy(session.id))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 11)
+                                .background(
+                                    RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
+                                        .fill(SHColor.surfaceSubtle.opacity(0.7))
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if matches.isEmpty {
+                        Text("Nothing matches “\(trimmedQuery)”. Search looks at titles, your last message, previews, projects and branches.")
+                            .font(SHTypography.caption)
+                            .foregroundStyle(SHColor.inkMuted)
+                            .padding(.horizontal, SHSpacing.xs)
+                            .padding(.top, SHSpacing.xs)
+                    }
+                }
+                .padding(.horizontal, SHSpacing.lg)
+                .padding(.bottom, SHSpacing.xl)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .onAppear { isFieldFocused = true }
+    }
+}
+
+private struct SearchGlassModifier<S: Shape>: ViewModifier {
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.75))
+        }
     }
 }

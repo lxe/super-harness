@@ -546,7 +546,7 @@ public struct ImageLightboxView: View {
                 }
                 isLoadingRemote = true
                 defer { isLoadingRemote = false }
-                if let data = await loader(path), let img = UIImage(data: data) {
+                if let img = await MediaRetryLoader.load(path: path, loader: loader, decode: { UIImage(data: $0) }) {
                     remoteImage = img
                 }
                 #endif

@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 
 public enum SuperHarnessServerEvent: Sendable {
     case connected
@@ -55,6 +56,8 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func watchSession(sessionId: String?, limit: Int) async
     func fetchMedia(path: String) async throws -> Data
     func fetchMedia(path: String, maxWidth: Int?) async throws -> Data
+    /// `ignoreLocalCache` skips the HTTP cache, for a retry after a response that was missing or unusable.
+    func fetchMedia(path: String, maxWidth: Int?, ignoreLocalCache: Bool) async throws -> Data
     func fetchDictationStatus(overrideURL: String?, overrideToken: String?) async -> DictationStatusResponse?
     func transcribeAudio(wavData: Data, overrideURL: String?, overrideToken: String?) async throws -> String
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment]) async throws -> SendMessageResult
@@ -78,6 +81,9 @@ public protocol SuperHarnessClientProtocol: Sendable {
 public extension SuperHarnessClientProtocol {
     func fetchMedia(path: String, maxWidth: Int?) async throws -> Data {
         try await fetchMedia(path: path)
+    }
+    func fetchMedia(path: String, maxWidth: Int?, ignoreLocalCache: Bool) async throws -> Data {
+        try await fetchMedia(path: path, maxWidth: maxWidth)
     }
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment], mode: SendMode) async throws -> SendMessageResult {
         try await sendMessage(sessionId: sessionId, message: message, attachments: attachments)
@@ -291,6 +297,10 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
     }
 
     public func fetchMedia(path: String, maxWidth: Int?) async throws -> Data {
+        try await fetchMedia(path: path, maxWidth: maxWidth, ignoreLocalCache: false)
+    }
+
+    public func fetchMedia(path: String, maxWidth: Int?, ignoreLocalCache: Bool) async throws -> Data {
         var items = [URLQueryItem(name: "path", value: path)]
         if let maxWidth, maxWidth > 0 {
             items.append(URLQueryItem(name: "w", value: String(maxWidth)))
@@ -301,6 +311,9 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.timeoutInterval = 20
+        if ignoreLocalCache {
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+        }
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -310,6 +323,12 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         }
         switch http.statusCode {
         case 200..<300:
+            // The host caches media for up to an hour. A response that cannot be shown (for
+            // example a file read while it was still being written) must not be replayed from
+            // the HTTP cache on the next attempt.
+            if !MediaDataValidator.isUsable(data, forPath: path) {
+                session.configuration.urlCache?.removeCachedResponse(for: req)
+            }
             return data
         case 401:
             throw SuperHarnessAPIError.unauthorized
@@ -689,6 +708,10 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         var comps = URLComponents(url: baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))), resolvingAgainstBaseURL: false)
         if !queryItems.isEmpty {
             comps?.queryItems = queryItems
+            // URLComponents leaves "+" as is, and the host reads "+" in a query as a space,
+            // which would turn a file path containing "+" into a 404.
+            let encoded = comps?.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+            comps?.percentEncodedQuery = encoded
         }
         return comps?.url
     }
@@ -769,5 +792,84 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             pinned: true,
             dispatchMode: .master
         )
+    }
+}
+
+// MARK: - Media Validation
+
+/// Decides whether bytes returned for a media path can actually be shown. Images must decode
+/// completely: a truncated file (read while its writer was still running) is rejected so the
+/// caller retries instead of caching a picture that will never render.
+public enum MediaDataValidator {
+    private static let rasterImageExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "bmp", "tif", "tiff"]
+
+    public static func isRasterImagePath(_ path: String) -> Bool {
+        rasterImageExtensions.contains((path as NSString).pathExtension.lowercased())
+    }
+
+    public static func isUsable(_ data: Data, forPath path: String) -> Bool {
+        guard !data.isEmpty else { return false }
+        guard isRasterImagePath(path) else { return true }
+        return isCompleteImage(data)
+    }
+
+    /// True when the bytes are a fully present image. The format comes from the bytes, not the
+    /// path: the host answers a .png path with WebP. ImageIO decodes a truncated file without
+    /// complaint (the missing rows come out blank), so each common format's end marker is
+    /// checked first.
+    public static func isCompleteImage(_ data: Data) -> Bool {
+        let bytes = [UInt8](data.prefix(16))
+        func hasPrefix(_ magic: [UInt8]) -> Bool { bytes.count >= magic.count && Array(bytes.prefix(magic.count)) == magic }
+        func hasSuffix(_ tail: [UInt8]) -> Bool { data.count >= tail.count && Array(data.suffix(tail.count)) == tail }
+
+        if hasPrefix([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+            // PNG ends with an empty IEND chunk and its CRC.
+            guard hasSuffix([0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]) else { return false }
+        } else if hasPrefix([0xFF, 0xD8, 0xFF]) {
+            // JPEG ends with the EOI marker; some encoders append a little padding after it.
+            let tail = Array(data.suffix(64))
+            guard tail.indices.dropLast().contains(where: { tail[$0] == 0xFF && tail[$0 + 1] == 0xD9 }) else { return false }
+        } else if hasPrefix([0x52, 0x49, 0x46, 0x46]), bytes.count >= 12, Array(bytes[8..<12]) == [0x57, 0x45, 0x42, 0x50] {
+            // WebP: the RIFF header states the payload size.
+            let declared = Int(bytes[4]) | Int(bytes[5]) << 8 | Int(bytes[6]) << 16 | Int(bytes[7]) << 24
+            guard data.count >= declared + 8 else { return false }
+        } else if hasPrefix([0x47, 0x49, 0x46, 0x38]) {
+            guard hasSuffix([0x3B]) else { return false }
+        }
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return false
+        }
+        return image.width > 0 && image.height > 0
+    }
+}
+
+/// Loads a media item with a few spaced retries. A generated image can be announced in the
+/// transcript moments before its file is complete on the host, so one failed or unusable
+/// response must not leave a permanent placeholder.
+public enum MediaRetryLoader {
+    public nonisolated static let defaultDelays: [Double] = [0, 1.5, 4, 10]
+
+    /// Runs on the caller's actor (`#isolation`), so the caller's non-Sendable closures are used in place.
+    public static func load<Result>(
+        path: String,
+        delays: [Double] = defaultDelays,
+        isolation: isolated (any Actor)? = #isolation,
+        sleep: (Double) async -> Void = { seconds in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        },
+        loader: (String) async -> Data?,
+        decode: (Data) -> Result?
+    ) async -> Result? {
+        for delay in delays {
+            if delay > 0 { await sleep(delay) }
+            if Task.isCancelled { return nil }
+            if let data = await loader(path), let result = decode(data) {
+                return result
+            }
+        }
+        return nil
     }
 }

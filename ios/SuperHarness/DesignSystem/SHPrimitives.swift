@@ -403,7 +403,8 @@ private struct SHAttachmentThumbTile: View {
                 remoteImage = cached
                 return
             }
-            if let data = await loader(item.path), let img = UIImage(data: data) {
+            // Retries with pauses: the file behind a freshly generated image may not be complete yet.
+            if let img = await MediaRetryLoader.load(path: item.path, loader: loader, decode: { UIImage(data: $0) }) {
                 SHMediaImageCache.shared.store(img, for: item.path)
                 remoteImage = img
             }

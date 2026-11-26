@@ -247,6 +247,7 @@ public final class AppStore {
     private var isResyncing: Bool = false
     private var isSceneActive: Bool = true
     private var mediaCache: [String: Data] = [:]
+    private var mediaFailedKeys: Set<String> = []
     private let snapshotFileURL: URL?
     private var recentTranscriptOrder: [String] = []
     private var saveSnapshotTask: Task<Void, Never>?
@@ -1428,9 +1429,16 @@ public final class AppStore {
         if let cached = mediaCache[cacheKey] {
             return cached
         }
-        guard let data = try? await client.fetchMedia(path: path, maxWidth: maxWidth), !data.isEmpty else {
+        // After a failed or unusable response, the next attempt goes to the host and skips the
+        // HTTP cache. Only bytes that can be shown are kept, so a bad first answer is never
+        // replayed for the rest of the app's life.
+        let retrying = mediaFailedKeys.contains(cacheKey)
+        guard let data = try? await client.fetchMedia(path: path, maxWidth: maxWidth, ignoreLocalCache: retrying),
+              MediaDataValidator.isUsable(data, forPath: path) else {
+            mediaFailedKeys.insert(cacheKey)
             return nil
         }
+        mediaFailedKeys.remove(cacheKey)
         mediaCache[cacheKey] = data
         return data
     }

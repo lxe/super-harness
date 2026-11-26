@@ -359,7 +359,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                         id: "th-4",
                         role: .assistant,
                         timestamp: now - 25 * hour,
-                        blocks: [.text(text: "Re-running the organizer tests against the staging snapshot now.\n\nInstall page: https://example.com/install/\n\nCode-styled: `https://example.com/code/`\n\nSee the [release notes](https://example.com/notes) too.\n\n- Dashboard: https://example.com/dash\n\n| Item | Link |\n| --- | --- |\n| Docs | [docs](https://example.com/docs) |")],
+                        blocks: [.text(text: "Re-running the organizer tests against the staging snapshot now.\n\nInstall page: https://example.com/install/\n\nCode-styled: `https://example.com/code/`\n\nSee the [release notes](https://example.com/notes) too.\n\n- Dashboard: https://example.com/dash\n\n| Item | Link |\n| --- | --- |\n| Docs | [docs](https://example.com/docs) |"), .image(path: MockSuperHarnessClient.slowGeneratedImagePath, name: "generated.png", dataUrl: nil), .text(text: "That is the generated image.")],
                         harnessMeta: MessageHarnessMeta(model: "gpt-5.3-codex", sourceKind: .agent)
                     ),
                 ],
@@ -727,7 +727,22 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         watchedSessions.append(sessionId)
     }
 
+    /// Demo path that behaves like an image still being written: the first request is a 404,
+    /// the second returns a truncated file, later ones return the whole image.
+    public static let slowGeneratedImagePath = "/demo/generated_images/slow-write.png"
+    private var slowGeneratedImageRequests = 0
+
     public func fetchMedia(path: String) async throws -> Data {
+        if path == Self.slowGeneratedImagePath {
+            slowGeneratedImageRequests += 1
+            guard slowGeneratedImageRequests > 1,
+                  let dataUrl = Self.makeSamplePreviewDataUrl(),
+                  let comma = dataUrl.firstIndex(of: ","),
+                  let full = Data(base64Encoded: String(dataUrl[dataUrl.index(after: comma)...])) else {
+                throw SuperHarnessAPIError.notFound("/api/media")
+            }
+            return slowGeneratedImageRequests == 2 ? full.prefix(full.count / 2) : full
+        }
         if let dataUrl = Self.makeSamplePreviewDataUrl(),
            let comma = dataUrl.firstIndex(of: ","),
            let data = Data(base64Encoded: String(dataUrl[dataUrl.index(after: comma)...])) {

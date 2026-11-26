@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import SuperHarness
 
@@ -210,6 +211,93 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertFalse(old.isUnread)
         // A malformed value must not break decoding of the session.
         XCTAssertFalse(try decode(", \"unread\": \"yes\"").isUnread)
+    }
+
+    private func samplePNG() -> Data {
+        // Noise keeps the PNG large enough that cutting it in half removes real pixel data.
+        let size = CGSize(width: 64, height: 64)
+        let image = UIGraphicsImageRenderer(size: size).image { ctx in
+            for y in 0..<64 {
+                for x in 0..<64 {
+                    UIColor(hue: CGFloat((x * 7 + y * 13) % 64) / 64, saturation: 0.8, brightness: CGFloat((x ^ y) % 8) / 8 + 0.1, alpha: 1).setFill()
+                    ctx.fill(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
+        return image.pngData()!
+    }
+
+    func testMediaValidatorRejectsTruncatedImagesAndAcceptsCompleteOnes() {
+        let png = samplePNG()
+        let path = "/home/lxe/.codex/generated_images/abc/exec-1.png"
+        XCTAssertTrue(MediaDataValidator.isUsable(png, forPath: path))
+        XCTAssertFalse(MediaDataValidator.isUsable(png.prefix(png.count / 2), forPath: path), "a half-written file must be rejected")
+        XCTAssertFalse(MediaDataValidator.isUsable(Data(), forPath: path))
+        XCTAssertFalse(MediaDataValidator.isUsable(Data("{\"error\":\"Media not found\"}".utf8), forPath: path))
+        // The host answers a .png path with another format; the bytes decide, not the extension.
+        let jpeg = UIImage(data: png)!.jpegData(compressionQuality: 0.8)!
+        XCTAssertTrue(MediaDataValidator.isUsable(jpeg, forPath: path))
+        XCTAssertFalse(MediaDataValidator.isUsable(jpeg.prefix(jpeg.count / 2), forPath: path))
+        // WebP as the host sends it (ImageMagick, lossy VP8, 48x48) for a .png path.
+        let webp = Data(base64Encoded: "UklGRlYAAABXRUJQVlA4IEoAAABQBACdASowADAAPnk0k0eko6GhuMgAkA8JaQANT+FaPl4UJecchj2QGxC4AP79r8epa8lreMlfS6Xd8+fReJaJGF/7tKZXYAAAAA==")!
+        XCTAssertNotNil(UIImage(data: webp), "iOS decodes the host's WebP")
+        XCTAssertTrue(MediaDataValidator.isUsable(webp, forPath: path))
+        XCTAssertFalse(MediaDataValidator.isUsable(webp.prefix(webp.count - 20), forPath: path), "a WebP shorter than its header says is rejected")
+        // Non-image media is not inspected.
+        XCTAssertTrue(MediaDataValidator.isUsable(Data([1, 2, 3]), forPath: "/tmp/clip.mp4"))
+    }
+
+    @MainActor
+    func testMediaRetryLoaderKeepsTryingUntilTheImageDecodes() async {
+        let png = samplePNG()
+        var calls = 0
+        var sleeps: [Double] = []
+        let image = await MediaRetryLoader.load(
+            path: "/x/generated.png",
+            delays: [0, 1.5, 4, 10],
+            sleep: { sleeps.append($0) },
+            loader: { _ in
+                calls += 1
+                if calls == 1 { return nil }                      // file not there yet
+                if calls == 2 { return png.prefix(png.count / 2) } // still being written
+                return png
+            },
+            decode: { MediaDataValidator.isCompleteImage($0) ? UIImage(data: $0) : nil }
+        )
+        XCTAssertNotNil(image)
+        XCTAssertEqual(calls, 3)
+        XCTAssertEqual(sleeps, [1.5, 4])
+
+        var failedCalls = 0
+        let never = await MediaRetryLoader.load(
+            path: "/x/missing.png", delays: [0, 1, 2], sleep: { _ in },
+            loader: { _ in failedCalls += 1; return nil }, decode: { UIImage(data: $0) }
+        )
+        XCTAssertNil(never)
+        XCTAssertEqual(failedCalls, 3)
+    }
+
+    @MainActor
+    func testStoreDoesNotCacheMissingOrTruncatedMediaAndRecoversOnRetry() async {
+        let suite = "MediaRetryTests.\(UUID().uuidString)"
+        let store = AppStore(
+            client: MockSuperHarnessClient(),
+            keychain: InMemoryKeychainStore(),
+            defaults: UserDefaults(suiteName: suite)!,
+            environment: [:]
+        )
+        defer { store.stopEventStream() }
+        let path = MockSuperHarnessClient.slowGeneratedImagePath
+
+        let first = await store.loadMediaData(path: path, maxWidth: 320)
+        XCTAssertNil(first, "404 while the file does not exist yet")
+        let second = await store.loadMediaData(path: path, maxWidth: 320)
+        XCTAssertNil(second, "a truncated file must not be returned or cached")
+        let third = await store.loadMediaData(path: path, maxWidth: 320)
+        XCTAssertNotNil(third, "the complete image loads once the host has it")
+        XCTAssertNotNil(third.flatMap { UIImage(data: $0) })
+        let fourth = await store.loadMediaData(path: path, maxWidth: 320)
+        XCTAssertEqual(fourth, third, "the good result is cached")
     }
 
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {

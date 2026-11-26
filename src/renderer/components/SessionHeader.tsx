@@ -24,7 +24,7 @@ import {
   MenuSectionLabel,
   PopoverSurface,
 } from '../ui';
-import { formatRelativeTime, getHarnessVisual } from '../utils/format';
+import { formatRelativeTime } from '../utils/format';
 import { HarnessLogo } from './HarnessLogo';
 
 export interface SessionHeaderProps {
@@ -96,8 +96,6 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
       setEditingTitle(false);
     };
 
-    const vis = getHarnessVisual(session.harness);
-
     return (
       <header className="sh-drag-region h-12 px-5 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0 relative">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -133,7 +131,6 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
               <h1 className="text-label font-medium text-ink-primary truncate">{session.title}</h1>
             </div>
           )}
-          {!isMaster && <span className="text-micro text-ink-faint shrink-0">{vis.label}</span>}
         </div>
 
         <div className="flex items-center gap-1 shrink-0">

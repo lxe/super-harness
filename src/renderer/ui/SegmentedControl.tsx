@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from './cn';
 import { WorkingOrb } from './WorkingOrb';
+import { useAnimationVisibilityRef } from './animationVisibility';
 import { ProgressBar, type ProgressTone } from './ProgressBar';
 
 export interface SegmentedItem<T extends string> {
@@ -104,6 +105,7 @@ export function SegmentedControl<T extends string>({
   onReorder,
   canReorder,
 }: SegmentedControlProps<T>) {
+  const gaugeContainerRef = useAnimationVisibilityRef<HTMLDivElement>();
   const hasAnyProgress = items.some((i) => i.progress !== undefined);
   const [dragId, setDragId] = React.useState<T | null>(null);
   const [overId, setOverId] = React.useState<T | null>(null);
@@ -112,6 +114,7 @@ export function SegmentedControl<T extends string>({
   if (variant === 'gauge') {
     return (
       <div
+        ref={gaugeContainerRef}
         role="tablist"
         style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
         className={cn(
@@ -213,7 +216,7 @@ export function SegmentedControl<T extends string>({
                   />
                 )}
 
-                {/* 3. Colored usage gauge arc on top */}
+                {/* 3. Colored usage gauge arc on top (compositor-only opacity pulse when working) */}
                 {displayPct > 0 && (
                   <svg
                     aria-hidden="true"
@@ -222,11 +225,6 @@ export function SegmentedControl<T extends string>({
                       'absolute inset-0 w-full h-full -rotate-90 pointer-events-none',
                       item.working && 'sh-gauge-arc-shimmer'
                     )}
-                    style={
-                      item.working
-                        ? { filter: `drop-shadow(0 0 2px ${palette.stroke}66)` }
-                        : undefined
-                    }
                   >
                     <circle
                       cx="18"

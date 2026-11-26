@@ -1,7 +1,10 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installWindowVisibilityPause } from './ui/animationVisibility';
 import './styles.css';
+
+installWindowVisibilityPause();
 
 interface ErrorBoundaryState {
   error: Error | null;

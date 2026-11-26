@@ -271,12 +271,12 @@ body,
   }
 }
 
-@keyframes sh-working-sweep {
+@keyframes sh-working-sweep-translate {
   0% {
-    background-position: 140% 0;
+    transform: translate3d(-120%, 0, 0);
   }
   100% {
-    background-position: -40% 0;
+    transform: translate3d(220%, 0, 0);
   }
 }
 
@@ -300,18 +300,28 @@ body,
   will-change: transform, opacity;
 }
 
+/* Compositor-only text shimmer using a translated pseudo-element (zero background-position paint) */
 .sh-working-shimmer {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  color: rgba(196, 200, 212, 0.88);
+}
+
+.sh-working-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 48%;
   background: linear-gradient(
     90deg,
-    rgba(161, 166, 179, 0.72) 0%,
-    rgba(244, 245, 247, 0.96) 50%,
-    rgba(161, 166, 179, 0.72) 100%
+    transparent 0%,
+    rgba(255, 255, 255, 0.24) 50%,
+    transparent 100%
   );
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: sh-working-sweep 2.6s ease-in-out infinite;
+  pointer-events: none;
+  animation: sh-working-sweep-translate 2.4s ease-in-out infinite;
+  will-change: transform;
 }
 
 @keyframes sh-nav-shimmer-sweep {
@@ -363,44 +373,59 @@ body,
 @keyframes sh-gauge-arc-glow {
   0%,
   100% {
-    filter: brightness(1);
+    opacity: 0.84;
   }
   50% {
-    filter: brightness(1.14);
+    opacity: 1;
   }
 }
 
+/* Compositor-only 3D orbit (transform only — zero z-index or filter per-frame recalc/paint) */
 @keyframes sh-orb-orbit-3d {
   0% {
     transform: translate3d(var(--sh-orbit-rx, 5px), 0px, 0) scale(0.88);
-    filter: brightness(0.9);
-    z-index: 2;
   }
   25% {
     transform: translate3d(0px, var(--sh-orbit-ry, 3.2px), 0) scale(1.12);
-    filter: brightness(1.04);
-    z-index: 3;
   }
   50% {
     transform: translate3d(calc(var(--sh-orbit-rx, 5px) * -1), 0px, 0) scale(0.88);
-    filter: brightness(0.9);
-    z-index: 2;
   }
   75% {
     transform: translate3d(0px, calc(var(--sh-orbit-ry, 3.2px) * -1), 0) scale(0.68);
-    filter: brightness(0.72);
-    z-index: 1;
   }
   100% {
     transform: translate3d(var(--sh-orbit-rx, 5px), 0px, 0) scale(0.88);
-    filter: brightness(0.9);
-    z-index: 2;
+  }
+}
+
+/* Compositor-only depth shading via opaque inner deep-hue overlay (opacity only) */
+@keyframes sh-orb-depth-shade {
+  0% {
+    opacity: 0.14;
+  }
+  25% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.14;
+  }
+  75% {
+    opacity: 0.36;
+  }
+  100% {
+    opacity: 0.14;
   }
 }
 
 .sh-orb-sphere {
   animation: sh-orb-orbit-3d 1.5s linear infinite;
-  will-change: transform, filter;
+  will-change: transform;
+}
+
+.sh-orb-shade {
+  animation: sh-orb-depth-shade 1.5s linear infinite;
+  will-change: opacity;
 }
 
 .sh-gauge-halo {
@@ -415,5 +440,30 @@ body,
 
 .sh-gauge-arc-shimmer {
   animation: sh-gauge-arc-glow 2.4s ease-in-out infinite;
-  will-change: filter;
+  will-change: opacity;
+}
+
+/* Pause infinite CSS animations when the Electron window is hidden or a row is offscreen */
+.sh-window-hidden .sh-orb-sphere,
+.sh-window-hidden .sh-orb-shade,
+.sh-window-hidden .sh-gauge-aurora,
+.sh-window-hidden .sh-gauge-arc-shimmer,
+.sh-window-hidden .sh-working-shimmer::after,
+[data-sh-offscreen='true'] .sh-orb-sphere,
+[data-sh-offscreen='true'] .sh-orb-shade,
+[data-sh-offscreen='true'] .sh-gauge-aurora,
+[data-sh-offscreen='true'] .sh-gauge-arc-shimmer,
+[data-sh-offscreen='true'] .sh-working-shimmer::after,
+[data-sh-offscreen='true'].sh-working-shimmer::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sh-orb-sphere,
+  .sh-orb-shade,
+  .sh-gauge-aurora,
+  .sh-gauge-arc-shimmer,
+  .sh-working-shimmer::after {
+    animation-play-state: paused !important;
+  }
 }

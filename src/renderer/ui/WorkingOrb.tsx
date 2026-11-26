@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { HarnessGroup, UsageSnapshot } from '../../shared/types';
 import { cn } from './cn';
+import { useAnimationVisibilityRef } from './animationVisibility';
 
 export type WorkingOrbTone = HarnessGroup | 'master' | 'neutral' | 'warning' | 'danger';
 
@@ -116,6 +117,7 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   size = 'md',
   className,
 }) => {
+  const hostRef = useAnimationVisibilityRef<HTMLSpanElement>();
   const px = SIZE_PX[size];
   const dotPx = Math.max(4.6, Math.round(px * 0.34 * 10) / 10);
   const orbitR = Math.round(px * 0.31 * 10) / 10;
@@ -127,6 +129,7 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
 
   return (
     <span
+      ref={hostRef}
       aria-hidden="true"
       style={
         {
@@ -138,18 +141,30 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
       }
       className={cn('relative inline-flex items-center justify-center shrink-0', className)}
     >
-      {[0, 1, 2].map((idx) => (
-        <span
-          key={idx}
-          className="sh-orb-sphere absolute rounded-full pointer-events-none"
-          style={{
-            width: dotPx,
-            height: dotPx,
-            background: sphereBg,
-            animationDelay: `${(-idx * 1.5) / 3}s`,
-          }}
-        />
-      ))}
+      {[0, 1, 2].map((idx) => {
+        const delay = `${(-idx * 1.5) / 3}s`;
+        return (
+          <span
+            key={idx}
+            className="sh-orb-sphere absolute rounded-full overflow-hidden pointer-events-none"
+            style={{
+              width: dotPx,
+              height: dotPx,
+              background: sphereBg,
+              animationDelay: delay,
+            }}
+          >
+            {/* Compositor-only depth shading overlay (opacity-only, keeps sphere 100% opaque) */}
+            <span
+              className="sh-orb-shade absolute inset-0 rounded-full pointer-events-none"
+              style={{
+                background: palette.deep,
+                animationDelay: delay,
+              }}
+            />
+          </span>
+        );
+      })}
     </span>
   );
 };
@@ -178,7 +193,7 @@ function formatWorkingElapsed(seconds: number): string {
 
 /**
  * Cohesive working status row combining the kinetic WorkingOrb with a subtle
- * shimmering text sweep and live elapsed timer.
+ * compositor-only shimmering text sweep and live elapsed timer.
  */
 export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
   tone = 'master',
@@ -189,6 +204,7 @@ export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
   showTimer = true,
   className,
 }) => {
+  const hostRef = useAnimationVisibilityRef<HTMLSpanElement>();
   const mountTimeRef = useRef<number>(Date.now());
   const originMs = startedAt && startedAt > 0 && startedAt <= Date.now() ? startedAt : mountTimeRef.current;
   const [elapsedSec, setElapsedSec] = useState<number>(() =>
@@ -207,6 +223,7 @@ export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
 
   return (
     <span
+      ref={hostRef}
       className={cn(
         'inline-flex items-center gap-2 text-caption font-medium select-none',
         className

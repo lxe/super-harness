@@ -478,11 +478,23 @@ export function parseAntigravityJsonlLines(
       const userBlocks: UnifiedBlock[] = [];
       for (const m of mediaArr) {
         const mo = m as Record<string, unknown>;
-        if (typeof mo?.uri === 'string' && String(mo.mime_type || '').startsWith('image/')) {
+        if (typeof mo?.uri !== 'string' || !mo.uri.trim()) continue;
+        const uri = mo.uri.trim();
+        const mime = String(mo.mime_type || '').toLowerCase();
+        const displayName =
+          typeof mo.name === 'string' && mo.name.trim() ? mo.name.trim() : path.basename(uri);
+        if (mime.startsWith('video/') || /\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(uri)) {
+          userBlocks.push({
+            type: 'video',
+            path: uri,
+            name: displayName,
+            mimeType: mime.startsWith('video/') ? mime : undefined,
+          });
+        } else if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(uri)) {
           userBlocks.push({
             type: 'image',
-            path: mo.uri,
-            name: path.basename(mo.uri),
+            path: uri,
+            name: displayName,
           });
         }
       }

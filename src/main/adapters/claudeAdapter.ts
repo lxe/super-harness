@@ -530,6 +530,13 @@ export async function detectClaude(
         activeFiles.push(data);
       }
 
+      const busySessionIds = new Set<string>();
+      for (const f of activeFiles) {
+        if (f.sessionId && (f.status === 'running' || f.status === 'busy')) {
+          busySessionIds.add(f.sessionId);
+        }
+      }
+
       const priority = (d: ActiveClaudeSessionJson): number =>
         d.tmux ? 3 : d.entrypoint === 'claude-desktop' ? 2 : 1;
       activeFiles.sort((a, b) => priority(b) - priority(a));
@@ -568,7 +575,11 @@ export async function detectClaude(
           ? desktopMatch.data.gitAnchors[0]?.branch
           : undefined;
         const activity = inspectClaudeTranscriptActivity(transcriptPath, true);
-        const isRunning = data.status === 'running' || activity.working;
+        const isRunning =
+          data.status === 'running' ||
+          data.status === 'busy' ||
+          busySessionIds.has(data.sessionId) ||
+          activity.working;
         const updatedAt = Math.max(
           normalizeTimestamp(data.updatedAt ?? data.startedAt),
           normalizeTimestamp(desktopMatch?.data.lastActivityAt ?? 0),
@@ -892,6 +903,7 @@ export function parseClaudeJsonlLines(
     }
 
     if (type !== 'user' && type !== 'assistant') continue;
+    if (obj.isSidechain === true) continue;
     const msg = obj.message as Record<string, unknown> | undefined;
     if (!msg) continue;
 
@@ -1399,6 +1411,83 @@ export function parseClaudeStreamLine(
  * Cohesive HarnessDriver encapsulating all Anthropic Claude integration
  * (Claude Desktop metadata, Claude Code CLI transcripts, and live tmux remote-control).
  */
+export interface LiveClaudeOwner {
+  pid: number;
+  sessionId: string;
+  entrypoint?: string;
+  tmux?: string;
+  status?: string;
+}
+
+export type ClaudeDispatchDecision =
+  | { action: 'tmux'; tmuxTarget: string }
+  | { action: 'resume' }
+  | { action: 'block'; reason: string };
+
+/**
+ * Inspects live `~/.claude/sessions/*.json` PID records for a given session ID.
+ */
+export function findLiveClaudeOwners(
+  nativeSessionId: string,
+  sessionsDir = CLAUDE_SESSIONS_DIR
+): LiveClaudeOwner[] {
+  if (!nativeSessionId || !fs.existsSync(sessionsDir)) return [];
+  const owners: LiveClaudeOwner[] = [];
+  try {
+    for (const fn of fs.readdirSync(sessionsDir)) {
+      if (!fn.endsWith('.json')) continue;
+      let data: ActiveClaudeSessionJson;
+      try {
+        data = JSON.parse(fs.readFileSync(path.join(sessionsDir, fn), 'utf8')) as ActiveClaudeSessionJson;
+      } catch {
+        continue;
+      }
+      if (data.sessionId !== nativeSessionId || !data.pid) continue;
+      const pid = Number(data.pid);
+      if (!Number.isFinite(pid) || !isPidAlive(pid)) continue;
+      owners.push({
+        pid,
+        sessionId: data.sessionId,
+        entrypoint: data.entrypoint,
+        tmux: data.tmux,
+        status: data.status,
+      });
+    }
+  } catch {
+    // ignore scan errors
+  }
+  return owners;
+}
+
+/**
+ * Prevents spawning duplicate `claude --resume` clone processes when a live
+ * Claude Desktop or concurrent CLI process already owns the session.
+ */
+export function resolveClaudeDispatchGuard(owners: LiveClaudeOwner[]): ClaudeDispatchDecision {
+  const tmuxOwner = owners.find((o) => Boolean(o.tmux));
+  if (tmuxOwner?.tmux) {
+    return { action: 'tmux', tmuxTarget: tmuxOwner.tmux };
+  }
+
+  const desktopOwner = owners.find((o) => o.entrypoint === 'claude-desktop');
+  if (desktopOwner) {
+    return {
+      action: 'block',
+      reason: `This session is currently open in Claude Desktop (PID ${desktopOwner.pid}). Spawning \`claude --resume\` while Claude Desktop holds it open would fork a duplicate clone session and desynchronize your workspace. Reply in Claude Desktop, close the session in Claude Desktop to resume here, or start new Claude sessions in tmux + Remote Control mode for synchronized two-way control.`,
+    };
+  }
+
+  const activeCliOwner = owners[0];
+  if (activeCliOwner) {
+    return {
+      action: 'block',
+      reason: `Another live Claude CLI process (PID ${activeCliOwner.pid}) is already active on this session. Wait for it to finish before sending so Super Harness does not fork a second concurrent copy.`,
+    };
+  }
+
+  return { action: 'resume' };
+}
+
 export function createClaudeDriver(): HarnessDriver {
   const startClaudeSession = async (
     req: StartSessionRequest,
@@ -1541,26 +1630,41 @@ export function createClaudeDriver(): HarnessDriver {
     ): Promise<SendMessageResult> {
       const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
 
-      // Live tmux-backed Claude session -> direct tmux send-keys with TUI-safe Enter delay
-      if (session.dispatchMode === 'tmux-send' && session.tmuxTarget) {
+      const sendViaTmux = async (target: string): Promise<SendMessageResult> => {
         try {
           await execFileAsync(
             'tmux',
-            ['send-keys', '-t', session.tmuxTarget, '-l', promptWithImages],
+            ['send-keys', '-t', target, '-l', promptWithImages],
             { timeout: 4000 }
           );
           await new Promise((r) => setTimeout(r, 150));
-          await execFileAsync('tmux', ['send-keys', '-t', session.tmuxTarget, 'C-m'], {
+          await execFileAsync('tmux', ['send-keys', '-t', target, 'C-m'], {
             timeout: 4000,
           });
           ctx.triggerRefresh(1200);
-          return { ok: true, dispatchedVia: `tmux → ${session.tmuxTarget}` };
+          return { ok: true, dispatchedVia: `tmux → ${target}` };
         } catch (err) {
           return {
             ok: false,
             error: `tmux send-keys failed: ${err instanceof Error ? err.message : String(err)}`,
           };
         }
+      };
+
+      // Live tmux-backed Claude session -> direct tmux send-keys with TUI-safe Enter delay
+      if (session.dispatchMode === 'tmux-send' && session.tmuxTarget) {
+        return sendViaTmux(session.tmuxTarget);
+      }
+
+      // Guard against spawning a second concurrent `claude --resume` clone process
+      // while Claude Desktop or another live CLI process already owns this session.
+      const liveOwners = findLiveClaudeOwners(session.nativeId);
+      const decision = resolveClaudeDispatchGuard(liveOwners);
+      if (decision.action === 'tmux') {
+        return sendViaTmux(decision.tmuxTarget);
+      }
+      if (decision.action === 'block') {
+        return { ok: false, error: decision.reason };
       }
 
       const bin = await whichBinary('claude');

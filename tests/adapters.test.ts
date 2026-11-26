@@ -13,6 +13,7 @@ import {
   loadClaudeTranscript,
   parseClaudeJsonlLines,
   parseClaudeStreamLine,
+  resolveClaudeDispatchGuard,
 } from '../src/main/adapters/claudeAdapter';
 import {
   coalesceCodexItemRows,
@@ -1147,5 +1148,90 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     expect(blocks.map((b) => b.type)).toEqual(['command', 'file_change', 'tool_call']);
     expect(blocks[0].command).toBe('ls -la');
     expect(blocks[2].name).toBe('Read');
+  });
+
+  it('parses Antigravity video attachments even when mime_type is application/octet-stream', () => {
+    const lines = [
+      JSON.stringify({
+        step_index: 10,
+        type: 'USER_INPUT',
+        created_at: 5000,
+        content: '<USER_REQUEST>See how it stutters?</USER_REQUEST>',
+        media: [
+          {
+            mime_type: 'application/octet-stream',
+            uri: '/tmp/Recording-2026-11-25.mp4',
+          },
+        ],
+      }),
+    ];
+    const parsed = parseAntigravityJsonlLines(lines, 'antigravity:vid-1', Date.now(), 40);
+    expect(parsed.messages).toHaveLength(1);
+    expect(parsed.messages[0].blocks).toEqual([
+      {
+        type: 'video',
+        path: '/tmp/Recording-2026-11-25.mp4',
+        name: 'Recording-2026-11-25.mp4',
+        mimeType: undefined,
+      },
+      { type: 'text', text: 'See how it stutters?' },
+    ]);
+  });
+
+  it('blocks claude --resume when a live Claude Desktop or concurrent CLI process owns the session', () => {
+    // Live tmux owner -> routes through tmux without cloning
+    expect(
+      resolveClaudeDispatchGuard([
+        { pid: 1001, sessionId: 's1', entrypoint: 'cli', tmux: 'dev:@1.%1', status: 'idle' },
+      ])
+    ).toEqual({ action: 'tmux', tmuxTarget: 'dev:@1.%1' });
+
+    // Live Claude Desktop owner -> blocks to prevent forked clone session
+    const desktopDecision = resolveClaudeDispatchGuard([
+      { pid: 2002, sessionId: 's1', entrypoint: 'claude-desktop', status: 'busy' },
+    ]);
+    expect(desktopDecision.action).toBe('block');
+    if (desktopDecision.action === 'block') {
+      expect(desktopDecision.reason).toContain('Claude Desktop');
+      expect(desktopDecision.reason).toContain('2002');
+    }
+
+    // Concurrent sdk-cli owner -> blocks to prevent parallel writers
+    const cliDecision = resolveClaudeDispatchGuard([
+      { pid: 3003, sessionId: 's1', entrypoint: 'sdk-cli', status: 'busy' },
+    ]);
+    expect(cliDecision.action).toBe('block');
+
+    // No live owners -> safe to resume
+    expect(resolveClaudeDispatchGuard([])).toEqual({ action: 'resume' });
+  });
+
+  it('skips Claude sidechain entries so subagents do not interleave into the main transcript', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-main',
+        isSidechain: false,
+        timestamp: '2026-11-26T00:01:00Z',
+        message: { content: 'Main question' },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'a-side',
+        isSidechain: true,
+        timestamp: '2026-11-26T00:01:01Z',
+        message: { content: [{ type: 'text', text: 'Sidechain chatter' }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'a-main',
+        isSidechain: false,
+        timestamp: '2026-11-26T00:01:02Z',
+        message: { content: [{ type: 'text', text: 'Main reply' }] },
+      }),
+    ];
+    const parsed = parseClaudeJsonlLines(lines, 'claude:side-test', Date.now(), 40);
+    expect(parsed.messages).toHaveLength(2);
+    expect(parsed.messages[1].blocks).toEqual([{ type: 'text', text: 'Main reply' }]);
   });
 });

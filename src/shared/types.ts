@@ -105,6 +105,12 @@ export type UnifiedBlock =
       dataUrl?: string;
     }
   | {
+      type: 'video';
+      path: string;
+      name?: string;
+      mimeType?: string;
+    }
+  | {
       type: 'thinking';
       text: string;
       summary?: string;

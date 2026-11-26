@@ -142,7 +142,9 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
           placeholder={
             isMaster
               ? 'Ask Master Orchestrator anything, or type /status, /auto-organize…'
-              : 'Ask anything, paste screenshots (Ctrl+V)…'
+              : session.harness === 'claude-desktop' && session.isLive && session.dispatchMode !== 'tmux-send'
+                ? 'Open in Claude Desktop (close tab there to reply here, or use tmux + Remote Control)…'
+                : 'Ask anything, paste screenshots (Ctrl+V)…'
           }
           className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-body text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none max-h-60 overflow-y-auto leading-relaxed"
         />
@@ -155,7 +157,11 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
             <HarnessLogo harness={session.harness} size={14} />
             <span className="text-caption text-ink-muted truncate">
               {session.model || vis.label}
-              {dispatchNote ? ` · ${dispatchNote}` : ''}
+              {session.harness === 'claude-desktop' && session.isLive && session.dispatchMode !== 'tmux-send'
+                ? ' · Live in Claude Desktop (mirror)'
+                : dispatchNote
+                  ? ` · ${dispatchNote}`
+                  : ''}
             </span>
           </div>
 

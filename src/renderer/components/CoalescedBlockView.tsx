@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   Bell,
@@ -12,9 +13,11 @@ import {
   HelpCircle,
   History,
   ImageOff,
+  Play,
   RotateCcw,
   Terminal,
   Wrench,
+  X,
 } from 'lucide-react';
 import type { MessageSourceKind, UnifiedBlock, UnifiedMessage } from '../../shared/types';
 import { Badge, Button, CollapsibleCard, DisclosureRow, WorkingIndicator } from '../ui';
@@ -27,7 +30,7 @@ export type TraceBlock = Extract<
 >;
 
 export function isTraceBlock(b: UnifiedBlock): b is TraceBlock {
-  return b.type !== 'text' && b.type !== 'image' && b.type !== 'question';
+  return b.type !== 'text' && b.type !== 'image' && b.type !== 'video' && b.type !== 'question';
 }
 
 export type BlockSegment =
@@ -193,6 +196,25 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
             className="max-h-64 max-w-full object-contain block"
           />
         </button>
+      </div>
+    );
+  }
+
+  if (block.type === 'video') {
+    const src = mediaUrlForPath(block.path);
+    const label = block.name || block.path.split('/').pop() || 'Video attachment';
+    return (
+      <div className="my-2 max-w-md rounded-xl overflow-hidden border border-line-subtle bg-black/50">
+        <video
+          src={src}
+          controls
+          preload="metadata"
+          playsInline
+          className="w-full max-h-72 block bg-black"
+        />
+        <div className="px-3 py-1.5 text-micro text-ink-muted truncate border-t border-line-hairline">
+          {label}
+        </div>
       </div>
     );
   }
@@ -510,7 +532,17 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
     const [expanded, setExpanded] = useState(false);
     const [showErrorDetail, setShowErrorDetail] = useState(false);
     const [brokenThumbs, setBrokenThumbs] = useState<Record<string, boolean>>({});
+    const [activeVideo, setActiveVideo] = useState<{ src: string; name: string } | null>(null);
     const info = useMemo(() => classifyUserMessage(msg), [msg]);
+
+    useEffect(() => {
+      if (!activeVideo) return;
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') setActiveVideo(null);
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, [activeVideo]);
 
     const imageBlocks = useMemo(
       () =>
@@ -519,8 +551,15 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
         ),
       [msg.blocks]
     );
+    const videoBlocks = useMemo(
+      () =>
+        msg.blocks.filter(
+          (b): b is Extract<UnifiedBlock, { type: 'video' }> => b.type === 'video'
+        ),
+      [msg.blocks]
+    );
     const nonImageBlocks = useMemo(
-      () => msg.blocks.filter((b) => b.type !== 'image'),
+      () => msg.blocks.filter((b) => b.type !== 'image' && b.type !== 'video'),
       [msg.blocks]
     );
     const previewItems = useMemo<PreviewImageItem[]>(
@@ -534,8 +573,31 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
     );
 
     const renderThumbnailStrip = () =>
-      previewItems.length > 0 ? (
-        <div className="flex flex-wrap justify-end gap-2 max-w-[82%]">
+      previewItems.length > 0 || videoBlocks.length > 0 ? (
+        <div className="flex flex-wrap justify-end items-center gap-2 max-w-[82%]">
+          {videoBlocks.map((vb, idx) => {
+            const name = vb.name || vb.path.split('/').pop() || 'Recording.mp4';
+            const extMatch = name.match(/\.([a-z0-9]+)$/i);
+            const extTag = (extMatch ? extMatch[1] : 'MP4').toUpperCase().slice(0, 4);
+            const src = mediaUrlForPath(vb.path);
+            return (
+              <button
+                key={`${vb.path}-${idx}`}
+                type="button"
+                onClick={() => setActiveVideo({ src, name })}
+                title={`Play ${name}`}
+                className="group inline-flex items-center gap-2.5 h-12 max-w-[260px] px-3 rounded-xl border border-line-subtle bg-surface-subtle hover:bg-surface-overlay hover:border-line-strong transition-colors shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
+              >
+                <span className="inline-flex items-center justify-center px-1.5 h-6 min-w-[34px] rounded-md bg-slate-500/25 border border-slate-400/25 text-[10px] font-bold tracking-wide text-slate-200 shrink-0">
+                  {extTag}
+                </span>
+                <span className="text-caption font-medium text-ink-primary truncate leading-[1.35] pt-[1px]">
+                  {name}
+                </span>
+                <Play className="w-3.5 h-3.5 text-ink-muted group-hover:text-ink-primary shrink-0 transition-colors" />
+              </button>
+            );
+          })}
           {previewItems.map((img, idx) => {
             const thumbKey = `${img.src}-${idx}`;
             if (brokenThumbs[thumbKey]) {
@@ -573,6 +635,43 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
               </button>
             );
           })}
+          {activeVideo &&
+            createPortal(
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={activeVideo.name}
+                onClick={() => setActiveVideo(null)}
+                className="sh-no-drag fixed inset-0 z-[100] bg-black/88 backdrop-blur-md flex flex-col items-center justify-center p-6 select-none"
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-full max-w-4xl rounded-2xl border border-line-subtle bg-surface-canvas overflow-hidden shadow-2xl"
+                >
+                  <div className="h-12 px-4 border-b border-line-hairline flex items-center justify-between gap-3">
+                    <span className="text-label font-medium text-ink-primary truncate">
+                      {activeVideo.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveVideo(null)}
+                      aria-label="Close video preview"
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-muted hover:text-ink-primary hover:bg-white/[0.08] cursor-pointer focus:outline-none focus-visible:shadow-none"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <video
+                    src={activeVideo.src}
+                    controls
+                    autoPlay
+                    playsInline
+                    className="w-full max-h-[78vh] bg-black block"
+                  />
+                </div>
+              </div>,
+              document.body
+            )}
         </div>
       ) : null;
 

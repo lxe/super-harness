@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   Columns2,
@@ -365,21 +365,173 @@ export const Sidebar: React.FC<Props> = React.memo(({
     [sessions]
   );
 
+  // Debounce recency-driven order changes (2.5s settle, 5s maxWait) so active sessions
+  // don't ping-pong back and forth on every poll while still reflecting live status/unread instantly.
+  const committedUpdatedAtRef = useRef<Map<string, number>>(new Map());
+  const reorderDebounceTimerRef = useRef<number | null>(null);
+  const reorderMaxWaitTimerRef = useRef<number | null>(null);
+  const [orderTick, setOrderTick] = useState(0);
+
+  useEffect(() => {
+    const committed = committedUpdatedAtRef.current;
+    let hasTimestampDrift = false;
+    const activeIds = new Set<string>();
+
+    for (const s of workerSessions) {
+      activeIds.add(s.id);
+      const prev = committed.get(s.id);
+      if (prev === undefined) {
+        // Brand-new session: position immediately
+        committed.set(s.id, s.updatedAt);
+      } else if (prev !== s.updatedAt) {
+        hasTimestampDrift = true;
+      }
+    }
+    for (const id of committed.keys()) {
+      if (!activeIds.has(id)) committed.delete(id);
+    }
+
+    if (!hasTimestampDrift) return;
+
+    const flushOrder = () => {
+      if (reorderDebounceTimerRef.current !== null) {
+        window.clearTimeout(reorderDebounceTimerRef.current);
+        reorderDebounceTimerRef.current = null;
+      }
+      if (reorderMaxWaitTimerRef.current !== null) {
+        window.clearTimeout(reorderMaxWaitTimerRef.current);
+        reorderMaxWaitTimerRef.current = null;
+      }
+      for (const s of workerSessions) {
+        committed.set(s.id, s.updatedAt);
+      }
+      setOrderTick((t) => t + 1);
+    };
+
+    if (reorderDebounceTimerRef.current !== null) {
+      window.clearTimeout(reorderDebounceTimerRef.current);
+    }
+    reorderDebounceTimerRef.current = window.setTimeout(flushOrder, 2500);
+    if (reorderMaxWaitTimerRef.current === null) {
+      reorderMaxWaitTimerRef.current = window.setTimeout(flushOrder, 5000);
+    }
+  }, [workerSessions]);
+
+  useEffect(() => {
+    return () => {
+      if (reorderDebounceTimerRef.current !== null) {
+        window.clearTimeout(reorderDebounceTimerRef.current);
+      }
+      if (reorderMaxWaitTimerRef.current !== null) {
+        window.clearTimeout(reorderMaxWaitTimerRef.current);
+      }
+    };
+  }, []);
+
+  const stabilizedWorkerSessions = useMemo(() => {
+    const committed = committedUpdatedAtRef.current;
+    return workerSessions.map((s) => {
+      const stableUpdatedAt = committed.get(s.id);
+      if (stableUpdatedAt === undefined || stableUpdatedAt === s.updatedAt) return s;
+      return { ...s, updatedAt: stableUpdatedAt };
+    });
+  }, [workerSessions, orderTick]);
+
   // Global Super Harness top-pinned chats across ALL harnesses (always shown below Master Orchestrator)
   const globalPinnedSessions = useMemo(
-    () => getGlobalPinnedSessions(workerSessions),
-    [workerSessions]
+    () => getGlobalPinnedSessions(stabilizedWorkerSessions),
+    [stabilizedWorkerSessions]
   );
 
   const filtered = useMemo(
-    () => filterSidebarSessions(workerSessions, filter, query),
-    [workerSessions, filter, query]
+    () => filterSidebarSessions(stabilizedWorkerSessions, filter, query),
+    [stabilizedWorkerSessions, filter, query]
   );
 
   const topGroups = useMemo(
     () => sortSidebarGroups(groupSessionsForSidebar(filtered, groupBy, folders, filter, harnessOrder), sortBy),
     [filtered, groupBy, folders, filter, sortBy, harnessOrder]
   );
+
+  // Smooth FLIP animation whenever sessions legitimately swap positions in the sidebar
+  const prevRowTopsRef = useRef<Map<string, number>>(new Map());
+  const prevLayoutContextRef = useRef<string>('');
+  const prevOrderSigRef = useRef<string>('');
+
+  const orderSignature = useMemo(() => {
+    const ids: string[] = [];
+    for (const s of globalPinnedSessions) ids.push(s.id);
+    for (const grp of topGroups) {
+      for (const s of grp.pinnedItems ?? []) ids.push(s.id);
+      if (grp.sections) {
+        for (const sec of grp.sections) {
+          for (const s of sec.items) ids.push(s.id);
+        }
+      } else {
+        for (const s of grp.items ?? []) ids.push(s.id);
+      }
+    }
+    return ids.join(',');
+  }, [globalPinnedSessions, topGroups]);
+
+  useLayoutEffect(() => {
+    const root = asideRef.current;
+    if (!root) return;
+    const contextKey = `${filter}|${groupBy}|${sortBy}|${query}`;
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-session-id]'));
+    const nextTops = new Map<string, number>();
+    for (const el of rows) {
+      const id = el.dataset.sessionId;
+      if (id) nextTops.set(id, el.getBoundingClientRect().top);
+    }
+
+    const shouldAnimate =
+      !activeDrag &&
+      prevLayoutContextRef.current === contextKey &&
+      prevOrderSigRef.current !== '' &&
+      prevOrderSigRef.current !== orderSignature;
+
+    if (shouldAnimate) {
+      const moved: Array<{ el: HTMLElement; dy: number }> = [];
+      for (const el of rows) {
+        const id = el.dataset.sessionId;
+        if (!id) continue;
+        const prevTop = prevRowTopsRef.current.get(id);
+        const nextTop = nextTops.get(id);
+        if (prevTop === undefined || nextTop === undefined) continue;
+        const dy = prevTop - nextTop;
+        if (Math.abs(dy) >= 2 && Math.abs(dy) < 420) {
+          moved.push({ el, dy });
+        }
+      }
+      if (moved.length > 0) {
+        for (const { el, dy } of moved) {
+          el.style.transition = 'none';
+          el.style.transform = `translateY(${dy}px)`;
+        }
+        // Force single reflow before animating back to natural position
+        void root.offsetHeight;
+        for (const { el } of moved) {
+          el.style.transition = 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)';
+          el.style.transform = '';
+        }
+        const cleanupTimer = window.setTimeout(() => {
+          for (const { el } of moved) {
+            el.style.transition = '';
+          }
+        }, 310);
+        prevRowTopsRef.current = nextTops;
+        prevLayoutContextRef.current = contextKey;
+        prevOrderSigRef.current = orderSignature;
+        return () => window.clearTimeout(cleanupTimer);
+      }
+    }
+
+    prevRowTopsRef.current = nextTops;
+    prevLayoutContextRef.current = contextKey;
+    prevOrderSigRef.current = orderSignature;
+    return undefined;
+  }, [orderSignature, filter, groupBy, sortBy, query, activeDrag]);
 
   // Map every droppable section container ID to its DragSectionTarget metadata
   const dropTargetMap = useMemo(() => {

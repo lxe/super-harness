@@ -94,8 +94,9 @@ public struct CollapsedTraceGroupView: View, Equatable {
             }
 
             if isExpanded {
+                let coalesced = Self.coalesceConsecutiveFileChanges(blocks)
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    ForEach(Array(coalesced.enumerated()), id: \.offset) { _, block in
                         CompactTraceRowView(
                             block: block,
                             onAnswerQuestion: onAnswerQuestion,
@@ -114,6 +115,30 @@ public struct CollapsedTraceGroupView: View, Equatable {
                 }
             }
         }
+    }
+
+    /// Coalesces consecutive `.fileChange` blocks into a single compact file list block
+    /// so bursts of edits show as one clean list of files rather than stacked cards.
+    private static func coalesceConsecutiveFileChanges(_ blocks: [UnifiedBlock]) -> [UnifiedBlock] {
+        var result: [UnifiedBlock] = []
+        var pendingChanges: [FileChangeEntry] = []
+
+        func flushPending() {
+            guard !pendingChanges.isEmpty else { return }
+            result.append(.fileChange(changes: pendingChanges, status: nil))
+            pendingChanges = []
+        }
+
+        for block in blocks {
+            if case .fileChange(let changes, _) = block {
+                pendingChanges.append(contentsOf: changes)
+            } else {
+                flushPending()
+                result.append(block)
+            }
+        }
+        flushPending()
+        return result
     }
 
     private var summaryIcon: String {
@@ -334,6 +359,9 @@ private struct CompactTraceRowView: View {
                 }
             }
 
+        case .fileChange(let changes, _):
+            CoalescedFileListCard(changes: changes)
+
         case .webSearch(let query, _):
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
@@ -358,6 +386,177 @@ private struct CompactTraceRowView: View {
                 onLoadMedia: onLoadMedia
             )
         }
+    }
+}
+
+/// Compact, cohesive list of changed files (deduplicating repeated edits to the same path),
+/// with diffs collapsed by default so bursts of edits read cleanly at a glance.
+private struct CoalescedFileListCard: View {
+    let changes: [FileChangeEntry]
+    @State private var expandedPaths: Set<String> = []
+
+    private struct MergedFile: Identifiable {
+        let id: String
+        let cleanPath: String
+        let basename: String
+        let parentDir: String?
+        let kind: String
+        let editCount: Int
+        let combinedDiff: String?
+    }
+
+    private var mergedFiles: [MergedFile] {
+        var order: [String] = []
+        var grouped: [String: (kind: String, count: Int, diffs: [String])] = [:]
+        for item in changes {
+            let trimmed = item.path
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            guard !trimmed.isEmpty else { continue }
+            if grouped[trimmed] == nil {
+                order.append(trimmed)
+                grouped[trimmed] = (item.kind, 1, item.diff.map { [$0] } ?? [])
+            } else {
+                grouped[trimmed]!.count += 1
+                if let d = item.diff, !d.isEmpty {
+                    grouped[trimmed]!.diffs.append(d)
+                }
+            }
+        }
+        return order.map { path in
+            let info = grouped[path]!
+            let ns = path as NSString
+            let base = ns.lastPathComponent.isEmpty ? path : ns.lastPathComponent
+            let dirPath = ns.deletingLastPathComponent
+            let parent = (dirPath as NSString).lastPathComponent
+            let cleanParent = (!parent.isEmpty && parent != "/" && parent != ".") ? parent : nil
+            let diff = info.diffs.isEmpty ? nil : info.diffs.joined(separator: "\n")
+            return MergedFile(
+                id: path,
+                cleanPath: path,
+                basename: base,
+                parentDir: cleanParent,
+                kind: info.kind,
+                editCount: info.count,
+                combinedDiff: diff
+            )
+        }
+    }
+
+    private func badgeInfo(for kind: String) -> (letter: String, color: Color) {
+        switch kind.lowercased() {
+        case "create", "add", "write":
+            return ("A", SHColor.statusSuccess)
+        case "delete", "remove":
+            return ("D", SHColor.statusDanger)
+        default:
+            return ("E", SHColor.statusWarning)
+        }
+    }
+
+    var body: some View {
+        let files = mergedFiles
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.badge.gearshape")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(SHColor.statusSuccess)
+                Text(files.count == 1 ? "1 file changed" : "\(files.count) files changed")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(SHColor.inkMuted)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            ForEach(Array(files.enumerated()), id: \.element.id) { idx, file in
+                if idx > 0 {
+                    Divider()
+                        .overlay(SHColor.lineHairline)
+                        .padding(.horizontal, 10)
+                }
+                let badge = badgeInfo(for: file.kind)
+                let isOpen = expandedPaths.contains(file.id)
+                let hasDiff = !(file.combinedDiff ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        guard hasDiff else { return }
+                        withAnimation(.easeInOut(duration: 0.14)) {
+                            if isOpen {
+                                expandedPaths.remove(file.id)
+                            } else {
+                                expandedPaths.insert(file.id)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(badge.letter)
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(badge.color)
+                                .frame(width: 18, height: 18)
+                                .background(badge.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+                            HStack(spacing: 4) {
+                                if let parent = file.parentDir {
+                                    Text("\(parent)/")
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(SHColor.inkFaint)
+                                        .lineLimit(1)
+                                }
+                                Text(file.basename)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(SHColor.inkPrimary)
+                                    .lineLimit(1)
+                            }
+                            .truncationMode(.middle)
+
+                            if file.editCount > 1 {
+                                Text("\(file.editCount)×")
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(SHColor.inkFaint)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(SHColor.surfaceBubble, in: Capsule())
+                            }
+
+                            Spacer(minLength: 4)
+
+                            if hasDiff {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(SHColor.inkFaint)
+                                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if isOpen, let diff = file.combinedDiff {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(diff)
+                                .font(SHTypography.monoSmall)
+                                .foregroundStyle(SHColor.inkSecondary)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                        }
+                        .frame(maxHeight: 180)
+                        .background(SHColor.surfaceCode)
+                    }
+                }
+            }
+        }
+        .background(SHColor.surfaceSubtle)
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75)
+        )
     }
 }
 

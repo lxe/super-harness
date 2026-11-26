@@ -22,6 +22,7 @@ import type {
 } from '../../shared/types';
 import { ClaudeStreamPool } from '../services/claudeStreamClient';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
+import { computeClaudeSessionStats } from '../utils/sessionStats';
 import { offloadPool } from '../workers/offloadPool';
 import { RemoteClaudeMirror } from './remoteClaude';
 import {
@@ -1542,6 +1543,7 @@ export function parseClaudeJsonlLines(
     hasMore: truncated || messages.length > limit,
     sourceMtimeMs,
     liveActivity,
+    stats: computeClaudeSessionStats(lines),
   };
 }
 

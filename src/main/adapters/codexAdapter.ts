@@ -28,6 +28,7 @@ import {
   resultsFor,
 } from './sessionConfig';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
+import { computeCodexSessionStats } from '../utils/sessionStats';
 import {
   cleanTextPreview,
   getBinaryVersion,
@@ -1101,6 +1102,26 @@ export async function loadCodexTranscriptFromPaths(
     const ratio = fetchedItemCount > 0 ? totalItemCount / fetchedItemCount : 2;
     totalCount = Math.max(messages.length + 1, Math.round(messages.length * ratio));
   }
+  let stats = undefined;
+  if (rolloutPath && fs.existsSync(rolloutPath)) {
+    try {
+      const st = fs.statSync(rolloutPath);
+      const readBytes = Math.min(st.size, 262_144);
+      if (readBytes > 0) {
+        const fd = fs.openSync(rolloutPath, 'r');
+        try {
+          const buf = Buffer.allocUnsafe(readBytes);
+          const n = fs.readSync(fd, buf, 0, readBytes, Math.max(0, st.size - readBytes));
+          stats = computeCodexSessionStats(buf.subarray(0, n).toString('utf8').split('\n'));
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
+    } catch {
+      // ignore rollout stats read errors
+    }
+  }
+
   return {
     sessionId,
     messages: sliced,
@@ -1108,6 +1129,7 @@ export async function loadCodexTranscriptFromPaths(
     hasMore: truncated || messages.length > limit,
     sourceMtimeMs,
     liveActivity,
+    stats,
   };
 }
 

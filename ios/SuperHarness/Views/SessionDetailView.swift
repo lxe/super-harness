@@ -22,7 +22,8 @@ public struct SessionDetailView: View {
     @State private var isRenameAlertPresented: Bool = false
     @State private var renameDraft: String = ""
     @State private var isNewFolderAlertPresented: Bool = false
-    @State private var newFolderDraft: String = "" 
+    @State private var newFolderDraft: String = ""
+    @State private var isThreadInfoExpanded: Bool = false
 
     public init(store: AppStore, session: UnifiedSession) {
         self.store = store
@@ -380,12 +381,45 @@ public struct SessionDetailView: View {
             }
         }
         .background(SHColor.surfaceCanvas)
+        .overlay(alignment: .top) {
+            if isThreadInfoExpanded {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.32)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                isThreadInfoExpanded = false
+                            }
+                        }
+
+                    ThreadInfoTopSheet(
+                        session: currentSession,
+                        stats: transcript?.stats,
+                        messageCount: transcript?.totalCount ?? messages.count,
+                        isBusy: isBusy,
+                        accentTint: store.gaugeTint(for: currentSession.harness),
+                        onDismiss: {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                isThreadInfoExpanded = false
+                            }
+                        }
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                .zIndex(40)
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button {
                     dismissKeyboard()
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        isThreadInfoExpanded.toggle()
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         HarnessLogoView(harness: currentSession.harness, size: 14)
@@ -394,6 +428,10 @@ public struct SessionDetailView: View {
                             .foregroundStyle(SHColor.inkPrimary)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(SHColor.inkFaint)
+                            .rotationEffect(.degrees(isThreadInfoExpanded ? 180 : 0))
                     }
                     .padding(.horizontal, 14)
                     .frame(height: 44)
@@ -401,6 +439,8 @@ public struct SessionDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(currentSession.displayTitle)
+                .accessibilityHint("Tap to show thread summary, duration, host, and token usage")
+                .accessibilityIdentifier("thread.header.pill")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -888,5 +928,267 @@ private struct ExpandableUserBubbleContent: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .shRaisedSurface(SHColor.surfaceBubble, cornerRadius: 20, elevation: .bubble)
+    }
+}
+
+// MARK: - Expandable Thread Info Top Sheet (Tapping Top Thread Pill)
+
+private struct ThreadInfoTopSheet: View {
+    let session: UnifiedSession
+    let stats: SessionStats?
+    let messageCount: Int
+    let isBusy: Bool
+    let accentTint: Color
+    let onDismiss: () -> Void
+
+    private var summaryCopy: String? {
+        let candidates = [session.summary, session.lastUserText, session.preview]
+        for raw in candidates {
+            if let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                return text
+            }
+        }
+        return nil
+    }
+
+    private var durationLabel: String {
+        let nowMs = Date().timeIntervalSince1970 * 1000.0
+        let createdMs = session.createdAt > 0 ? session.createdAt : session.updatedAt
+        let startedAgo = UsageMetrics.formatUpdatedAgo(createdMs)
+        let spanSec = max(0, Int((max(session.updatedAt, createdMs) - createdMs) / 1000.0))
+        let ageSec = max(0, Int((nowMs - createdMs) / 1000.0))
+        if spanSec >= 60 {
+            return "Started \(startedAgo) · Span \(Self.formatDuration(spanSec))"
+        }
+        if ageSec >= 60 {
+            return "Started \(startedAgo)"
+        }
+        return "Started just now"
+    }
+
+    private var hostDescription: String {
+        if let addr = session.hostAddress, !addr.isEmpty {
+            let lbl = session.hostLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return lbl.isEmpty || lbl == addr ? addr : "\(lbl) (\(addr))"
+        }
+        if let tmux = session.tmuxTarget, !tmux.isEmpty {
+            return "Local · tmux \(tmux)"
+        }
+        if let app = session.originApp {
+            return app == .antigravityCli ? "Local · CLI" : "Local · Desktop"
+        }
+        return "Local machine"
+    }
+
+    private var shortCwd: String? {
+        let trimmed = session.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "~" else { return nil }
+        if let range = trimmed.range(of: "/Users/") ?? trimmed.range(of: "/home/") {
+            let after = trimmed[range.upperBound...]
+            if let slash = after.firstIndex(of: "/") {
+                return "~" + String(after[slash...])
+            }
+        }
+        return trimmed
+    }
+
+    private var modelSummary: String? {
+        var parts: [String] = []
+        if let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
+            parts.append(m)
+        }
+        if let eff = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines), !eff.isEmpty {
+            parts.append(eff.capitalized)
+        }
+        if let perm = session.permissionMode?.trimmingCharacters(in: .whitespacesAndNewlines), !perm.isEmpty {
+            parts.append(perm)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func formatDuration(_ totalSeconds: Int) -> String {
+        let hrs = totalSeconds / 3600
+        let mins = (totalSeconds % 3600) / 60
+        if hrs >= 24 {
+            let days = hrs / 24
+            let remHrs = hrs % 24
+            return remHrs > 0 ? "\(days)d \(remHrs)h" : "\(days)d"
+        }
+        if hrs > 0 {
+            return mins > 0 ? "\(hrs)h \(mins)m" : "\(hrs)h"
+        }
+        return "\(max(1, mins))m"
+    }
+
+    private static func formatCost(_ usd: Double) -> String {
+        if usd <= 0 { return "$0.00" }
+        if usd < 0.01 { return "<$0.01" }
+        return String(format: "$%.2f", usd)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header: title + status badge + close chevron
+            HStack(alignment: .top, spacing: 10) {
+                HarnessLogoView(harness: session.harness, size: 18)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.displayTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        if isBusy {
+                            SHActivityPulse(tint: accentTint, size: 10)
+                            Text("Working")
+                                .font(SHTypography.micro.weight(.semibold))
+                                .foregroundStyle(accentTint)
+                        } else if session.status == .waitingInput {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(SHColor.statusWarning)
+                            Text("Waiting for input")
+                                .font(SHTypography.micro.weight(.semibold))
+                                .foregroundStyle(SHColor.statusWarning)
+                        } else {
+                            Text("Idle · updated \(UsageMetrics.formatUpdatedAgo(session.updatedAt))")
+                                .font(SHTypography.micro)
+                                .foregroundStyle(SHColor.inkMuted)
+                        }
+                    }
+                }
+                Spacer(minLength: 8)
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .frame(width: 26, height: 26)
+                        .background(SHColor.surfaceBubble, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close thread info")
+            }
+
+            // Summary well
+            if let summaryCopy {
+                Text(summaryCopy)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(SHColor.surfaceSubtle, in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            }
+
+            // Context usage bar + token/cost telemetry
+            if let stats, stats.totalTokens > 0 {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let pct = stats.contextUsedPercent, let window = stats.contextWindowTokens {
+                        let barTint = SHRadialGauge<EmptyView>.resolvedTint(base: accentTint, value: pct)
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text("Context")
+                                    .font(SHTypography.micro.weight(.semibold))
+                                    .foregroundStyle(SHColor.inkMuted)
+                                Spacer()
+                                Text("\(UsageMetrics.formatTokens(stats.contextUsedTokens)) / \(UsageMetrics.formatTokens(window)) · \(Int(pct.rounded()))%")
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(SHColor.inkPrimary)
+                            }
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.08))
+                                    Capsule()
+                                        .fill(barTint)
+                                        .frame(width: max(4, geo.size.width * CGFloat(pct / 100.0)))
+                                }
+                            }
+                            .frame(height: 5)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        metricCell(label: "Input", value: UsageMetrics.formatTokens(stats.inputTokens))
+                        metricCell(label: "Cached", value: UsageMetrics.formatTokens(stats.cacheReadTokens))
+                        metricCell(label: "Output", value: UsageMetrics.formatTokens(stats.outputTokens))
+                        metricCell(label: "Est. Cost", value: Self.formatCost(stats.estimatedCostUsd))
+                    }
+                }
+                .padding(10)
+                .background(SHColor.surfaceSubtle, in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            }
+
+            // Runtime & environment rows
+            VStack(alignment: .leading, spacing: 6) {
+                infoRow(
+                    icon: "clock",
+                    text: stats.map { "\(durationLabel) · \($0.turnCount) turns" }
+                        ?? "\(durationLabel) · \(messageCount) msgs"
+                )
+                infoRow(icon: "desktopcomputer", text: hostDescription)
+                if let shortCwd {
+                    infoRow(
+                        icon: "folder",
+                        text: session.gitBranch.map { "\(shortCwd) (\($0))" } ?? shortCwd
+                    )
+                }
+                if let modelSummary {
+                    infoRow(icon: "cpu", text: modelSummary)
+                }
+            }
+        }
+        .padding(14)
+        .modifier(SHTopSheetGlassModifier())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("thread.info.sheet")
+    }
+
+    private func metricCell(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(SHColor.inkFaint)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(SHColor.inkPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func infoRow(icon: String, text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(SHColor.inkFaint)
+                .frame(width: 14)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(SHColor.inkSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct SHTopSheetGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .shadow(color: Color.black.opacity(0.45), radius: 18, y: 10)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75)
+                )
+                .shadow(color: Color.black.opacity(0.45), radius: 18, y: 10)
+        }
     }
 }

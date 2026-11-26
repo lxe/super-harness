@@ -73,9 +73,13 @@ public enum SessionRowFormatting {
         return "Running on \(trimmed.isEmpty ? address : trimmed) (\(address))"
     }
 
-    /// Second line of a session row: the start of the person's latest message when the host
-    /// reports it, otherwise the session preview.
+    /// Second line of a session row: the host's one-line "what this thread is doing / last did"
+    /// summary when available, otherwise the start of the person's latest message, otherwise preview.
     public static func subtitle(for session: UnifiedSession) -> String? {
+        if let summary = session.summary {
+            let oneLine = normalizeWhitespace(summary)
+            if !oneLine.isEmpty { return oneLine }
+        }
         if let last = session.lastUserText {
             let oneLine = normalizeWhitespace(last)
             if !oneLine.isEmpty { return oneLine }
@@ -83,13 +87,13 @@ public enum SessionRowFormatting {
         return cleanPreview(for: session).map(normalizeWhitespace)
     }
 
-    /// True when every word of the query appears in the session's title, last message,
+    /// True when every word of the query appears in the session's title, summary, last message,
     /// preview, project, working directory, branch or tags.
     public static func matches(_ session: UnifiedSession, query: String) -> Bool {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace)
         guard !words.isEmpty else { return true }
         let hay = [
-            session.displayTitle, session.lastUserText ?? "", session.preview, session.projectName,
+            session.displayTitle, session.summary ?? "", session.lastUserText ?? "", session.preview, session.projectName,
             session.cwd, session.gitBranch ?? "", session.tags.joined(separator: " "),
         ].joined(separator: " ").lowercased()
         return words.allSatisfy { hay.contains($0) }

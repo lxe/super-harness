@@ -118,6 +118,8 @@ export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Yellow notification dot rendered at the bottom-right of the leading icon (or left of title when iconless). */
   unread?: boolean;
   title: string;
+  /** Optional hover tooltip text (e.g. one-line thread summary). */
+  tooltip?: string;
   /** Optional compact badge rendered inline right next to the title text. */
   titleBadge?: React.ReactNode;
   /** Subtle age-based opacity for inactive rows (restored to 1.0 on active/selected/hover). */
@@ -135,6 +137,7 @@ export const NavRow: React.FC<NavRowProps> = ({
   icon,
   unread = false,
   title,
+  tooltip,
   titleBadge,
   titleOpacity,
   meta,
@@ -154,6 +157,7 @@ export const NavRow: React.FC<NavRowProps> = ({
 
   return (
       <div
+        title={tooltip ?? title}
         className={cn(
           'group relative h-8 flex items-center gap-2 px-2.5 rounded-lg cursor-pointer transition-colors select-none',
           selected

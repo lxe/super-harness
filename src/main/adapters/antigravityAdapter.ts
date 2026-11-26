@@ -25,6 +25,7 @@ import { AntigravityLsClient } from '../services/antigravityLsClient';
 import { RemoteAntigravityMirror } from './remoteAntigravity';
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
+import { computeAntigravitySessionStats } from '../utils/sessionStats';
 import {
   cleanTextPreview,
   getBinaryVersion,
@@ -822,6 +823,7 @@ export function parseAntigravityJsonlLines(
     hasMore: truncated || messages.length > limit,
     sourceMtimeMs,
     liveActivity,
+    stats: computeAntigravitySessionStats(lines),
   };
 }
 

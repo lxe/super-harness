@@ -363,6 +363,8 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
     public var hostLabel: String?
     /// Start of the newest message the person sent in this session (one line, host-trimmed).
     public var lastUserText: String?
+    /// Host-generated one-line summary of what this thread is working on or last finished.
+    public var summary: String?
     /// New activity since the person last had the session open on any client. The host
     /// computes it and never sets it while the session is running.
     public var unread: Bool?
@@ -426,6 +428,7 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         hostAddress: String? = nil,
         hostLabel: String? = nil,
         lastUserText: String? = nil,
+        summary: String? = nil,
         unread: Bool? = nil
     ) {
         self.id = id
@@ -469,6 +472,7 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         self.hostAddress = hostAddress
         self.hostLabel = hostLabel
         self.lastUserText = lastUserText
+        self.summary = summary
         self.unread = unread
     }
 
@@ -521,6 +525,7 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         hostAddress = try? c.decodeIfPresent(String.self, forKey: .hostAddress)
         hostLabel = try? c.decodeIfPresent(String.self, forKey: .hostLabel)
         lastUserText = try? c.decodeIfPresent(String.self, forKey: .lastUserText)
+        summary = try? c.decodeIfPresent(String.self, forKey: .summary)
         unread = try? c.decodeIfPresent(Bool.self, forKey: .unread)
     }
 
@@ -940,6 +945,45 @@ public struct UnifiedMessage: Codable, Identifiable, Sendable, Equatable {
     }
 }
 
+public struct SessionStats: Codable, Sendable, Equatable {
+    public var inputTokens: Int
+    public var outputTokens: Int
+    public var cacheReadTokens: Int
+    public var cacheWriteTokens: Int
+    public var totalTokens: Int
+    public var contextUsedTokens: Int
+    public var contextWindowTokens: Int?
+    public var estimatedCostUsd: Double
+    public var turnCount: Int
+
+    public init(
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        cacheReadTokens: Int = 0,
+        cacheWriteTokens: Int = 0,
+        totalTokens: Int = 0,
+        contextUsedTokens: Int = 0,
+        contextWindowTokens: Int? = nil,
+        estimatedCostUsd: Double = 0,
+        turnCount: Int = 0
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+        self.totalTokens = totalTokens
+        self.contextUsedTokens = contextUsedTokens
+        self.contextWindowTokens = contextWindowTokens
+        self.estimatedCostUsd = estimatedCostUsd
+        self.turnCount = turnCount
+    }
+
+    public var contextUsedPercent: Double? {
+        guard let window = contextWindowTokens, window > 0, contextUsedTokens > 0 else { return nil }
+        return min(100, (Double(contextUsedTokens) / Double(window)) * 100.0)
+    }
+}
+
 public struct SessionTranscriptResult: Codable, Sendable, Equatable {
     public var sessionId: String
     public var messages: [UnifiedMessage]
@@ -947,6 +991,7 @@ public struct SessionTranscriptResult: Codable, Sendable, Equatable {
     public var hasMore: Bool
     public var sourceMtimeMs: Double
     public var liveActivity: LiveActivityState?
+    public var stats: SessionStats?
 
     public init(
         sessionId: String,
@@ -954,7 +999,8 @@ public struct SessionTranscriptResult: Codable, Sendable, Equatable {
         totalCount: Int? = nil,
         hasMore: Bool = false,
         sourceMtimeMs: Double = Date().timeIntervalSince1970 * 1000.0,
-        liveActivity: LiveActivityState? = nil
+        liveActivity: LiveActivityState? = nil,
+        stats: SessionStats? = nil
     ) {
         self.sessionId = sessionId
         self.messages = messages
@@ -962,6 +1008,7 @@ public struct SessionTranscriptResult: Codable, Sendable, Equatable {
         self.hasMore = hasMore
         self.sourceMtimeMs = sourceMtimeMs
         self.liveActivity = liveActivity
+        self.stats = stats
     }
 
     public init(from decoder: Decoder) throws {
@@ -973,6 +1020,7 @@ public struct SessionTranscriptResult: Codable, Sendable, Equatable {
         hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
         sourceMtimeMs = try c.decodeIfPresent(Double.self, forKey: .sourceMtimeMs) ?? 0
         liveActivity = try? c.decodeIfPresent(LiveActivityState.self, forKey: .liveActivity)
+        stats = try? c.decodeIfPresent(SessionStats.self, forKey: .stats)
     }
 
     /// True when another transcript snapshot carries no visible change (e.g. idle WAL heartbeat).
@@ -981,6 +1029,7 @@ public struct SessionTranscriptResult: Codable, Sendable, Equatable {
             && messages.count == other.messages.count
             && messages.last?.id == other.messages.last?.id
             && liveActivity == other.liveActivity
+            && stats == other.stats
     }
 }
 

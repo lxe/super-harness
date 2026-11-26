@@ -160,7 +160,7 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function priceClaudeTokens(
+export function priceClaudeTokens(
   model: string,
   input: number,
   cacheCreate: number,
@@ -194,7 +194,7 @@ function priceClaudeTokens(
   );
 }
 
-function priceCodexTokens(
+export function priceCodexTokens(
   model: string,
   uncachedInput: number,
   cachedInput: number,
@@ -247,7 +247,7 @@ function priceMuseTokens(
   );
 }
 
-function priceAntigravityTokens(
+export function priceAntigravityTokens(
   model: string,
   uncachedInput: number,
   cacheRead: number,

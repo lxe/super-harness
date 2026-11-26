@@ -947,6 +947,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         icon={leadingIcon}
         unread={Boolean(s.unread)}
         title={s.title}
+        tooltip={s.summary ? `${s.title}\n${s.summary}` : s.lastUserText ? `${s.title}\n${s.lastUserText}` : s.title}
         titleBadge={titleBadge}
         titleOpacity={recencyOpacity}
         active={isPrimary}

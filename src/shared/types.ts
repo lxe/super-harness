@@ -232,6 +232,22 @@ export interface UnifiedMessage {
   };
 }
 
+export interface SessionStats {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  /** Approximate current context window fill (latest turn input + cached input). */
+  contextUsedTokens: number;
+  /** Model's context window capacity in tokens (best-effort from model/harness). */
+  contextWindowTokens?: number;
+  /** Estimated API-equivalent cost in USD across loaded turns. */
+  estimatedCostUsd: number;
+  /** Number of model turns counted. */
+  turnCount: number;
+}
+
 export interface SessionTranscriptResult {
   sessionId: string;
   messages: UnifiedMessage[];
@@ -239,6 +255,7 @@ export interface SessionTranscriptResult {
   hasMore: boolean;
   sourceMtimeMs: number;
   liveActivity?: LiveActivityState;
+  stats?: SessionStats;
 }
 
 export interface SessionFolder {

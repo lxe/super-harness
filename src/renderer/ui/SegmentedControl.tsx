@@ -135,13 +135,13 @@ export function SegmentedControl<T extends string>({
               onMouseEnter={(e) => onItemMouseEnter?.(item.id, e.currentTarget)}
               onMouseLeave={() => onItemMouseLeave?.(item.id)}
               className={cn(
-                'relative h-11 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+                'relative h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
                 active
                   ? 'bg-white/[0.11] text-ink-primary shadow-sm'
                   : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.05]'
               )}
             >
-              <span className="relative inline-flex items-center justify-center w-[34px] h-[34px]">
+              <span className="relative inline-flex items-center justify-center w-8 h-8">
                 {/* Soft ambient halo when actively working */}
                 {item.working && (
                   <span

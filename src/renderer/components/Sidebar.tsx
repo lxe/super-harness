@@ -949,7 +949,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
       {/* Top Harness Switcher Bar (All | Antigravity | Codex | Claude | Muse) with circular radial gauges */}
       {(() => {
-        const tabLogoSize = 15;
+        const tabLogoSize = 14;
         const anyWorking =
           workingByHarness.antigravity ||
           workingByHarness.codex ||

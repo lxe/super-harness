@@ -2,10 +2,25 @@ import React from 'react';
 import { ChevronDown, ChevronRight, Loader2, Plus } from 'lucide-react';
 import { cn } from './cn';
 
+export type SectionHeaderAccent = 'antigravity' | 'codex' | 'claude' | 'muse';
+
+const SEPARATOR_ACCENT_CLASSES: Record<SectionHeaderAccent, string> = {
+  antigravity:
+    'bg-gradient-to-r from-[#60a5fa]/[0.10] via-[#1a1d26]/95 to-[#171920]/95 border-l-2 border-l-[#60a5fa]/70 hover:from-[#60a5fa]/[0.15]',
+  codex:
+    'bg-gradient-to-r from-[#10a37f]/[0.10] via-[#171e1e]/95 to-[#16191e]/95 border-l-2 border-l-[#10a37f]/70 hover:from-[#10a37f]/[0.15]',
+  claude:
+    'bg-gradient-to-r from-[#d97757]/[0.10] via-[#201a19]/95 to-[#18181d]/95 border-l-2 border-l-[#d97757]/70 hover:from-[#d97757]/[0.15]',
+  muse:
+    'bg-gradient-to-r from-[#a855f7]/[0.10] via-[#1d1926]/95 to-[#171820]/95 border-l-2 border-l-[#a855f7]/70 hover:from-[#a855f7]/[0.15]',
+};
+
 export interface SectionHeaderProps {
   level?: 1 | 2;
   /** 'separator' renders a full-bleed collapsible divider band (used between harnesses in All view). */
   variant?: 'tree' | 'separator';
+  /** Optional subtle harness brand tint for separator headers. */
+  accent?: SectionHeaderAccent;
   collapsed?: boolean;
   onToggle: () => void;
   /** Optional quick-add action button rendered on the right (used on harness separators to start a new chat). */
@@ -24,6 +39,7 @@ export interface SectionHeaderProps {
 export const SectionHeader: React.FC<SectionHeaderProps> = ({
   level = 1,
   variant = 'tree',
+  accent,
   collapsed = false,
   onToggle,
   onAdd,
@@ -43,7 +59,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         data-harness-separator="true"
         onContextMenu={onContextMenu}
         className={cn(
-          'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-8 flex items-center gap-1 bg-surface-rail/95 backdrop-blur-md border-y border-line-hairline/75 hover:bg-white/[0.035] transition-colors select-none',
+          'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-9 flex items-center gap-1 backdrop-blur-md border-y border-white/[0.08] transition-colors select-none',
+          accent
+            ? SEPARATOR_ACCENT_CLASSES[accent]
+            : 'bg-surface-subtle/95 hover:bg-surface-raised/90',
           sticky && 'sticky top-0 z-20',
           className
         )}
@@ -54,13 +73,13 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           aria-expanded={!collapsed}
           className="flex-1 min-w-0 h-full flex items-center gap-2 cursor-pointer focus:outline-none focus-visible:shadow-none"
         >
-          {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-          <span className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-secondary group-hover:text-ink-primary transition-colors truncate">
+          {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
+          <span className="text-micro font-semibold uppercase tracking-[0.06em] leading-none translate-y-[1px] text-ink-primary/90 group-hover:text-ink-primary transition-colors truncate">
             {label}
           </span>
-          <span className="ml-auto flex items-center gap-1.5 text-micro tabular-nums font-normal text-ink-faint shrink-0">
+          <span className="ml-auto flex items-center gap-1.5 text-micro leading-none tabular-nums font-normal text-ink-faint shrink-0">
             {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
-            {count !== undefined && <span>{count}</span>}
+            {count !== undefined && <span className="translate-y-[0.5px]">{count}</span>}
             {collapsed ? (
               <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
             ) : (
@@ -90,11 +109,11 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
     <div
       onContextMenu={onContextMenu}
       className={cn(
-        'group w-full flex items-center gap-1 px-2 bg-surface-rail/95 backdrop-blur-sm hover:bg-surface-subtle rounded-md transition-colors select-none',
+        'group w-full flex items-center gap-1 px-2 backdrop-blur-sm rounded-md transition-colors select-none',
         level === 1
-          ? 'h-8 text-label font-semibold text-ink-primary'
-          : 'h-7 text-caption font-medium text-ink-muted hover:text-ink-primary',
-        sticky && (level === 1 ? 'sticky top-0 z-20' : 'sticky top-8 z-10'),
+          ? 'h-9 text-label font-semibold text-ink-primary bg-surface-subtle/85 hover:bg-surface-raised/85 border border-line-hairline/70'
+          : 'h-[30px] text-caption font-medium text-ink-muted hover:text-ink-primary bg-surface-rail/95 hover:bg-surface-subtle',
+        sticky && (level === 1 ? 'sticky top-0 z-20' : 'sticky top-9 z-10'),
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
@@ -110,11 +129,11 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         ) : (
           <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
         )}
-        {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-        <span className="truncate">{label}</span>
-        <span className="ml-auto flex items-center gap-1.5 text-caption tabular-nums font-normal text-ink-faint shrink-0">
+        {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
+        <span className="leading-none translate-y-[1px] truncate">{label}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-caption leading-none tabular-nums font-normal text-ink-faint shrink-0">
           {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
-          {count !== undefined && <span>{count}</span>}
+          {count !== undefined && <span className="translate-y-[0.5px]">{count}</span>}
         </span>
       </button>
       {onAdd && (

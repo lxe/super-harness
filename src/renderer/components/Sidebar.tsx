@@ -46,6 +46,7 @@ import {
   flattenVisibleSessions,
   getGlobalPinnedSessions,
   groupSessionsForSidebar,
+  isSingleHarnessFilter,
   type DragSectionTarget,
   type SidebarFilterTab,
 } from '../utils/sidebarGrouping';
@@ -1196,8 +1197,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             {topGroups.map((grp, grpIdx) => {
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
-                const showRowLogos =
-                  filter !== 'antigravity' && filter !== 'codex' && filter !== 'claude';
+                const showRowLogos = !isSingleHarnessFilter(filter);
                 return (
                   <div
                     key={grp.id}
@@ -1261,6 +1261,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   <SectionHeader
                     level={1}
                     variant={isHarnessDivider ? 'separator' : 'tree'}
+                    accent={grp.harnessLogo}
                     collapsed={isTopClosed}
                     dropTarget={isTopDragOver}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
@@ -1363,11 +1364,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                         <div className="space-y-0.5">
                           {(grp.items ?? []).map((s) =>
                             renderSessionRow(s, {
-                              showLogo:
-                                !grp.harnessLogo &&
-                                filter !== 'antigravity' &&
-                                filter !== 'codex' &&
-                                filter !== 'claude',
+                              showLogo: !grp.harnessLogo && !isSingleHarnessFilter(filter),
                               showPin: Boolean(s.pinned),
                             })
                           )}

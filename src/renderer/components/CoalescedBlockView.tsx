@@ -1159,7 +1159,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                       }
                     : undefined
                 }
-                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary shadow-[0_1px_2px_rgba(0,0,0,0.22),0_3px_10px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_0_0_1px_rgba(255,255,255,0.025)] transition-colors ${
+                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary sh-shadow-bubble transition-colors ${
                   !expanded ? 'cursor-pointer hover:bg-[#272a33]' : ''
                 } ${msg.error ? 'ring-1 ring-rose-500/35' : ''}`}
               >
@@ -1222,7 +1222,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
           <div className="flex items-center justify-end gap-2 w-full">
             {renderFailedBadge()}
             <div
-              className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary shadow-[0_1px_2px_rgba(0,0,0,0.22),0_3px_10px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.06),inset_0_0_0_1px_rgba(255,255,255,0.025)] space-y-2 ${
+              className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary sh-shadow-bubble space-y-2 ${
                 msg.error ? 'ring-1 ring-rose-500/35' : ''
               }`}
             >

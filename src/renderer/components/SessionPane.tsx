@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Terminal } from 'lucide-react';
+import { ArrowDown, ChevronDown, ChevronRight, FileText, Terminal } from 'lucide-react';
 import type {
   HarnessCatalog,
   ImageAttachment,
@@ -520,11 +520,28 @@ export const SessionPane: React.FC<Props> = ({
     liveActivity?.focus,
   ]);
 
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+  useEffect(() => {
+    setShowScrollToBottom(false);
+  }, [session?.id]);
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stickyBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickyBottomRef.current = distFromBottom < 90;
+    const shouldShow = distFromBottom > 180;
+    setShowScrollToBottom((prev) => (prev === shouldShow ? prev : shouldShow));
   };
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickyBottomRef.current = true;
+    setShowScrollToBottom(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, []);
 
   // Image paste / drop helper (captures targetSessionId + uses functional draft updates)
   const ingestImageFiles = useCallback(
@@ -1150,7 +1167,18 @@ export const SessionPane: React.FC<Props> = ({
 
       {/* Bottom Composer Dock */}
       <div className="relative z-10 px-6 pb-5 pt-2 shrink-0 bg-surface-canvas">
-        <div className="pointer-events-none absolute -top-5 inset-x-0 h-5 bg-gradient-to-t from-surface-canvas via-surface-canvas/70 to-transparent" />
+        <div className="pointer-events-none absolute -top-8 inset-x-0 h-8 sh-scroll-fade-bottom" />
+        {showScrollToBottom && viewMode !== 'tmux' && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            aria-label="Scroll to bottom"
+            title="Scroll to bottom"
+            className="absolute -top-11 left-1/2 -translate-x-1/2 z-20 w-8 h-8 rounded-full bg-[#242731]/95 hover:bg-[#2c303d] text-ink-secondary hover:text-ink-primary sh-shadow-card flex items-center justify-center transition-all cursor-pointer focus:outline-none focus-visible:shadow-none"
+          >
+            <ArrowDown className="w-4 h-4" />
+          </button>
+        )}
         <div className="max-w-[740px] mx-auto space-y-2">
           {!isMaster && <LiveStepsBar key={session.id} steps={liveActivity?.steps} />}
 

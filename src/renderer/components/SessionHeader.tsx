@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Archive,
   Check,
@@ -81,6 +81,8 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
     const [subagentsOpen, setSubagentsOpen] = useState(false);
     const [editingTitle, setEditingTitle] = useState(false);
     const [titleDraft, setTitleDraft] = useState('');
+    const subagentsTriggerRef = useRef<HTMLSpanElement | null>(null);
+    const menuTriggerRef = useRef<HTMLSpanElement | null>(null);
 
     useEffect(() => {
       setMenuOpen(false);
@@ -148,18 +150,22 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
 
           {subagents.length > 0 && (
             <div className="relative">
-              <Button
-                size="xs"
-                variant={subagentsOpen ? 'secondary' : 'ghost'}
-                onClick={() => setSubagentsOpen((v) => !v)}
-                iconLeft={<GitBranch className="w-3.5 h-3.5" />}
-              >
-                {subagents.length}
-              </Button>
+              <span ref={subagentsTriggerRef} className="inline-flex">
+                <Button
+                  size="xs"
+                  variant={subagentsOpen ? 'secondary' : 'ghost'}
+                  onClick={() => setSubagentsOpen((v) => !v)}
+                  iconLeft={<GitBranch className="w-3.5 h-3.5" />}
+                >
+                  {subagents.length}
+                </Button>
+              </span>
 
               {subagentsOpen && (
                 <PopoverSurface
                   width="auto"
+                  onClose={() => setSubagentsOpen(false)}
+                  ignoreRef={subagentsTriggerRef}
                   className="sh-no-drag absolute right-0 top-9 z-40 w-72 space-y-1"
                 >
                   <div className="px-2 py-1 text-micro font-medium text-ink-muted flex items-center justify-between">
@@ -224,13 +230,17 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
           )}
 
           <div className="relative">
-            <IconButton label="More options" active={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
-              <MoreHorizontal className="w-4 h-4" />
-            </IconButton>
+            <span ref={menuTriggerRef} className="inline-flex">
+              <IconButton label="More options" active={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
+                <MoreHorizontal className="w-4 h-4" />
+              </IconButton>
+            </span>
 
             {menuOpen && (
               <PopoverSurface
                 width="sm"
+                onClose={() => setMenuOpen(false)}
+                ignoreRef={menuTriggerRef}
                 className="sh-no-drag absolute right-0 top-9 z-40 w-52 space-y-0.5"
               >
                 {!isMaster && (

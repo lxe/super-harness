@@ -161,6 +161,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
   } | null>(null);
   const hoverCloseTimerRef = useRef<number | null>(null);
   const prefetchTimerRef = useRef<number | null>(null);
+  const filterTriggerRef = useRef<HTMLSpanElement | null>(null);
 
   const scheduleHoverPrefetch = (sessionId: string) => {
     if (prefetchTimerRef.current !== null) {
@@ -471,16 +472,23 @@ export const Sidebar: React.FC<Props> = React.memo(({
           >
             <Search className="w-3.5 h-3.5" />
           </IconButton>
-          <IconButton
-            label="Group & Filter"
-            active={showFilterMenu || filter !== 'all'}
-            onClick={() => setShowFilterMenu((v) => !v)}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-          </IconButton>
+          <span ref={filterTriggerRef} className="inline-flex">
+            <IconButton
+              label="Group & Filter"
+              active={showFilterMenu || filter !== 'all'}
+              onClick={() => setShowFilterMenu((v) => !v)}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+            </IconButton>
+          </span>
 
           {showFilterMenu && (
-            <PopoverSurface width="sm" className="sh-no-drag absolute right-0 top-9 z-40 w-52">
+            <PopoverSurface
+              width="sm"
+              onClose={() => setShowFilterMenu(false)}
+              ignoreRef={filterTriggerRef}
+              className="sh-no-drag absolute right-0 top-9 z-40 w-52"
+            >
               <MenuSectionLabel>Group by</MenuSectionLabel>
               {(
                 [

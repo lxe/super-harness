@@ -100,7 +100,10 @@ export const DraftSessionPane: React.FC<Props> = ({
   const [newProjectError, setNewProjectError] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const claudeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const projectTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const thinkingTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (draft.harness === 'claude-tmux' || draft.harness === 'claude-cli') {
@@ -118,33 +121,6 @@ export const DraftSessionPane: React.FC<Props> = ({
   useEffect(() => {
     textareaRef.current?.focus();
   }, [draft.id]);
-
-  // Close open popovers on outside click or Escape
-  useEffect(() => {
-    if (!claudeMenuOpen && !projectMenuOpen && !modelMenuOpen && !thinkingMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) {
-        setClaudeMenuOpen(false);
-        setProjectMenuOpen(false);
-        setModelMenuOpen(false);
-        setThinkingMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setClaudeMenuOpen(false);
-        setProjectMenuOpen(false);
-        setModelMenuOpen(false);
-        setThinkingMenuOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', onDocClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDocClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [claudeMenuOpen, projectMenuOpen, modelMenuOpen, thinkingMenuOpen]);
 
   const selectedGroup = groupForDraftHarness(draft.harness);
 
@@ -353,10 +329,7 @@ export const DraftSessionPane: React.FC<Props> = ({
       </header>
 
       {/* Center Canvas */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-y-auto px-6 py-8 flex flex-col items-center justify-center"
-      >
+      <div className="flex-1 overflow-y-auto px-6 py-8 flex flex-col items-center justify-center">
         <div className="w-full max-w-[720px] space-y-6">
           <div className="text-center space-y-2">
             <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-surface-subtle border border-line-subtle mb-1">
@@ -446,6 +419,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                     <span className="truncate">Claude</span>
                   </div>
                   <button
+                    ref={claudeTriggerRef}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -472,6 +446,8 @@ export const DraftSessionPane: React.FC<Props> = ({
               {claudeMenuOpen && (
                 <PopoverSurface
                   width="auto"
+                  onClose={() => setClaudeMenuOpen(false)}
+                  ignoreRef={claudeTriggerRef}
                   className="absolute right-0 top-[calc(100%+6px)] z-40 w-64 p-1.5 space-y-1"
                 >
                   <button
@@ -560,6 +536,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                 {/* Project Selector Popover */}
                 <div className="relative">
                   <button
+                    ref={projectTriggerRef}
                     type="button"
                     onClick={() => {
                       setProjectMenuOpen((v) => !v);
@@ -580,6 +557,8 @@ export const DraftSessionPane: React.FC<Props> = ({
                   {projectMenuOpen && (
                     <PopoverSurface
                       width="auto"
+                      onClose={() => setProjectMenuOpen(false)}
+                      ignoreRef={projectTriggerRef}
                       className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-80 p-2 space-y-2"
                     >
                       <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code border border-line-hairline focus-within:border-line-subtle">
@@ -687,6 +666,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                 {/* Model Selector Popover (mirrors the selected harness's live models) */}
                 <div className="relative">
                   <button
+                    ref={modelTriggerRef}
                     type="button"
                     onClick={() => {
                       setModelMenuOpen((v) => !v);
@@ -710,6 +690,8 @@ export const DraftSessionPane: React.FC<Props> = ({
                   {modelMenuOpen && selectedGroup && (
                     <PopoverSurface
                       width="auto"
+                      onClose={() => setModelMenuOpen(false)}
+                      ignoreRef={modelTriggerRef}
                       className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-80 p-2 space-y-2"
                     >
                       <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code border border-line-hairline focus-within:border-line-subtle">
@@ -801,6 +783,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                 {/* Thinking / Reasoning Effort Selector Popover */}
                 <div className="relative">
                   <button
+                    ref={thinkingTriggerRef}
                     type="button"
                     onClick={() => {
                       setThinkingMenuOpen((v) => !v);
@@ -826,6 +809,8 @@ export const DraftSessionPane: React.FC<Props> = ({
                   {thinkingMenuOpen && selectedGroup && (
                     <PopoverSurface
                       width="auto"
+                      onClose={() => setThinkingMenuOpen(false)}
+                      ignoreRef={thinkingTriggerRef}
                       className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-64 p-1.5 space-y-0.5"
                     >
                       <button

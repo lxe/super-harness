@@ -11,6 +11,7 @@ export {
   MenuSectionLabel,
   MenuDivider,
   MenuItem,
+  shouldDismissPopover,
 } from './Menu';
 export type { PopoverSurfaceProps, MenuHeaderProps, MenuItemProps } from './Menu';
 export { Modal, Drawer } from './Modal';

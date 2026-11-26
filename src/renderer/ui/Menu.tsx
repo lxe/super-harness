@@ -1,8 +1,28 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { cn } from './cn';
+
+/**
+ * Pure dismissal predicate for click-outside popover behavior.
+ * Returns true when an event target is outside both the popover surface and
+ * its optional trigger element (`ignoreEl`).
+ */
+export function shouldDismissPopover(
+  target: Node | null,
+  surfaceEl: Node | null,
+  ignoreEl?: Node | null
+): boolean {
+  if (!target) return false;
+  if (surfaceEl && surfaceEl.contains(target)) return false;
+  if (ignoreEl && ignoreEl.contains(target)) return false;
+  return true;
+}
 
 export interface PopoverSurfaceProps extends React.HTMLAttributes<HTMLDivElement> {
   width?: 'sm' | 'md' | 'lg' | 'auto';
+  /** When provided, clicking outside the popover or pressing Escape automatically calls `onClose`. */
+  onClose?: () => void;
+  /** Optional ref to the trigger element that toggles this popover so clicking it doesn't double-toggle. */
+  ignoreRef?: React.RefObject<HTMLElement | null>;
 }
 
 const WIDTH_CLASSES = {
@@ -13,20 +33,59 @@ const WIDTH_CLASSES = {
 };
 
 export const PopoverSurface = React.forwardRef<HTMLDivElement, PopoverSurfaceProps>(
-  ({ width = 'md', className, children, ...rest }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        'rounded-xl border border-line-subtle bg-surface-popover/98 backdrop-blur-md p-1.5 text-caption select-none',
-        'shadow-[0_18px_40px_-10px_rgba(0,0,0,0.65)]',
-        WIDTH_CLASSES[width],
-        className
-      )}
-      {...rest}
-    >
-      {children}
-    </div>
-  )
+  ({ width = 'md', onClose, ignoreRef, className, children, ...rest }, ref) => {
+    const localRef = useRef<HTMLDivElement | null>(null);
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
+
+    useEffect(() => {
+      if (!onClose) return;
+      const onPointerDown = (e: MouseEvent) => {
+        if (
+          shouldDismissPopover(
+            e.target as Node | null,
+            localRef.current,
+            ignoreRef?.current ?? null
+          )
+        ) {
+          onCloseRef.current?.();
+        }
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onCloseRef.current?.();
+        }
+      };
+      // Use capture phase for mousedown so stopPropagation() on sibling containers still dismisses
+      document.addEventListener('mousedown', onPointerDown, true);
+      document.addEventListener('keydown', onKeyDown);
+      return () => {
+        document.removeEventListener('mousedown', onPointerDown, true);
+        document.removeEventListener('keydown', onKeyDown);
+      };
+    }, [Boolean(onClose), ignoreRef]);
+
+    const setRefs = (node: HTMLDivElement | null) => {
+      localRef.current = node;
+      if (typeof ref === 'function') ref(node);
+      else if (ref) ref.current = node;
+    };
+
+    return (
+      <div
+        ref={setRefs}
+        className={cn(
+          'rounded-xl border border-line-subtle bg-surface-popover/98 backdrop-blur-md p-1.5 text-caption select-none',
+          'shadow-[0_18px_40px_-10px_rgba(0,0,0,0.65)]',
+          WIDTH_CLASSES[width],
+          className
+        )}
+        {...rest}
+      >
+        {children}
+      </div>
+    );
+  }
 );
 PopoverSurface.displayName = 'PopoverSurface';
 

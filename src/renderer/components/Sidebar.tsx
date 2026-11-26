@@ -129,7 +129,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const [filter, setFilter] = useState<FilterTab>(() => {
     try {
       const saved = localStorage.getItem('sh:sidebarFilter') as FilterTab | null;
-      if (saved && ['all', 'live', 'codex', 'claude', 'tmux', 'antigravity'].includes(saved)) {
+      if (saved && ['all', 'live', 'codex', 'claude', 'tmux', 'antigravity', 'muse'].includes(saved)) {
         return saved;
       }
     } catch {
@@ -297,6 +297,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       antigravity: false,
       codex: false,
       claude: false,
+      muse: false,
     };
     for (const s of sessions) {
       if (s.harnessGroup !== 'master' && s.status === 'running') {
@@ -546,6 +547,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         (filter === 'antigravity' && target.harnessGroup === 'antigravity') ||
         (filter === 'codex' && target.harnessGroup === 'codex') ||
         (filter === 'claude' && target.harnessGroup === 'claude') ||
+        (filter === 'muse' && target.harnessGroup === 'muse') ||
         (filter === 'live' && target.isLive) ||
         (filter === 'tmux' && target.harness === 'claude-tmux');
 
@@ -869,6 +871,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   ['codex', 'Codex'],
                   ['tmux', 'Claude · tmux'],
                   ['claude', 'All Claude'],
+                  ['muse', 'Muse'],
                 ] as Array<[FilterTab, string]>
               ).map(([k, lbl]) => (
                 <MenuItem
@@ -941,73 +944,94 @@ export const Sidebar: React.FC<Props> = React.memo(({
         )}
       </div>
 
-      {/* Top Harness Switcher Bar (All | Antigravity | Codex | Claude) with bottom usage bars */}
-      <div className="px-2.5 pb-3">
-        <SegmentedControl<FilterTab>
-          value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
-          onChange={(tab) => {
-            setFilter(tab);
-            dismissUsageHover();
-          }}
-          onItemMouseEnter={(id, el) => {
-            if (!usage) return;
-            const target: HarnessGroup | 'all' =
-              id === 'antigravity' || id === 'codex' || id === 'claude' ? id : 'all';
-            openUsageHover(target, el);
-          }}
-          onItemMouseLeave={scheduleCloseUsageHover}
-          items={[
-            {
-              id: 'all',
-              label: 'All',
-              progress: {
-                value: usage
-                  ? Math.max(
-                      usage.claude.barPercent ?? 0,
-                      usage.codex.barPercent ?? 0,
-                      usage.antigravity.barPercent ?? 0
-                    )
-                  : null,
-                tone: 'neutral',
-                estimated: true,
-              },
-            },
-            {
-              id: 'antigravity',
-              label: 'AGY',
-              icon: <HarnessLogo harness="antigravity" size={13} />,
-              working: workingByHarness.antigravity,
-              progress: {
-                value: usage?.antigravity.barPercent ?? null,
-                tone: 'antigravity',
-                estimated: usage?.antigravity.barIsEstimated,
-              },
-            },
-            {
-              id: 'codex',
-              label: 'Codex',
-              icon: <HarnessLogo harness="codex" size={13} />,
-              working: workingByHarness.codex,
-              progress: {
-                value: usage?.codex.barPercent ?? null,
-                tone: 'codex',
-                estimated: usage?.codex.barIsEstimated,
-              },
-            },
-            {
-              id: 'claude',
-              label: 'Claude',
-              icon: <HarnessLogo harness="claude" size={13} />,
-              working: workingByHarness.claude,
-              progress: {
-                value: usage?.claude.barPercent ?? null,
-                tone: 'claude',
-                estimated: usage?.claude.barIsEstimated,
-              },
-            },
-          ]}
-        />
-      </div>
+      {/* Top Harness Switcher Bar (All | Antigravity | Codex | Claude | Muse) with bottom usage bars */}
+      {(() => {
+        const compactTabs = width < 405;
+        const tabLogoSize = compactTabs ? 15 : 13;
+        return (
+          <div className="px-2.5 pb-3">
+            <SegmentedControl<FilterTab>
+              iconOnly={compactTabs}
+              value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
+              onChange={(tab) => {
+                setFilter(tab);
+                dismissUsageHover();
+              }}
+              onItemMouseEnter={(id, el) => {
+                if (!usage) return;
+                const target: HarnessGroup | 'all' =
+                  id === 'antigravity' || id === 'codex' || id === 'claude' || id === 'muse'
+                    ? id
+                    : 'all';
+                openUsageHover(target, el);
+              }}
+              onItemMouseLeave={scheduleCloseUsageHover}
+              items={[
+                {
+                  id: 'all',
+                  label: 'All',
+                  progress: {
+                    value: usage
+                      ? Math.max(
+                          usage.claude.barPercent ?? 0,
+                          usage.codex.barPercent ?? 0,
+                          usage.antigravity.barPercent ?? 0,
+                          usage.muse.barPercent ?? 0
+                        )
+                      : null,
+                    tone: 'neutral',
+                    estimated: true,
+                  },
+                },
+                {
+                  id: 'antigravity',
+                  label: 'AGY',
+                  icon: <HarnessLogo harness="antigravity" size={tabLogoSize} />,
+                  working: workingByHarness.antigravity,
+                  progress: {
+                    value: usage?.antigravity.barPercent ?? null,
+                    tone: 'antigravity',
+                    estimated: usage?.antigravity.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'codex',
+                  label: 'Codex',
+                  icon: <HarnessLogo harness="codex" size={tabLogoSize} />,
+                  working: workingByHarness.codex,
+                  progress: {
+                    value: usage?.codex.barPercent ?? null,
+                    tone: 'codex',
+                    estimated: usage?.codex.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'claude',
+                  label: 'Claude',
+                  icon: <HarnessLogo harness="claude" size={tabLogoSize} />,
+                  working: workingByHarness.claude,
+                  progress: {
+                    value: usage?.claude.barPercent ?? null,
+                    tone: 'claude',
+                    estimated: usage?.claude.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'muse',
+                  label: 'Muse',
+                  icon: <HarnessLogo harness="muse" size={tabLogoSize} />,
+                  working: workingByHarness.muse,
+                  progress: {
+                    value: usage?.muse.barPercent ?? null,
+                    tone: 'muse',
+                    estimated: usage?.muse.barIsEstimated,
+                  },
+                },
+              ]}
+            />
+          </div>
+        );
+      })()}
 
       {hoveredUsage && usage && (
         <HarnessUsageHoverCard

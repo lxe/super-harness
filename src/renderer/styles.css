@@ -59,6 +59,33 @@ body,
   background: rgba(255, 255, 255, 0.18);
 }
 
+/* Hover-only hairline scrollbar for compact menus and popovers */
+.sh-scroll-hover {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.sh-scroll-hover:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+.sh-scroll-hover::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.sh-scroll-hover::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sh-scroll-hover::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  transition: background 150ms ease;
+}
+.sh-scroll-hover:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+.sh-scroll-hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
 /* Clean, calm Antigravity-grade markdown prose */
 .sh-markdown {
   font-size: 0.975rem;

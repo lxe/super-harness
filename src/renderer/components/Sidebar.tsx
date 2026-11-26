@@ -803,7 +803,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
               {s.hostAddress ? (
             <span
               title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-              className="rounded px-1 py-px text-[10px] font-medium leading-none tabular-nums text-ink-secondary bg-surface-subtle border border-line-hairline"
+              className="rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums text-ink-muted bg-white/[0.04] border border-line-hairline"
             >
               {hostBadgeLabel(s.hostAddress)}
             </span>
@@ -970,10 +970,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
         <button
           type="button"
           onClick={() => onNewSession(filter)}
-          className="w-full h-9 flex items-center gap-2.5 px-2.5 rounded-lg text-body text-ink-secondary hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
+          className="w-full h-8 flex items-center gap-2 px-2.5 rounded-lg text-[13px] text-ink-secondary hover:text-ink-primary hover:bg-white/[0.045] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
         >
-          <SquarePen className="w-4 h-4 text-ink-muted shrink-0" />
-          <span className="leading-[1.35] pt-[1px]">New Conversation</span>
+          <SquarePen className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+          <span className="leading-[1.35]">New Conversation</span>
         </button>
 
         {masterSession && (
@@ -1266,7 +1266,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             No conversations found
           </div>
         ) : (
-          <div className={`space-y-3 ${topGroups[0]?.harnessLogo ? '' : 'pt-2'}`}>
+          <div className="pt-2 space-y-2.5">
             {topGroups.map((grp, grpIdx) => {
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
@@ -1359,15 +1359,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     icon={topIcon}
                     label={grp.label}
                     working={groupHasWorking}
-                    className={
-                      isHarnessDivider && grpIdx === 0 && draftConversations.length === 0
-                        ? 'border-t-0'
-                        : undefined
-                    }
                   />
 
                   {!isTopClosed && (
-                    <div className="mt-1 space-y-2">
+                    <div className="mt-1 space-y-1.5">
                       {/* Individual harness pins right below the harness separator (no extra Pinned section) */}
                       {grp.pinnedItems && grp.pinnedItems.length > 0 && (
                         <div className="space-y-0.5">
@@ -1425,7 +1420,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                 working={secHasWorking}
                               />
                               {!isSecClosed && (
-                                <div className="mt-0.5 space-y-0.5">
+                                <div className="mt-0.5 ml-2.5 pl-2 border-l border-white/[0.06] space-y-0.5">
                                   {sec.items.map((s) =>
                                     renderSessionRow(s, { showLogo: false, showPin: Boolean(s.pinned) })
                                   )}
@@ -1458,7 +1453,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         <button
           type="button"
           onClick={onOpenSettings}
-          className="flex-1 min-w-0 flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-ink-secondary hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer"
+          className="flex-1 min-w-0 flex items-center gap-2 px-2.5 h-8 rounded-lg text-[13px] text-ink-secondary hover:text-ink-primary hover:bg-white/[0.05] transition-colors cursor-pointer"
         >
           <Settings className="w-4 h-4 text-ink-muted shrink-0" />
           <span className="truncate">Settings</span>

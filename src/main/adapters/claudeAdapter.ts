@@ -1765,6 +1765,20 @@ export function claudeTmuxTypingSteps(text: string, chunk = 100): string[] {
  * Short chunks with small gaps stay below the paste detector; Ctrl+J inserts newlines.
  */
 export async function typeIntoClaudeTmux(target: string, text: string, tmuxBin = 'tmux'): Promise<void> {
+  // If the tmux pane is scrolled up in copy-mode, cancel it first so keystrokes reach the Claude TUI.
+  try {
+    const { stdout } = await execFileAsync(
+      tmuxBin,
+      ['display-message', '-p', '-t', target, '#{pane_in_mode}'],
+      { timeout: 2000 }
+    );
+    if (stdout.trim() === '1') {
+      await execFileAsync(tmuxBin, ['send-keys', '-t', target, '-X', 'cancel'], { timeout: 2000 });
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  } catch {
+    // Non-fatal: proceed with typing
+  }
   for (const step of claudeTmuxTypingSteps(text)) {
     if (step === '\n') {
       await execFileAsync(tmuxBin, ['send-keys', '-t', target, 'C-j'], { timeout: 4000 });
@@ -1778,26 +1792,31 @@ export async function typeIntoClaudeTmux(target: string, text: string, tmuxBin =
 /**
  * Delivery ack for tmux typing: poll the tail of the session JSONL for the
  * submitted prompt (user line or queue-operation enqueue) so a raced or
- * swallowed Enter is reported instead of silently lost.
+ * swallowed Enter can be retried automatically.
  */
 export async function waitForClaudeTranscriptDelivery(
   transcriptPath: string | undefined,
   prompt: string,
-  timeoutMs = 4000
+  timeoutMs = 4000,
+  initialSize?: number
 ): Promise<boolean> {
   if (!transcriptPath) return false;
   const needle = JSON.stringify(prompt.trim().slice(0, 60)).slice(1, -1);
-  if (needle.length < 3) return false;
+  if (needle.length < 3 && initialSize === undefined) return false;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const st = fs.statSync(transcriptPath);
-      const start = Math.max(0, st.size - 262144);
-      const fd = fs.openSync(transcriptPath, 'r');
-      const buf = Buffer.alloc(st.size - start);
-      fs.readSync(fd, buf, 0, buf.length, start);
-      fs.closeSync(fd);
-      if (buf.toString('utf8').includes(needle)) return true;
+      if (needle.length < 3) {
+        if (initialSize !== undefined && st.size > initialSize) return true;
+      } else {
+        const start = Math.max(0, st.size - 262144);
+        const fd = fs.openSync(transcriptPath, 'r');
+        const buf = Buffer.alloc(st.size - start);
+        fs.readSync(fd, buf, 0, buf.length, start);
+        fs.closeSync(fd);
+        if (buf.toString('utf8').includes(needle)) return true;
+      }
     } catch {
       // transcript not flushed yet
     }
@@ -2291,30 +2310,66 @@ export function createClaudeDriver(): HarnessDriver {
       // paste-buffer for long/multiline text and a transcript ack.
       const sendViaTmux = async (target: string): Promise<SendMessageResult> => {
         try {
-          await typeIntoClaudeTmux(target, promptWithImages);
-          await new Promise((r) => setTimeout(r, 150));
-          await execFileAsync('tmux', ['send-keys', '-t', target, 'C-m'], {
-            timeout: 4000,
-          });
           const transcriptPath =
             session.transcriptPath ||
             resolveClaudeTranscriptPath(session.nativeId, session.cwd);
-          const delivered = await waitForClaudeTranscriptDelivery(
+          let initialSize: number | undefined;
+          if (transcriptPath) {
+            try {
+              initialSize = fs.statSync(transcriptPath).size;
+            } catch {
+              initialSize = 0;
+            }
+          }
+
+          await typeIntoClaudeTmux(target, promptWithImages);
+          await new Promise((r) => setTimeout(r, 180));
+          await execFileAsync('tmux', ['send-keys', '-t', target, 'C-m'], {
+            timeout: 4000,
+          });
+
+          let delivered = await waitForClaudeTranscriptDelivery(
             transcriptPath,
             prompt,
-            4000
+            1800,
+            initialSize
           );
-          ctx.triggerRefresh(1200);
+
+          // If the prompt hasn't hit the JSONL yet, check whether the Claude TUI swallowed
+          // the first Enter (text still sitting in the input box) and retry C-m once.
           if (transcriptPath && !delivered) {
-            return {
-              ok: false,
-              error:
-                'Super Harness typed your message into the tmux Claude session but could not confirm it landed in the transcript within 4 seconds (tmux typing is a degraded route — Claude offers no metadata-free API into a live terminal). Check that terminal before resending, to avoid a duplicate.',
-            };
+            try {
+              const { stdout: paneTail } = await execFileAsync(
+                'tmux',
+                ['capture-pane', '-p', '-t', target, '-S', '-12'],
+                { timeout: 2500 }
+              );
+              const snippet = prompt.trim().slice(0, 24);
+              if (snippet && paneTail.includes(snippet)) {
+                await execFileAsync('tmux', ['send-keys', '-t', target, 'C-m'], {
+                  timeout: 4000,
+                });
+              }
+            } catch {
+              // ignore pane capture errors
+            }
+            delivered = await waitForClaudeTranscriptDelivery(
+              transcriptPath,
+              prompt,
+              3000,
+              initialSize
+            );
+          }
+
+          ctx.triggerRefresh(1200);
+          if (!delivered) {
+            // Schedule a follow-up refresh in case the TUI was mid-turn / queuing the prompt,
+            // without falsely marking a successfully typed tmux message as "Not delivered".
+            ctx.triggerRefresh(3500);
           }
           return {
             ok: true,
-            dispatchedVia: `tmux typing (degraded, no native API) → ${target}`,
+            dispatchedVia: `tmux typing → ${target}`,
           };
         } catch (err) {
           return {

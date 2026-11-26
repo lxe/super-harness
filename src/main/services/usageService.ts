@@ -818,7 +818,7 @@ export class UsageService {
     return {
       harness: 'pi',
       updatedAt: now,
-      planLabel: 'API keys',
+      planLabel: 'Pi',
       barPercent: null,
       barIsEstimated: false,
       windows: [],
@@ -829,7 +829,7 @@ export class UsageService {
       tokens7d: Math.round(acc.tokens7d),
       dailySpend7d: buildDailySeries7d(acc, now),
       spendIsEstimated: false,
-      note: 'Spend as recorded by Pi for each model call (API keys, no quota)',
+      note: 'API spend from local transcripts',
     };
   }
 

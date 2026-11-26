@@ -44,3 +44,28 @@ export const HarnessSwitcher: StoryObj = {
     );
   },
 };
+
+/** The sidebar's harness strip: Muse and Pi without a quota reading show an empty track. */
+export const HarnessGaugeStrip: StoryObj = {
+  render: () => {
+    const [val, setVal] = useState<'all' | 'antigravity' | 'codex' | 'claude' | 'muse' | 'pi'>('all');
+    return (
+      <div className="w-[340px] p-2.5 bg-[#181a20]">
+        <SegmentedControl
+          variant="gauge"
+          className="bg-transparent shadow-none rounded-none !p-0"
+          value={val}
+          onChange={setVal}
+          items={[
+            { id: 'all', label: 'All', progress: { value: 82, tone: 'neutral', estimated: true } },
+            { id: 'antigravity', label: 'AGY', icon: <HarnessLogo harness="antigravity" size={14} />, progress: { value: 40, tone: 'antigravity' } },
+            { id: 'codex', label: 'Codex', icon: <HarnessLogo harness="codex" size={14} />, progress: { value: 35, tone: 'codex' } },
+            { id: 'claude', label: 'Claude', icon: <HarnessLogo harness="claude" size={14} />, working: true, progress: { value: 82, tone: 'claude' } },
+            { id: 'muse', label: 'Muse', icon: <HarnessLogo harness="muse" size={16} />, progress: { value: null, tone: 'muse' } },
+            { id: 'pi', label: 'Pi', icon: <HarnessLogo harness="pi" size={14} />, progress: { value: null, tone: 'pi' } },
+          ]}
+        />
+      </div>
+    );
+  },
+};

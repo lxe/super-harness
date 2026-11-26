@@ -144,7 +144,7 @@ const MOCK_USAGE: UsageSnapshot = {
   pi: {
     harness: 'pi',
     updatedAt: now - 30_000,
-    planLabel: 'API keys',
+    planLabel: 'Pi',
     barPercent: null,
     barIsEstimated: false,
     windows: [],
@@ -163,7 +163,7 @@ const MOCK_USAGE: UsageSnapshot = {
       { date: '2026-11-26', dayLabel: 'Thu', spendUsd: 1.18, tokens: 800_000 },
     ],
     spendIsEstimated: false,
-    note: 'Spend as recorded by Pi for each model call (API keys, no quota)',
+    note: 'API spend from local transcripts',
   },
 };
 
@@ -191,6 +191,34 @@ export const AntigravityUsage: StoryObj = {
     <div className="min-h-[480px] relative">
       <HarnessUsageHoverCard
         target="antigravity"
+        usage={MOCK_USAGE}
+        anchorRect={{ left: 24, bottom: 16, width: 80 }}
+        onMouseEnter={() => {}}
+        onMouseLeave={() => {}}
+      />
+    </div>
+  ),
+};
+
+export const MuseUsage: StoryObj = {
+  render: () => (
+    <div className="min-h-[480px] relative">
+      <HarnessUsageHoverCard
+        target="muse"
+        usage={MOCK_USAGE}
+        anchorRect={{ left: 24, bottom: 16, width: 80 }}
+        onMouseEnter={() => {}}
+        onMouseLeave={() => {}}
+      />
+    </div>
+  ),
+};
+
+export const PiUsage: StoryObj = {
+  render: () => (
+    <div className="min-h-[480px] relative">
+      <HarnessUsageHoverCard
+        target="pi"
         usage={MOCK_USAGE}
         anchorRect={{ left: 24, bottom: 16, width: 80 }}
         onMouseEnter={() => {}}

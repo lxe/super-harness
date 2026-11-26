@@ -122,19 +122,6 @@ public enum HarnessGroup: String, Codable, CaseIterable, Identifiable, Sendable,
     }
 }
 
-extension HarnessGroup {
-    /// Harnesses that run on API keys: no quota to fill, so the gauge shows recent spend.
-    public var usesSpendGauge: Bool { self == .pi }
-}
-
-/// Compact gauge caption for a spend amount (matches desktop `formatSpendCaption`): `$0`, `$.42`, `$3.1`, `$27`.
-public func spendGaugeCaption(_ usd: Double) -> String {
-    guard usd.isFinite, usd > 0 else { return "$0" }
-    if usd < 1 { return "$" + String(format: "%.2f", usd).replacingOccurrences(of: "0.", with: ".") }
-    if usd < 10 { return "$" + String(format: "%.1f", usd) }
-    return "$\(Int(usd.rounded()))"
-}
-
 public enum HarnessGroupOrMaster: String, Codable, Sendable, Hashable {
     case master
     case codex

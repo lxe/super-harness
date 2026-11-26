@@ -188,8 +188,6 @@ interface SpendChartProps {
   spend24h: number;
   spend5h: number;
   tokens7d: number;
-  /** False when the harness reports real spend (API keys) rather than an API-equivalent estimate. */
-  estimated?: boolean;
 }
 
 const SpendTrendSection: React.FC<SpendChartProps> = ({
@@ -199,7 +197,6 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
   spend24h,
   spend5h,
   tokens7d,
-  estimated = true,
 }) => {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const maxVal = Math.max(...points.map((p) => p.spendUsd), 0.01);
@@ -223,13 +220,7 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
     <div className="rounded-xl bg-black/[0.16] shadow-[inset_0_1px_1px_rgba(0,0,0,0.22)] px-3.5 py-3 space-y-2.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-caption font-medium text-ink-secondary">
-          {estimated ? (
-            <>
-              API-equivalent value <span className="text-ink-faint font-normal">(est.)</span>
-            </>
-          ) : (
-            'Spend'
-          )}
+          API-equivalent value <span className="text-ink-faint font-normal">(est.)</span>
         </span>
         <span className="text-micro tabular-nums text-ink-faint truncate">
           {active
@@ -588,7 +579,6 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
           spend24h={info.spend24hUsd}
           spend5h={info.spend5hUsd}
           tokens7d={info.tokens7d}
-          estimated={info.spendIsEstimated}
         />
       )}
 

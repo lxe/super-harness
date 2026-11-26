@@ -1187,18 +1187,6 @@ private struct HarnessSwitcherStrip: View {
                     HarnessLogoView(group: group, size: 15)
                         .opacity(isSelected ? 1 : 0.8)
                 }
-                .overlay(alignment: .bottom) {
-                    // API-key harnesses have no quota ring to fill; show the last 24h of spend.
-                    if group.usesSpendGauge, let summary {
-                        Text(spendGaugeCaption(summary.spend24hUsd))
-                            .font(.system(size: 8.5, weight: .semibold).monospacedDigit())
-                            .foregroundStyle(SHColor.inkSecondary)
-                            .padding(.horizontal, 3)
-                            .background(Color(hex: 0x181A20), in: RoundedRectangle(cornerRadius: 4))
-                            .offset(y: 6)
-                            .allowsHitTesting(false)
-                    }
-                }
             }
         }
         .buttonStyle(.plain)

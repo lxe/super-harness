@@ -59,7 +59,6 @@ import {
 import { prefetchSessionTranscript } from '../utils/transcriptCache';
 import type { DraftConversation } from './DraftSessionPane';
 import { HarnessLogo } from './HarnessLogo';
-import { formatSpendCaption } from '../utils/harnessMeta';
 import { HarnessUsageHoverCard } from './HarnessUsageHoverCard';
 import { SidebarContextMenu } from './SidebarContextMenu';
 
@@ -1224,7 +1223,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
                           usage.claude?.barPercent ?? 0,
                           usage.codex?.barPercent ?? 0,
                           usage.antigravity?.barPercent ?? 0,
-                          usage.muse?.barPercent ?? 0
+                          usage.muse?.barPercent ?? 0,
+                          usage.pi?.barPercent ?? 0
                         )
                       : null,
                     tone: 'neutral',
@@ -1283,10 +1283,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   icon: <HarnessLogo harness="pi" size={tabLogoSize} />,
                   working: workingByHarness.pi,
                   progress: {
-                    // API keys: no quota to fill, so the ring carries 24h spend instead.
-                    value: null,
+                    value: usage?.pi?.barPercent ?? null,
                     tone: 'pi',
-                    caption: usage?.pi ? formatSpendCaption(usage.pi.spend24hUsd) : undefined,
+                    estimated: usage?.pi?.barIsEstimated,
                   },
                 },
               ], harnessOrder)}

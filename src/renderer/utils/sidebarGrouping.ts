@@ -11,6 +11,7 @@ export interface SubSection {
   id: string;
   label: string;
   order: number;
+  harnessGroup: HarnessGroup;
   items: UnifiedSession[];
 }
 
@@ -18,6 +19,12 @@ export interface TopGroup {
   id: string;
   label: string;
   harnessLogo?: HarnessGroup;
+  /** Owning editor/harness when this top-level group is a native harness section (single-harness view). */
+  harnessGroup?: HarnessGroup;
+  /** Section sort order (used when moving chats into a single-harness native section). */
+  sectionOrder?: number;
+  /** Custom folder ID when groupBy === 'folders' (`null` for Unfiled). */
+  folderId?: string | null;
   /** True when items should render flat at the top with no collapsible header (e.g., native harness pins in single-harness view). */
   headless?: boolean;
   isUngrouped?: boolean;
@@ -25,6 +32,42 @@ export interface TopGroup {
   pinnedItems?: UnifiedSession[];
   sections?: SubSection[];
   items?: UnifiedSession[];
+}
+
+export interface DragSectionTarget {
+  kind: 'native-section' | 'folder';
+  sectionLabel: string;
+  harnessGroup?: HarnessGroup;
+  sectionOrder?: number;
+  folderId?: string | null;
+}
+
+export function canDropSessionIntoSection(
+  dragged: {
+    harnessGroup: UnifiedSession['harnessGroup'];
+    nativeSection?: string;
+    pinned?: boolean;
+    folderId?: string | null;
+  },
+  target: DragSectionTarget
+): boolean {
+  if (dragged.harnessGroup === 'master') return false;
+  if (target.kind === 'native-section') {
+    if (!target.harnessGroup || target.harnessGroup !== dragged.harnessGroup) {
+      return false;
+    }
+    const currentSection =
+      !dragged.nativeSection || dragged.nativeSection === 'Ungrouped'
+        ? 'Ungrouped'
+        : dragged.nativeSection;
+    if (!dragged.pinned && currentSection === target.sectionLabel) {
+      return false;
+    }
+    return true;
+  }
+  const currentFolder = dragged.folderId ?? null;
+  const targetFolder = target.folderId ?? null;
+  return currentFolder !== targetFolder;
 }
 
 const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
@@ -80,7 +123,7 @@ export function filterSidebarSessions(
 }
 
 function splitNativePinnedAndSections(
-  hId: string,
+  hId: HarnessGroup,
   hItems: UnifiedSession[]
 ): { pinnedItems: UnifiedSession[]; sections: SubSection[] } {
   const pinnedItems: UnifiedSession[] = [];
@@ -102,11 +145,12 @@ function splitNativePinnedAndSections(
 
   pinnedItems.sort((a, b) => b.updatedAt - a.updatedAt);
 
-  const sections = Array.from(secMap.entries())
+  const sections: SubSection[] = Array.from(secMap.entries())
     .map(([label, info]) => ({
       id: `${hId}:${label}`,
       label,
       order: info.order,
+      harnessGroup: hId,
       items: info.items,
     }))
     .sort((a, b) => {
@@ -157,6 +201,8 @@ export function groupSessionsForSidebar(
         out.push({
           id: sec.id,
           label: sec.label,
+          harnessGroup: filter,
+          sectionOrder: sec.order,
           isUngrouped: sec.label === 'Ungrouped',
           items: sec.items,
         });
@@ -213,9 +259,11 @@ export function groupSessionsForSidebar(
     }
     for (const f of folders) {
       const items = folderMap.get(f.id) ?? [];
-      if (items.length > 0) out.push({ id: f.id, label: f.name, items });
+      if (items.length > 0) out.push({ id: f.id, label: f.name, folderId: f.id, items });
     }
-    if (unfiled.length > 0) out.push({ id: 'unfiled', label: 'Conversations', items: unfiled });
+    if (unfiled.length > 0) {
+      out.push({ id: 'unfiled', label: 'Conversations', folderId: null, items: unfiled });
+    }
     return out;
   }
 

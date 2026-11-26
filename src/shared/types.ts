@@ -229,6 +229,8 @@ export interface SessionFolder {
 export interface SessionOverride {
   customTitle?: string;
   folderId?: string | null;
+  nativeSection?: string | null;
+  nativeSectionOrder?: number;
   pinned?: boolean;
   pinnedToTop?: boolean;
   tags?: string[];
@@ -350,6 +352,7 @@ export interface OrganizeAction {
     | 'rename_folder'
     | 'reorder_folders'
     | 'assign_folder'
+    | 'move_section'
     | 'pin'
     | 'unpin'
     | 'pin_top'
@@ -362,6 +365,8 @@ export interface OrganizeAction {
   folderName?: string;
   folderColor?: string;
   folderIds?: string[];
+  sectionName?: string | null;
+  sectionOrder?: number;
   sessionId?: string;
   title?: string;
   tags?: string[];

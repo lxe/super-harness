@@ -16,6 +16,7 @@ export interface SectionHeaderProps {
   count?: number;
   working?: boolean;
   sticky?: boolean;
+  dropTarget?: boolean;
   onContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
   className?: string;
 }
@@ -32,6 +33,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   count,
   working = false,
   sticky = true,
+  dropTarget = false,
   onContextMenu,
   className,
 }) => {
@@ -74,7 +76,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
             }}
             title={addLabel || `New ${label} conversation`}
             aria-label={addLabel || `New ${label} conversation`}
-            className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.1] transition-colors shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
+            className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.1] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -92,6 +94,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           ? 'h-8 text-label font-semibold text-ink-primary'
           : 'h-7 text-caption font-medium text-ink-muted hover:text-ink-primary',
         sticky && (level === 1 ? 'sticky top-0 z-20' : 'sticky top-8 z-10'),
+        dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
     >
@@ -122,7 +125,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           }}
           title={addLabel || `New conversation in ${label}`}
           aria-label={addLabel || `New conversation in ${label}`}
-          className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.1] transition-colors shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
+          className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.1] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>

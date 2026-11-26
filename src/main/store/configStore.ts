@@ -274,6 +274,22 @@ export class ConfigStore {
           };
           break;
         }
+        case 'move_section': {
+          if (!act.sessionId) break;
+          const normalizedSection =
+            act.sectionName && act.sectionName.trim() && act.sectionName.trim() !== 'Ungrouped'
+              ? act.sectionName.trim()
+              : 'Ungrouped';
+          this.state.overrides[act.sessionId] = {
+            ...(this.state.overrides[act.sessionId] ?? {}),
+            nativeSection: normalizedSection,
+            nativeSectionOrder:
+              normalizedSection === 'Ungrouped' ? 9999 : (act.sectionOrder ?? 500),
+            pinned: false,
+            pinnedToTop: false,
+          };
+          break;
+        }
         case 'pin': {
           if (!act.sessionId) break;
           this.state.overrides[act.sessionId] = {

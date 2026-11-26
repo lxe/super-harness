@@ -93,6 +93,14 @@ export class HarnessRegistry {
           customTitle: ov.customTitle ?? s.customTitle,
           title: ov.customTitle || s.title,
           folderId: ov.folderId !== undefined ? ov.folderId : s.folderId,
+          nativeSection:
+            ov.nativeSection !== undefined ? ov.nativeSection || 'Ungrouped' : s.nativeSection,
+          nativeSectionOrder:
+            ov.nativeSection !== undefined
+              ? ov.nativeSection && ov.nativeSection !== 'Ungrouped'
+                ? (ov.nativeSectionOrder ?? s.nativeSectionOrder ?? 500)
+                : 9999
+              : s.nativeSectionOrder,
           pinned: ov.pinned !== undefined ? ov.pinned : s.pinned,
           pinnedToTop: Boolean(ov.pinnedToTop),
           tags: ov.tags !== undefined ? ov.tags : s.tags,

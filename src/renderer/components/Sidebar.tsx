@@ -39,11 +39,13 @@ import {
   SegmentedControl,
 } from '../ui';
 import {
+  canDropSessionIntoSection,
   computeThreadRecencyOpacity,
   filterSidebarSessions,
   flattenVisibleSessions,
   getGlobalPinnedSessions,
   groupSessionsForSidebar,
+  type DragSectionTarget,
   type SidebarFilterTab,
 } from '../utils/sidebarGrouping';
 import { prefetchSessionTranscript } from '../utils/transcriptCache';
@@ -173,6 +175,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const [renameDraft, setRenameDraft] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<{
+    sessions: UnifiedSession[];
+    harnessGroup: HarnessGroup;
+  } | null>(null);
+  const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
   const [hoveredUsage, setHoveredUsage] = useState<{
     target: HarnessGroup | 'all';
     rect: { left: number; bottom: number; width: number };
@@ -502,6 +509,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
     ) : undefined;
 
     const recencyOpacity = computeThreadRecencyOpacity(s.updatedAt);
+    const isDraggable = s.harnessGroup !== 'master';
+    const isBeingDragged = Boolean(dragState?.sessions.some((d) => d.id === s.id));
 
     return (
       <NavRow
@@ -515,6 +524,29 @@ export const Sidebar: React.FC<Props> = React.memo(({
         secondaryActive={isSplit}
         selected={isMultiSelected}
         working={s.status === 'running'}
+        draggable={isDraggable}
+        className={isBeingDragged ? 'opacity-45' : undefined}
+        onDragStart={(e) => {
+          if (s.harnessGroup === 'master') return;
+          const draggedSessions =
+            selectedIds.size > 1 && selectedIds.has(s.id)
+              ? visibleOrderedSessions.filter(
+                  (x) => selectedIds.has(x.id) && x.harnessGroup === s.harnessGroup
+                )
+              : [s];
+          const safeDragged = draggedSessions.length > 0 ? draggedSessions : [s];
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('application/x-super-harness-session', s.id);
+          e.dataTransfer.setData('text/plain', s.title);
+          setDragState({
+            sessions: safeDragged,
+            harnessGroup: s.harnessGroup,
+          });
+        }}
+        onDragEnd={() => {
+          setDragState(null);
+          setDragOverTargetId(null);
+        }}
         meta={
           s.harness === 'claude-tmux' ? (
             <span
@@ -943,12 +975,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
               }
 
               const isTopClosed = Boolean(collapsed[grp.id]);
-              const pinnedCount = grp.pinnedItems?.length ?? 0;
-              const totalInGroup =
-                pinnedCount +
-                (grp.sections
-                  ? grp.sections.reduce((acc, s) => acc + s.items.length, 0)
-                  : grp.items?.length ?? 0);
               const groupHasWorking =
                 (grp.pinnedItems ?? []).some((i) => i.status === 'running') ||
                 (grp.sections
@@ -970,12 +996,105 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 ...(grp.sections ? grp.sections.flatMap((sec) => sec.items) : grp.items ?? []),
               ];
 
+              const topDropTarget: DragSectionTarget | null =
+                !grp.sections && grp.harnessGroup
+                  ? {
+                      kind: 'native-section',
+                      sectionLabel: grp.label,
+                      harnessGroup: grp.harnessGroup,
+                      sectionOrder: grp.sectionOrder,
+                    }
+                  : !grp.sections && grp.folderId !== undefined
+                    ? {
+                        kind: 'folder',
+                        sectionLabel: grp.label,
+                        folderId: grp.folderId,
+                      }
+                    : null;
+
+              const canDropOnTop = Boolean(
+                topDropTarget &&
+                  dragState?.sessions.some((d) => canDropSessionIntoSection(d, topDropTarget))
+              );
+              const isTopDragOver = Boolean(canDropOnTop && dragOverTargetId === grp.id);
+              const isOtherHarnessWhileDragging = Boolean(
+                dragState &&
+                  ((grp.harnessLogo && grp.harnessLogo !== dragState.harnessGroup) ||
+                    (grp.harnessGroup && grp.harnessGroup !== dragState.harnessGroup))
+              );
+
+              const handleDropOnTarget = (
+                e: React.DragEvent,
+                targetId: string,
+                target: DragSectionTarget
+              ) => {
+                if (!dragState) return;
+                const movable = dragState.sessions.filter((d) =>
+                  canDropSessionIntoSection(d, target)
+                );
+                if (movable.length === 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (target.kind === 'native-section') {
+                  onOrganize(
+                    movable.map((d) => ({
+                      type: 'move_section',
+                      sessionId: d.id,
+                      sectionName: target.sectionLabel,
+                      sectionOrder: target.sectionOrder,
+                    }))
+                  );
+                } else {
+                  onOrganize(
+                    movable.map((d) => ({
+                      type: 'assign_folder',
+                      sessionId: d.id,
+                      folderId: target.folderId ?? null,
+                    }))
+                  );
+                }
+                setCollapsed((prev) =>
+                  prev[targetId] ? { ...prev, [targetId]: false } : prev
+                );
+                setDragState(null);
+                setDragOverTargetId(null);
+              };
+
               return (
-                <div key={grp.id} className="relative">
+                <div
+                  key={grp.id}
+                  className={`relative rounded-lg transition-opacity ${
+                    isOtherHarnessWhileDragging ? 'opacity-40' : ''
+                  } ${
+                    isTopDragOver
+                      ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-400/45'
+                      : ''
+                  }`}
+                  onDragOver={(e) => {
+                    if (!topDropTarget || !dragState) return;
+                    if (canDropOnTop) {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverTargetId !== grp.id) setDragOverTargetId(grp.id);
+                    } else {
+                      e.dataTransfer.dropEffect = 'none';
+                      if (dragOverTargetId === grp.id) setDragOverTargetId(null);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      if (dragOverTargetId === grp.id) setDragOverTargetId(null);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (topDropTarget) handleDropOnTarget(e, grp.id, topDropTarget);
+                  }}
+                >
                   <SectionHeader
                     level={1}
                     variant={isHarnessDivider ? 'separator' : 'tree'}
                     collapsed={isTopClosed}
+                    dropTarget={isTopDragOver}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -997,7 +1116,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     }
                     icon={topIcon}
                     label={grp.label}
-                    count={totalInGroup}
                     working={groupHasWorking}
                     className={
                       isHarnessDivider && grpIdx === 0 && draftConversations.length === 0
@@ -1027,11 +1145,57 @@ export const Sidebar: React.FC<Props> = React.memo(({
                           ) : (
                             <Folder className="w-3.5 h-3.5 text-ink-secondary" />
                           );
+                          const secDropTarget: DragSectionTarget = {
+                            kind: 'native-section',
+                            sectionLabel: sec.label,
+                            harnessGroup: sec.harnessGroup,
+                            sectionOrder: sec.order,
+                          };
+                          const canDropOnSec = Boolean(
+                            dragState?.sessions.some((d) =>
+                              canDropSessionIntoSection(d, secDropTarget)
+                            )
+                          );
+                          const isSecDragOver = Boolean(
+                            canDropOnSec && dragOverTargetId === sec.id
+                          );
+
                           return (
-                            <div key={sec.id} className="relative">
+                            <div
+                              key={sec.id}
+                              className={`relative rounded-lg transition-colors ${
+                                isSecDragOver
+                                  ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-400/45'
+                                  : ''
+                              }`}
+                              onDragOver={(e) => {
+                                if (!dragState) return;
+                                if (canDropOnSec) {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                  if (dragOverTargetId !== sec.id) {
+                                    setDragOverTargetId(sec.id);
+                                  }
+                                } else {
+                                  e.dataTransfer.dropEffect = 'none';
+                                  if (dragOverTargetId === sec.id) {
+                                    setDragOverTargetId(null);
+                                  }
+                                }
+                              }}
+                              onDragLeave={(e) => {
+                                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                  if (dragOverTargetId === sec.id) {
+                                    setDragOverTargetId(null);
+                                  }
+                                }
+                              }}
+                              onDrop={(e) => handleDropOnTarget(e, sec.id, secDropTarget)}
+                            >
                               <SectionHeader
                                 level={2}
                                 collapsed={isSecClosed}
+                                dropTarget={isSecDragOver}
                                 onToggle={() =>
                                   setCollapsed((p) => ({ ...p, [sec.id]: !p[sec.id] }))
                                 }
@@ -1048,7 +1212,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                 addLabel={`New ${grp.label} conversation in ${sec.label}`}
                                 icon={secIcon}
                                 label={sec.label}
-                                count={sec.items.length}
                                 working={secHasWorking}
                               />
                               {!isSecClosed && (

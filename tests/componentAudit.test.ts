@@ -65,4 +65,9 @@ describe('Component-level UI & Electron overlay contract audit', () => {
       ).toBe(popoverCount);
     }
   });
+
+  it('prevents layout-shifting display toggles (group-hover:hidden / group-hover:flex) in SettingsModal rows', () => {
+    const src = readRel('src/renderer/components/SettingsModal.tsx');
+    expect(src).not.toMatch(/\bgroup-hover:(?:hidden|flex|block)\b/);
+  });
 });

@@ -588,9 +588,9 @@ export const SettingsModal: React.FC<Props> = ({
                             setDragFolderId(null);
                             setDragOverFolderId(null);
                           }}
-                          className={`group -mx-2 px-2 py-2.5 rounded-lg flex items-center justify-between gap-3 transition-colors ${
+                          className={`group h-11 px-2 flex items-center justify-between gap-3 transition-colors ${
                             isDragTarget
-                              ? 'bg-white/[0.08] ring-1 ring-line-strong'
+                              ? 'bg-white/[0.08] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)]'
                               : 'hover:bg-white/[0.04]'
                           }`}
                         >
@@ -617,17 +617,17 @@ export const SettingsModal: React.FC<Props> = ({
                                 }}
                               />
                             ) : (
-                              <span className="text-body font-medium text-ink-primary truncate">
+                              <span className="text-body font-medium text-ink-primary leading-[1.35] pt-[1px] truncate">
                                 {f.name}
                               </span>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className="text-caption tabular-nums text-ink-faint group-hover:hidden">
+                          <div className="relative flex items-center justify-end w-14 h-7 shrink-0">
+                            <span className="text-caption tabular-nums text-ink-faint transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
                               {count}
                             </span>
-                            <div className="hidden group-hover:flex items-center gap-0.5">
+                            <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto transition-opacity">
                               <IconButton
                                 size="xs"
                                 label={`Rename ${f.name}`}

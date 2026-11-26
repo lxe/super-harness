@@ -62,6 +62,7 @@ const api: SuperHarnessApi = {
   ) => ipcRenderer.invoke('sh:open-path', targetPath, mode, opts),
   openExternalUrl: (url: string) => ipcRenderer.invoke('sh:open-external', url),
   getUsage: (force?: boolean) => ipcRenderer.invoke('sh:get-usage', force),
+  restartApp: (opts?: { build?: boolean }) => ipcRenderer.invoke('sh:restart-app', opts),
 
   onStreamEvent: (cb: (ev: StreamEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: StreamEvent) => cb(payload);

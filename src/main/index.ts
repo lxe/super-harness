@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, protocol, shell } from 'electron';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,10 +28,72 @@ import {
 import { UsageService } from './services/usageService';
 import { ConfigStore } from './store/configStore';
 import { closeSqlitePool } from './utils/sqlite';
+import { whichBinary } from './utils/system';
+
+// Expose our Electron PID to child agent processes (Codex, Claude, Antigravity, Muse)
+// so running `scripts/launch-electron.mjs` or `npm run restart` from inside a session
+// automatically delegates to the detached restart watchdog instead of dying mid-shutdown.
+process.env.SUPER_HARNESS_APP_PID = String(process.pid);
 
 let mainWindow: BrowserWindow | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
 let usageTimer: NodeJS.Timeout | null = null;
+let restartInProgress = false;
+
+async function scheduleDetachedRestart(opts?: {
+  build?: boolean;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (restartInProgress) {
+    return { ok: true };
+  }
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const restartScript = path.join(repoRoot, 'scripts', 'restart-electron.mjs');
+  if (!fs.existsSync(restartScript)) {
+    return { ok: false, error: `Restart helper not found at ${restartScript}` };
+  }
+
+  restartInProgress = true;
+  try {
+    const nodeBin = await whichBinary('node');
+    const runnerBin = nodeBin || process.execPath;
+    const workerEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      NODE_ENV: 'production',
+      SUPER_HARNESS_ELECTRON_BIN: process.execPath,
+    };
+    if (!nodeBin) {
+      workerEnv.ELECTRON_RUN_AS_NODE = '1';
+    } else {
+      delete workerEnv.ELECTRON_RUN_AS_NODE;
+    }
+
+    const args = [restartScript, '--worker', `--wait-pid=${process.pid}`];
+    if (opts?.build) args.push('--build');
+
+    const worker = spawn(runnerBin, args, {
+      cwd: repoRoot,
+      env: workerEnv,
+      detached: true,
+      stdio: 'ignore',
+    });
+    worker.unref();
+
+    // If not rebuilding first, quit cleanly after the IPC/HTTP reply flushes;
+    // when rebuilding, the detached worker keeps the app alive until `npm run build` succeeds.
+    if (!opts?.build) {
+      setTimeout(() => {
+        app.quit();
+      }, 150);
+    }
+    return { ok: true };
+  } catch (err) {
+    restartInProgress = false;
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -258,6 +321,7 @@ const controlServer = new ControlServer(
         await liveSyncRef.watchPane(paneId, sessionId, limit ?? 80);
       }
     },
+    restartApp: async (opts) => scheduleDetachedRestart(opts),
   }
 );
 controlServerRef = controlServer;
@@ -620,6 +684,10 @@ function registerIpcHandlers(): void {
     broadcastToRenderer('sh:usage-updated', snap);
     return snap;
   });
+
+  ipcMain.handle('sh:restart-app', async (_ev, opts?: { build?: boolean }) => {
+    return scheduleDetachedRestart(opts);
+  });
 }
 
 async function refreshUsageAndBroadcast(): Promise<void> {
@@ -632,12 +700,30 @@ async function refreshUsageAndBroadcast(): Promise<void> {
   }
 }
 
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
+function acquireSingleInstanceLock(): boolean {
+  if (app.requestSingleInstanceLock()) return true;
+  // When launched by our detached restart watchdog (`--restarted`), the previous
+  // Electron instance may still be releasing SingletonLock for a few hundred ms.
+  if (process.argv.includes('--restarted')) {
+    const waitBuf = new Int32Array(new SharedArrayBuffer(4));
+    for (let i = 0; i < 15; i++) {
+      Atomics.wait(waitBuf, 0, 0, 120);
+      if (app.requestSingleInstanceLock()) return true;
+    }
+  }
+  return false;
+}
+
+const gotSingleInstanceLock = acquireSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    if (argv.includes('--replace') || argv.includes('--restart')) {
+      void scheduleDetachedRestart();
+      return;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();

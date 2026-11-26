@@ -11,6 +11,7 @@ import {
   Layers,
   MoreHorizontal,
   Pin,
+  RotateCw,
   Search,
   Settings,
   SlidersHorizontal,
@@ -1381,16 +1382,24 @@ export const Sidebar: React.FC<Props> = React.memo(({
         )}
       </div>
 
-      {/* Settings Footer */}
-      <div className="p-2.5 border-t border-line-hairline">
+      {/* Settings & Restart Footer */}
+      <div className="p-2.5 border-t border-line-hairline flex items-center gap-1">
         <button
           type="button"
           onClick={onOpenSettings}
-          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-ink-secondary hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer"
+          className="flex-1 min-w-0 flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-ink-secondary hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer"
         >
-          <Settings className="w-4 h-4 text-ink-muted" />
-          <span>Settings</span>
+          <Settings className="w-4 h-4 text-ink-muted shrink-0" />
+          <span className="truncate">Settings</span>
         </button>
+        <IconButton
+          label="Restart Super Harness"
+          onClick={() => {
+            void window.superHarness.restartApp();
+          }}
+        >
+          <RotateCw className="w-4 h-4" strokeWidth={1.75} />
+        </IconButton>
       </div>
 
       {/* Floating Pointer-Drag Preview Pill */}

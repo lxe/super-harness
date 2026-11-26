@@ -9,6 +9,8 @@
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "start": "npm run build && node scripts/launch-electron.mjs .",
+    "restart": "node scripts/restart-electron.mjs",
+    "restart:build": "node scripts/restart-electron.mjs --build",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build -o dist/storybook",
     "test": "vitest run",

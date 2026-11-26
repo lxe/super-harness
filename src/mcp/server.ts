@@ -146,6 +146,20 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'sh_restart_app',
+    description:
+      'Safely restart Super Harness via a detached watchdog (optionally running npm run build first) so the app comes back cleanly without dying mid-shutdown.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        build: {
+          type: 'boolean',
+          description: 'If true, rebuild main and renderer before restarting.',
+        },
+      },
+    },
+  },
 ];
 
 async function apiRequest(method: string, pathAndQuery: string, body?: unknown): Promise<unknown> {
@@ -195,6 +209,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       return apiRequest('POST', '/api/settings', args);
     case 'sh_control_harness':
       return apiRequest('POST', '/api/control-harness', args);
+    case 'sh_restart_app':
+      return apiRequest('POST', '/api/restart', args);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

@@ -493,6 +493,7 @@ export interface SuperHarnessApi {
   ) => Promise<{ ok: boolean; action?: 'internal' | 'launched'; error?: string }>;
   openExternalUrl: (url: string) => Promise<{ ok: boolean }>;
   getUsage: (force?: boolean) => Promise<UsageSnapshot>;
+  restartApp: (opts?: { build?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   onStreamEvent: (cb: (ev: StreamEvent) => void) => () => void;
   onTranscriptUpdated: (cb: (result: SessionTranscriptResult) => void) => () => void;
   onStateChanged: (cb: (state: SuperHarnessState) => void) => () => void;

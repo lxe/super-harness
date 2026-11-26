@@ -38,6 +38,7 @@ export interface ControlServerHooks {
     endLine?: number
   ) => Promise<FilePreviewData>;
   watchSession?: (paneId: string, sessionId: string | null, limit?: number) => Promise<void>;
+  restartApp?: (opts?: { build?: boolean }) => Promise<{ ok: boolean; error?: string }>;
 }
 
 interface BufferedEvent {
@@ -584,6 +585,19 @@ export class ControlServer {
             body.action as 'start_remote' | 'stop_remote' | 'open_desktop'
           );
           await this.triggerRefresh();
+          sendJson(result);
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/restart') {
+          const body = await readBody();
+          if (!this.hooks.restartApp) {
+            sendJson({ ok: false, error: 'Restart hook not configured' }, 404);
+            return;
+          }
+          const result = await this.hooks.restartApp({
+            build: Boolean(body.build),
+          });
           sendJson(result);
           return;
         }

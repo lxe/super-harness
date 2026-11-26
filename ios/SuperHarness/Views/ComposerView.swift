@@ -220,20 +220,16 @@ public struct ComposerView: View {
                     .padding(.top, 8)
                 }
 
-                TextField(
-                    session.isMaster
+                SHPasteableTextInput(
+                    text: $text,
+                    placeholder: session.isMaster
                         ? "Ask Master Orchestrator anything, or /status…"
                         : "Message \(HarnessVisual.forKind(session.harness).label)…",
-                    text: $text,
-                    axis: .vertical
+                    onPasteMedia: { handleClipboardPaste() }
                 )
-                .lineLimit(1...5)
-                .font(SHTypography.body)
-                .foregroundStyle(SHColor.inkPrimary)
                 .padding(.horizontal, 15)
                 .padding(.top, 15)
                 .padding(.bottom, 12)
-                .accessibilityIdentifier("composer.input")
 
                 HStack(spacing: 8) {
                     attachMenuButton
@@ -285,6 +281,11 @@ public struct ComposerView: View {
                 isFileImporterPresented = true
             } label: {
                 Label("Choose File", systemImage: "doc")
+            }
+            Button {
+                handleClipboardPaste(allowTextFallback: true)
+            } label: {
+                Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
             }
         } label: {
             Image(systemName: "plus")
@@ -411,9 +412,7 @@ public struct ComposerView: View {
             .accessibilityIdentifier("composer.mic")
 
         case .transcribing:
-            ProgressView()
-                .controlSize(.mini)
-                .tint(SHColor.brandAntigravity)
+            SHActivityPulse(tint: SHColor.brandAntigravity, size: 12)
                 .frame(width: 32, height: 32)
                 .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityLabel("Transcribing voice dictation")
@@ -457,9 +456,7 @@ public struct ComposerView: View {
             } label: {
                 Group {
                     if isSending {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .tint(SHColor.surfaceRail)
+                        SHActivityPulse(tint: SHColor.surfaceRail, size: 11)
                     } else {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 13.5, weight: .bold))
@@ -491,6 +488,118 @@ public struct ComposerView: View {
             .accessibilityLabel("Send message")
             .accessibilityIdentifier("composer.send")
         }
+    }
+
+
+    // MARK: - Clipboard Paste (Images, Videos, Files, and Text)
+
+    private func handleClipboardPaste(allowTextFallback: Bool = false) {
+        #if canImport(UIKit)
+        let pb = UIPasteboard.general
+        let providers = pb.itemProviders
+
+        // 1. Direct UIImage(s) on pasteboard (screenshots, copied photos, browser images)
+        if let images = pb.images, !images.isEmpty {
+            let picked = Array(images.prefix(4))
+            Task {
+                for (idx, img) in picked.enumerated() {
+                    let jpeg = await Task.detached(priority: .userInitiated) { () -> Data? in
+                        guard let raw = img.jpegData(compressionQuality: 0.9) ?? img.pngData() else { return nil }
+                        return Self.downscaledJPEG(from: raw, maxDimension: 1600, quality: 0.75) ?? raw
+                    }.value
+                    if let jpeg {
+                        onPickPhotoData(jpeg, "pasted-image-\(idx + 1).jpg")
+                    }
+                }
+            }
+            return
+        }
+
+        // 2. Videos, PDFs, or generic files via NSItemProvider
+        let mediaProviders = providers.filter { prov in
+            prov.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.video.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        if !mediaProviders.isEmpty {
+            for (idx, prov) in mediaProviders.prefix(4).enumerated() {
+                if prov.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
+                    || prov.hasItemConformingToTypeIdentifier(UTType.video.identifier) {
+                    let typeId = prov.hasItemConformingToTypeIdentifier(UTType.mpeg4Movie.identifier)
+                        ? UTType.mpeg4Movie.identifier
+                        : UTType.movie.identifier
+                    prov.loadFileRepresentation(forTypeIdentifier: typeId) { url, _ in
+                        guard let url else { return }
+                        let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension.lowercased()
+                        let tmp = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("sh-paste-video-\(UUID().uuidString).\(ext)")
+                        guard (try? FileManager.default.copyItem(at: url, to: tmp)) != nil else { return }
+                        Task {
+                            let prepared = await Task.detached(priority: .userInitiated) { () -> (Data, String, String, Data?)? in
+                                defer { try? FileManager.default.removeItem(at: tmp) }
+                                guard let raw = try? Data(contentsOf: tmp), !raw.isEmpty else { return nil }
+                                let mime = ext == "mp4" ? "video/mp4" : "video/quicktime"
+                                let thumb = await Self.videoThumbnailJPEG(url: tmp)
+                                return (raw, mime, "pasted-video-\(idx + 1).\(ext)", thumb)
+                            }.value
+                            if let (data, mime, name, thumb) = prepared {
+                                await MainActor.run {
+                                    onPickFileData?(data, mime, name, thumb)
+                                }
+                            }
+                        }
+                    }
+                } else if prov.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                    prov.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                        guard let data, !data.isEmpty else { return }
+                        Task {
+                            let jpeg = await Task.detached(priority: .userInitiated) {
+                                Self.downscaledJPEG(from: data, maxDimension: 1600, quality: 0.75) ?? data
+                            }.value
+                            await MainActor.run {
+                                onPickPhotoData(jpeg, "pasted-image-\(idx + 1).jpg")
+                            }
+                        }
+                    }
+                } else if prov.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+                    let pdfName = (prov.suggestedName?.isEmpty == false ? prov.suggestedName! : "pasted-document-\(idx + 1)") + ".pdf"
+                    prov.loadDataRepresentation(forTypeIdentifier: UTType.pdf.identifier) { data, _ in
+                        guard let data, !data.isEmpty else { return }
+                        Task { @MainActor in
+                            onPickFileData?(data, "application/pdf", pdfName, nil)
+                        }
+                    }
+                } else if prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                    prov.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                        let fileURL: URL?
+                        if let u = item as? URL {
+                            fileURL = u
+                        } else if let d = item as? Data {
+                            fileURL = URL(dataRepresentation: d, relativeTo: nil)
+                        } else {
+                            fileURL = nil
+                        }
+                        guard let fileURL else { return }
+                        Task { @MainActor in
+                            handleImportedFiles(.success([fileURL]))
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        // 3. Plain text fallback (used when triggered from the '+' menu)
+        if allowTextFallback, let str = pb.string, !str.isEmpty {
+            if text.isEmpty {
+                text = str
+            } else {
+                text += (text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " ") + str
+            }
+        }
+        #endif
     }
 
     // MARK: - Media & File Picking Helpers
@@ -608,3 +717,152 @@ public struct ComposerView: View {
         #endif
     }
 }
+
+
+// MARK: - Paste-Aware Auto-Sizing Composer Input (Supports Pasting Images, Videos, Files & Text)
+
+#if canImport(UIKit)
+private final class SHPasteInterceptingTextView: UITextView {
+    var onPasteMedia: (() -> Void)?
+
+    private func clipboardHasAttachableMedia() -> Bool {
+        let pb = UIPasteboard.general
+        if pb.hasImages { return true }
+        return pb.itemProviders.contains { prov in
+            prov.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.video.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+                || prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)) && clipboardHasAttachableMedia() {
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        if clipboardHasAttachableMedia(), let onPasteMedia {
+            onPasteMedia()
+            return
+        }
+        super.paste(sender)
+    }
+}
+
+private struct SHPasteableTextInput: View {
+    @Binding var text: String
+    let placeholder: String
+    let onPasteMedia: () -> Void
+    @State private var measuredHeight: CGFloat = 22
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if text.isEmpty {
+                Text(placeholder)
+                    .font(SHTypography.body)
+                    .foregroundStyle(SHColor.inkFaint)
+                    .allowsHitTesting(false)
+            }
+            SHPasteableTextViewRepresentable(
+                text: $text,
+                measuredHeight: $measuredHeight,
+                onPasteMedia: onPasteMedia
+            )
+            .frame(height: measuredHeight)
+        }
+    }
+}
+
+private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var measuredHeight: CGFloat
+    let onPasteMedia: () -> Void
+
+    private static let minHeight: CGFloat = 22
+    private static let maxHeight: CGFloat = 112
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> SHPasteInterceptingTextView {
+        let tv = SHPasteInterceptingTextView()
+        tv.delegate = context.coordinator
+        tv.onPasteMedia = onPasteMedia
+        tv.backgroundColor = .clear
+        tv.font = UIFont.preferredFont(forTextStyle: .body)
+        tv.textColor = UIColor(SHColor.inkPrimary)
+        tv.tintColor = UIColor(SHColor.brandAntigravity)
+        tv.keyboardAppearance = .dark
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.isScrollEnabled = false
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.accessibilityIdentifier = "composer.input"
+        tv.text = text
+        return tv
+    }
+
+    func updateUIView(_ uiView: SHPasteInterceptingTextView, context: Context) {
+        uiView.onPasteMedia = onPasteMedia
+        if uiView.text != text && uiView.markedTextRange == nil {
+            uiView.text = text
+        }
+        recalcHeight(uiView)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: SHPasteInterceptingTextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? uiView.bounds.width
+        guard width > 10 else { return nil }
+        let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let clamped = min(Self.maxHeight, max(Self.minHeight, ceil(fitting.height)))
+        uiView.isScrollEnabled = fitting.height > Self.maxHeight + 1
+        return CGSize(width: width, height: clamped)
+    }
+
+    private func recalcHeight(_ tv: UITextView) {
+        let width = tv.bounds.width
+        guard width > 10 else { return }
+        let fitting = tv.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let clamped = min(Self.maxHeight, max(Self.minHeight, ceil(fitting.height)))
+        tv.isScrollEnabled = fitting.height > Self.maxHeight + 1
+        if abs(measuredHeight - clamped) > 0.5 {
+            DispatchQueue.main.async {
+                measuredHeight = clamped
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: SHPasteableTextViewRepresentable
+
+        init(_ parent: SHPasteableTextViewRepresentable) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            let next = textView.text ?? ""
+            if parent.text != next {
+                parent.text = next
+            }
+            parent.recalcHeight(textView)
+        }
+    }
+}
+#else
+private struct SHPasteableTextInput: View {
+    @Binding var text: String
+    let placeholder: String
+    let onPasteMedia: () -> Void
+    var body: some View {
+        TextField(placeholder, text: $text, axis: .vertical)
+            .lineLimit(1...5)
+            .font(SHTypography.body)
+            .foregroundStyle(SHColor.inkPrimary)
+    }
+}
+#endif

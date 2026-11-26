@@ -224,9 +224,7 @@ public struct SessionListView: View {
                     } label: {
                         ZStack {
                             if isMasterBusy {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                    .tint(SHColor.brandMaster)
+                                SHActivityPulse(tint: SHColor.brandMaster, size: 15)
                             } else {
                                 Image(systemName: "sparkles")
                                     .font(.system(size: 14, weight: .semibold))
@@ -428,9 +426,7 @@ public struct SessionListView: View {
                                             .foregroundStyle(SHColor.inkFaint)
                                     }
                                     if store.isAnyWorking(in: section) {
-                                        ProgressView()
-                                            .controlSize(.mini)
-                                            .tint(section.harnessGroup.map(SHColor.harness) ?? SHColor.inkSecondary)
+                                        SHActivityPulse(tint: section.harnessGroup.map(SHColor.harness) ?? SHColor.inkSecondary, size: 11)
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right")
@@ -647,9 +643,7 @@ private struct MasterSessionRow: View {
                         .lineLimit(1)
                     Spacer()
                     if isBusy {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .tint(SHColor.brandMaster)
+                        SHActivityPulse(tint: SHColor.brandMaster, size: 14)
                     } else {
                         Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
                             .font(SHTypography.micro)
@@ -858,9 +852,7 @@ private struct SessionListRow: View {
             Spacer(minLength: 6)
 
             if isBusy {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(vis.color)
+                SHActivityPulse(tint: vis.color, size: 11)
                     .frame(width: 14, height: 14)
             } else if session.status == .waitingInput {
                 Image(systemName: "questionmark.circle.fill")

@@ -73,9 +73,9 @@ const SIZE_PX: Record<NonNullable<WorkingOrbProps['size']>, number> = {
 };
 
 /**
- * Subtle, fluid kinetic orb tinted to the active harness colorway: a quiet
- * translucent ring with counter-rotating light arcs and a softly breathing
- * drifting core.
+ * Refined, calm luminous activity pulse tinted to the active harness colorway:
+ * a soft ambient bloom, delicate glass rim, and gently breathing pearlescent core
+ * (no distracting spinning or flying elements).
  */
 export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   tone = 'master',
@@ -91,48 +91,28 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
       style={{ width: px, height: px }}
       className={cn('relative inline-flex items-center justify-center shrink-0', className)}
     >
-      {/* Whisper-soft ambient bloom */}
+      {/* Whisper-soft ambient breathing bloom */}
       <span
-        className="sh-orb-halo absolute inset-[-3px] rounded-full pointer-events-none"
+        className="sh-orb-halo absolute inset-[-4px] rounded-full pointer-events-none"
         style={{
           background: `radial-gradient(circle, ${palette.halo} 0%, transparent 72%)`,
         }}
       />
 
-      {/* Primary orbiting light arc (ring-masked) */}
+      {/* Delicate breathing glass rim */}
       <span
-        className="sh-orb-swirl absolute inset-0 rounded-full pointer-events-none"
+        className="sh-gauge-halo absolute inset-[1px] rounded-full pointer-events-none"
         style={{
-          background: palette.arcPrimary,
-          WebkitMaskImage: 'radial-gradient(circle, transparent 54%, black 60%)',
-          maskImage: 'radial-gradient(circle, transparent 54%, black 60%)',
+          boxShadow: `inset 0 0 0 1.25px ${palette.rim}`,
         }}
       />
 
-      {/* Counter-rotating secondary harmonic arc */}
-      <span
-        className="sh-orb-counter absolute inset-[1px] rounded-full pointer-events-none"
-        style={{
-          background: palette.arcSecondary,
-          WebkitMaskImage: 'radial-gradient(circle, transparent 52%, black 60%)',
-          maskImage: 'radial-gradient(circle, transparent 52%, black 60%)',
-        }}
-      />
-
-      {/* Delicate glass rim */}
-      <span
-        className="absolute inset-0 rounded-full pointer-events-none"
-        style={{
-          boxShadow: `inset 0 0 0 1px ${palette.rim}`,
-        }}
-      />
-
-      {/* Soft breathing drifting inner core */}
+      {/* Softly breathing luminous core */}
       <span
         className="sh-orb-core relative rounded-full pointer-events-none"
         style={{
-          width: '46%',
-          height: '46%',
+          width: '48%',
+          height: '48%',
           background: palette.core,
         }}
       />

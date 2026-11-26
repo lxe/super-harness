@@ -142,7 +142,7 @@ export function SegmentedControl<T extends string>({
               )}
             >
               <span className="relative inline-flex items-center justify-center w-8 h-8">
-                {/* 1. Recessed circular track (bottom layer) */}
+                {/* 1. Recessed circular track (bottom layer) — thicker refined 3.0 stroke */}
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 36 36"
@@ -153,32 +153,48 @@ export function SegmentedControl<T extends string>({
                     cy="18"
                     r={GAUGE_RADIUS}
                     fill="none"
-                    stroke={active ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.08)'}
-                    strokeWidth="2.3"
+                    stroke={active ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.09)'}
+                    strokeWidth="3.0"
                   />
                 </svg>
 
-                {/* 2. Full smooth conic-gradient chaser (WorkingOrb-style, exact gauge ring thickness, underneath progress arc) */}
+                {/* 2. Subtle breathing shimmer when working (replaces orbiting chaser) */}
                 {item.working && (
-                  <span
-                    aria-hidden="true"
-                    className="sh-gauge-shimmer absolute inset-0 rounded-full pointer-events-none"
-                    style={{
-                      background: palette.comet,
-                      WebkitMaskImage:
-                        'radial-gradient(circle, transparent 0%, transparent 75.5%, black 77%, black 89.5%, transparent 91%)',
-                      maskImage:
-                        'radial-gradient(circle, transparent 0%, transparent 75.5%, black 77%, black 89.5%, transparent 91%)',
-                    }}
-                  />
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="sh-gauge-halo absolute inset-[-2px] rounded-full pointer-events-none"
+                      style={{
+                        background: `radial-gradient(circle, ${palette.stroke}33 0%, transparent 70%)`,
+                      }}
+                    />
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 36 36"
+                      className="sh-gauge-halo absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                    >
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r={GAUGE_RADIUS}
+                        fill="none"
+                        stroke={palette.stroke}
+                        strokeOpacity={0.55}
+                        strokeWidth="3.0"
+                      />
+                    </svg>
+                  </>
                 )}
 
-                {/* 3. Colored usage gauge arc on top of the chaser */}
+                {/* 3. Colored usage gauge arc on top */}
                 {displayPct > 0 && (
                   <svg
                     aria-hidden="true"
                     viewBox="0 0 36 36"
-                    className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                    className={cn(
+                      'absolute inset-0 w-full h-full -rotate-90 pointer-events-none',
+                      item.working && 'sh-gauge-arc-shimmer'
+                    )}
                   >
                     <circle
                       cx="18"
@@ -186,8 +202,8 @@ export function SegmentedControl<T extends string>({
                       r={GAUGE_RADIUS}
                       fill="none"
                       stroke={palette.stroke}
-                      strokeOpacity={item.progress?.estimated ? 0.78 : 0.96}
-                      strokeWidth="2.3"
+                      strokeOpacity={item.progress?.estimated ? 0.8 : 0.96}
+                      strokeWidth="3.0"
                       strokeLinecap="round"
                       strokeDasharray={GAUGE_CIRCUMFERENCE}
                       strokeDashoffset={dashOffset}

@@ -153,9 +153,7 @@ public struct SHGlassActionCapsule<MenuContent: View>: View {
     public var body: some View {
         HStack(spacing: 10) {
             if isBusy {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(accentColor)
+                SHActivityPulse(tint: accentColor, size: 14)
                     .frame(width: 20, height: 20)
             }
             Menu {
@@ -237,9 +235,7 @@ public struct SHInlineDisclosureRow: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 if isSpinning {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(tint)
+                    SHActivityPulse(tint: tint, size: 12)
                         .frame(width: 14, height: 14)
                 } else {
                     Image(systemName: icon)
@@ -637,9 +633,9 @@ public struct SHRadialGauge<Center: View>: View {
         self.center = center()
     }
 
-    // Desktop draws radius 15 with a 2.3 stroke inside a 36pt box.
-    private var lineWidth: CGFloat { size * 2.3 / 36 }
-    private var ringInset: CGFloat { size * 3 / 36 - lineWidth / 2 }
+    // Thicker refined 3.1 stroke inside a 36pt coordinate box (matches Desktop SegmentedControl).
+    private var lineWidth: CGFloat { size * 3.1 / 36 }
+    private var ringInset: CGFloat { max(lineWidth / 2 + 0.5, size * 3.0 / 36 - lineWidth / 2) }
 
     private var clamped: Double? {
         guard let value, value.isFinite else { return nil }
@@ -661,13 +657,47 @@ public struct SHRadialGauge<Center: View>: View {
     }
 
     public var body: some View {
+        if isWorking && !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 2.2))
+                gaugeContent(pulse: wave)
+            }
+        } else {
+            gaugeContent(pulse: isWorking ? 0.55 : 0.0)
+        }
+    }
+
+    @ViewBuilder
+    private func gaugeContent(pulse: Double) -> some View {
         ZStack {
+            if isWorking {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                stroke.opacity(0.10 + 0.16 * pulse),
+                                stroke.opacity(0.0),
+                            ],
+                            center: .center,
+                            startRadius: 2,
+                            endRadius: size * 0.62
+                        )
+                    )
+                    .frame(width: size + 4, height: size + 4)
+            }
+
             Circle()
                 .inset(by: ringInset)
-                .stroke(Color.white.opacity(isActive ? 0.13 : 0.08), lineWidth: lineWidth)
+                .stroke(Color.white.opacity(isActive ? 0.15 : 0.09), lineWidth: lineWidth)
 
             if isWorking {
-                chaser
+                Circle()
+                    .inset(by: ringInset)
+                    .stroke(
+                        stroke.opacity(0.20 + 0.36 * pulse),
+                        lineWidth: lineWidth
+                    )
             }
 
             if displayFraction > 0 {
@@ -675,7 +705,7 @@ public struct SHRadialGauge<Center: View>: View {
                     .inset(by: ringInset)
                     .trim(from: 0, to: displayFraction)
                     .stroke(
-                        stroke.opacity(estimated ? 0.78 : 0.96),
+                        stroke.opacity(estimated ? (0.80 + 0.14 * pulse) : min(1.0, 0.94 + 0.06 * pulse)),
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
@@ -686,36 +716,70 @@ public struct SHRadialGauge<Center: View>: View {
         }
         .frame(width: size, height: size)
     }
+}
 
-    private var chaserRing: some View {
-        Circle()
-            .inset(by: ringInset)
-            .stroke(
-                AngularGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .clear, location: 120.0 / 360),
-                        .init(color: stroke.opacity(0.16), location: 195.0 / 360),
-                        .init(color: stroke.mix(with: .white, by: 0.4).opacity(0.62), location: 295.0 / 360),
-                        .init(color: Color.white.opacity(0.92), location: 348.0 / 360),
-                        .init(color: .clear, location: 1),
-                    ],
-                    center: .center
-                ),
-                lineWidth: lineWidth
-            )
+// MARK: - Refined Luminous Activity Shimmer Pulse (Replaces Harsh Spoke Spinners)
+
+/// Calm, softly breathing luminous pulse tinted to the active harness accent color:
+/// whisper-soft radial bloom, delicate frosted ring, and gently breathing pearlescent core.
+public struct SHActivityPulse: View {
+    public let tint: Color
+    public var size: CGFloat = 14
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public init(tint: Color, size: CGFloat = 14) {
+        self.tint = tint
+        self.size = size
     }
 
-    @ViewBuilder
-    private var chaser: some View {
+    public var body: some View {
         if reduceMotion {
-            chaserRing.rotationEffect(.degrees(-90))
+            pulseView(wave: 0.65)
         } else {
-            // One turn every 2.2s, matching desktop `sh-gauge-spin`.
-            TimelineView(.animation) { context in
-                let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 2.2
-                chaserRing.rotationEffect(.degrees(turn * 360 - 90))
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 2.2))
+                pulseView(wave: wave)
             }
         }
+    }
+
+    private func pulseView(wave: Double) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            tint.opacity(0.18 + 0.24 * wave),
+                            tint.opacity(0.0),
+                        ],
+                        center: .center,
+                        startRadius: 1,
+                        endRadius: size * 0.72
+                    )
+                )
+                .frame(width: size * 1.45, height: size * 1.45)
+
+            Circle()
+                .strokeBorder(tint.opacity(0.24 + 0.30 * wave), lineWidth: 1.15)
+                .frame(width: size * 0.88, height: size * 0.88)
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.85 + 0.15 * wave),
+                            tint.opacity(0.82 + 0.18 * wave),
+                        ],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: size * 0.32
+                    )
+                )
+                .frame(width: size * (0.44 + 0.08 * wave), height: size * (0.44 + 0.08 * wave))
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }

@@ -302,30 +302,32 @@ body,
   animation: sh-working-sweep 2.6s ease-in-out infinite;
 }
 
-@keyframes sh-gauge-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes sh-gauge-pulse {
   0%,
   100% {
-    opacity: 0.42;
+    opacity: 0.28;
   }
   50% {
-    opacity: 0.85;
+    opacity: 0.82;
   }
 }
 
-.sh-gauge-shimmer {
-  animation: sh-gauge-spin 2.2s linear infinite;
-  will-change: transform;
+@keyframes sh-gauge-arc-glow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.22);
+  }
 }
 
 .sh-gauge-halo {
-  animation: sh-gauge-pulse 2.4s ease-in-out infinite;
+  animation: sh-gauge-pulse 2.2s ease-in-out infinite;
+  will-change: opacity;
+}
+
+.sh-gauge-arc-shimmer {
+  animation: sh-gauge-arc-glow 2.2s ease-in-out infinite;
+  will-change: filter;
 }

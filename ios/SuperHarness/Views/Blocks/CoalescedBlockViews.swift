@@ -178,9 +178,7 @@ private struct CompactTraceRowView: View {
                 Group {
                     HStack(alignment: .top, spacing: 7) {
                         if isRunning {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .scaleEffect(0.75)
+                            SHActivityPulse(tint: SHColor.brandAntigravity, size: 9)
                                 .frame(width: 12, height: ScrollingCommandText.lineHeight)
                         } else {
                             Image(systemName: failed ? "xmark.circle.fill" : "terminal")
@@ -280,7 +278,8 @@ private struct CompactTraceRowView: View {
                 } label: {
                     HStack(alignment: .center, spacing: 7) {
                         if isRunning {
-                            ProgressView().controlSize(.mini).scaleEffect(0.75).frame(width: 12, height: 12)
+                            SHActivityPulse(tint: SHColor.brandAntigravity, size: 9)
+                                .frame(width: 12, height: 12)
                         } else {
                             Image(systemName: "wrench.adjustable")
                                 .font(.system(size: 10.5))

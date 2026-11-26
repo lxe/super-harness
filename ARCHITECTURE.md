@@ -41,6 +41,7 @@ Switching between conversations — including 500 MB+ Claude JSONL files and mul
    - **Main process (`src/main/services/transcriptCache.ts`)**: Fingerprint-validated LRU (64 sessions / 40 MB budget) with concurrent in-flight request deduplication (~0.01 ms warm hit).
    - **Renderer (`src/renderer/utils/transcriptCache.ts`)**: Stale-while-revalidate LRU cache (32 sessions) for 0-flash switching, warmed by 75 ms sidebar hover prefetch and idle bootstrap prefetch.
    - **Markdown LRU (`src/renderer/utils/format.ts`)**: 600-entry LRU cache around `marked.parse` + `<script>` stripping.
+   - **Off-main-thread parsing (`src/main/workers/`)**: The Electron main thread is also Chromium's browser UI thread, so any long synchronous task there freezes the window. CPU-heavy pure work (Claude JSONL tail read + parse) runs on a small `worker_threads` pool (`offloadPool`), falling back inline if a worker is unavailable.
    - **Render isolation**: Memoized `Sidebar`, `SessionHeader`, `SessionComposer`, `LiveStepsBar`, `UserMessageView`, `AssistantMessageView`, and `CoalescedBlockView` prevent composer keystrokes from re-rendering message rows or the sidebar.
 
 ---

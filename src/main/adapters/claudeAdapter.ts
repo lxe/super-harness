@@ -22,6 +22,7 @@ import type {
 } from '../../shared/types';
 import { ClaudeStreamPool } from '../services/claudeStreamClient';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
+import { offloadPool } from '../workers/offloadPool';
 import { RemoteClaudeMirror } from './remoteClaude';
 import {
   CLAUDE_EFFORTS,
@@ -2255,7 +2256,9 @@ export function createClaudeDriver(): HarnessDriver {
       }
       const resolved =
         session.transcriptPath || resolveClaudeTranscriptPath(session.nativeId, session.cwd);
-      return loadClaudeTranscript(session.id, session.nativeId, resolved, session.cwd, limit);
+      // Reading and JSON-parsing a multi-MB tail runs on a worker thread so it never stalls
+      // the main (browser UI) thread.
+      return offloadPool.run('loadClaudeTranscript', session.id, session.nativeId, resolved, session.cwd, limit);
     },
 
     getGlobalWatchDirs(): HarnessWatchSpec[] {

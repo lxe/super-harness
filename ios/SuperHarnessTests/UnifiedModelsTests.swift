@@ -492,4 +492,16 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(delta.harnesses?.map(\.id), [.muse])
         XCTAssertEqual(delta.activeWorkingSessionIds, ["muse:m-9"])
     }
+
+    func testPickHeroWindowPrefersCanonicalPrimaryOver3P() {
+        let windows = [
+            UsageQuotaWindow(id: "3p-weekly", label: "Claude & GPT · Weekly", usedPercent: 50),
+            UsageQuotaWindow(id: "five_hour", label: "Gemini · 5h limit", usedPercent: 6),
+            UsageQuotaWindow(id: "weekly", label: "Gemini · Weekly", usedPercent: 3),
+            UsageQuotaWindow(id: "3p-five-hour", label: "Claude & GPT · 5h limit", usedPercent: 0),
+        ]
+        let picked = UsageMetrics.pickHeroWindow(windows)
+        XCTAssertEqual(picked.hero?.id, "five_hour", "Hero must prefer canonical Gemini five_hour/weekly over higher 3P window")
+        XCTAssertEqual(picked.secondary.map(\.id), ["3p-weekly", "weekly", "3p-five-hour"])
+    }
 }

@@ -1550,7 +1550,9 @@ public struct WindowPaceInfo: Sendable, Equatable {
 public enum UsageMetrics {
     public static func pickHeroWindow(_ windows: [UsageQuotaWindow]) -> (hero: UsageQuotaWindow?, secondary: [UsageQuotaWindow]) {
         guard !windows.isEmpty else { return (nil, []) }
-        let primaryPool = windows.filter { $0.id != "extra" }
+        let canonicalPrimaryIds: Set<String> = ["five_hour", "weekly", "primary"]
+        let canonicalPool = windows.filter { canonicalPrimaryIds.contains($0.id) }
+        let primaryPool = canonicalPool.isEmpty ? windows.filter { $0.id != "extra" } : canonicalPool
         let candidates = primaryPool.isEmpty ? windows : primaryPool
 
         var hero = candidates[0]

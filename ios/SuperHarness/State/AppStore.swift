@@ -61,6 +61,26 @@ public struct LightboxPayload: Identifiable, Equatable {
     public let path: String?
 }
 
+public struct StreamTurnBaseline: Sendable, Equatable {
+    public let lastAssistantId: String?
+    public let lastAssistantBlockCount: Int
+
+    public init(lastAssistantId: String?, lastAssistantBlockCount: Int) {
+        self.lastAssistantId = lastAssistantId
+        self.lastAssistantBlockCount = lastAssistantBlockCount
+    }
+}
+
+public struct VisibleStreamingOverlay: Sendable, Equatable {
+    public let showBlocks: [UnifiedBlock]
+    public let showText: String
+
+    public init(showBlocks: [UnifiedBlock], showText: String) {
+        self.showBlocks = showBlocks
+        self.showText = showText
+    }
+}
+
 @MainActor
 @Observable
 public final class AppStore {
@@ -124,6 +144,9 @@ public final class AppStore {
     public var transcriptLimitsBySessionId: [String: Int] = [:]
     public var loadingTranscriptSessionIds: Set<String> = []
     public var streamingMessagesBySessionId: [String: UnifiedMessage] = [:]
+    private var streamBaselineBySessionId: [String: StreamTurnBaseline] = [:]
+    private var streamingBlocksBySessionId: [String: [UnifiedBlock]] = [:]
+    private var streamingTextBySessionId: [String: String] = [:]
     public var pendingOutgoingBySessionId: [String: [PendingOutgoingMessage]] = [:]
     public var sendingSessionIds: Set<String> = []
     public var draftInputs: [String: String] = [:]
@@ -758,17 +781,98 @@ public final class AppStore {
             PerfLogger.markFirstAssistantContentIfNeeded(sessionId: tr.sessionId)
         }
         if tr.liveActivity?.isWorking == false {
-            streamingMessagesBySessionId.removeValue(forKey: tr.sessionId)
+            clearStreamingState(for: tr.sessionId)
         }
         return true
     }
 
-    private func applyStreamEvent(_ ev: StreamEvent) {
+    private func clearStreamingState(for sessionId: String) {
+        streamingMessagesBySessionId.removeValue(forKey: sessionId)
+        streamBaselineBySessionId.removeValue(forKey: sessionId)
+        streamingBlocksBySessionId.removeValue(forKey: sessionId)
+        streamingTextBySessionId.removeValue(forKey: sessionId)
+    }
+
+    public static func captureStreamTurnBaseline(messages: [UnifiedMessage]) -> StreamTurnBaseline {
+        var lastAssistantId: String? = nil
+        var lastAssistantBlockCount = 0
+        for m in messages where m.role == .assistant {
+            lastAssistantId = m.id
+            lastAssistantBlockCount = m.blocks.count
+        }
+        return StreamTurnBaseline(
+            lastAssistantId: lastAssistantId,
+            lastAssistantBlockCount: lastAssistantBlockCount
+        )
+    }
+
+    /// Mirrors Desktop's `resolveVisibleStreamingOverlay` in `src/renderer/utils/transcriptCache.ts`:
+    /// prevents live SSE stream previews from duplicating persisted assistant messages that LiveSync
+    /// has already pushed for the active turn.
+    public static func resolveVisibleStreamingOverlay(
+        messages: [UnifiedMessage],
+        baseline: StreamTurnBaseline?,
+        streamingBlocks: [UnifiedBlock],
+        streamingText: String
+    ) -> VisibleStreamingOverlay {
+        let lastMsg = messages.last
+        let persistedActiveAssistant: Bool = {
+            guard let lastMsg, lastMsg.role == .assistant else { return false }
+            guard let baseline else { return true }
+            return lastMsg.id != baseline.lastAssistantId || lastMsg.blocks.count > baseline.lastAssistantBlockCount
+        }()
+
+        if !persistedActiveAssistant || lastMsg == nil {
+            return VisibleStreamingOverlay(
+                showBlocks: streamingBlocks,
+                showText: streamingText.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+
+        func normalizeWs(_ s: String) -> String {
+            s.components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+
+        let persistedText = lastMsg!.blocks.compactMap { block -> String? in
+            if case .text(let t) = block { return t }
+            return nil
+        }.joined(separator: "\n\n")
+        let persistedNorm = normalizeWs(persistedText)
+
+        let trimmedStream = streamingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedStream.isEmpty {
+            return VisibleStreamingOverlay(showBlocks: [], showText: "")
+        }
+
+        // Split on paragraph breaks (2+ newlines) and drop any chunk already persisted.
+        let rawChunks = trimmedStream.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n\n")
+        let remainingChunks = rawChunks
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { chunk in
+                guard !chunk.isEmpty else { return false }
+                let norm = normalizeWs(chunk)
+                return !norm.isEmpty && !persistedNorm.contains(norm)
+            }
+
+        return VisibleStreamingOverlay(
+            showBlocks: [],
+            showText: remainingChunks.joined(separator: "\n\n")
+        )
+    }
+
+    public func applyStreamEvent(_ ev: StreamEvent) {
         switch ev.kind {
         case .start:
             if !hostWorkingSessionIds.contains(ev.sessionId) {
                 hostWorkingSessionIds.insert(ev.sessionId)
             }
+            let persisted = transcriptsBySessionId[ev.sessionId]?.messages ?? []
+            streamBaselineBySessionId[ev.sessionId] = Self.captureStreamTurnBaseline(messages: persisted)
+            streamingBlocksBySessionId[ev.sessionId] = []
+            streamingTextBySessionId[ev.sessionId] = ""
             streamingMessagesBySessionId[ev.sessionId] = UnifiedMessage(
                 id: "stream-\(ev.runId)",
                 role: .assistant,
@@ -779,20 +883,42 @@ public final class AppStore {
         case .block:
             guard let block = ev.block else { return }
             PerfLogger.markFirstAssistantContentIfNeeded(sessionId: ev.sessionId)
-            var msg = streamingMessagesBySessionId[ev.sessionId] ?? UnifiedMessage(
-                id: "stream-\(ev.runId)",
-                role: .assistant,
-                timestamp: Date().timeIntervalSince1970 * 1000.0,
-                blocks: [],
-                streaming: true
-            )
-            msg.blocks.append(block)
-            streamingMessagesBySessionId[ev.sessionId] = msg
+            if streamBaselineBySessionId[ev.sessionId] == nil {
+                let persisted = transcriptsBySessionId[ev.sessionId]?.messages ?? []
+                streamBaselineBySessionId[ev.sessionId] = Self.captureStreamTurnBaseline(messages: persisted)
+            }
+            if streamingMessagesBySessionId[ev.sessionId] == nil {
+                streamingMessagesBySessionId[ev.sessionId] = UnifiedMessage(
+                    id: "stream-\(ev.runId)",
+                    role: .assistant,
+                    timestamp: Date().timeIntervalSince1970 * 1000.0,
+                    blocks: [],
+                    streaming: true
+                )
+            }
+            if case .text(let text) = block {
+                let existing = streamingTextBySessionId[ev.sessionId] ?? ""
+                streamingTextBySessionId[ev.sessionId] = existing.isEmpty ? text : "\(existing)\n\n\(text)"
+            } else {
+                var blocks = streamingBlocksBySessionId[ev.sessionId] ?? []
+                blocks.append(block)
+                streamingBlocksBySessionId[ev.sessionId] = blocks
+            }
+            if var msg = streamingMessagesBySessionId[ev.sessionId] {
+                msg.blocks.append(block)
+                streamingMessagesBySessionId[ev.sessionId] = msg
+            }
         case .delta:
             guard let chunk = ev.text else { return }
             if !chunk.isEmpty {
                 PerfLogger.markFirstAssistantContentIfNeeded(sessionId: ev.sessionId)
             }
+            if streamBaselineBySessionId[ev.sessionId] == nil {
+                let persisted = transcriptsBySessionId[ev.sessionId]?.messages ?? []
+                streamBaselineBySessionId[ev.sessionId] = Self.captureStreamTurnBaseline(messages: persisted)
+            }
+            let existingText = streamingTextBySessionId[ev.sessionId] ?? ""
+            streamingTextBySessionId[ev.sessionId] = existingText + chunk
             var msg = streamingMessagesBySessionId[ev.sessionId] ?? UnifiedMessage(
                 id: "stream-\(ev.runId)",
                 role: .assistant,
@@ -807,11 +933,11 @@ public final class AppStore {
             }
             streamingMessagesBySessionId[ev.sessionId] = msg
         case .done:
-            streamingMessagesBySessionId.removeValue(forKey: ev.sessionId)
+            clearStreamingState(for: ev.sessionId)
             hostWorkingSessionIds.remove(ev.sessionId)
             Task { await loadTranscript(for: ev.sessionId) }
         case .error:
-            streamingMessagesBySessionId.removeValue(forKey: ev.sessionId)
+            clearStreamingState(for: ev.sessionId)
             hostWorkingSessionIds.remove(ev.sessionId)
             if let err = ev.error {
                 lastError = err
@@ -1098,12 +1224,27 @@ public final class AppStore {
     }
 
     public func messages(for sessionId: String) -> [UnifiedMessage] {
-        var list = transcriptsBySessionId[sessionId]?.messages ?? []
+        let persisted = transcriptsBySessionId[sessionId]?.messages ?? []
+        var list = persisted
         if let pending = pendingOutgoingBySessionId[sessionId], !pending.isEmpty {
             list.append(contentsOf: pending.map { $0.asUnifiedMessage() })
         }
         if let streaming = streamingMessagesBySessionId[sessionId] {
-            list.append(streaming)
+            let overlay = Self.resolveVisibleStreamingOverlay(
+                messages: persisted,
+                baseline: streamBaselineBySessionId[sessionId],
+                streamingBlocks: streamingBlocksBySessionId[sessionId] ?? [],
+                streamingText: streamingTextBySessionId[sessionId] ?? ""
+            )
+            var visibleBlocks = overlay.showBlocks
+            if !overlay.showText.isEmpty {
+                visibleBlocks.append(.text(text: overlay.showText))
+            }
+            if !visibleBlocks.isEmpty {
+                var visibleStream = streaming
+                visibleStream.blocks = visibleBlocks
+                list.append(visibleStream)
+            }
         }
         return list
     }

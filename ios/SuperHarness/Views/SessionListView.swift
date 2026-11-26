@@ -626,7 +626,7 @@ private struct SessionListRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                HStack(alignment: .center, spacing: 6) {
                     if session.pinned {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 10))
@@ -641,6 +641,7 @@ private struct SessionListRow: View {
                         ProgressView()
                             .controlSize(.mini)
                             .tint(vis.color)
+                            .frame(width: 14, height: 14)
                     } else {
                         Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
                             .font(SHTypography.micro.monospacedDigit())

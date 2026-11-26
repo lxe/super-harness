@@ -116,6 +116,25 @@ public struct DesignSystemCatalogView: View {
                         }
                     }
 
+                    section("GFM Markdown Formatting") {
+                        SHMarkdownView(text: """
+                        ### Release Summary
+                        Updated `cmd/orble` and **MarkdownRenderer.swift** with ~~legacy~~ accurate GFM support:
+                        - [x] Headings, lists, blockquotes & task items
+                        - [x] Tables with column alignment
+
+                        | Metric | Before | After |
+                        | :--- | :---: | ---: |
+                        | Dictation | 320 KB | **40 KB** |
+                        | SSE idle | 4.7 MB | **110 B** |
+
+                        > Inline `code` chips, bold emphasis, and [links](https://github.com/lxe/super-harness) stay crisp.
+                        """)
+                        .padding(12)
+                        .background(SHColor.surfaceSubtle)
+                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+                    }
+
                     section("Obsidian Surface & Brand Tokens") {
                         HStack(spacing: 8) {
                             swatch("Canvas", SHColor.surfaceCanvas)

@@ -616,4 +616,69 @@ final class AppStoreTests: XCTestCase {
         store.applySessionsDelta(noopDelta)
         XCTAssertFalse(sessionsMutated.get())
     }
+
+    @MainActor
+    func testStreamOverlayDeduplicatesPersistedMultiToolClaudeTurn() {
+        let sid = "claude:multi-tool-test"
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: .init(suiteName: UUID().uuidString)!)
+
+        // Initial persisted transcript before the turn starts
+        let initialUser = UnifiedMessage(id: "u-1", role: .user, timestamp: 1000, blocks: [.text(text: "check omnara")])
+        let prevAssistant = UnifiedMessage(id: "a-1", role: .assistant, timestamp: 1001, blocks: [.text(text: "previous reply")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid,
+            messages: [initialUser, prevAssistant],
+            totalCount: 2,
+            hasMore: false,
+            liveActivity: LiveActivityState(isWorking: false)
+        ))
+
+        // 1. Stream starts -> captures baseline (a-1, 1 block); empty streaming bubble is NOT shown
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .start))
+        XCTAssertEqual(store.messages(for: sid).count, 2, "Empty start stream event should not render a blank duplicate bubble")
+
+        // 2. Before persistence catches up, live stream blocks & text SHOULD render
+        let cmd1 = UnifiedBlock.command(command: "ls -la", cwd: nil, output: nil, exitCode: nil, durationMs: nil, status: "running")
+        let cmd2 = UnifiedBlock.command(command: "git status", cwd: nil, output: nil, exitCode: nil, durationMs: nil, status: "running")
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd1))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd2))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .delta, text: "Omnara is already on the page, but without its X handle."))
+
+        let prePersistMsgs = store.messages(for: sid)
+        XCTAssertEqual(prePersistMsgs.count, 3)
+        XCTAssertEqual(prePersistMsgs.last?.id, "stream-r-1")
+        XCTAssertEqual(prePersistMsgs.last?.blocks.count, 3)
+
+        // 3. LiveSync pushes persisted active assistant turn with those exact commands + text + 2 more commands
+        let cmd3 = UnifiedBlock.command(command: "python3 fix.py", cwd: nil, output: "ok", exitCode: 0, durationMs: 50, status: "completed")
+        let cmd4 = UnifiedBlock.command(command: "git diff", cwd: nil, output: nil, exitCode: nil, durationMs: nil, status: "running")
+        let persistedTurn = UnifiedMessage(
+            id: "a-2",
+            role: .assistant,
+            timestamp: 2000,
+            blocks: [cmd1, cmd2, .text(text: "Omnara is already on the page, but without its X handle."), cmd3, cmd4]
+        )
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd3))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd4))
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid,
+            messages: [initialUser, prevAssistant, persistedTurn],
+            totalCount: 3,
+            hasMore: false,
+            liveActivity: LiveActivityState(isWorking: true, focus: "Running Bash")
+        ))
+
+        // Duplicate streaming bubble MUST be completely suppressed!
+        let dedupedMsgs = store.messages(for: sid)
+        XCTAssertEqual(dedupedMsgs.count, 3, "Must NOT show duplicate streaming bubble once persisted turn contains active assistant message")
+        XCTAssertEqual(dedupedMsgs.last?.id, "a-2")
+        XCTAssertTrue(store.isSessionBusy(sid), "Session must remain busy while streaming")
+
+        // 4. If a brand-new unpersisted trailing paragraph streams in, show ONLY that new text (zero duplicate blocks)
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .delta, text: "\n\nAdded @omnara and pushed."))
+        let withTrailing = store.messages(for: sid)
+        XCTAssertEqual(withTrailing.count, 4)
+        XCTAssertEqual(withTrailing.last?.id, "stream-r-1")
+        XCTAssertEqual(withTrailing.last?.blocks, [.text(text: "Added @omnara and pushed.")])
+    }
 }

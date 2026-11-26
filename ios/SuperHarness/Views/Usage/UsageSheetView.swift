@@ -5,7 +5,6 @@ public struct UsageSheetView: View {
     @Bindable var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTarget: HarnessGroup?
-    @State private var showSecondaryWindows: Bool = false
     @State private var selectedDayDate: String?
     @State private var isRefreshing: Bool = false
 
@@ -218,52 +217,44 @@ public struct UsageSheetView: View {
                     .foregroundStyle(SHColor.inkMuted)
             }
 
-            // Progressive disclosure for secondary quota windows & credits
+            // Always-expanded secondary quota windows & credits
             if !secondary.isEmpty || info.creditsBalance != nil {
-                DisclosureGroup(isExpanded: $showSecondaryWindows) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(secondary) { w in
-                            let pct = Int(w.usedPercent.rounded())
-                            let reset = UsageMetrics.formatResetLabel(w.resetsAt)
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(w.label)
-                                        .font(SHTypography.caption)
-                                        .foregroundStyle(SHColor.inkSecondary)
-                                    Spacer()
-                                    Text("\(pct)%")
-                                        .font(SHTypography.caption.weight(.semibold).monospacedDigit())
-                                        .foregroundStyle(SHColor.percentageTone(w.usedPercent))
-                                    if let ctx = reset ?? (w.id == "extra" ? "of monthly cap" : nil) {
-                                        Text("· \(ctx)")
-                                            .font(SHTypography.micro)
-                                            .foregroundStyle(SHColor.inkFaint)
-                                    }
-                                }
-                                ObsidianProgressBar(value: w.usedPercent, tint: brand, muted: true, height: 4)
-                            }
-                        }
-
-                        if let credits = info.creditsBalance {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(secondary) { w in
+                        let pct = Int(w.usedPercent.rounded())
+                        let reset = UsageMetrics.formatResetLabel(w.resetsAt)
+                        VStack(alignment: .leading, spacing: 5) {
                             HStack {
-                                Text("Credits remaining")
+                                Text(w.label)
                                     .font(SHTypography.caption)
-                                    .foregroundStyle(SHColor.inkMuted)
+                                    .foregroundStyle(SHColor.inkSecondary)
                                 Spacer()
-                                Text(Int(credits.rounded()).formatted())
+                                Text("\(pct)%")
                                     .font(SHTypography.caption.weight(.semibold).monospacedDigit())
-                                    .foregroundStyle(SHColor.inkPrimary)
+                                    .foregroundStyle(SHColor.percentageTone(w.usedPercent))
+                                if let ctx = reset ?? (w.id == "extra" ? "of monthly cap" : nil) {
+                                    Text("· \(ctx)")
+                                        .font(SHTypography.micro)
+                                        .foregroundStyle(SHColor.inkFaint)
+                                }
                             }
-                            .padding(.top, 2)
+                            ObsidianProgressBar(value: w.usedPercent, tint: brand, muted: true, height: 4)
                         }
                     }
-                    .padding(.top, 10)
-                } label: {
-                    Text(secondarySummaryLabel(secondary: secondary, credits: info.creditsBalance))
-                        .font(SHTypography.caption.weight(.medium))
-                        .foregroundStyle(SHColor.inkSecondary)
+
+                    if let credits = info.creditsBalance {
+                        HStack {
+                            Text("Credits remaining")
+                                .font(SHTypography.caption)
+                                .foregroundStyle(SHColor.inkMuted)
+                            Spacer()
+                            Text(Int(credits.rounded()).formatted())
+                                .font(SHTypography.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(SHColor.inkPrimary)
+                        }
+                        .padding(.top, 2)
+                    }
                 }
-                .tint(SHColor.inkMuted)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(SHColor.surfaceSubtle)

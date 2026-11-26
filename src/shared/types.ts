@@ -364,6 +364,11 @@ export interface MobileApiSettings {
 }
 
 export interface SuperHarnessSettings {
+  /**
+   * lxe's harness order for the gauge strip and the harness sections in the All view
+   * (shared by desktop and phone). Missing harnesses follow in the default order.
+   */
+  harnessOrder?: HarnessGroup[];
   pollIntervalMs: number;
   maxSessionsPerHarness: number;
   sidebarGroupBy: SidebarGroupBy;

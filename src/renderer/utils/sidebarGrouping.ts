@@ -137,6 +137,40 @@ const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'muse', label: 'Muse' },
 ];
 
+/** Default harness order; lxe can rearrange it (settings.harnessOrder). */
+export const DEFAULT_HARNESS_ORDER: HarnessGroup[] = HARNESS_DEFS.map((d) => d.id);
+
+/** A saved order made complete: known harnesses once each, missing ones appended in default order. */
+export function normalizeHarnessOrder(order?: readonly string[] | null): HarnessGroup[] {
+  const known = new Set<string>(DEFAULT_HARNESS_ORDER);
+  const seen = new Set<string>();
+  const out: HarnessGroup[] = [];
+  for (const h of order ?? []) {
+    if (known.has(h) && !seen.has(h)) {
+      seen.add(h);
+      out.push(h as HarnessGroup);
+    }
+  }
+  for (const h of DEFAULT_HARNESS_ORDER) if (!seen.has(h)) out.push(h);
+  return out;
+}
+
+/** Order after dragging `dragged` onto `target`'s position. */
+export function moveHarness(order: readonly HarnessGroup[], dragged: HarnessGroup, target: HarnessGroup): HarnessGroup[] {
+  const full = normalizeHarnessOrder(order);
+  const from = full.indexOf(dragged);
+  const to = full.indexOf(target);
+  if (from < 0 || to < 0 || from === to) return full;
+  const next = full.filter((h) => h !== dragged);
+  next.splice(to, 0, dragged);
+  return next;
+}
+
+function orderedHarnessDefs(order?: readonly string[] | null): Array<{ id: HarnessGroup; label: string }> {
+  const byId = new Map(HARNESS_DEFS.map((d) => [d.id, d]));
+  return normalizeHarnessOrder(order).map((id) => byId.get(id)!);
+}
+
 /**
  * Computes a gentle logarithmic opacity fade for sidebar conversation rows
  * based on how long ago they were active (1.0 for fresh chats, flooring at
@@ -237,8 +271,10 @@ export function groupSessionsForSidebar(
   filtered: UnifiedSession[],
   groupBy: SidebarGroupBy,
   folders: SessionFolder[],
-  filter: SidebarFilterTab
+  filter: SidebarFilterTab,
+  harnessOrder?: readonly string[] | null
 ): TopGroup[] {
+  const harnessDefs = orderedHarnessDefs(harnessOrder);
   const rest = filtered.filter((s) => !s.pinnedToTop);
 
   if (groupBy === 'recent') {
@@ -278,7 +314,7 @@ export function groupSessionsForSidebar(
     }
 
     const out: TopGroup[] = [];
-    for (const h of HARNESS_DEFS) {
+    for (const h of harnessDefs) {
       const hItems = rest.filter((s) => s.harnessGroup === h.id);
       if (hItems.length === 0) continue;
       const { pinnedItems, sections } = splitNativePinnedAndSections(h.id, hItems);
@@ -294,7 +330,7 @@ export function groupSessionsForSidebar(
   }
 
   if (groupBy === 'harness') {
-    return HARNESS_DEFS.map((d) => {
+    return harnessDefs.map((d) => {
       const hItems = rest
         .filter((s) => s.harnessGroup === d.id)
         .sort((a, b) => {

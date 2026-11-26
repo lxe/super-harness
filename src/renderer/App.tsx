@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   HarnessCatalog,
+  HarnessGroup,
   HarnessDetection,
   OrganizeAction,
   QueuedMessageItem,
@@ -587,6 +588,13 @@ export const App: React.FC = () => {
     [handleUpdateSettings]
   );
 
+  const handleChangeHarnessOrder = useCallback(
+    (order: HarnessGroup[]) => {
+      void handleUpdateSettings({ harnessOrder: order });
+    },
+    [handleUpdateSettings]
+  );
+
   const handleClearMaster = useCallback(async () => {
     const next = await window.superHarness.clearMasterHistory();
     setState(next);
@@ -880,6 +888,8 @@ export const App: React.FC = () => {
         usage={usage}
         folders={folders}
         groupBy={state?.settings.sidebarGroupBy ?? 'native'}
+        harnessOrder={state?.settings.harnessOrder}
+        onChangeHarnessOrder={handleChangeHarnessOrder}
         activeSessionId={activeSessionId}
         splitSessionId={splitSessionId}
         searchInputRef={searchInputRef}

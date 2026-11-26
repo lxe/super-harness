@@ -181,6 +181,13 @@ export class ConfigStore {
   }
 
   updateSettings(patch: Partial<SuperHarnessSettings>): SuperHarnessState {
+    if (patch.harnessOrder !== undefined) {
+      const known = new Set(['antigravity', 'codex', 'claude', 'muse']);
+      const order = Array.isArray(patch.harnessOrder)
+        ? patch.harnessOrder.filter((h, i, a) => known.has(h) && a.indexOf(h) === i)
+        : [];
+      patch = { ...patch, harnessOrder: order as SuperHarnessSettings['harnessOrder'] };
+    }
     this.state.settings = {
       ...this.state.settings,
       ...patch,

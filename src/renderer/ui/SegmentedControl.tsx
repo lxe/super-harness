@@ -26,6 +26,12 @@ export interface SegmentedControlProps<T extends string> {
   /** Visual style: `'bar'` (default horizontal progress bar) or `'gauge'` (circular radial gauge around icon). */
   variant?: 'bar' | 'gauge';
   className?: string;
+  /**
+   * Gauge variant: lets the user drag items to reorder them. `canReorder` picks which items
+   * take part (e.g. not "All"); `onReorder` gets the dragged item and the item it was dropped on.
+   */
+  onReorder?: (dragged: T, target: T) => void;
+  canReorder?: (id: T) => boolean;
 }
 
 const GAUGE_COLORS: Record<ProgressTone, { stroke: string; comet: string }> = {
@@ -95,8 +101,13 @@ export function SegmentedControl<T extends string>({
   iconOnly = false,
   variant = 'bar',
   className,
+  onReorder,
+  canReorder,
 }: SegmentedControlProps<T>) {
   const hasAnyProgress = items.some((i) => i.progress !== undefined);
+  const [dragId, setDragId] = React.useState<T | null>(null);
+  const [overId, setOverId] = React.useState<T | null>(null);
+  const reorderable = (id: T) => Boolean(onReorder) && (canReorder ? canReorder(id) : true);
 
   if (variant === 'gauge') {
     return (
@@ -134,8 +145,37 @@ export function SegmentedControl<T extends string>({
               onClick={() => onChange(item.id)}
               onMouseEnter={(e) => onItemMouseEnter?.(item.id, e.currentTarget)}
               onMouseLeave={() => onItemMouseLeave?.(item.id)}
+              draggable={reorderable(item.id)}
+              onDragStart={(e) => {
+                if (!reorderable(item.id)) return;
+                setDragId(item.id);
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', item.id);
+                onItemMouseLeave?.(item.id);
+              }}
+              onDragOver={(e) => {
+                if (!dragId || !reorderable(item.id)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (overId !== item.id) setOverId(item.id);
+              }}
+              onDragLeave={() => {
+                if (overId === item.id) setOverId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragId && dragId !== item.id && reorderable(item.id)) onReorder?.(dragId, item.id);
+                setDragId(null);
+                setOverId(null);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverId(null);
+              }}
               className={cn(
                 'relative h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+                dragId === item.id && 'opacity-40',
+                overId === item.id && dragId !== item.id && 'ring-1 ring-white/25',
                 active
                   ? 'bg-white/[0.11] text-ink-primary shadow-sm'
                   : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.05]'

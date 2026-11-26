@@ -50,6 +50,8 @@ import {
   isSingleHarnessFilter,
   SIDEBAR_SORT_OPTIONS,
   sortSidebarGroups,
+  moveHarness,
+  normalizeHarnessOrder,
   type SidebarSortBy,
   type DragSectionTarget,
   type SidebarFilterTab,
@@ -82,6 +84,9 @@ interface Props {
   onOpenSettings: () => void;
   onRefresh: () => void;
   onChangeGroupBy: (g: SidebarGroupBy) => void;
+  /** Saved harness order (gauge strip and All-view sections); see settings.harnessOrder. */
+  harnessOrder?: HarnessGroup[];
+  onChangeHarnessOrder?: (order: HarnessGroup[]) => void;
   onOrganize: (actions: OrganizeAction[]) => void;
   onArchiveSession: (session: UnifiedSession, killTmux?: boolean) => void;
   onArchiveMany: (sessions: UnifiedSession[], killTmux?: boolean) => void;
@@ -128,6 +133,12 @@ function resolveGroupCwd(items: UnifiedSession[], isUngrouped = false): string |
   return bestCwd;
 }
 
+/** Keeps "All" first and puts harness gauges in lxe's saved order. */
+function orderGaugeItems<T extends { id: string }>(items: T[], order?: readonly string[] | null): T[] {
+  const rank = new Map(normalizeHarnessOrder(order).map((h, i) => [h as string, i]));
+  return [...items].sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
+}
+
 export const Sidebar: React.FC<Props> = React.memo(({
   width,
   sessions,
@@ -144,6 +155,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
   onDiscardDraft,
   onOpenSettings,
   onChangeGroupBy,
+  harnessOrder,
+  onChangeHarnessOrder,
   onOrganize,
   onArchiveSession,
   onArchiveMany,
@@ -364,8 +377,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
   );
 
   const topGroups = useMemo(
-    () => sortSidebarGroups(groupSessionsForSidebar(filtered, groupBy, folders, filter), sortBy),
-    [filtered, groupBy, folders, filter, sortBy]
+    () => sortSidebarGroups(groupSessionsForSidebar(filtered, groupBy, folders, filter, harnessOrder), sortBy),
+    [filtered, groupBy, folders, filter, sortBy, harnessOrder]
   );
 
   // Map every droppable section container ID to its DragSectionTarget metadata
@@ -1040,7 +1053,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 openUsageHover(target, el);
               }}
               onItemMouseLeave={scheduleCloseUsageHover}
-              items={[
+              items={orderGaugeItems([
                 {
                   id: 'all',
                   label: 'All',
@@ -1104,7 +1117,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     estimated: usage?.muse?.barIsEstimated,
                   },
                 },
-              ]}
+              ], harnessOrder)}
+              canReorder={(id) => id !== 'all'}
+              onReorder={(dragged, target) => {
+                if (dragged === 'all' || target === 'all') return;
+                onChangeHarnessOrder?.(moveHarness(harnessOrder ?? [], dragged as HarnessGroup, target as HarnessGroup));
+              }}
             />
           </div>
         );

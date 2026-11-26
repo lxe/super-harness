@@ -20,8 +20,8 @@ const TONE_CLASSES: Record<BadgeTone, string> = {
 };
 
 const SIZE_CLASSES: Record<BadgeSize, string> = {
-  xs: 'h-[19px] min-w-[19px] px-1.5 text-[11px] leading-none rounded-[7px] gap-1',
-  sm: 'h-5 px-2 text-micro leading-none rounded-[7px] gap-1.5',
+  xs: 'h-[19px] min-w-[19px] px-1.5 text-[11px] leading-none rounded-md gap-1',
+  sm: 'h-5 px-2 text-micro leading-none rounded-md gap-1.5',
 };
 
 export const Badge: React.FC<BadgeProps> = ({

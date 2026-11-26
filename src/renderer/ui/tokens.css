@@ -48,6 +48,14 @@
   --text-caption--line-height: 1.15rem;
   --text-micro: 0.75rem;         /* 12px */
   --text-micro--line-height: 1.05rem;
+
+  /* Squircle-calibrated radius scale (~1.65x circular radii so superellipses look lush, not square) */
+  --radius-sm: 0.4375rem;        /* 7px */
+  --radius-md: 0.625rem;         /* 10px */
+  --radius-lg: 0.875rem;         /* 14px */
+  --radius-xl: 1.25rem;          /* 20px */
+  --radius-2xl: 1.75rem;         /* 28px */
+  --radius-3xl: 2.25rem;         /* 36px */
 }
 
 :root {

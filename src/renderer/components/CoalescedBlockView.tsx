@@ -1134,7 +1134,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                       }
                     : undefined
                 }
-                className={`max-w-[82%] rounded-[20px] bg-surface-bubble px-4 py-3 text-body text-ink-primary transition-colors ${
+                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary transition-colors ${
                   !expanded ? 'cursor-pointer hover:bg-[#272a33]' : ''
                 } ${msg.error ? 'ring-1 ring-rose-500/35' : ''}`}
               >

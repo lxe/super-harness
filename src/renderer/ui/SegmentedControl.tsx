@@ -208,7 +208,7 @@ export function SegmentedControl<T extends string>({
         role="tablist"
         style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
         className={cn(
-          'grid gap-1 p-1.5 rounded-[18px] bg-[#181a20] shadow-[0_2px_8px_-3px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.04)]',
+          'grid gap-1 p-1.5 rounded-2xl bg-[#181a20] shadow-[0_2px_8px_-3px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.04)]',
           className
         )}
       >
@@ -255,8 +255,7 @@ export function SegmentedControl<T extends string>({
                 };
               }}
               className={cn(
-                'relative h-10 rounded-xl flex items-center justify-center transition-colors select-none focus:outline-none focus-visible:shadow-none',
-                dragId ? 'cursor-grabbing' : reorderable(item.id) ? 'cursor-grab' : 'cursor-pointer',
+                'relative h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
                 dragId === item.id && 'opacity-40',
                 overId === item.id && dragId !== item.id && 'ring-1 ring-white/25',
                 active

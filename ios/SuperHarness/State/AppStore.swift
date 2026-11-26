@@ -81,6 +81,51 @@ public struct VisibleStreamingOverlay: Sendable, Equatable {
     }
 }
 
+
+// MARK: - On-Disk Cold-Launch Snapshot Cache (Zero Skeleton Flash on Relaunch)
+
+private struct CachedMobileSnapshot: Codable, Sendable {
+    var version: Int = 1
+    var hostURL: String
+    var savedAt: Double
+    var harnesses: [HarnessDetection]
+    var sessions: [UnifiedSession]
+    var state: SuperHarnessState
+    var usage: UsageSnapshot?
+    var catalog: HarnessCatalog?
+    var recentTranscriptOrder: [String]
+    var recentTranscripts: [String: SessionTranscriptResult]
+}
+
+private enum MobileSnapshotDiskStore {
+    static var defaultFileURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("sh-mobile-snapshot-v1.json")
+    }
+
+    static func load(from url: URL?) -> CachedMobileSnapshot? {
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(CachedMobileSnapshot.self, from: data)
+    }
+
+    static func save(_ snapshot: CachedMobileSnapshot, to url: URL?, synchronous: Bool = false) {
+        guard let url else { return }
+        let writeBlock: @Sendable () -> Void = {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? data.write(to: url, options: .atomic)
+        }
+        if synchronous {
+            writeBlock()
+        } else {
+            DispatchQueue.global(qos: .utility).async(execute: writeBlock)
+        }
+    }
+}
+
 @MainActor
 @Observable
 public final class AppStore {
@@ -179,13 +224,17 @@ public final class AppStore {
     private var isResyncing: Bool = false
     private var isSceneActive: Bool = true
     private var mediaCache: [String: Data] = [:]
+    private let snapshotFileURL: URL?
+    private var recentTranscriptOrder: [String] = []
+    private var saveSnapshotTask: Task<Void, Never>?
 
     public init(
         client: SuperHarnessClientProtocol? = nil,
         keychain: KeychainStoreProtocol = KeychainStore(),
         defaults: UserDefaults = .standard,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        reconnectIntervalNs: UInt64 = 2_000_000_000
+        reconnectIntervalNs: UInt64 = 2_000_000_000,
+        snapshotFileURL: URL? = nil
     ) {
         self.keychain = keychain
         self.defaults = defaults
@@ -274,6 +323,24 @@ public final class AppStore {
             self.connectionHealth = .demo
         }
 
+        self.snapshotFileURL = snapshotFileURL ?? (client == nil ? MobileSnapshotDiskStore.defaultFileURL : nil)
+
+        // Hydrate synchronously from on-disk Caches snapshot for instant zero-skeleton cold launch.
+        if self.connectionMode == .live,
+           let snap = MobileSnapshotDiskStore.load(from: self.snapshotFileURL),
+           snap.hostURL == self.hostURLString,
+           !snap.sessions.isEmpty {
+            self.harnesses = snap.harnesses
+            self.sessions = snap.sessions
+            self.folders = snap.state.folders
+            self.settings = snap.state.settings
+            self.usage = snap.usage
+            self.catalog = snap.catalog
+            self.recentTranscriptOrder = snap.recentTranscriptOrder
+            self.transcriptsBySessionId = snap.recentTranscripts
+            self.hasBootstrapped = true
+        }
+
         // Only start NWPathMonitor in real app runtime (keep unit tests deterministic when client is injected)
         if client == nil {
             self.pathWatcher = NetworkPathWatcher { [weak self] in
@@ -281,6 +348,57 @@ public final class AppStore {
                     self?.triggerImmediateReconnectIfOffline()
                 }
             }
+        }
+    }
+
+    public func persistSnapshotNow() {
+        guard connectionMode == .live, let url = snapshotFileURL, !sessions.isEmpty else { return }
+        let keepIds = Array(recentTranscriptOrder.suffix(10))
+        var trimmedTranscripts: [String: SessionTranscriptResult] = [:]
+        for sid in keepIds {
+            if let tr = transcriptsBySessionId[sid] {
+                trimmedTranscripts[sid] = tr
+            }
+        }
+        let snap = CachedMobileSnapshot(
+            hostURL: hostURLString,
+            savedAt: Date().timeIntervalSince1970 * 1000.0,
+            harnesses: harnesses,
+            sessions: sessions,
+            state: SuperHarnessState(settings: settings, folders: folders),
+            usage: usage,
+            catalog: catalog,
+            recentTranscriptOrder: keepIds,
+            recentTranscripts: trimmedTranscripts
+        )
+        MobileSnapshotDiskStore.save(snap, to: url, synchronous: true)
+    }
+
+    private func scheduleSnapshotPersist() {
+        guard connectionMode == .live, let url = snapshotFileURL, !sessions.isEmpty else { return }
+        saveSnapshotTask?.cancel()
+        saveSnapshotTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled, let self else { return }
+            let keepIds = Array(self.recentTranscriptOrder.suffix(10))
+            var trimmedTranscripts: [String: SessionTranscriptResult] = [:]
+            for sid in keepIds {
+                if let tr = self.transcriptsBySessionId[sid] {
+                    trimmedTranscripts[sid] = tr
+                }
+            }
+            let snap = CachedMobileSnapshot(
+                hostURL: self.hostURLString,
+                savedAt: Date().timeIntervalSince1970 * 1000.0,
+                harnesses: self.harnesses,
+                sessions: self.sessions,
+                state: SuperHarnessState(settings: self.settings, folders: self.folders),
+                usage: self.usage,
+                catalog: self.catalog,
+                recentTranscriptOrder: keepIds,
+                recentTranscripts: trimmedTranscripts
+            )
+            MobileSnapshotDiskStore.save(snap, to: url)
         }
     }
 
@@ -303,6 +421,7 @@ public final class AppStore {
             let payload = try await client.fetchBootstrap()
             applyBootstrap(payload)
             hasBootstrapped = true
+            scheduleSnapshotPersist()
             lastError = nil
             if connectionMode == .live {
                 connectionHealth = .connected
@@ -798,6 +917,12 @@ public final class AppStore {
         if tr.liveActivity?.isWorking == false {
             clearStreamingState(for: tr.sessionId)
         }
+        recentTranscriptOrder.removeAll { $0 == tr.sessionId }
+        recentTranscriptOrder.append(tr.sessionId)
+        if recentTranscriptOrder.count > 12 {
+            recentTranscriptOrder.removeFirst(recentTranscriptOrder.count - 12)
+        }
+        scheduleSnapshotPersist()
         return true
     }
 

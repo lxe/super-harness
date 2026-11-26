@@ -217,9 +217,13 @@ public struct SessionListView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(SHColor.surfacePopover, in: RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
-                .listRowBackground(SHColor.surfacePopover)
             }
 
 
@@ -227,7 +231,7 @@ public struct SessionListView: View {
             // Harness switcher: icon-only chips with radial quota gauges
             Section {
                 HarnessSwitcherStrip(store: store)
-                    .listRowInsets(EdgeInsets())
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -236,10 +240,6 @@ public struct SessionListView: View {
             let topPinned = store.pinnedToTopSessions
             if !topPinned.isEmpty {
                 Section {
-                    ForEach(topPinned) { session in
-                        sessionRowButton(session)
-                    }
-                } header: {
                     HStack(spacing: 6) {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 10))
@@ -247,8 +247,15 @@ public struct SessionListView: View {
                         Text("PINNED TO TOP")
                             .font(SHTypography.micro.weight(.semibold))
                             .foregroundStyle(SHColor.inkMuted)
+                        Spacer()
                     }
-                    .padding(.bottom, 2)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 4, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                    ForEach(topPinned) { session in
+                        sessionRowButton(session)
+                    }
                 }
             }
 
@@ -283,58 +290,58 @@ public struct SessionListView: View {
                     } else {
                         let isCollapsed = collapsedSectionIds.contains(section.id)
                         Section {
-                            if !isCollapsed {
-                                ForEach(section.sessions) { session in
-                                    sessionRowButton(session, hideProjectSubtitle: section.isProjectOrSectionGroup)
-                                }
-                            }
-                        } header: {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     toggleCollapsed(section.id)
                                 }
                             } label: {
-                            HStack(spacing: 7) {
-                                if let group = section.harnessGroup {
-                                    HarnessLogoView(group: group, size: 13)
-                                } else if let hex = section.accentHex {
-                                    Circle()
-                                        .fill(Color(cssHex: hex))
-                                        .frame(width: 7, height: 7)
-                                } else if section.isProjectOrSectionGroup {
-                                    Image(systemName: "folder")
-                                        .font(.system(size: 11, weight: .semibold))
+                                HStack(spacing: 7) {
+                                    if let group = section.harnessGroup {
+                                        HarnessLogoView(group: group, size: 13)
+                                    } else if let hex = section.accentHex {
+                                        Circle()
+                                            .fill(Color(cssHex: hex))
+                                            .frame(width: 7, height: 7)
+                                    } else if section.isProjectOrSectionGroup {
+                                        Image(systemName: "folder")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(SHColor.inkMuted)
+                                    }
+                                    Text(section.isProjectOrSectionGroup ? section.title : section.title.uppercased())
+                                        .font(SHTypography.micro.weight(.semibold))
                                         .foregroundStyle(SHColor.inkMuted)
+                                        .lineLimit(1)
+                                    if store.isAnyWorking(in: section) {
+                                        ProgressView()
+                                            .controlSize(.mini)
+                                            .tint(section.harnessGroup.map(SHColor.harness) ?? SHColor.inkSecondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(SHColor.inkFaint)
+                                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                                 }
-                                Text(section.isProjectOrSectionGroup ? section.title : section.title.uppercased())
-                                    .font(SHTypography.micro.weight(.semibold))
-                                    .foregroundStyle(SHColor.inkMuted)
-                                    .textCase(section.isProjectOrSectionGroup ? nil : .uppercase)
-                                    .lineLimit(1)
-                                if store.isAnyWorking(in: section) {
-                                    ProgressView()
-                                        .controlSize(.mini)
-                                        .tint(section.harnessGroup.map(SHColor.harness) ?? SHColor.inkSecondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(SHColor.inkFaint)
-                                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                            }
-                            .padding(.bottom, 2)
-                            .contentShape(Rectangle())
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("section.header.\(section.id)")
                             .accessibilityValue(isCollapsed ? "collapsed" : "expanded")
+                            .listRowInsets(EdgeInsets(top: 14, leading: 20, bottom: 4, trailing: 20))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+
+                            if !isCollapsed {
+                                ForEach(section.sessions) { session in
+                                    sessionRowButton(session, hideProjectSubtitle: section.isProjectOrSectionGroup)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(12)
+        .listStyle(.plain)
         .contentMargins(.top, 4, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(SHColor.surfaceRail)
@@ -372,7 +379,7 @@ public struct SessionListView: View {
         }
         .buttonStyle(.plain)
         // Each row is its own rounded card so swipe actions slide a rounded shape instead of a hard edge.
-        .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
+        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .swipeActions(edge: .leading, allowsFullSwipe: true) {

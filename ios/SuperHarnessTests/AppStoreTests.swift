@@ -721,4 +721,26 @@ final class AppStoreTests: XCTestCase {
         XCTAssertTrue(store.pendingOutgoingBySessionId[sid]?.isEmpty ?? true)
         XCTAssertEqual(store.messages(for: sid).map(\.id), ["agy-u-1"])
     }
+
+    func testColdLaunchHydratesSynchronouslyFromDiskSnapshot() async throws {
+        let suite = "sh.test.snapshot.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("live", forKey: "sh.connectionMode")
+        defaults.set("http://127.0.0.1:47890", forKey: "sh.hostURL")
+        let snapURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sh-test-snap-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: snapURL) }
+
+        let mock = MockSuperHarnessClient()
+        let firstStore = AppStore(client: mock, defaults: defaults, environment: [:], snapshotFileURL: snapURL)
+        await firstStore.bootstrap(quiet: true)
+        await firstStore.loadTranscript(for: "codex:cx-control-server")
+        firstStore.persistSnapshotNow()
+
+        let coldStore = AppStore(client: mock, defaults: defaults, environment: [:], snapshotFileURL: snapURL)
+        XCTAssertTrue(coldStore.hasCompletedBootstrap)
+        XCTAssertFalse(coldStore.sessions.isEmpty)
+        XCTAssertNotNil(coldStore.transcriptsBySessionId["codex:cx-control-server"])
+        XCTAssertFalse(coldStore.messages(for: "codex:cx-control-server").isEmpty)
+    }
 }

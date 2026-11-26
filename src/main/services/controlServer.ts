@@ -10,6 +10,66 @@ import zlib from 'node:zlib';
 const execFileAsync = promisify(execFile);
 const WEBP_CACHE_DIR = path.join(os.tmpdir(), 'sh-media-webp-cache');
 const TRANSCODABLE_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff']);
+
+const COMPACT_CMD_MAX = 320;
+const COMPACT_OUT_MAX = 400;
+
+/**
+ * Compacts collapsed historical command/tool blocks for mobile delivery (`?compact=1` and SSE pushes)
+ * so 60-message sessions transfer ~3x less data over Tailscale cellular while keeping prose, diffs,
+ * thinking, and actively running commands untouched. Opt-in on GET /api/transcript so MCP tools
+ * always receive full untruncated output.
+ */
+function compactTranscriptForMobile<T>(tr: T): T {
+  if (!tr || typeof tr !== 'object') return tr;
+  const obj = tr as { messages?: unknown[] };
+  if (!Array.isArray(obj.messages)) return tr;
+  let changed = false;
+  const messages = obj.messages.map((rawMsg) => {
+    if (!rawMsg || typeof rawMsg !== 'object') return rawMsg;
+    const msg = rawMsg as { blocks?: unknown[] };
+    if (!Array.isArray(msg.blocks)) return rawMsg;
+    let msgChanged = false;
+    const blocks = msg.blocks.map((rawBlock) => {
+      if (!rawBlock || typeof rawBlock !== 'object') return rawBlock;
+      const b = rawBlock as Record<string, unknown>;
+      if (b.status === 'running') return rawBlock;
+      if (b.type === 'command') {
+        const cmd = typeof b.command === 'string' ? b.command : '';
+        const out = typeof b.output === 'string' ? b.output : '';
+        const needCmd = cmd.length > COMPACT_CMD_MAX;
+        const needOut = out.length > COMPACT_OUT_MAX;
+        if (!needCmd && !needOut) return rawBlock;
+        msgChanged = true;
+        return {
+          ...b,
+          command: needCmd ? `${cmd.slice(0, COMPACT_CMD_MAX)}…` : cmd,
+          output: needOut ? `…\n${out.slice(-COMPACT_OUT_MAX)}` : out,
+          ...(needOut ? { outputTruncated: true, outputLength: out.length } : {}),
+        };
+      }
+      if (b.type === 'tool_call') {
+        const args = typeof b.args === 'string' ? b.args : '';
+        const out = typeof b.output === 'string' ? b.output : '';
+        const needArgs = args.length > COMPACT_CMD_MAX;
+        const needOut = out.length > COMPACT_OUT_MAX;
+        if (!needArgs && !needOut) return rawBlock;
+        msgChanged = true;
+        return {
+          ...b,
+          args: needArgs ? `${args.slice(0, COMPACT_CMD_MAX)}…` : args,
+          output: needOut ? `…\n${out.slice(-COMPACT_OUT_MAX)}` : out,
+          ...(needOut ? { outputTruncated: true, outputLength: out.length } : {}),
+        };
+      }
+      return rawBlock;
+    });
+    if (!msgChanged) return rawMsg;
+    changed = true;
+    return { ...msg, blocks };
+  });
+  return changed ? ({ ...obj, messages } as T) : tr;
+}
 import type {
   FilePreviewData,
   HarnessCatalog,
@@ -260,17 +320,15 @@ export class ControlServer {
       return;
     }
 
-    // Cap mobile SSE transcript payloads to the tail 20 messages so a single frame never sends ~800 KB.
+    // Cap mobile SSE transcript payloads to the tail 20 messages and compact collapsed command/tool output.
     let payload: unknown = data;
     if (event === 'transcript' && data && typeof data === 'object') {
       const tr = data as { messages?: unknown[]; hasMore?: boolean };
-      if (Array.isArray(tr.messages) && tr.messages.length > 20) {
-        payload = {
-          ...tr,
-          messages: tr.messages.slice(-20),
-          hasMore: true,
-        };
-      }
+      const capped =
+        Array.isArray(tr.messages) && tr.messages.length > 20
+          ? { ...tr, messages: tr.messages.slice(-20), hasMore: true }
+          : tr;
+      payload = compactTranscriptForMobile(capped);
     }
 
     const seq = ++this.eventSeq;
@@ -700,8 +758,9 @@ export class ControlServer {
         if (req.method === 'GET' && url.pathname === '/api/transcript') {
           const sessionId = url.searchParams.get('sessionId') || '';
           const limit = Number(url.searchParams.get('limit') || '20');
+          const compact = url.searchParams.get('compact') === '1' || url.searchParams.get('compact') === 'true';
           const tr = await this.registry.getTranscript(sessionId, Math.max(1, Math.min(limit, 200)));
-          sendJson(tr);
+          sendJson(compact ? compactTranscriptForMobile(tr) : tr);
           return;
         }
 

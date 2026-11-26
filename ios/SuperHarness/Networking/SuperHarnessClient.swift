@@ -122,6 +122,8 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         let cfg = URLSessionConfiguration.default
         cfg.httpMaximumConnectionsPerHost = 8
         cfg.waitsForConnectivity = false
+        cfg.requestCachePolicy = .useProtocolCachePolicy
+        cfg.urlCache = URLCache(memoryCapacity: 16 * 1024 * 1024, diskCapacity: 64 * 1024 * 1024)
         cfg.timeoutIntervalForRequest = 45
         cfg.timeoutIntervalForResource = 120
         return URLSession(configuration: cfg)
@@ -224,6 +226,7 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             queryItems: [
                 URLQueryItem(name: "sessionId", value: sessionId),
                 URLQueryItem(name: "limit", value: "\(limit)"),
+                URLQueryItem(name: "compact", value: "1"),
             ]
         )
     }

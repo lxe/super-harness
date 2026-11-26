@@ -97,6 +97,7 @@ export class HarnessRegistry {
           title: ov.customTitle || s.title,
           model: ov.model || s.model,
           reasoningEffort: ov.reasoningEffort || s.reasoningEffort,
+          permissionMode: ov.permissionMode || s.permissionMode,
           folderId: ov.folderId !== undefined ? ov.folderId : s.folderId,
           nativeSection:
             ov.nativeSection !== undefined ? ov.nativeSection || 'Ungrouped' : s.nativeSection,

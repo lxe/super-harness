@@ -1,6 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type {
   HarnessGroup,
+  SessionConfigChange,
+  SessionConfigFieldResult,
+  SessionConfigResult,
   ImageAttachment,
   SendMessageResult,
   StartSessionRequest,
@@ -162,6 +165,38 @@ export class HarnessDispatcher {
       return { ok: false, error: `Unknown harness: ${req.harness}` };
     }
     return driver.startSession(req, this.createContext());
+  }
+
+  /**
+   * Change a session's model / reasoning effort / permission mode through its driver.
+   * Fields the driver accepts (applied now or on the next message) are persisted as
+   * Super Harness overrides so every later dispatch, on any client, uses them.
+   */
+  async updateSessionConfig(sessionId: string, change: SessionConfigChange): Promise<SessionConfigResult> {
+    const session = this.registry.getSession(sessionId);
+    if (!session) return { ok: false, sessionId, results: [], error: `Unknown session: ${sessionId}` };
+    const driver = this.registry.getDriver(session.harnessGroup as HarnessGroup);
+    const requested = (['model', 'reasoningEffort', 'permissionMode'] as const).filter(
+      (f) => change[f] !== undefined
+    );
+    if (requested.length === 0) {
+      return { ok: false, sessionId, harness: session.harness, results: [], error: 'Nothing to change: pass model, reasoningEffort and/or permissionMode.' };
+    }
+    const results: SessionConfigFieldResult[] = driver?.applySessionConfig
+      ? await driver.applySessionConfig(session, change, this.createContext())
+      : requested.map((field) => ({
+          field,
+          requested: String(change[field]),
+          status: 'unsupported' as const,
+          detail: `${session.harness} sessions don't support changing this from Super Harness.`,
+        }));
+    const keep = results.filter((r) => r.status === 'applied' || r.status === 'next_message');
+    if (keep.length > 0) {
+      const action: Record<string, unknown> = { type: 'set_model', sessionId };
+      for (const r of keep) action[r.field] = r.value ?? '';
+      this.store.applyOrganize([action as never]);
+    }
+    return { ok: results.every((r) => r.status === 'applied' || r.status === 'next_message'), sessionId, harness: session.harness, results };
   }
 
   async controlHarness(

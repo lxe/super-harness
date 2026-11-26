@@ -19,6 +19,14 @@ import type {
 } from '../../shared/types';
 import { CodexAppServerClient } from '../services/codexAppServerClient';
 import { querySqliteReadOnly } from '../utils/sqlite';
+import {
+  CODEX_EFFORTS,
+  CODEX_PERMISSION_MODES,
+  invalid,
+  normalizeCodexPermissionMode,
+  normalizeEffort,
+  resultsFor,
+} from './sessionConfig';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import {
   cleanTextPreview,
@@ -1149,6 +1157,29 @@ export function createCodexDriver(): HarnessDriver {
   };
 
   return {
+    async applySessionConfig(session, change) {
+      const next =
+        'Applies to the next turn Super Harness starts in this thread; turns started from the Codex app keep the app\'s own settings.';
+      return resultsFor(change, (field, requested) => {
+        if (!requested.trim()) return { status: 'next_message', value: '', detail: 'Override cleared. ' + next };
+        if (field === 'model') return { status: 'next_message', value: requested.trim(), detail: next };
+        if (field === 'reasoningEffort') {
+          const v = normalizeEffort(requested, CODEX_EFFORTS);
+          return v ? { status: 'next_message', value: v, detail: next } : invalid(CODEX_EFFORTS);
+        }
+        const mode = normalizeCodexPermissionMode(requested);
+        if (!mode) return invalid(CODEX_PERMISSION_MODES);
+        return {
+          status: 'next_message',
+          value: mode === 'default' ? '' : mode,
+          detail:
+            (mode === 'default' ? 'Back to your Codex config. ' : '') +
+            next +
+            ' Super Harness auto-accepts Codex approvals, so escalation is off and the sandbox is the boundary.',
+        };
+      });
+    },
+
     id: 'codex',
     displayName: 'OpenAI Codex',
 
@@ -1318,6 +1349,7 @@ export function createCodexDriver(): HarnessDriver {
           attachments,
           model: session.model,
           reasoningEffort: session.reasoningEffort,
+          permissionMode: session.permissionMode,
           runId,
           onEvent: ctx.emitStream,
           onComplete: () => {

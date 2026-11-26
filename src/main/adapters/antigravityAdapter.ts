@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { resultsFor } from './sessionConfig';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1108,6 +1109,26 @@ export function createAntigravityDriver(): HarnessDriver {
   };
 
   return {
+    async applySessionConfig(session, change) {
+      return resultsFor(change, (field, requested) => {
+        if (field === 'model') {
+          if (!requested.trim()) return { status: 'next_message', value: '', detail: 'Override cleared; the cascade keeps its last model.' };
+          return {
+            status: 'next_message',
+            value: requested.trim(),
+            detail: 'Applies to the next message Super Harness sends (mapped to the hub\'s planModel; unknown slugs fall back to the recommended model).',
+          };
+        }
+        return {
+          status: 'unsupported',
+          detail:
+            field === 'reasoningEffort'
+              ? 'The Antigravity language server takes no per-message reasoning effort; pick a model variant instead.'
+              : 'Antigravity exposes no permission mode Super Harness can set per conversation.',
+        };
+      });
+    },
+
     id: 'antigravity',
     displayName: 'Google Antigravity',
 

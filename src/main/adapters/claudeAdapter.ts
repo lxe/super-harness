@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
+  SessionConfigFieldResult,
   HarnessDetection,
   ImageAttachment,
   LiveActivityState,
@@ -22,6 +23,14 @@ import type {
 import { ClaudeStreamPool } from '../services/claudeStreamClient';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import { RemoteClaudeMirror } from './remoteClaude';
+import {
+  CLAUDE_EFFORTS,
+  CLAUDE_PERMISSION_MODES,
+  invalid,
+  normalizeClaudePermissionMode,
+  normalizeEffort,
+  resultsFor,
+} from './sessionConfig';
 import {
   cleanTextPreview,
   getBinaryVersion,
@@ -1911,6 +1920,73 @@ export function buildClaudeResumeArgs(
   return args;
 }
 
+/** Footer text Claude Code's TUI shows for each permission mode (Shift+Tab cycles them). */
+export const CLAUDE_TUI_MODE_LABELS: Record<string, string> = {
+  bypassPermissions: 'bypass permissions on',
+  auto: 'auto mode on',
+  manual: 'manual mode on',
+  plan: 'plan mode on',
+  acceptEdits: 'accept edits on',
+};
+
+/** Current permission mode read from the bottom of a captured Claude TUI pane. */
+export function detectClaudeTuiMode(paneText: string): string | undefined {
+  const tail = paneText.split('\n').slice(-10).join('\n').toLowerCase();
+  for (const [mode, label] of Object.entries(CLAUDE_TUI_MODE_LABELS)) {
+    if (tail.includes(label)) return mode;
+  }
+  return undefined;
+}
+
+async function captureClaudePane(target: string): Promise<string> {
+  const { stdout } = await execFileAsync('tmux', ['capture-pane', '-p', '-t', target], { timeout: 4000 });
+  return stdout;
+}
+
+/**
+ * Switch a live Claude TUI's permission mode with Shift+Tab, reading the footer after each
+ * press. Session-scoped: unlike /model or /effort it changes no saved defaults.
+ */
+export async function cycleClaudeTuiMode(
+  target: string,
+  wanted: string
+): Promise<{ ok: boolean; seen: string[] }> {
+  const seen: string[] = [];
+  for (let i = 0; i <= 7; i++) {
+    const mode = detectClaudeTuiMode(await captureClaudePane(target));
+    seen.push(mode ?? 'unknown');
+    if (mode === wanted) return { ok: true, seen };
+    await execFileAsync('tmux', ['send-keys', '-t', target, 'BTab'], { timeout: 4000 });
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return { ok: false, seen };
+}
+
+/** Wait until Claude registers `nativeId` under a new pid in ~/.claude/sessions. */
+async function waitForClaudeRelaunch(nativeId: string, oldPid: number | undefined, timeoutMs = 12000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      for (const f of fs.readdirSync(CLAUDE_SESSIONS_DIR)) {
+        if (!f.endsWith('.json')) continue;
+        try {
+          const d = JSON.parse(fs.readFileSync(path.join(CLAUDE_SESSIONS_DIR, f), 'utf8')) as ActiveClaudeSessionJson;
+          if (d.sessionId === nativeId && d.pid && d.pid !== oldPid) {
+            process.kill(d.pid, 0);
+            return true;
+          }
+        } catch {
+          // stale or partial file
+        }
+      }
+    } catch {
+      // sessions dir missing
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
 export function createClaudeDriver(): HarnessDriver {
   const remote = new RemoteClaudeMirror();
   const streamPool = new ClaudeStreamPool((sid, rid, line, gotAny, emit) =>
@@ -2019,6 +2095,97 @@ export function createClaudeDriver(): HarnessDriver {
   };
 
   return {
+    async applySessionConfig(session, change, ctx) {
+      if (remote.isRemote(session.id) || session.tags?.includes('remote-host')) {
+        return resultsFor(change, () => ({
+          status: 'unsupported',
+          detail: `This Claude session runs on ${session.hostLabel || session.hostAddress || 'another machine'}; change it there.`,
+        }));
+      }
+      // Validate first.
+      const norm: { model?: string; reasoningEffort?: string; permissionMode?: string } = {};
+      const bad: Record<string, ReturnType<typeof invalid>> = {};
+      if (change.model !== undefined) norm.model = change.model.trim();
+      if (change.reasoningEffort !== undefined) {
+        const v = change.reasoningEffort.trim() ? normalizeEffort(change.reasoningEffort, CLAUDE_EFFORTS) : '';
+        if (v === undefined) bad.reasoningEffort = invalid(CLAUDE_EFFORTS);
+        else norm.reasoningEffort = v;
+      }
+      if (change.permissionMode !== undefined) {
+        const v = change.permissionMode.trim() ? normalizeClaudePermissionMode(change.permissionMode) : '';
+        if (v === undefined) bad.permissionMode = invalid(CLAUDE_PERMISSION_MODES);
+        else norm.permissionMode = v;
+      }
+
+      const liveTmux = session.dispatchMode === 'tmux-send' && Boolean(session.tmuxTarget);
+      if (!liveTmux) {
+        const next =
+          'Applies when Super Harness next sends a message to this session (live set_model / set_permission_mode on its Claude process, or resume flags). The Claude Desktop app\'s own picker is not changed.';
+        return resultsFor(change, (field) =>
+          bad[field] ?? { status: 'next_message', value: norm[field] ?? '', detail: next }
+        );
+      }
+
+      // Live Claude TUI in tmux.
+      const target = session.tmuxTarget!;
+      const out: Record<string, { status: SessionConfigFieldResult['status']; value?: string; detail?: string }> = {};
+      const wantsLaunchFlags = (norm.model !== undefined && !bad.model) || norm.reasoningEffort !== undefined;
+      if (wantsLaunchFlags && change.restart) {
+        if (session.status === 'running') {
+          for (const f of ['model', 'reasoningEffort', 'permissionMode'] as const) {
+            if (norm[f] !== undefined) out[f] = { status: 'failed', detail: 'Claude is mid-turn in this tmux session; restart it when it is idle.' };
+          }
+        } else {
+          const claudeBin = (await whichBinary('claude')) || 'claude';
+          const model = norm.model !== undefined ? norm.model : session.model;
+          const effort = norm.reasoningEffort !== undefined ? norm.reasoningEffort : session.reasoningEffort;
+          const perm = norm.permissionMode !== undefined ? norm.permissionMode : session.permissionMode;
+          const flags = ['--resume', session.nativeId];
+          if (session.isRemote || session.tags?.includes('remote-control')) flags.push('--remote-control');
+          if (model) flags.push('--model', model);
+          if (effort) flags.push('--effort', effort);
+          if (perm) flags.push('--permission-mode', perm);
+          const quote = (a: string) => `'${a.replace(/'/g, `'\\''`)}'`;
+          const cmd = [claudeBin, ...flags].map(quote).join(' ');
+          try {
+            await execFileAsync('tmux', ['respawn-pane', '-k', '-t', target, '-c', session.cwd || os.homedir(), cmd], { timeout: 5000 });
+            const ok = await waitForClaudeRelaunch(session.nativeId, session.pid);
+            for (const f of ['model', 'reasoningEffort', 'permissionMode'] as const) {
+              if (norm[f] === undefined || bad[f]) continue;
+              out[f] = ok
+                ? { status: 'applied', value: norm[f], detail: `Restarted Claude in tmux ${target} with --resume and the new flags; the conversation continues.` }
+                : { status: 'failed', value: norm[f], detail: `Restarted the tmux pane ${target} but Claude did not re-register within 12 s; check that terminal.` };
+            }
+            ctx.triggerRefresh(1500);
+          } catch (err) {
+            for (const f of ['model', 'reasoningEffort', 'permissionMode'] as const) {
+              if (norm[f] !== undefined && !bad[f]) out[f] = { status: 'failed', detail: `tmux respawn failed: ${err instanceof Error ? err.message : String(err)}` };
+            }
+          }
+        }
+      } else {
+        const why =
+          'A live Claude terminal only takes model/effort at launch (typing /model or /effort would also change your global Claude defaults). Pass restart: true to restart it in place with --resume.';
+        if (norm.model !== undefined) out.model = { status: 'needs_restart', value: norm.model, detail: why };
+        if (norm.reasoningEffort !== undefined) out.reasoningEffort = { status: 'needs_restart', value: norm.reasoningEffort, detail: why };
+        if (norm.permissionMode !== undefined) {
+          const wanted = norm.permissionMode || 'manual';
+          try {
+            const r = await cycleClaudeTuiMode(target, wanted);
+            out.permissionMode = r.ok
+              ? { status: 'applied', value: norm.permissionMode, detail: 'Switched live with Shift+Tab (this session only).' }
+              : {
+                  status: 'failed',
+                  detail: `Shift+Tab never reached "${CLAUDE_TUI_MODE_LABELS[wanted]}" (saw: ${r.seen.join(' -> ')}). The mode may not be enabled for this session; pass restart: true to relaunch with --permission-mode.`,
+                };
+          } catch (err) {
+            out.permissionMode = { status: 'failed', detail: `tmux failed: ${err instanceof Error ? err.message : String(err)}` };
+          }
+        }
+      }
+      return resultsFor(change, (field) => bad[field] ?? out[field] ?? { status: 'failed', detail: 'Not processed.' });
+    },
+
     id: 'claude',
     displayName: 'Claude (Desktop + tmux CLI)',
 

@@ -5,6 +5,8 @@ import type {
   HarnessGroup,
   ImageAttachment,
   SendMessageResult,
+  SessionConfigChange,
+  SessionConfigFieldResult,
   SessionTranscriptResult,
   StartSessionRequest,
   StreamEvent,
@@ -149,6 +151,18 @@ export interface HarnessDriver {
    * uses it to push transcript refreshes without FS polling.
    */
   setActivitySink?(sink: ((sessionId: string) => void) | null): void;
+
+  /**
+   * Validate and apply a model / reasoning effort / permission mode change for one
+   * session. Return one result per requested field; fields with status `applied` or
+   * `next_message` are persisted as Super Harness overrides by the caller. Drivers
+   * without this hook report every field as unsupported.
+   */
+  applySessionConfig?(
+    session: UnifiedSession,
+    change: SessionConfigChange,
+    ctx: DispatchContext
+  ): Promise<SessionConfigFieldResult[]>;
 }
 
 /**

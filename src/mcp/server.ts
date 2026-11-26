@@ -159,6 +159,28 @@ const TOOLS = [
     },
   },
   {
+    name: 'sh_update_session',
+    description:
+      "Change one session's model, reasoning effort and/or permission mode. Returns a per-field status: applied (in effect now), next_message (Super Harness applies it on the next message it sends), needs_restart (pass restart:true to restart the live terminal process; the conversation resumes), unsupported, invalid (detail lists valid values) or failed. Support by harness: Claude Desktop/CLI sessions — all three, on the next message. Claude in tmux — permission mode switches live (Shift+Tab, verified); model and effort need restart:true (typing /model or /effort would also change the user's global defaults). Codex — all three on the next turn; permission presets default, read-only, auto (workspace-write sandbox), full-access (no sandbox), with escalation off because Super Harness auto-accepts approvals. Muse — model and effort on the next turn; permission mode unsupported (Super Harness runs Muse turns allow-all). Antigravity — model on the next message; effort and permission mode unsupported. Sessions on another machine — unsupported. Aliases like 'bypass', 'yolo', 'full-auto', 'plan', 'sonnet', 'opus' are accepted; an empty string clears the override.",
+    inputSchema: {
+      type: 'object',
+      required: ['sessionId'],
+      properties: {
+        sessionId: { type: 'string', description: 'Session id from sh_list_sessions, e.g. claude:<uuid>.' },
+        model: { type: 'string', description: 'Harness model id or alias (e.g. sonnet, opus, gpt-5.3-codex).' },
+        reasoningEffort: { type: 'string', description: 'e.g. low, medium, high, xhigh, max (harness-specific).' },
+        permissionMode: {
+          type: 'string',
+          description: 'Claude: manual (alias default), acceptEdits, auto, plan, dontAsk, bypassPermissions. Codex: default, read-only, auto, full-access.',
+        },
+        restart: {
+          type: 'boolean',
+          description: 'Allow restarting a live Claude tmux process to apply model/effort (conversation resumes).',
+        },
+      },
+    },
+  },
+  {
     name: 'sh_restart_app',
     description:
       'Safely restart Super Harness via a detached watchdog (optionally running npm run build first) so the app comes back cleanly without dying mid-shutdown.',
@@ -224,6 +246,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       return apiRequest('POST', '/api/settings', args);
     case 'sh_control_harness':
       return apiRequest('POST', '/api/control-harness', args);
+    case 'sh_update_session':
+      return apiRequest('POST', '/api/session-config', args);
     case 'sh_restart_app':
       return apiRequest('POST', '/api/restart', args);
     default:

@@ -885,6 +885,20 @@ export class ControlServer {
           return;
         }
 
+        if (req.method === 'POST' && url.pathname === '/api/session-config') {
+          const body = await readBody();
+          const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+          const result = await this.dispatcher.updateSessionConfig(String(body.sessionId || ''), {
+            model: str(body.model),
+            reasoningEffort: str(body.reasoningEffort),
+            permissionMode: str(body.permissionMode),
+            restart: body.restart === true,
+          });
+          await this.triggerRefresh();
+          sendJson(result, result.error && result.results.length === 0 ? 400 : 200);
+          return;
+        }
+
         if (req.method === 'POST' && url.pathname === '/api/organize') {
           const body = await readBody();
           const actions = Array.isArray(body.actions)

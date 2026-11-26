@@ -251,10 +251,61 @@ export interface SessionOverride {
   nativeSectionOrder?: number;
   model?: string;
   reasoningEffort?: string;
+  /** Harness-native permission mode chosen in Super Harness (see SessionConfigChange). */
+  permissionMode?: string;
   pinned?: boolean;
   pinnedToTop?: boolean;
   tags?: string[];
   hidden?: boolean;
+}
+
+/**
+ * A request to change how a session runs. Values are harness-native after validation;
+ * an empty string clears the Super Harness override (back to the harness's own default).
+ */
+export interface SessionConfigChange {
+  model?: string;
+  reasoningEffort?: string;
+  permissionMode?: string;
+  /**
+   * Allow restarting a live terminal process to apply settings it can only take at launch
+   * (Claude in tmux: model and effort). The conversation resumes; nothing is lost.
+   */
+  restart?: boolean;
+}
+
+/**
+ * What happened to one requested setting:
+ * - applied: in effect now
+ * - next_message: stored; Super Harness applies it when it next sends to this session
+ * - needs_restart: would take effect only after restarting the live process (pass restart: true)
+ * - unsupported: this harness or session can't change it from Super Harness (detail says why)
+ * - invalid: value not accepted (detail lists valid values)
+ * - failed: tried and could not confirm it took effect
+ */
+export type SessionConfigStatus =
+  | 'applied'
+  | 'next_message'
+  | 'needs_restart'
+  | 'unsupported'
+  | 'invalid'
+  | 'failed';
+
+export interface SessionConfigFieldResult {
+  field: 'model' | 'reasoningEffort' | 'permissionMode';
+  requested: string;
+  /** Normalized harness-native value that was stored/applied. */
+  value?: string;
+  status: SessionConfigStatus;
+  detail?: string;
+}
+
+export interface SessionConfigResult {
+  ok: boolean;
+  sessionId: string;
+  harness?: string;
+  results: SessionConfigFieldResult[];
+  error?: string;
 }
 
 export interface MasterEngineConfig {
@@ -391,6 +442,7 @@ export interface OrganizeAction {
   sectionOrder?: number;
   model?: string;
   reasoningEffort?: string;
+  permissionMode?: string;
   sessionId?: string;
   title?: string;
   tags?: string[];

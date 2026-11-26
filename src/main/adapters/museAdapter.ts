@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { invalid, normalizeEffort, resultsFor } from './sessionConfig';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1265,6 +1266,23 @@ export function createMuseDriver(): HarnessDriver {
   };
 
   return {
+    async applySessionConfig(session, change) {
+      const next = 'Applies to the next turn Super Harness sends to this Muse session.';
+      return resultsFor(change, (field, requested) => {
+        if (field === 'permissionMode') {
+          return {
+            status: 'unsupported',
+            detail:
+              'Super Harness runs Muse turns with approvalMode allowAll because it has no approval UI for Muse yet; a stricter mode would stall turns waiting for approvals nobody can answer.',
+          };
+        }
+        if (!requested.trim()) return { status: 'next_message', value: '', detail: 'Override cleared. ' + next };
+        if (field === 'model') return { status: 'next_message', value: requested.trim(), detail: next + ' (set with MSP model/set before the turn).' };
+        const v = normalizeEffort(requested, MUSE_EFFORT_LEVELS);
+        return v ? { status: 'next_message', value: v, detail: next } : invalid(MUSE_EFFORT_LEVELS);
+      });
+    },
+
     id: 'muse',
     displayName: 'Muse',
 

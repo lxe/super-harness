@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { codexTurnPolicy } from '../adapters/sessionConfig';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { Socket } from 'node:net';
@@ -621,6 +622,8 @@ export class CodexAppServerClient {
     attachments?: ImageAttachment[];
     model?: string;
     reasoningEffort?: string;
+    /** Super Harness permission preset (see codexTurnPolicy). */
+    permissionMode?: string;
     runId: string;
     onEvent: (ev: StreamEvent) => void;
     onComplete: () => void;
@@ -645,6 +648,7 @@ export class CodexAppServerClient {
     };
     if (opts.model) turnParams.model = opts.model;
     if (opts.reasoningEffort) turnParams.effort = opts.reasoningEffort;
+    Object.assign(turnParams, codexTurnPolicy(opts.permissionMode));
 
     const run: ActiveTurnRun = {
       shSessionId: opts.shSessionId,

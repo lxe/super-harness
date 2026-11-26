@@ -300,6 +300,9 @@ export class ConfigStore {
             ...(act.reasoningEffort !== undefined
               ? { reasoningEffort: act.reasoningEffort.trim().toLowerCase() || undefined }
               : {}),
+            ...(act.permissionMode !== undefined
+              ? { permissionMode: act.permissionMode.trim() || undefined }
+              : {}),
           };
           break;
         }

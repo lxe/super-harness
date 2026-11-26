@@ -42,6 +42,31 @@ const shortHumanMsg: UnifiedMessage = {
   blocks: [{ type: 'text', text: 'add ability to pin chats to superharness top' }],
 };
 
+const failedHumanMsg: UnifiedMessage = {
+  id: 'm-failed',
+  role: 'user',
+  timestamp: Date.now(),
+  error: 'Harness process exited with code 1: connection refused',
+  blocks: [
+    {
+      type: 'text',
+      text: 'Archive the old image-generation threads we do not need anymore.',
+    },
+  ],
+};
+
+export const FailedUserMessage: StoryObj = {
+  render: () => (
+    <div className="w-[680px] max-w-full space-y-5 p-6 bg-surface-canvas rounded-2xl border border-line-hairline">
+      <UserMessageView
+        msg={failedHumanMsg}
+        onRetryFailed={() => {}}
+        onDismissFailed={() => {}}
+      />
+    </div>
+  ),
+};
+
 export const FullConversationFlow: StoryObj = {
   render: () => (
     <div className="w-[680px] max-w-full space-y-5 p-6 bg-surface-canvas rounded-2xl border border-line-hairline">

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertCircle,
   Bell,
   Bot,
   Check,
@@ -10,6 +11,7 @@ import {
   Globe,
   HelpCircle,
   History,
+  RotateCcw,
   Terminal,
   Wrench,
 } from 'lucide-react';
@@ -488,11 +490,14 @@ interface UserMessageViewProps {
   msg: UnifiedMessage;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
   onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
+  onRetryFailed?: (msg: UnifiedMessage) => void;
+  onDismissFailed?: (msgId: string) => void;
 }
 
 export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
-  ({ msg, onOpenPath, onPreviewImage }) => {
+  ({ msg, onOpenPath, onPreviewImage, onRetryFailed, onDismissFailed }) => {
     const [expanded, setExpanded] = useState(false);
+    const [showErrorDetail, setShowErrorDetail] = useState(false);
     const info = useMemo(() => classifyUserMessage(msg), [msg]);
 
     const imageBlocks = useMemo(
@@ -581,6 +586,64 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
       );
     }
 
+    const renderFailedBadge = () =>
+      msg.error ? (
+        <button
+          type="button"
+          onClick={() => setShowErrorDetail((v) => !v)}
+          title={msg.error}
+          aria-label={`Message failed to send: ${msg.error}`}
+          className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 transition-colors cursor-pointer"
+        >
+          <AlertCircle className="w-4 h-4" />
+        </button>
+      ) : null;
+
+    const renderFailedFooter = () =>
+      msg.error ? (
+        <div className="flex flex-col items-end gap-1 max-w-[82%]">
+          <div className="flex items-center gap-2 text-micro text-rose-300/90">
+            <button
+              type="button"
+              onClick={() => setShowErrorDetail((v) => !v)}
+              className="hover:text-rose-200 transition-colors cursor-pointer"
+            >
+              Not delivered
+            </button>
+            {onRetryFailed && (
+              <>
+                <span className="text-ink-faint">·</span>
+                <button
+                  type="button"
+                  onClick={() => onRetryFailed(msg)}
+                  className="inline-flex items-center gap-1 text-ink-secondary hover:text-ink-primary transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Retry</span>
+                </button>
+              </>
+            )}
+            {onDismissFailed && (
+              <>
+                <span className="text-ink-faint">·</span>
+                <button
+                  type="button"
+                  onClick={() => onDismissFailed(msg.id)}
+                  className="text-ink-faint hover:text-ink-secondary transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </>
+            )}
+          </div>
+          {showErrorDetail && (
+            <div className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-1.5 text-micro font-mono text-rose-300/90 break-words max-w-full">
+              {msg.error}
+            </div>
+          )}
+        </div>
+      ) : null;
+
     if (info.kind === 'long_human') {
       const previewSnippet = nonImageBlocks
         .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
@@ -590,73 +653,90 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
         .slice(0, 420);
 
       return (
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-end gap-1.5">
           {renderThumbnailStrip()}
           {nonImageBlocks.length > 0 && (
-            <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
-              {expanded ? (
-                <>
+            <div className="flex items-center justify-end gap-2 w-full">
+              {renderFailedBadge()}
+              <div
+                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2 ${
+                  msg.error ? 'ring-1 ring-rose-500/35' : ''
+                }`}
+              >
+                {expanded ? (
+                  <>
+                    <div className="space-y-2">
+                      {nonImageBlocks.map((b, i) => (
+                        <CoalescedBlockView
+                          key={i}
+                          block={b}
+                          onOpenPath={onOpenPath}
+                          onPreviewImage={onPreviewImage}
+                        />
+                      ))}
+                    </div>
+                    <div className="pt-1 flex justify-end border-t border-line-hairline">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => setExpanded(false)}
+                        iconLeft={<ChevronUp className="w-3.5 h-3.5" />}
+                      >
+                        Collapse
+                      </Button>
+                    </div>
+                  </>
+                ) : (
                   <div className="space-y-2">
-                    {nonImageBlocks.map((b, i) => (
-                      <CoalescedBlockView
-                        key={i}
-                        block={b}
-                        onOpenPath={onOpenPath}
-                        onPreviewImage={onPreviewImage}
-                      />
-                    ))}
-                  </div>
-                  <div className="pt-1 flex justify-end border-t border-line-hairline">
+                    <div className="relative max-h-20 overflow-hidden">
+                      <div className="whitespace-pre-wrap text-body leading-relaxed text-ink-secondary">
+                        {previewSnippet}
+                      </div>
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
+                    </div>
                     <Button
                       size="xs"
                       variant="ghost"
-                      onClick={() => setExpanded(false)}
-                      iconLeft={<ChevronUp className="w-3.5 h-3.5" />}
+                      onClick={() => setExpanded(true)}
+                      iconLeft={<ChevronDown className="w-3.5 h-3.5" />}
+                      className="-ml-2"
                     >
-                      Collapse
+                      Show full message ({info.sizeLabel})
                     </Button>
                   </div>
-                </>
-              ) : (
-                <div className="space-y-2">
-                  <div className="relative max-h-20 overflow-hidden">
-                    <div className="whitespace-pre-wrap text-body leading-relaxed text-ink-secondary">
-                      {previewSnippet}
-                    </div>
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
-                  </div>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => setExpanded(true)}
-                    iconLeft={<ChevronDown className="w-3.5 h-3.5" />}
-                    className="-ml-2"
-                  >
-                    Show full message ({info.sizeLabel})
-                  </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
+          {renderFailedFooter()}
         </div>
       );
     }
 
     return (
-      <div className="flex flex-col items-end gap-2">
+      <div className="flex flex-col items-end gap-1.5">
         {renderThumbnailStrip()}
         {nonImageBlocks.length > 0 && (
-          <div className="max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2">
-            {nonImageBlocks.map((b, i) => (
-              <CoalescedBlockView
-                key={i}
-                block={b}
-                onOpenPath={onOpenPath}
-                onPreviewImage={onPreviewImage}
-              />
-            ))}
+          <div className="flex items-center justify-end gap-2 w-full">
+            {renderFailedBadge()}
+            <div
+              className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2 ${
+                msg.error ? 'ring-1 ring-rose-500/35' : ''
+              }`}
+            >
+              {nonImageBlocks.map((b, i) => (
+                <CoalescedBlockView
+                  key={i}
+                  block={b}
+                  onOpenPath={onOpenPath}
+                  onPreviewImage={onPreviewImage}
+                />
+              ))}
+            </div>
           </div>
         )}
+        {nonImageBlocks.length === 0 && msg.error && renderFailedBadge()}
+        {renderFailedFooter()}
       </div>
     );
   }

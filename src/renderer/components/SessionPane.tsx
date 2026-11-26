@@ -30,6 +30,19 @@ import { QueuedMessagesTray } from './QueuedMessagesTray';
 import { SessionComposer } from './SessionComposer';
 import { SessionHeader } from './SessionHeader';
 
+interface FailedUserEntry {
+  msg: UnifiedMessage;
+  prompt: string;
+  attachments: ImageAttachment[];
+}
+
+/**
+ * Persists failed user messages per session across transcript reloads and
+ * session switches so unsent prompts stay visible with a `!` indicator until
+ * retried or dismissed.
+ */
+const failedUserMessagesBySession = new Map<string, FailedUserEntry[]>();
+
 export interface ComposerDraft {
   text: string;
   attachments: ImageAttachment[];
@@ -122,6 +135,7 @@ export const SessionPane: React.FC<Props> = ({
     sessionId: string;
     msg: UnifiedMessage;
     promptText: string;
+    attachments: ImageAttachment[];
     sentAt: number;
   } | null>(null);
   const currentSessionRef = useRef(session?.id ?? '');
@@ -129,12 +143,24 @@ export const SessionPane: React.FC<Props> = ({
 
   const mergeWithOptimistic = useCallback(
     (reqId: string, incoming: UnifiedMessage[]): UnifiedMessage[] => {
+      let result = incoming;
+      const failedList = failedUserMessagesBySession.get(reqId);
+      if (failedList && failedList.length > 0) {
+        const existingIds = new Set(result.map((m) => m.id));
+        const toAppend = failedList
+          .map((e) => e.msg)
+          .filter((m) => !existingIds.has(m.id));
+        if (toAppend.length > 0) {
+          result = [...result, ...toAppend];
+        }
+      }
+
       const pending = pendingOptimisticRef.current;
-      if (!pending || pending.sessionId !== reqId) return incoming;
+      if (!pending || pending.sessionId !== reqId) return result;
       // Expire after 25s if the harness never wrote it
       if (Date.now() - pending.sentAt > 25_000) {
         pendingOptimisticRef.current = null;
-        return incoming;
+        return result;
       }
       // Once the real transcript contains this user message (or any newer user message), drop the optimistic copy
       const matched = incoming.some((m) => {
@@ -147,12 +173,36 @@ export const SessionPane: React.FC<Props> = ({
       });
       if (matched) {
         pendingOptimisticRef.current = null;
-        return incoming;
+        return result;
       }
-      return [...incoming, pending.msg];
+      return [...result, pending.msg];
     },
     []
   );
+
+  const markPendingFailed = useCallback((targetSid: string, errorText: string): boolean => {
+    const pending = pendingOptimisticRef.current;
+    if (!pending || pending.sessionId !== targetSid) return false;
+    const failedMsg: UnifiedMessage = { ...pending.msg, error: errorText };
+    const existing = failedUserMessagesBySession.get(targetSid) ?? [];
+    failedUserMessagesBySession.set(targetSid, [
+      ...existing.filter((e) => e.msg.id !== failedMsg.id),
+      { msg: failedMsg, prompt: pending.promptText, attachments: pending.attachments },
+    ]);
+    pendingOptimisticRef.current = null;
+    if (currentSessionRef.current === targetSid) {
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === failedMsg.id);
+        if (idx !== -1) {
+          const next = [...prev];
+          next[idx] = failedMsg;
+          return next;
+        }
+        return [...prev, failedMsg];
+      });
+    }
+    return true;
+  }, []);
 
   const isMaster = session?.harness === 'master';
   const sessionId = session?.id ?? '';
@@ -221,14 +271,14 @@ export const SessionPane: React.FC<Props> = ({
     const cached = rendererTranscriptCache.get(sessionId);
     if (cached) {
       lastResultRef.current = cached.result;
-      setMessages(cached.result.messages);
+      setMessages(mergeWithOptimistic(sessionId, cached.result.messages));
       setTotalCount(cached.result.totalCount);
       setLiveActivity(cached.result.liveActivity);
       setLimit(Math.max(DEFAULT_TRANSCRIPT_LIMIT, cached.fetchedLimit));
       setLoading(false);
     } else {
       lastResultRef.current = null;
-      setMessages([]);
+      setMessages(mergeWithOptimistic(sessionId, []));
       setTotalCount(0);
       setLiveActivity(undefined);
       setLimit(DEFAULT_TRANSCRIPT_LIMIT);
@@ -341,7 +391,11 @@ export const SessionPane: React.FC<Props> = ({
         setIsStreaming(true);
         setStreamingBlocks((prev) => [...prev, ev.block!]);
       } else if (ev.kind === 'error' && ev.error) {
-        setStreamError(ev.error);
+        // Attach the error directly to the user message so it stays in the transcript with a `!` indicator
+        const attached = markPendingFailed(sessionId, ev.error);
+        if (!attached) {
+          setStreamError(ev.error);
+        }
       } else if (ev.kind === 'done') {
         setIsStreaming(false);
         setStreamingText('');
@@ -488,6 +542,7 @@ export const SessionPane: React.FC<Props> = ({
           sessionId: session.id,
           msg: optMsg,
           promptText: prompt.trim(),
+          attachments: msgAttachments,
           sentAt,
         };
         setMessages((prev) => [...prev, optMsg]);
@@ -500,7 +555,9 @@ export const SessionPane: React.FC<Props> = ({
           msgAttachments.length > 0 ? msgAttachments : undefined
         );
         if (!res.ok) {
-          setStreamError(res.error || 'Dispatch failed');
+          const errText = res.error || 'Dispatch failed';
+          const attached = markPendingFailed(session.id, errText);
+          if (!attached) setStreamError(errText);
         } else {
           setDispatchNote(res.dispatchedVia || null);
           if (session.dispatchMode === 'tmux-send') {
@@ -512,6 +569,36 @@ export const SessionPane: React.FC<Props> = ({
       }
     },
     [session, isMaster, loadTranscript]
+  );
+
+  const handleDismissFailed = useCallback(
+    (msgId: string) => {
+      if (!sessionId) return;
+      const list = failedUserMessagesBySession.get(sessionId);
+      if (list) {
+        const next = list.filter((e) => e.msg.id !== msgId);
+        if (next.length > 0) failedUserMessagesBySession.set(sessionId, next);
+        else failedUserMessagesBySession.delete(sessionId);
+      }
+      setMessages((prev) => prev.filter((m) => m.id !== msgId));
+    },
+    [sessionId]
+  );
+
+  const handleRetryFailed = useCallback(
+    (msg: UnifiedMessage) => {
+      if (!sessionId) return;
+      const list = failedUserMessagesBySession.get(sessionId) ?? [];
+      const entry = list.find((e) => e.msg.id === msg.id);
+      const fallbackText = msg.blocks
+        .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim();
+      handleDismissFailed(msg.id);
+      void dispatchMessageNow(entry?.prompt ?? fallbackText, entry?.attachments ?? []);
+    },
+    [sessionId, handleDismissFailed, dispatchMessageNow]
   );
 
   const handleSend = useCallback(
@@ -708,6 +795,8 @@ export const SessionPane: React.FC<Props> = ({
                       msg={msg}
                       onOpenPath={handleMessageOpenPath}
                       onPreviewImage={handlePreviewImage}
+                      onRetryFailed={handleRetryFailed}
+                      onDismissFailed={handleDismissFailed}
                     />
                   );
                 }

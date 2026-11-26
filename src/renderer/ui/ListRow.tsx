@@ -55,8 +55,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           <span className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-secondary group-hover:text-ink-primary transition-colors truncate">
             {label}
           </span>
-          <span className="flex-1 h-px bg-line-hairline/70 mx-1" aria-hidden="true" />
-          <span className="flex items-center gap-1.5 text-micro tabular-nums font-normal text-ink-faint shrink-0">
+          <span className="ml-auto flex items-center gap-1.5 text-micro tabular-nums font-normal text-ink-faint shrink-0">
             {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
             {count !== undefined && <span>{count}</span>}
             {collapsed ? (

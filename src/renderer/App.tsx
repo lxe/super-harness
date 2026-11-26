@@ -172,7 +172,7 @@ export const App: React.FC = () => {
   }, []);
 
   const handleCreateDraftConversation = useCallback(
-    (activeFilter?: SidebarFilterTab) => {
+    (activeFilter?: SidebarFilterTab, opts?: { cwd?: string }) => {
       const f =
         activeFilter ??
         ((localStorage.getItem('sh:sidebarFilter') as SidebarFilterTab | null) || 'all');
@@ -185,12 +185,13 @@ export const App: React.FC = () => {
               ? 'claude-tmux'
               : null;
 
-      const defaultCwd = state?.settings.defaultNewSessionCwd || '~';
+      const defaultCwd = opts?.cwd?.trim() || state?.settings.defaultNewSessionCwd || '~';
       const newDraft: DraftConversation = {
         id: `draft:${Date.now()}`,
         harness: preselectedHarness,
         cwd: defaultCwd,
         model: '',
+        reasoningEffort: '',
         remoteControl: true,
         prompt: '',
         createdAt: Date.now(),

@@ -69,7 +69,7 @@ interface Props {
   refreshing: boolean;
   onSelectSession: (id: string) => void;
   onOpenInSplit: (id: string) => void;
-  onNewSession: (activeFilter: SidebarFilterTab) => void;
+  onNewSession: (activeFilter: SidebarFilterTab, opts?: { cwd?: string }) => void;
   onDiscardDraft: (draftId: string) => void;
   onOpenSettings: () => void;
   onRefresh: () => void;
@@ -83,6 +83,23 @@ interface ContextMenuState {
   x: number;
   y: number;
   sessions: UnifiedSession[];
+}
+
+function resolveGroupCwd(items: UnifiedSession[], isUngrouped = false): string | undefined {
+  if (isUngrouped || items.length === 0) return undefined;
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    if (item.cwd) counts.set(item.cwd, (counts.get(item.cwd) ?? 0) + 1);
+  }
+  let bestCwd: string | undefined;
+  let bestCount = 0;
+  for (const [cwd, count] of counts.entries()) {
+    if (count > bestCount) {
+      bestCwd = cwd;
+      bestCount = count;
+    }
+  }
+  return bestCwd;
 }
 
 export const Sidebar: React.FC<Props> = React.memo(({
@@ -857,8 +874,19 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     variant={isHarnessDivider ? 'separator' : 'tree'}
                     collapsed={isTopClosed}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
-                    onAdd={grp.harnessLogo ? () => onNewSession(grp.harnessLogo!) : undefined}
-                    addLabel={grp.harnessLogo ? `New ${grp.label} conversation` : undefined}
+                    onAdd={
+                      grp.harnessLogo
+                        ? () => onNewSession(grp.harnessLogo!)
+                        : () =>
+                            onNewSession(filter, {
+                              cwd: resolveGroupCwd(grp.items ?? [], Boolean(grp.isUngrouped)),
+                            })
+                    }
+                    addLabel={
+                      grp.harnessLogo
+                        ? `New ${grp.label} conversation`
+                        : `New conversation in ${grp.label}`
+                    }
                     icon={topIcon}
                     label={grp.label}
                     count={totalInGroup}
@@ -885,12 +913,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
                         grp.sections.map((sec) => {
                           const isSecClosed = Boolean(collapsed[sec.id]);
                           const secHasWorking = sec.items.some((i) => i.status === 'running');
-                          const secIcon =
-                            sec.label === 'Ungrouped' ? (
-                              <Inbox className="w-3.5 h-3.5 text-ink-muted" />
-                            ) : (
-                              <Folder className="w-3.5 h-3.5 text-ink-secondary" />
-                            );
+                          const isSecUngrouped = sec.label === 'Ungrouped';
+                          const secIcon = isSecUngrouped ? (
+                            <Inbox className="w-3.5 h-3.5 text-ink-muted" />
+                          ) : (
+                            <Folder className="w-3.5 h-3.5 text-ink-secondary" />
+                          );
                           return (
                             <div key={sec.id} className="relative">
                               <SectionHeader
@@ -899,6 +927,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                 onToggle={() =>
                                   setCollapsed((p) => ({ ...p, [sec.id]: !p[sec.id] }))
                                 }
+                                onAdd={() =>
+                                  onNewSession(grp.harnessLogo || filter, {
+                                    cwd: resolveGroupCwd(sec.items, isSecUngrouped),
+                                  })
+                                }
+                                addLabel={`New ${grp.label} conversation in ${sec.label}`}
                                 icon={secIcon}
                                 label={sec.label}
                                 count={sec.items.length}

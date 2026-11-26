@@ -82,12 +82,9 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   }
 
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={!collapsed}
+    <div
       className={cn(
-        'w-full flex items-center gap-2 px-2 bg-surface-rail/95 backdrop-blur-sm hover:bg-surface-subtle rounded-md transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+        'group w-full flex items-center gap-1 px-2 bg-surface-rail/95 backdrop-blur-sm hover:bg-surface-subtle rounded-md transition-colors select-none',
         level === 1
           ? 'h-8 text-label font-semibold text-ink-primary'
           : 'h-7 text-caption font-medium text-ink-muted hover:text-ink-primary',
@@ -95,18 +92,39 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         className
       )}
     >
-      {collapsed ? (
-        <ChevronRight className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-      ) : (
-        <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        className="flex-1 min-w-0 h-full flex items-center gap-2 cursor-pointer focus:outline-none focus-visible:shadow-none"
+      >
+        {collapsed ? (
+          <ChevronRight className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+        )}
+        {icon && <span className="shrink-0 inline-flex">{icon}</span>}
+        <span className="truncate">{label}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-caption tabular-nums font-normal text-ink-faint shrink-0">
+          {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
+          {count !== undefined && <span>{count}</span>}
+        </span>
+      </button>
+      {onAdd && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd();
+          }}
+          title={addLabel || `New conversation in ${label}`}
+          aria-label={addLabel || `New conversation in ${label}`}
+          className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.1] transition-colors shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
       )}
-      {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-      <span className="truncate">{label}</span>
-      <span className="ml-auto flex items-center gap-1.5 text-caption tabular-nums font-normal text-ink-faint">
-        {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
-        {count !== undefined && <span>{count}</span>}
-      </span>
-    </button>
+    </div>
   );
 };
 

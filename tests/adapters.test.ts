@@ -642,11 +642,14 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     expect(pace!.windowWord).toBe('week');
   });
 
-  it('detects Codex active-writer lock errors for automatic codex queue fallback', () => {
+  it('detects Codex active-writer and active-turn errors for automatic codex queue fallback', () => {
     expect(
       isCodexActiveWriterError(
         'Error: thread/resume failed: thread 01a214d5-7edc-7480-8b89-f270e244701a already has an active writer (code -32600)'
       )
+    ).toBe(true);
+    expect(
+      isCodexActiveWriterError('Error: remote thread already has an active turn')
     ).toBe(true);
     expect(isCodexActiveWriterError('Error: network timeout')).toBe(false);
   });

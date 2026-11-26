@@ -1002,8 +1002,15 @@ function parseCodexStreamLine(
   return false;
 }
 
+/**
+ * Matches transient Codex daemon concurrency rejections (`already has an active writer`
+ * or `remote thread already has an active turn`) that should transparently fall back
+ * to `codex queue --resume` instead of surfacing an error to the user.
+ */
 export function isCodexActiveWriterError(text: string): boolean {
-  return /already has an active writer/i.test(text);
+  return /already has an active (?:writer|turn)|turn already in progress|thread is busy/i.test(
+    text
+  );
 }
 
 /**

@@ -35,6 +35,9 @@ BUNDLE_ID="${SH_BUNDLE_ID:-$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER:' "$IOS_DIR/pro
 VERSION="${SH_MARKETING_VERSION:-$(grep -m1 'MARKETING_VERSION:' "$IOS_DIR/project.yml" | awk '{print $2}' | tr -d '"')}"
 GIT_SHA="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local')"
 BUILD_TS="$(date +%Y%m%d-%H%M%S)"
+# A fresh build number per install: iOS caches the app icon (home screen and push
+# notifications) per build, so a constant CFBundleVersion keeps showing a stale icon.
+BUILD_NUMBER="${SH_BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 BUILD_HUMAN="$(date '+%b %d, %Y %I:%M %p %Z')"
 CONFIG="Release"
 if [ "$METHOD" = "development" ]; then
@@ -78,6 +81,7 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   -quiet
 
 echo "Exporting signed IPA (${METHOD})..."

@@ -16,8 +16,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       ref={ref}
       className={cn(
         BASE_CONTROL,
-        inputSize === 'sm' ? 'h-8 px-2.5 text-caption' : 'h-9 px-3 text-label',
-        mono && 'font-mono',
+        inputSize === 'sm'
+          ? 'h-8 px-2.5 py-0 text-caption leading-[30px]'
+          : 'h-9 px-3 py-0 text-label leading-[34px]',
+        mono && 'font-mono pt-[1px]',
         className
       )}
       {...rest}
@@ -38,7 +40,9 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         className={cn(
           BASE_CONTROL,
           'appearance-none cursor-pointer [&>option]:bg-surface-overlay [&>option]:text-ink-primary',
-          inputSize === 'sm' ? 'h-8 pl-3 pr-8 text-caption' : 'h-9 pl-3.5 pr-9 text-label'
+          inputSize === 'sm'
+            ? 'h-8 pl-3 pr-8 py-0 text-caption leading-[30px]'
+            : 'h-9 pl-3.5 pr-9 py-0 text-label leading-[34px]'
         )}
         {...rest}
       >

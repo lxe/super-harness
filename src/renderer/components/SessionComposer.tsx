@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ImagePlus,
+  ListPlus,
   Loader2,
   Search,
   Square,
@@ -46,6 +47,7 @@ export interface SessionComposerProps {
   onDropFiles: (files: FileList) => void;
   onPickImages: () => void;
   onSend: () => void;
+  onQueue?: () => void;
   onAbort: () => void;
 }
 
@@ -74,6 +76,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
     onDropFiles,
     onPickImages,
     onSend,
+    onQueue,
     onAbort,
   }) => {
     const [dragOver, setDragOver] = useState(false);
@@ -240,7 +243,11 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              onSend();
+              if ((e.ctrlKey || e.altKey || e.metaKey) && onQueue && !isMaster) {
+                onQueue();
+              } else {
+                onSend();
+              }
             }
           }}
           placeholder={
@@ -493,6 +500,21 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {isAgentBusy &&
+              !isMaster &&
+              onQueue &&
+              (Boolean(input.trim()) || attachments.length > 0) && (
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={onQueue}
+                  title="Queue for after current turn (Ctrl/Option+Enter)"
+                  aria-label="Queue message"
+                  className="w-7 h-7 rounded-full border border-line-subtle bg-white/[0.04] text-ink-muted hover:text-ink-primary hover:bg-white/[0.09] hover:border-line-strong disabled:opacity-25 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer"
+                >
+                  <ListPlus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                </button>
+              )}
             {(isStreaming || isAgentBusy) &&
             (isMaster || (!input.trim() && attachments.length === 0)) ? (
               <button
@@ -510,9 +532,11 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                 disabled={sending || (!input.trim() && attachments.length === 0)}
                 onClick={onSend}
                 title={
-                  isAgentBusy ? 'Queue message (sends after agent finishes)' : 'Send (Enter)'
+                  isAgentBusy
+                    ? 'Steer / Send now (Enter) · Ctrl/Option+Enter to queue'
+                    : 'Send (Enter)'
                 }
-                aria-label={isAgentBusy ? 'Queue message' : 'Send'}
+                aria-label={isAgentBusy ? 'Steer now' : 'Send'}
                 className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {sending ? (

@@ -745,6 +745,43 @@ export const SessionPane: React.FC<Props> = ({
     [sessionId, handleDismissFailed, dispatchMessageNow]
   );
 
+  const handleQueue = useCallback(async () => {
+    if (!session || isMaster) return;
+    const prompt = input.trim();
+    const currentAttachments = attachments;
+    if (!prompt && currentAttachments.length === 0) return;
+
+    onDraftChange(session.id, { text: '', attachments: [] });
+
+    if (session.harnessGroup === 'codex') {
+      try {
+        const qRes = await window.superHarness.queueMessage(
+          session.id,
+          prompt,
+          currentAttachments.length > 0 ? currentAttachments : undefined
+        );
+        if (qRes.ok) {
+          setDispatchNote(qRes.dispatchedVia || 'Codex queue');
+          void loadTranscript(true);
+          setTimeout(() => void loadTranscript(true), 600);
+          return;
+        }
+      } catch {
+        // Fall back to Super Harness's persistent queue below
+      }
+    }
+
+    const queuedItem: QueuedMessageItem = {
+      id: `sh-q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      text: prompt,
+      attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
+      createdAt: Date.now(),
+      source: 'super-harness',
+    };
+    onQueueChange(session.id, (prev) => [...prev, queuedItem]);
+    setDispatchNote('Queued until current turn finishes');
+  }, [session, isMaster, input, attachments, onDraftChange, onQueueChange, loadTranscript]);
+
   const handleSend = useCallback(
     async (customText?: string) => {
       if (!session) return;
@@ -756,49 +793,15 @@ export const SessionPane: React.FC<Props> = ({
         onDraftChange(session.id, { text: '', attachments: [] });
       }
 
-      // If the agent is currently working, queue the message cleanly instead of clobbering the turn
-      if (isAgentBusy && !customText) {
-        if (session.harnessGroup === 'codex') {
-          try {
-            const qRes = await window.superHarness.queueMessage(
-              session.id,
-              prompt,
-              currentAttachments.length > 0 ? currentAttachments : undefined
-            );
-            if (qRes.ok) {
-              setDispatchNote(qRes.dispatchedVia || 'Codex queue');
-              void loadTranscript(true);
-              setTimeout(() => void loadTranscript(true), 600);
-              return;
-            }
-          } catch {
-            // Fall back to Super Harness's persistent queue below
-          }
-        }
-
-        const queuedItem: QueuedMessageItem = {
-          id: `sh-q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          text: prompt,
-          attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
-          createdAt: Date.now(),
-          source: 'super-harness',
-        };
-        onQueueChange(session.id, (prev) => [...prev, queuedItem]);
-        return;
-      }
-
-      await dispatchMessageNow(prompt, currentAttachments);
+      // Default Enter always sends/steers immediately (even while working);
+      // Ctrl+Enter / Option+Enter explicitly queues for after the current turn.
+      await dispatchMessageNow(
+        prompt,
+        currentAttachments,
+        isAgentBusy ? { force: true } : undefined
+      );
     },
-    [
-      session,
-      input,
-      attachments,
-      isAgentBusy,
-      onDraftChange,
-      onQueueChange,
-      dispatchMessageNow,
-      loadTranscript,
-    ]
+    [session, input, attachments, isAgentBusy, onDraftChange, dispatchMessageNow]
   );
 
   // Auto-dequeue is coordinated globally in App.tsx so queued messages drain across
@@ -1161,6 +1164,7 @@ export const SessionPane: React.FC<Props> = ({
             onDropFiles={handleDropFiles}
             onPickImages={() => void handlePickImages()}
             onSend={() => void handleSend()}
+            onQueue={() => void handleQueue()}
             onAbort={() => void handleAbort()}
           />
         </div>

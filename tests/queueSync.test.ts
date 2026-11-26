@@ -230,4 +230,19 @@ describe('Persistent Super Harness queue storage', () => {
     expect(appSrc).toContain('Date.now() - cachedEntry.cachedAt < 20_000');
     expect(paneSrc).toContain('outline-none focus:outline-none');
   });
+
+  it('defaults Enter to immediate steer/send while busy and binds Ctrl/Alt+Enter to queue', () => {
+    const composerSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/components/SessionComposer.tsx'),
+      'utf8'
+    );
+    const paneSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/components/SessionPane.tsx'),
+      'utf8'
+    );
+
+    expect(composerSrc).toContain('if ((e.ctrlKey || e.altKey || e.metaKey) && onQueue && !isMaster)');
+    expect(paneSrc).toContain('isAgentBusy ? { force: true } : undefined');
+    expect(paneSrc).toContain('onQueue={() => void handleQueue()}');
+  });
 });

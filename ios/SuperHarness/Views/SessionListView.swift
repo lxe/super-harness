@@ -1234,78 +1234,76 @@ private struct SessionListRow: View {
         let hostBadge = SessionRowFormatting.hostBadgeLabel(session.hostAddress)
         let subtitle = SessionRowFormatting.subtitle(for: session)
 
-        HStack(alignment: .center, spacing: 12) {
-            RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
-                .fill(vis.color.opacity(0.10))
-                .frame(width: 32, height: 32)
-                .overlay(
-                    HarnessLogoView(harness: session.harness, size: 17)
-                )
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .center, spacing: 8) {
+                HarnessLogoView(harness: session.harness, size: 15)
+                    .frame(width: 16, height: 16)
 
-            VStack(alignment: .leading, spacing: 3) {
                 SHShimmerText(
                     text: session.displayTitle,
                     font: SHTypography.label.weight(.medium),
                     isActive: isBusy
                 )
 
-                if hostBadge != nil || subtitle != nil {
-                    HStack(alignment: .center, spacing: 6) {
-                        if let hostBadge, let address = session.hostAddress {
-                            Text(hostBadge)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(SHColor.inkSecondary)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .fill(SHColor.surfaceRaised)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .stroke(SHColor.lineHairline, lineWidth: 1)
-                                )
-                                .fixedSize()
-                                .accessibilityLabel(SessionRowFormatting.hostAccessibilityLabel(address: address, label: session.hostLabel))
-                        }
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(SHTypography.micro)
-                                .foregroundStyle(SHColor.inkMuted)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
+                Spacer(minLength: 8)
+
+                // A working thread is shown by its shimmering title, so the right slot keeps the time.
+                // With Reduce Motion on, the shimmer is still, so a small dot marks the thread instead.
+                if isBusy && reduceMotion {
+                    Circle()
+                        .fill(vis.color)
+                        .frame(width: 7, height: 7)
+                        .accessibilityLabel("Working")
+                } else if session.status == .waitingInput && !isBusy {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(SHColor.statusWarning)
+                        .accessibilityLabel("Question pending")
+                } else {
+                    HStack(spacing: 6) {
+                        Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
+                            .font(SHTypography.micro.monospacedDigit())
+                            .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)
+                            .fixedSize()
+                        if session.isUnread {
+                            Circle()
+                                .fill(SHColor.brandMaster)
+                                .frame(width: 7, height: 7)
+                                .accessibilityLabel("Unread")
+                                .accessibilityIdentifier("row.unread")
                         }
                     }
                 }
             }
 
-            Spacer(minLength: 6)
-
-            // A working thread is shown by its shimmering title, so the right slot keeps the time.
-            // With Reduce Motion on, the shimmer is still, so a small dot marks the thread instead.
-            if isBusy && reduceMotion {
-                Circle()
-                    .fill(vis.color)
-                    .frame(width: 7, height: 7)
-                    .accessibilityLabel("Working")
-            } else if session.status == .waitingInput && !isBusy {
-                Image(systemName: "questionmark.circle.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(SHColor.statusWarning)
-                    .accessibilityLabel("Question pending")
-            } else {
-                HStack(spacing: 6) {
-                    Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
-                        .font(SHTypography.micro.monospacedDigit())
-                        .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)
-                    if session.isUnread {
-                        Circle()
-                            .fill(SHColor.brandMaster)
-                            .frame(width: 8, height: 8)
-                            .accessibilityLabel("Unread")
-                            .accessibilityIdentifier("row.unread")
+            if hostBadge != nil || subtitle != nil {
+                HStack(alignment: .center, spacing: 6) {
+                    if let hostBadge, let address = session.hostAddress {
+                        Text(hostBadge)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(SHColor.surfaceRaised)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .stroke(SHColor.lineHairline, lineWidth: 1)
+                            )
+                            .fixedSize()
+                            .accessibilityLabel(SessionRowFormatting.hostAccessibilityLabel(address: address, label: session.hostLabel))
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(SHTypography.micro)
+                            .foregroundStyle(SHColor.inkMuted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .contentShape(Rectangle())

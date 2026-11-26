@@ -50,7 +50,6 @@ import {
   isSingleHarnessFilter,
   SIDEBAR_SORT_OPTIONS,
   sortSidebarGroups,
-  hostBadgeLabel,
   type SidebarSortBy,
   type DragSectionTarget,
   type SidebarFilterTab,
@@ -93,6 +92,23 @@ interface ContextMenuState {
   y: number;
   sessions: UnifiedSession[];
   sectionLabel?: string;
+}
+
+const REMOTE_HOST_ICON_COLORS = [
+  'text-sky-400',
+  'text-emerald-400',
+  'text-amber-400',
+  'text-rose-400',
+  'text-violet-400',
+  'text-teal-400',
+];
+
+function remoteHostColorClass(hostKey: string): string {
+  let h = 0;
+  for (let i = 0; i < hostKey.length; i += 1) {
+    h = (h * 31 + hostKey.charCodeAt(i)) | 0;
+  }
+  return REMOTE_HOST_ICON_COLORS[Math.abs(h) % REMOTE_HOST_ICON_COLORS.length];
 }
 
 function resolveGroupCwd(items: UnifiedSession[], isUngrouped = false): string | undefined {
@@ -793,28 +809,28 @@ export const Sidebar: React.FC<Props> = React.memo(({
         meta={
           s.unread || s.hostAddress || s.harness === 'claude-tmux' ? (
             <>
+              {s.hostAddress ? (
+                <span
+                  title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
+                  className={remoteHostColorClass(s.hostAddress || s.hostLabel || 'remote')}
+                >
+                  <Laptop className="w-3.5 h-3.5" />
+                </span>
+              ) : s.harness === 'claude-tmux' ? (
+                <span
+                  title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'local'}`}
+                  className="text-ink-muted"
+                >
+                  <Laptop className="w-3.5 h-3.5" />
+                </span>
+              ) : undefined}
               {s.unread && (
                 <span
                   aria-label="Unread"
                   title="New activity since you last opened this thread"
-                  className="w-2 h-2 rounded-full bg-accent-primary"
+                  className="w-2 h-2 rounded-full bg-accent-primary shrink-0"
                 />
               )}
-              {s.hostAddress ? (
-            <span
-              title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-              className="rounded px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums text-ink-muted bg-white/[0.04] border border-line-hairline"
-            >
-              {hostBadgeLabel(s.hostAddress)}
-            </span>
-          ) : s.harness === 'claude-tmux' ? (
-            <span
-              title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'remote'}`}
-              className="text-ink-muted"
-            >
-              <Laptop className="w-3.5 h-3.5" />
-            </span>
-          ) : undefined}
             </>
           ) : undefined
         }
@@ -1266,7 +1282,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             No conversations found
           </div>
         ) : (
-          <div className="pt-2 space-y-2.5">
+          <div className="space-y-1">
             {topGroups.map((grp, grpIdx) => {
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
@@ -1274,7 +1290,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 return (
                   <div
                     key={grp.id}
-                    className={`space-y-0.5 ${
+                    className={`space-y-0.5 ${grpIdx === 0 ? 'pt-2' : ''} ${
                       grpIdx < topGroups.length - 1 ? 'pb-2 border-b border-line-hairline/60' : ''
                     }`}
                   >

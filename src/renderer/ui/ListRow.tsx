@@ -45,19 +45,16 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 }) => {
   const isTopLevel = variant === 'separator' || level === 1;
 
-  return (
+  const pillContent = (
     <div
       data-harness-separator={variant === 'separator' ? 'true' : undefined}
       onContextMenu={onContextMenu}
       className={cn(
         'group w-full flex items-center gap-1 rounded-lg transition-colors select-none',
         isTopLevel
-          ? 'h-8 px-2.5 bg-surface-subtle/90 hover:bg-surface-raised/90 border border-line-hairline text-[13px] font-semibold tracking-[-0.01em] text-ink-primary backdrop-blur-md'
-          : 'h-7 px-2 bg-surface-rail/95 hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary backdrop-blur-sm',
-        sticky &&
-          (isTopLevel
-            ? "sticky top-2 z-20 before:content-[''] before:absolute before:-top-[9px] before:inset-x-[-10px] before:h-2 before:bg-surface-rail before:pointer-events-none"
-            : 'sticky top-10 z-10'),
+          ? 'h-8 px-2.5 bg-surface-subtle hover:bg-surface-raised border border-line-hairline text-[13px] font-semibold tracking-[-0.01em] text-ink-primary'
+          : 'h-7 px-2 bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary',
+        !isTopLevel && sticky && 'sticky top-10 z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
@@ -104,6 +101,16 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
       )}
     </div>
   );
+
+  if (isTopLevel && sticky) {
+    return (
+      <div className="sticky top-0 z-20 -mx-2.5 px-2.5 pt-2 bg-surface-rail">
+        {pillContent}
+      </div>
+    );
+  }
+
+  return pillContent;
 };
 
 export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {

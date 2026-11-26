@@ -999,17 +999,18 @@ private struct HarnessSwitcherStrip: View {
     @State private var ignoreTapsUntil: Date = .distantPast
     /// Set when a gauge was held and released without being dragged: shows its shortcuts.
     @State private var shortcutsHarness: HarnessGroup?
-    @State private var isAllShortcutsPresented: Bool = false
 
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
     private static let scrollableCellWidth: CGFloat = 62
-    /// "All" plus five harnesses still fit side by side on a phone; beyond that the dock scrolls.
+    /// Six gauges still fit side by side on a phone; beyond that the dock scrolls. There is no
+    /// "All" gauge: with no harness selected nothing is highlighted and every harness is shown,
+    /// and tapping the selected gauge deselects it.
     private static let maxFittedSlots = 6
     private static let stripSpace = "harnessStrip"
 
     private var totalSlots: Int {
-        max(1, 1 + store.harnessOrder.count)
+        max(1, store.harnessOrder.count)
     }
 
     private var needsHorizontalScroll: Bool {
@@ -1024,20 +1025,19 @@ private struct HarnessSwitcherStrip: View {
         return max(1, (stripWidth - Self.stripPadding * 2 - gaps) / CGFloat(totalSlots))
     }
 
-    /// Centre of the cell at `slot` (0 is "All", 1...N are the harnesses), in strip coordinates.
+    /// Centre of the cell at `slot` (the harness's index in the order), in strip coordinates.
     private func cellCenter(slot: Int) -> CGFloat {
         Self.stripPadding + cellWidth / 2 + CGFloat(slot) * (cellWidth + Self.cellSpacing)
     }
 
     private var chipsRow: some View {
         HStack(spacing: Self.cellSpacing) {
-            allChip
             ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
                 let isDragged = drag?.harness == group
                 harnessChip(group)
                     .scaleEffect(isDragged ? 1.14 : 1)
                     .shadow(color: .black.opacity(isDragged ? 0.45 : 0), radius: 8, y: 3)
-                    .offset(x: isDragged ? (drag?.x ?? 0) - cellCenter(slot: index + 1) : 0)
+                    .offset(x: isDragged ? (drag?.x ?? 0) - cellCenter(slot: index) : 0)
                     .zIndex(isDragged ? 1 : 0)
                     .gesture(
                         HarnessHoldDragGesture(
@@ -1085,7 +1085,7 @@ private struct HarnessSwitcherStrip: View {
             guard let state else { return }
             // The harness slot under the finger takes the dragged gauge.
             let raw = Int(((state.x - Self.stripPadding) / (cellWidth + Self.cellSpacing)).rounded(.down))
-            let targetIndex = min(max(raw - 1, 0), store.harnessOrder.count - 1)
+            let targetIndex = min(max(raw, 0), store.harnessOrder.count - 1)
             let target = store.harnessOrder[targetIndex]
             if target != state.harness {
                 store.moveHarness(state.harness, onto: target)
@@ -1112,47 +1112,6 @@ private struct HarnessSwitcherStrip: View {
         #if canImport(UIKit)
         UISelectionFeedbackGenerator().selectionChanged()
         #endif
-    }
-
-    private var allChip: some View {
-        let isSelected = store.selectedHarnessFilter == nil
-        let working = HarnessGroup.allCases.contains { store.isAnyWorking(for: $0) }
-        return Button {
-            guard Date() >= ignoreTapsUntil else { return }
-            withAnimation(.easeInOut(duration: 0.16)) {
-                store.selectedHarnessFilter = nil
-            }
-        } label: {
-            chipCell(isSelected: isSelected) {
-                SHRadialGauge(
-                    value: peakBarPercent,
-                    tint: SHColor.inkSecondary,
-                    estimated: true,
-                    isWorking: working,
-                    isActive: isSelected
-                ) {
-                    Text("All")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkMuted)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("All harnesses")
-        .accessibilityValue(gaugeAccessibilityValue(percent: peakBarPercent, working: working))
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        // No .contextMenu here: inside a List row SwiftUI applies it to the whole row, which
-        // would swallow the long press on every harness gauge. Holding "All" shows its shortcut
-        // the same way the harness gauges do.
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                ignoreTapsUntil = Date().addingTimeInterval(0.5)
-                isAllShortcutsPresented = true
-            }
-        )
-        .confirmationDialog("All Harnesses", isPresented: $isAllShortcutsPresented, titleVisibility: .visible) {
-            Button("Usage") { store.openUsageSheet(for: nil) }
-        }
     }
 
     private func harnessChip(_ group: HarnessGroup) -> some View {
@@ -1208,14 +1167,6 @@ private struct HarnessSwitcherStrip: View {
         if let percent { parts.append("\(Int(percent.rounded())) percent of quota used") }
         if working { parts.append("working") }
         return parts.joined(separator: ", ")
-    }
-
-    /// Desktop's "All" gauge shows the highest quota use across harnesses.
-    private var peakBarPercent: Double? {
-        guard let usage = store.usage else { return nil }
-        return usage.allSummaries
-            .compactMap { $0.barPercent ?? UsageMetrics.pickHeroWindow($0.windows).hero?.usedPercent }
-            .max()
     }
 }
 

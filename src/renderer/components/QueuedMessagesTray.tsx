@@ -32,7 +32,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
   const subtitle =
     !isAgentBusy && allNative && harnessLabel
       ? `Held in ${harnessLabel} queue · active in ${harnessLabel} app`
-      : 'Sends after agent finishes working';
+      : null;
 
   return (
     <div className="rounded-2xl border border-line-subtle bg-surface-subtle overflow-hidden">
@@ -49,9 +49,11 @@ export const QueuedMessagesTray: React.FC<Props> = ({
           <Badge tone="neutral" mono>
             {items.length}
           </Badge>
-          <span className="text-micro text-ink-faint leading-[1.35] pt-[1px] truncate">
-            {subtitle}
-          </span>
+          {subtitle && (
+            <span className="text-micro text-ink-faint leading-[1.35] pt-[1px] truncate">
+              {subtitle}
+            </span>
+          )}
         </div>
         {collapsed ? (
           <ChevronUp className="w-3.5 h-3.5 text-ink-faint shrink-0" />

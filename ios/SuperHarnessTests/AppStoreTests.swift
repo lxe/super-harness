@@ -681,4 +681,44 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(withTrailing.last?.id, "stream-r-1")
         XCTAssertEqual(withTrailing.last?.blocks, [.text(text: "Added @omnara and pushed.")])
     }
+
+    @MainActor
+    func testPendingMessageNeverDisappearsOnQueuedOrSyntheticEcho() {
+        let sid = "antigravity:test-no-thrash"
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: .init(suiteName: UUID().uuidString)!)
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: sid, messages: [], totalCount: 0, hasMore: false))
+
+        let pending = store.submitMessage(for: sid, text: "keep this bubble steady", attachments: [])
+        XCTAssertNotNil(pending)
+        XCTAssertEqual(store.messages(for: sid).count, 1)
+
+        // 1. Host sends transient queuedMessages before disk flush -> pending bubble MUST stay visible!
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid,
+            messages: [],
+            totalCount: 0,
+            hasMore: false,
+            liveActivity: LiveActivityState(isWorking: true, queuedMessages: [QueuedMessageItem(text: "keep this bubble steady")])
+        ))
+        XCTAssertEqual(store.messages(for: sid).count, 1, "Message must NEVER vanish when temporarily echoed in queuedMessages")
+
+        // 2. Synthetic mobile-opt-* message must NOT drop pending either!
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid,
+            messages: [UnifiedMessage(id: "mobile-opt-123", role: .user, timestamp: Date().timeIntervalSince1970 * 1000.0, blocks: [.text(text: "keep this bubble steady")])],
+            totalCount: 1,
+            hasMore: false
+        ))
+        XCTAssertFalse(store.pendingOutgoingBySessionId[sid]?.isEmpty ?? true, "Synthetic mobile-opt-* must not clear pending outgoing state")
+
+        // 3. Real persisted user message arrives -> atomically swaps with zero gap and zero duplication!
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid,
+            messages: [UnifiedMessage(id: "agy-u-1", role: .user, timestamp: Date().timeIntervalSince1970 * 1000.0, blocks: [.text(text: "keep this bubble steady")])],
+            totalCount: 1,
+            hasMore: false
+        ))
+        XCTAssertTrue(store.pendingOutgoingBySessionId[sid]?.isEmpty ?? true)
+        XCTAssertEqual(store.messages(for: sid).map(\.id), ["agy-u-1"])
+    }
 }

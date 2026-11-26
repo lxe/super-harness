@@ -66,10 +66,10 @@ public struct LiveStepsBarView: View {
                             Image(systemName: "terminal")
                                 .font(.system(size: 11))
                                 .foregroundStyle(accentColor)
-                            Text(task.command ?? task.summary)
-                                .font(SHTypography.monoSmall)
+                            Text(task.summary.isEmpty ? (task.command ?? "Running task") : task.summary)
+                                .font(SHTypography.caption)
                                 .foregroundStyle(SHColor.inkSecondary)
-                                .lineLimit(2)
+                                .lineLimit(1)
                         }
                     }
                 }

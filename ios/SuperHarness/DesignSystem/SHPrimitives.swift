@@ -44,34 +44,34 @@ public struct SHGlassCircleButton: View {
     }
 }
 
-/// Compact centered Liquid Glass header pill with smaller title + subtle project subtitle.
+/// Compact centered Liquid Glass header pill matching the exact 38pt height of the left/right chrome pills.
+/// Uses the harness icon on the left + crisp single-line title for balanced horizontal symmetry.
 public struct SHFloatingTitlePill: View {
     public let title: String
     public let subtitle: String?
+    public let harness: HarnessKind?
     public var onTap: (() -> Void)? = nil
 
-    public init(title: String, subtitle: String? = nil, onTap: (() -> Void)? = nil) {
+    public init(title: String, subtitle: String? = nil, harness: HarnessKind? = nil, onTap: (() -> Void)? = nil) {
         self.title = title
         self.subtitle = subtitle
+        self.harness = harness
         self.onTap = onTap
     }
 
     public var body: some View {
-        let content = VStack(spacing: 1) {
+        let content = HStack(spacing: 7) {
+            if let harness {
+                HarnessLogoView(harness: harness, size: 14)
+            }
             Text(title)
-                .font(.system(size: 13.5, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SHColor.inkPrimary)
                 .lineLimit(1)
-            if let subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(SHColor.inkMuted)
-                    .lineLimit(1)
-            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, subtitle?.isEmpty == false ? 6 : 9)
-        .frame(maxWidth: 215)
+        .padding(.horizontal, 13)
+        .frame(height: 38)
+        .frame(maxWidth: 225)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
         .shadow(color: Color.black.opacity(0.32), radius: 8, y: 3)
@@ -83,6 +83,94 @@ public struct SHFloatingTitlePill: View {
             content
         }
     }
+}
+
+// MARK: - Bespoke Session Row Status Badges
+
+/// Compact amber `?` badge for sessions awaiting user input or approval.
+public struct SHQuestionBadge: View {
+    public init() {}
+
+    public var body: some View {
+        ZStack {
+            Circle()
+                .fill(SHColor.statusWarning)
+                .frame(width: 15, height: 15)
+            Image(systemName: "questionmark")
+                .font(.system(size: 8.5, weight: .black))
+                .foregroundStyle(Color(hex: 0x16171B))
+        }
+        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.75))
+        .shadow(color: Color.black.opacity(0.35), radius: 2, y: 1)
+    }
+}
+
+/// Compact emerald mini-robot badge indicating a live running session process on the desktop host.
+public struct SHMiniRobotBadge: View {
+    public init() {}
+
+    public var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color(hex: 0x132E24))
+                .frame(width: 15, height: 15)
+            SHMiniRobotGlyph()
+                .frame(width: 9, height: 9)
+        }
+        .overlay(Circle().stroke(SHColor.statusSuccess.opacity(0.85), lineWidth: 1.0))
+        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.5).padding(-1.2))
+        .shadow(color: Color.black.opacity(0.35), radius: 2, y: 1)
+    }
+}
+
+private struct SHMiniRobotGlyph: View {
+    var body: some View {
+        VStack(spacing: 0.8) {
+            // Antenna tip
+            Circle()
+                .fill(SHColor.statusSuccess)
+                .frame(width: 2.0, height: 2.0)
+            // Robot visor head with two glowing eyes
+            ZStack {
+                RoundedRectangle(cornerRadius: 2.0, style: .continuous)
+                    .fill(SHColor.statusSuccess)
+                    .frame(width: 8.0, height: 5.5)
+                HStack(spacing: 2.0) {
+                    Circle().fill(Color(hex: 0x111215)).frame(width: 1.6, height: 1.6)
+                    Circle().fill(Color(hex: 0x111215)).frame(width: 1.6, height: 1.6)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Synchronous In-Memory Media Image Cache (Zero-Flash Handoff)
+
+@MainActor
+public final class SHMediaImageCache {
+    public static let shared = SHMediaImageCache()
+    #if canImport(UIKit)
+    private let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 120
+        return c
+    }()
+
+    public func image(for path: String) -> UIImage? {
+        guard !path.isEmpty else { return nil }
+        return cache.object(forKey: path as NSString)
+    }
+
+    public func store(_ image: UIImage, for path: String) {
+        guard !path.isEmpty else { return }
+        cache.setObject(image, forKey: path as NSString)
+    }
+
+    public func store(data: Data, for path: String) {
+        guard !path.isEmpty, let img = UIImage(data: data) else { return }
+        cache.setObject(img, forKey: path as NSString)
+    }
+    #endif
 }
 
 /// Right-side Liquid Glass capsule combining an optional live activity ring and a menu button.
@@ -146,7 +234,7 @@ public struct SHComposerSurface<Content: View>: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
             )
-            .shadow(color: Color.black.opacity(0.48), radius: 14, x: 0, y: -3)
+            .shadow(color: Color.black.opacity(0.42), radius: 16, x: 0, y: 4)
     }
 }
 
@@ -218,7 +306,7 @@ public struct SHInlineDisclosureRow: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -344,7 +432,12 @@ private struct SHAttachmentThumbTile: View {
                   remoteImage == nil,
                   !item.path.isEmpty,
                   let loader = onLoadMedia else { return }
+            if let cached = SHMediaImageCache.shared.image(for: item.path) {
+                remoteImage = cached
+                return
+            }
             if let data = await loader(item.path), let img = UIImage(data: data) {
+                SHMediaImageCache.shared.store(img, for: item.path)
                 remoteImage = img
             }
             #endif
@@ -354,7 +447,7 @@ private struct SHAttachmentThumbTile: View {
     private var mediaTile: some View {
         ZStack {
             #if canImport(UIKit)
-            if let img = DataURLImageDecoder.decode(item.dataUrl) ?? remoteImage {
+            if let img = DataURLImageDecoder.decode(item.dataUrl) ?? SHMediaImageCache.shared.image(for: item.path) ?? remoteImage {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
@@ -450,5 +543,92 @@ private struct SHAttachmentThumbTile: View {
     private func fileExtBadge(for name: String) -> String {
         let ext = (name as NSString).pathExtension.uppercased()
         return ext.isEmpty ? "FILE" : ext
+    }
+}
+
+
+// MARK: - Combined Super Harness Logo + Live Status Core
+
+/// Renders the official Super Harness 3-arm geometric logo with its center core dynamically
+/// tinted to reflect live host connection health (green = live, amber = connecting, red = error).
+public struct SuperHarnessStatusLogo: View {
+    public let statusColor: Color
+    public var size: CGFloat = 22
+
+    public init(statusColor: Color, size: CGFloat = 22) {
+        self.statusColor = statusColor
+        self.size = size
+    }
+
+    public var body: some View {
+        Canvas { ctx, sz in
+            let sx = sz.width / 24.0
+            let sy = sz.height / 24.0
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
+
+            var topArm = Path()
+            topArm.move(to: pt(12, 2.2))
+            topArm.addLine(to: pt(20.4, 7.05))
+            topArm.addLine(to: pt(17.4, 8.8))
+            topArm.addLine(to: pt(12, 5.65))
+            topArm.addLine(to: pt(6.6, 8.8))
+            topArm.addLine(to: pt(3.6, 7.05))
+            topArm.closeSubpath()
+            ctx.fill(
+                topArm,
+                with: .linearGradient(
+                    Gradient(colors: [Color(hex: 0x818CF8), Color(hex: 0x60A5FA)]),
+                    startPoint: pt(3, 3),
+                    endPoint: pt(21, 12)
+                )
+            )
+
+            var leftArm = Path()
+            leftArm.move(to: pt(3.6, 8.95))
+            leftArm.addLine(to: pt(6.6, 10.7))
+            leftArm.addLine(to: pt(6.6, 16.2))
+            leftArm.addLine(to: pt(11.15, 18.85))
+            leftArm.addLine(to: pt(11.15, 22.3))
+            leftArm.addLine(to: pt(3.6, 17.95))
+            leftArm.closeSubpath()
+            ctx.fill(
+                leftArm,
+                with: .linearGradient(
+                    Gradient(colors: [Color(hex: 0x60A5FA), Color(hex: 0x10A37F)]),
+                    startPoint: pt(4, 8),
+                    endPoint: pt(12, 21)
+                )
+            )
+
+            var rightArm = Path()
+            rightArm.move(to: pt(20.4, 8.95))
+            rightArm.addLine(to: pt(20.4, 17.95))
+            rightArm.addLine(to: pt(12.85, 22.3))
+            rightArm.addLine(to: pt(12.85, 18.85))
+            rightArm.addLine(to: pt(17.4, 16.2))
+            rightArm.addLine(to: pt(17.4, 10.7))
+            rightArm.closeSubpath()
+            ctx.fill(
+                rightArm,
+                with: .linearGradient(
+                    Gradient(colors: [Color(hex: 0xD97757), Color(hex: 0x818CF8)]),
+                    startPoint: pt(20, 8),
+                    endPoint: pt(12, 21)
+                )
+            )
+
+            // Live status core inside the logo
+            var core = Path()
+            core.move(to: pt(12, 8.4))
+            core.addLine(to: pt(15.35, 10.35))
+            core.addLine(to: pt(15.35, 14.25))
+            core.addLine(to: pt(12, 16.2))
+            core.addLine(to: pt(8.65, 14.25))
+            core.addLine(to: pt(8.65, 10.35))
+            core.closeSubpath()
+            ctx.fill(core, with: .color(statusColor))
+        }
+        .frame(width: size, height: size)
+        .shadow(color: statusColor.opacity(0.35), radius: 4, x: 0, y: 0)
     }
 }

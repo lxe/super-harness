@@ -4,7 +4,6 @@ import SwiftUI
 
 public struct ObsidianShimmerModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = -1.0
 
     public init() {}
 
@@ -12,36 +11,34 @@ public struct ObsidianShimmerModifier: ViewModifier {
         if reduceMotion {
             content
         } else {
-            content
-                .overlay {
-                    GeometryReader { geo in
-                        let width = max(geo.size.width, 120)
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0.0),
-                                .init(color: Color(hex: 0x292C35).opacity(0.95), location: 0.45),
-                                .init(color: Color.white.opacity(0.06), location: 0.50),
-                                .init(color: Color(hex: 0x292C35).opacity(0.95), location: 0.55),
-                                .init(color: .clear, location: 1.0),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .frame(width: width * 1.4)
-                        .offset(x: phase * width * 1.4)
-                        .blendMode(.screen)
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+                let period: Double = 1.35
+                let raw = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
+                let eased = raw < 0.5 ? 2 * raw * raw : 1 - pow(-2 * raw + 2, 2) / 2
+                let phase = CGFloat(-1.0 + eased * 2.25)
+
+                content
+                    .overlay {
+                        GeometryReader { geo in
+                            let width = max(geo.size.width, 120)
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0.0),
+                                    .init(color: Color(hex: 0x2F3545).opacity(0.95), location: 0.38),
+                                    .init(color: Color.white.opacity(0.12), location: 0.50),
+                                    .init(color: Color(hex: 0x2F3545).opacity(0.95), location: 0.62),
+                                    .init(color: .clear, location: 1.0),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            .frame(width: width * 1.35)
+                            .offset(x: phase * width * 1.35)
+                            .blendMode(.screen)
+                        }
+                        .mask(content)
                     }
-                    .mask(content)
-                }
-                .onAppear {
-                    phase = -1.0
-                    withAnimation(
-                        .easeInOut(duration: 1.35)
-                            .repeatForever(autoreverses: false)
-                    ) {
-                        phase = 1.2
-                    }
-                }
+            }
         }
     }
 }

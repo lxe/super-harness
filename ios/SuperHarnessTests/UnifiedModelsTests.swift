@@ -504,4 +504,51 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(picked.hero?.id, "five_hour", "Hero must prefer canonical Gemini five_hour/weekly over higher 3P window")
         XCTAssertEqual(picked.secondary.map(\.id), ["3p-weekly", "weekly", "3p-five-hour"])
     }
+
+    func testSessionLinkResolverAllSchemes() {
+        let agy = UnifiedSession(
+            id: "antigravity:dc969a3b-736f-45e1-b1af-60d2fe972418",
+            nativeId: "dc969a3b-736f-45e1-b1af-60d2fe972418",
+            harness: .antigravity,
+            title: "Troubleshooting SSH",
+            cwd: "/tmp",
+            projectName: "super-harness"
+        )
+        let claude = UnifiedSession(
+            id: "claude:3d88042c-caee-4c5c-863e-dcccc4b2ff38",
+            nativeId: "3d88042c-caee-4c5c-863e-dcccc4b2ff38",
+            harness: .claudeDesktop,
+            title: "Orble supervisor",
+            cwd: "/tmp",
+            projectName: "orble"
+        )
+        let codex = UnifiedSession(
+            id: "codex:01a214b8-51a9-7410-acf7-d351e13b4430",
+            nativeId: "01a214b8-51a9-7410-acf7-d351e13b4430",
+            harness: .codex,
+            title: "Codex thread",
+            cwd: "/tmp",
+            projectName: "orble"
+        )
+        let muse = UnifiedSession(
+            id: "muse:aabbccdd-1122-3344-5566-778899001122",
+            nativeId: "aabbccdd-1122-3344-5566-778899001122",
+            harness: .muse,
+            title: "Super Harness Muse",
+            cwd: "/tmp",
+            projectName: "super-harness"
+        )
+        let all = [agy, claude, codex, muse]
+
+        XCTAssertEqual(SessionLinkResolver.resolve("conversation://dc969a3b-736f-45e1-b1af-60d2fe972418", in: all)?.id, agy.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("CONVERSATION://dc969a3b?foo=bar#top", in: all)?.id, agy.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("antigravity://conversation/dc969a3b-736f-45e1-b1af-60d2fe972418/", in: all)?.id, agy.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("agy://dc969a3b-736f-45e1-b1af-60d2fe972418", in: all)?.id, agy.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("claude://session/3d88042c-caee-4c5c-863e-dcccc4b2ff38", in: all)?.id, claude.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("codex://thread/01a214b8-51a9-7410-acf7-d351e13b4430", in: all)?.id, codex.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("muse://session/aabbccdd-1122-3344-5566-778899001122", in: all)?.id, muse.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("super-harness://session/claude:3d88042c-caee-4c5c-863e-dcccc4b2ff38", in: all)?.id, claude.id)
+        XCTAssertEqual(SessionLinkResolver.resolve("sh://session/01a214b8", in: all)?.id, codex.id)
+        XCTAssertNil(SessionLinkResolver.resolve("https://example.com/dc969a3b-736f-45e1-b1af-60d2fe972418", in: all))
+    }
 }

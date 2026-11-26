@@ -90,21 +90,20 @@ public struct CollapsedTraceGroupView: View, Equatable {
             }
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: SHLayout.itemGap) {
+                VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                        UnifiedBlockView(
+                        CompactTraceRowView(
                             block: block,
-                            isUserBubble: false,
                             onAnswerQuestion: onAnswerQuestion,
                             onTapImage: onTapImage,
                             onLoadMedia: onLoadMedia
                         )
                     }
                 }
-                .padding(.leading, 12)
+                .padding(.leading, 10)
                 .overlay(alignment: .leading) {
                     Rectangle()
-                        .fill(SHColor.lineSubtle)
+                        .fill(SHColor.lineHairline)
                         .frame(width: 1.5)
                         .padding(.vertical, 2)
                 }
@@ -140,6 +139,216 @@ public struct CollapsedTraceGroupView: View, Equatable {
             counts.append(diffFileCount == 1 ? "1 file changed" : "\(diffFileCount) files changed")
         }
         return counts.isEmpty ? "\(blocks.count) steps" : counts.joined(separator: " · ")
+    }
+}
+
+
+// MARK: - Slim Mobile Trace Row (Replaces Bulky Stacked Cards Inside CollapsedTraceGroupView)
+
+private struct CompactTraceRowView: View {
+    let block: UnifiedBlock
+    let onAnswerQuestion: (String) -> Void
+    let onTapImage: (LightboxPayload) -> Void
+    let onLoadMedia: ((String) async -> Data?)?
+
+    @State private var isDetailOpen: Bool = false
+
+    private static func stripOuterQuotes(_ raw: String) -> String {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.count >= 2 && ((t.hasPrefix("\"") && t.hasSuffix("\"")) || (t.hasPrefix(") && t.hasSuffix("))) {
+            return String(t.dropFirst().dropLast())
+        }
+        return t
+    }
+
+    var body: some View {
+        switch block {
+        case .command(let command, _, let output, let exitCode, let durationMs, let status):
+            let cleanCmd = Self.stripOuterQuotes(command)
+            let isRunning = status?.lowercased() == "running"
+            let failed = (exitCode ?? 0) != 0 || status?.lowercased() == "failed"
+            let hasOutput = !(output ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    if hasOutput || cleanCmd.count > 44 {
+                        withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        if isRunning {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .scaleEffect(0.75)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: failed ? "xmark.circle.fill" : "terminal")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(failed ? SHColor.statusDanger : SHColor.inkFaint)
+                                .frame(width: 12)
+                        }
+                        Text(cleanCmd)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .lineLimit(isDetailOpen ? nil : 1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 4)
+                        if let durationMs, durationMs >= 1000 {
+                            Text(String(format: "%.1fs", durationMs / 1000.0))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(SHColor.inkFaint)
+                        }
+                        if hasOutput {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
+                                .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
+                        }
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isDetailOpen, let output, !output.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(output)
+                            .font(SHTypography.monoSmall)
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .textSelection(.enabled)
+                            .padding(9)
+                    }
+                    .frame(maxHeight: 200)
+                    .background(SHColor.surfaceCode)
+                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
+                    .padding(.leading, 18)
+                }
+            }
+
+        case .thinking(let text, let summary):
+            let title = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first
+                ?? "Thought"
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(SHColor.inkFaint)
+                            .frame(width: 12)
+                        Text(title)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(SHColor.inkMuted)
+                            .lineLimit(isDetailOpen ? nil : 1)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(SHColor.inkFaint)
+                            .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isDetailOpen {
+                    Text(text)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(SHColor.inkSecondary)
+                        .textSelection(.enabled)
+                        .padding(.leading, 25)
+                        .padding(.bottom, 4)
+                }
+            }
+
+        case .toolCall(let name, let server, let args, let output, let status, _):
+            let label = [server, name].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+            let hasBody = !(args ?? "").isEmpty || !(output ?? "").isEmpty
+            let isRunning = status?.lowercased() == "running"
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    if hasBody {
+                        withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        if isRunning {
+                            ProgressView().controlSize(.mini).scaleEffect(0.75).frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "wrench.adjustable")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(SHColor.inkFaint)
+                                .frame(width: 12)
+                        }
+                        Text(label.isEmpty ? name : label)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if hasBody {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
+                                .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
+                        }
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isDetailOpen {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let args, !args.isEmpty {
+                            Text(args)
+                                .font(SHTypography.monoSmall)
+                                .foregroundStyle(SHColor.inkMuted)
+                                .lineLimit(8)
+                        }
+                        if let output, !output.isEmpty {
+                            Text(output)
+                                .font(SHTypography.monoSmall)
+                                .foregroundStyle(SHColor.inkSecondary)
+                                .lineLimit(12)
+                        }
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(SHColor.surfaceCode)
+                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
+                    .padding(.leading, 18)
+                }
+            }
+
+        case .webSearch(let query, _):
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(SHColor.inkFaint)
+                    .frame(width: 12)
+                Text(query)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+
+        default:
+            UnifiedBlockView(
+                block: block,
+                isUserBubble: false,
+                onAnswerQuestion: onAnswerQuestion,
+                onTapImage: onTapImage,
+                onLoadMedia: onLoadMedia
+            )
+        }
     }
 }
 

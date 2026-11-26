@@ -114,16 +114,25 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
     private let encoder: JSONEncoder
     private let lastEventIdBox = LockedEventIdBox()
 
+    private static func makeDedicatedSession() -> URLSession {
+        let cfg = URLSessionConfiguration.default
+        cfg.httpMaximumConnectionsPerHost = 8
+        cfg.waitsForConnectivity = false
+        cfg.timeoutIntervalForRequest = 45
+        cfg.timeoutIntervalForResource = 120
+        return URLSession(configuration: cfg)
+    }
+
     public init(
         baseURL: URL,
         token: String,
-        session: URLSession = .shared,
+        session: URLSession? = nil,
         clientId: String? = nil,
         defaults: UserDefaults = .standard
     ) {
         self.baseURL = baseURL
         self.token = token
-        self.session = session
+        self.session = session ?? Self.makeDedicatedSession()
         self.sseClient = SSEClient()
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()

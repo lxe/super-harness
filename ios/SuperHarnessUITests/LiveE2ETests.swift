@@ -95,6 +95,19 @@ final class LiveE2ETests: XCTestCase {
         }
         recordMetric("optimistic_bubble", ms: max(0, Int(((appearedAt - sendStart) * 1000.0).rounded())))
 
+        // 1b. Poll every 50ms for 2.5s right after appearance to guarantee the bubble NEVER disappears
+        //     during optimistic -> persisted handoff (zero disappear/reappear thrash).
+        let stabilityEnd = CFAbsoluteTimeGetCurrent() + 2.5
+        var missingFrames = 0
+        while CFAbsoluteTimeGetCurrent() <= stabilityEnd {
+            if !bubbleQuery.firstMatch.exists {
+                missingFrames += 1
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        recordMetric("optimistic_missing_frames", ms: missingFrames)
+        XCTAssertEqual(missingFrames, 0, "User message disappeared during send handoff (\(missingFrames) missing frames)")
+
         // 2. Wait up to 60s for an assistant reply containing "12", polling every 250ms,
         //    and fail if transcript.latest ever appears while pinned at bottom.
         let replyPredicate = NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS 'suffix')", "\(marker)-ack")
@@ -245,5 +258,20 @@ final class LiveE2ETests: XCTestCase {
             return
         }
         recordMetric("dictation_roundtrip", ms: max(0, Int(((doneAt - stopStart) * 1000.0).rounded())))
+    }
+
+    func testTapConversationLinkSwitchesSession() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["SH_CONNECTION_MODE"] = "demo"
+        app.launchEnvironment["SH_INITIAL_SESSION_ID"] = "antigravity:agy-ios-companion"
+        app.launch()
+
+        let link = app.links["Tailscale Control Server"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 6.0), "conversation:// markdown link should be hittable in transcript")
+        link.tap()
+
+        // Target session title in the floating header pill should switch to the Codex Control Server session
+        let targetHeader = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Tailscale bind'")).firstMatch
+        XCTAssertTrue(targetHeader.waitForExistence(timeout: 4.0), "Tapping conversation:// link must switch directly to target session")
     }
 }

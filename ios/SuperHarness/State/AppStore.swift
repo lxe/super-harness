@@ -764,9 +764,18 @@ public final class AppStore {
                 hostWorkingSessionIds.remove(tr.sessionId)
             }
         }
-        if let existing = transcriptsBySessionId[tr.sessionId],
-           existing.isEquivalentUpdate(to: tr) {
-            return false
+        if let existing = transcriptsBySessionId[tr.sessionId] {
+            if existing.isEquivalentUpdate(to: tr) {
+                return false
+            }
+            // Never let a stale out-of-order HTTP fetch regress the transcript backwards and hide a turn.
+            if existing.sourceMtimeMs > 0,
+               tr.sourceMtimeMs > 0,
+               tr.sourceMtimeMs < existing.sourceMtimeMs,
+               existing.sourceMtimeMs - tr.sourceMtimeMs < 30_000,
+               tr.messages.count < existing.messages.count {
+                return false
+            }
         }
         transcriptRevisionBySessionId[tr.sessionId, default: 0] += 1
         transcriptFallbackTasks[tr.sessionId]?.cancel()
@@ -1189,6 +1198,20 @@ public final class AppStore {
         }
     }
 
+    /// Resolves cross-harness session links (`conversation://`, `session://`, `codex://`, `claude://`, `muse://`, etc.)
+    /// against loaded sessions and navigates directly to the target thread.
+    @discardableResult
+    public func openSessionLink(_ url: URL) -> Bool {
+        guard let target = SessionLinkResolver.resolve(url.absoluteString, in: sessions) else {
+            return false
+        }
+        isUsageSheetPresented = false
+        isHostSettingsSheetPresented = false
+        lightboxPayload = nil
+        selectSession(target.id)
+        return true
+    }
+
     public func loadMediaData(path: String) async -> Data? {
         guard !path.isEmpty else { return nil }
         if let cached = mediaCache[path] {
@@ -1418,10 +1441,12 @@ public final class AppStore {
     ) {
         guard let current = pendingOutgoingBySessionId[sessionId], !current.isEmpty else { return }
 
-        let userMessages = transcript.messages.filter { $0.role == .user }
-        let queuedTexts: [String] = (transcript.liveActivity?.queuedMessages ?? []).map {
-            $0.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only reconcile against REAL persisted user messages (never transient `mobile-opt-*`
+        // placeholders or brief `queuedMessages` handoffs that cause disappear/reappear flicker).
+        let persistedUserMessages = transcript.messages.filter {
+            $0.role == .user && !$0.id.hasPrefix("mobile-opt-")
         }
+        let tailUsers = Array(persistedUserMessages.suffix(6))
 
         let remaining = current.filter { pending in
             // Expire sent pending messages after 90s even if host never echoed them back
@@ -1431,14 +1456,10 @@ public final class AppStore {
 
             let trimmedPending = pending.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Drop if echoed in queuedMessages tray
-            if !trimmedPending.isEmpty && queuedTexts.contains(where: { $0 == trimmedPending || $0.contains(trimmedPending) }) {
-                return false
-            }
-
-            // Drop if matched by a user message in transcript with timestamp >= pending.createdAt - 10s
-            let matchedInTranscript = userMessages.contains { msg in
-                guard msg.timestamp >= pending.createdAt - 10_000 else { return false }
+            // Drop only once matched by a real persisted user message in the tail of the transcript.
+            // Allow 60s clock skew (or timestamp == 0) so clock differences never leave duplicates.
+            let matchedInTranscript = tailUsers.contains { msg in
+                guard msg.timestamp == 0 || msg.timestamp >= pending.createdAt - 60_000 else { return false }
                 let msgText = msg.blocks.compactMap { block -> String? in
                     if case .text(let t) = block { return t }
                     return nil
@@ -1546,6 +1567,14 @@ public final class AppStore {
                     previewDataUrl: thumbDataUrl,
                     sizeBytes: uploaded.sizeBytes ?? data.count
                 )
+                if !uploaded.path.isEmpty, mimeType.lowercased().hasPrefix("image/") {
+                    await MainActor.run {
+                        self?.mediaCache[uploaded.path] = data
+                        #if canImport(UIKit)
+                        SHMediaImageCache.shared.store(data: data, for: uploaded.path)
+                        #endif
+                    }
+                }
                 await MainActor.run {
                     guard let self, var list = self.draftAttachments[sessionId],
                           let idx = list.firstIndex(where: { $0.id == localId }) else { return }
@@ -1663,6 +1692,15 @@ public final class AppStore {
             mutateSession(session.id) { $0.hidden = nextHidden }
         } catch {
             reportError(error)
+        }
+    }
+
+    public func refreshCatalogIfNeeded(for group: HarnessGroup) async {
+        if let existing = catalog?.models(for: group), !existing.isEmpty {
+            return
+        }
+        if let fetched = try? await client.fetchCatalog(force: true) {
+            catalog = fetched
         }
     }
 

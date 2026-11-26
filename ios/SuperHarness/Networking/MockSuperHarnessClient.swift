@@ -408,7 +408,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             let frame = parser.feed(line: "data: {\"ok\":true}")
                             ```
 
-                            I'm running final simulator verification now — feel free to queue a follow-up message while I finish.
+                            Related session: [Tailscale Control Server](conversation://cx-control-server). I'm running final simulator verification now — feel free to steer or follow up while I finish.
                             """),
                         ],
                         harnessMeta: MessageHarnessMeta(model: "Gemini 3.1 Pro", sourceKind: .agent)

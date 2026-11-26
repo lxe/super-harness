@@ -326,7 +326,9 @@ export class ControlServer {
             sendJson({ ok: false, error: 'Dictation server not configured on host (~/.config/yapyap/config.toml)' }, 503);
             return;
           }
+          const t0 = Date.now();
           const audioBuf = await readRawBody();
+          const readMs = Date.now() - t0;
           if (audioBuf.length === 0) {
             sendJson({ ok: false, error: 'Empty audio payload' }, 400);
             return;
@@ -349,12 +351,17 @@ export class ControlServer {
           const headers: Record<string, string> = {};
           if (targetToken) headers.Authorization = `Bearer ${targetToken}`;
 
+          const tUp = Date.now();
           const upRes = await fetch(`${targetUrl}/v1/audio/transcriptions`, {
             method: 'POST',
             headers,
             body: form,
           });
           const rawText = await upRes.text();
+          const yapyapMs = Date.now() - tUp;
+          console.log(
+            `[ControlServer] /api/dictate ${ext} ${audioBuf.length}B read=${readMs}ms yapyap=${yapyapMs}ms status=${upRes.status}`
+          );
           if (!upRes.ok) {
             sendJson({ ok: false, error: `YapYap HTTP ${upRes.status}: ${rawText.slice(0, 240)}` }, 502);
             return;
@@ -633,62 +640,11 @@ export class ControlServer {
                 })();
 
           if (result.ok && sessionId) {
-            // Ensure liveSync is actively watching this session and immediately push
-            // a fresh transcript snapshot (with an optimistic user turn if the harness
-            // hasn't flushed to disk yet) so mobile composers see submitted turns right away.
+            // Ensure liveSync is actively watching this session and immediately broadcast
+            // live working activity. Do NOT fabricate transient `mobile-opt-*` messages
+            // that vanish on the next disk poll before the harness flushes.
             void this.hooks.watchSession?.('mobile-active', sessionId, 20).catch(() => {});
             this.hooks.onMessageSent?.(sessionId);
-            void (async () => {
-              try {
-                const tr = await this.registry.getTranscript(sessionId, 20);
-                const trimmed = message.trim();
-                const lastUser = [...tr.messages].reverse().find((m) => m.role === 'user');
-                const lastUserText = lastUser?.blocks
-                  .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-                  .map((b) => b.text.trim())
-                  .join('\n')
-                  .trim();
-                const alreadyPersisted = Boolean(trimmed && lastUserText === trimmed);
-                const now = Date.now();
-                const messages = alreadyPersisted
-                  ? tr.messages
-                  : [
-                      ...tr.messages,
-                      {
-                        id: `mobile-opt-${now}`,
-                        role: 'user' as const,
-                        timestamp: now,
-                        blocks: [
-                          ...(attachments ?? []).map((a) => ({
-                            type: 'image' as const,
-                            path: a.path,
-                            name: a.name,
-                            dataUrl: a.previewDataUrl,
-                          })),
-                          ...(trimmed ? [{ type: 'text' as const, text: trimmed }] : []),
-                        ],
-                      },
-                    ];
-                const nextTranscript = {
-                  ...tr,
-                  messages,
-                  totalCount: alreadyPersisted ? tr.totalCount : tr.totalCount + 1,
-                  liveActivity: {
-                    ...(tr.liveActivity ?? { isWorking: true }),
-                    isWorking: true,
-                    lastEventAt: now,
-                  },
-                };
-                this.broadcastEvent('transcript', nextTranscript);
-                this.broadcastEvent('transcript_updated', {
-                  sessionId: nextTranscript.sessionId,
-                  totalCount: nextTranscript.totalCount,
-                  liveActivity: nextTranscript.liveActivity,
-                });
-              } catch {
-                // best-effort optimistic push; liveSync follow-ups will still deliver
-              }
-            })();
           }
 
           sendJson(result);

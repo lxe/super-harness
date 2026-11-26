@@ -30,9 +30,9 @@ private final class DictationAudioCoordinator: @unchecked Sendable {
 
                     let aacSettings: [String: Any] = [
                         AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                        AVSampleRateKey: 24_000.0,
+                        AVSampleRateKey: 16_000.0,
                         AVNumberOfChannelsKey: 1,
-                        AVEncoderBitRateKey: 32_000,
+                        AVEncoderBitRateKey: 24_000,
                         AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
                     ]
                     let wavSettings: [String: Any] = [
@@ -155,8 +155,9 @@ public final class DictationController {
 
         // Optimistically switch to recording UI immediately on tap.
         let token = UUID()
+        // Must use .m4a extension so CoreAudio allows kAudioFormatMPEG4AAC instead of failing over to WAV.
         let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sh-dictation-\(token.uuidString).wav")
+            .appendingPathComponent("sh-dictation-\(token.uuidString).m4a")
 
         activeSessionToken = token
         recordingURL = fileURL

@@ -1920,3 +1920,107 @@ public enum ConnectionHealth: Sendable, Equatable {
         }
     }
 }
+
+// MARK: - Cross-Harness Session Link Parser & Resolver (Desktop parity)
+
+public struct ParsedSessionLink: Sendable, Equatable {
+    public let unifiedId: String?
+    public let harnessHint: HarnessGroup?
+    public let nativeId: String
+
+    public init(unifiedId: String? = nil, harnessHint: HarnessGroup? = nil, nativeId: String) {
+        self.unifiedId = unifiedId
+        self.harnessHint = harnessHint
+        self.nativeId = nativeId
+    }
+}
+
+public enum SessionLinkResolver {
+    private static let schemeHints: [String: HarnessGroup?] = [
+        "conversation": .antigravity,
+        "antigravity": .antigravity,
+        "agy": .antigravity,
+        "codex": .codex,
+        "claude": .claude,
+        "muse": .muse,
+        "session": nil,
+        "sh": nil,
+        "super-harness": nil,
+    ]
+
+    private static let wrapperSegments: Set<String> = [
+        "session", "sessions", "thread", "threads", "conversation", "conversations", "chat", "chats",
+    ]
+
+    public static func parse(_ href: String) -> ParsedSessionLink? {
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let sep = trimmed.range(of: "://") else { return nil }
+        let scheme = String(trimmed[..<sep.lowerBound]).lowercased()
+        guard let hintOpt = schemeHints[scheme] else { return nil }
+
+        var rest = String(trimmed[sep.upperBound...])
+        if let qIdx = rest.firstIndex(where: { $0 == "?" || $0 == "#" }) {
+            rest = String(rest[..<qIdx])
+        }
+        rest = rest.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !rest.isEmpty else { return nil }
+
+        let decoded = rest.removingPercentEncoding ?? rest
+        let segments = decoded.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+        guard !segments.isEmpty else { return nil }
+
+        var idPart = segments[0]
+        if segments.count >= 2 && wrapperSegments.contains(segments[0].lowercased()) {
+            idPart = segments[1]
+        } else if segments.count > 1 {
+            idPart = segments[segments.count - 1]
+        }
+        idPart = idPart.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !idPart.isEmpty else { return nil }
+
+        if let colon = idPart.firstIndex(of: ":"), colon > idPart.startIndex {
+            let prefixStr = String(idPart[..<colon]).lowercased()
+            let native = String(idPart[idPart.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let group = HarnessGroup(rawValue: prefixStr), !native.isEmpty {
+                return ParsedSessionLink(
+                    unifiedId: "\(group.rawValue):\(native)",
+                    harnessHint: group,
+                    nativeId: native
+                )
+            }
+        }
+
+        return ParsedSessionLink(unifiedId: nil, harnessHint: hintOpt, nativeId: idPart)
+    }
+
+    public static func resolve(_ href: String, in sessions: [UnifiedSession]) -> UnifiedSession? {
+        guard let parsed = parse(href) else { return nil }
+        let targetNative = parsed.nativeId.lowercased()
+
+        if let targetUnified = parsed.unifiedId?.lowercased(),
+           let exact = sessions.first(where: { $0.id.lowercased() == targetUnified }) {
+            return exact
+        }
+
+        if let hint = parsed.harnessHint,
+           let hinted = sessions.first(where: { $0.harness.harnessGroup == hint && $0.nativeId.lowercased() == targetNative }) {
+            return hinted
+        }
+
+        if let byNative = sessions.first(where: { $0.nativeId.lowercased() == targetNative }) {
+            return byNative
+        }
+
+        if targetNative.count >= 8 {
+            let prefixMatches = sessions.filter { s in
+                let matchesHint = (parsed.harnessHint == nil || s.harness.harnessGroup == parsed.harnessHint)
+                return matchesHint && s.nativeId.lowercased().hasPrefix(targetNative)
+            }
+            if prefixMatches.count == 1 {
+                return prefixMatches[0]
+            }
+        }
+
+        return nil
+    }
+}

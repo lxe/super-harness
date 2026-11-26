@@ -393,7 +393,7 @@ export class HarnessCatalogService {
     this.inFlight = (async () => {
       const museCfg = readMuseSettingsDefaults();
       const [agyModels, museModels, codexProjects, agyProjects] = await Promise.all([
-        this.fetchAgyModels(),
+        this.fetchAgyModels(sessions),
         this.fetchMuseModels(museCfg.model),
         this.fetchCodexProjects(),
         this.fetchAgyProjects(),
@@ -457,18 +457,58 @@ export class HarnessCatalogService {
     this.cache = null;
   }
 
-  private async fetchAgyModels(): Promise<HarnessModelOption[]> {
+  private async fetchAgyModels(sessions: UnifiedSession[] = []): Promise<HarnessModelOption[]> {
     try {
       const bin = await whichBinary('agy');
-      if (!bin) return [];
-      const { stdout } = await execFileAsync(bin, ['models'], {
-        timeout: 10_000,
-        maxBuffer: 1024 * 1024,
-      });
-      return parseAgyModelsOutput(stdout);
+      if (bin) {
+        const { stdout } = await execFileAsync(bin, ['models'], {
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        });
+        const parsed = parseAgyModelsOutput(stdout);
+        if (parsed.length > 0) return parsed;
+      }
     } catch {
-      return [];
+      // Fall through to fallback list when `agy` CLI is not independently signed in
     }
+    return this.collectAgyFallbackModels(sessions);
+  }
+
+  private collectAgyFallbackModels(sessions: UnifiedSession[]): HarnessModelOption[] {
+    const knownLines = [
+      'gemini-4-neon-high\tGemini 4 Neon (High)',
+      'gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)',
+      'gemini-4-neon-medium\tGemini 4 Neon (Medium)',
+      'gemini-4-neon-low\tGemini 4 Neon (Low)',
+      'gemini-4-carbon-high\tGemini 4 Carbon (High)',
+      'gemini-4-carbon-medium\tGemini 4 Carbon (Medium)',
+      'gemini-4-carbon-low\tGemini 4 Carbon (Low)',
+      'gemini-4-argon-high\tGemini 4 Argon (High)',
+      'gemini-4-argon-medium\tGemini 4 Argon (Medium)',
+      'gemini-4-argon-low\tGemini 4 Argon (Low)',
+      'gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)',
+      'gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)',
+      'gemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)',
+      'gemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)',
+      'gemini-3.8-flash-high\tGemini 3.8 Flash (High)',
+      'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)',
+      'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)',
+      'claude-opus-5-5-high\tClaude Opus 5.5 (High)',
+      'claude-opus-5-5-medium\tClaude Opus 5.5 (Medium)',
+      'claude-opus-5-5-low\tClaude Opus 5.5 (Low)',
+      'claude-sonnet-5-5-high\tClaude Sonnet 5.5 (High)',
+      'claude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)',
+      'claude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)',
+      'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)',
+    ];
+    for (const s of sessions) {
+      if (s.harnessGroup !== 'antigravity') continue;
+      const m = (s.model || '').trim();
+      if (m && !knownLines.some((l) => l.startsWith(`${m}\t`))) {
+        knownLines.push(`${m}\t${m}`);
+      }
+    }
+    return parseAgyModelsOutput(knownLines.join('\n'));
   }
 
   private async fetchMuseModels(defaultModelId?: string): Promise<HarnessModelOption[]> {

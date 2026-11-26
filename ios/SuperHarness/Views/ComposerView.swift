@@ -94,20 +94,72 @@ public struct ComposerView: View {
         (isStreaming || isAgentBusy) && !hasContent
     }
 
+    private static let effortSuffixes = ["-low", "-medium", "-high", "-xhigh", "-max"]
+
+    private static func baseModelStem(_ id: String) -> String {
+        let lower = id.lowercased()
+        for suf in effortSuffixes where lower.hasSuffix(suf) {
+            return String(id.dropLast(suf.count))
+        }
+        return id
+    }
+
+    private static func embeddedEffort(from id: String?) -> String? {
+        guard let lower = id?.lowercased() else { return nil }
+        for suf in effortSuffixes where lower.hasSuffix(suf) {
+            return String(suf.dropFirst())
+        }
+        return nil
+    }
+
+    private static func cleanBaseDisplayLabel(_ label: String) -> String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        for tag in [" (Low)", " (Medium)", " (High)", " (XHigh)", " (Max)"] {
+            if trimmed.hasSuffix(tag) {
+                return String(trimmed.dropLast(tag.count))
+            }
+        }
+        return shortModelName(trimmed)
+    }
+
+    /// Deduplicates sibling effort-suffixed slugs (e.g. Antigravity `gemini-4-neon-high` / `-medium`)
+    /// so the Model menu stays clean while the Thinking Effort section switches the effort variant.
+    private var menuModelOptions: [(stem: String, displayLabel: String, representative: HarnessModelOption)] {
+        var seen: [String] = []
+        var byStem: [String: HarnessModelOption] = [:]
+        let activeStem = session.model.map(Self.baseModelStem)
+        for opt in availableModels {
+            let stem = Self.baseModelStem(opt.id)
+            if byStem[stem] == nil {
+                seen.append(stem)
+                byStem[stem] = opt
+            } else if stem == activeStem && opt.id == session.model {
+                byStem[stem] = opt
+            }
+        }
+        return seen.compactMap { stem in
+            guard let rep = byStem[stem] else { return nil }
+            return (stem, Self.cleanBaseDisplayLabel(rep.label), rep)
+        }
+    }
+
     private var currentModelLabel: String {
         if let raw = session.model, !raw.isEmpty {
             if let match = availableModels.first(where: { $0.id == raw || $0.label == raw }) {
-                return Self.shortModelName(match.label)
+                return Self.cleanBaseDisplayLabel(match.label)
             }
-            return Self.shortModelName(raw)
+            return Self.cleanBaseDisplayLabel(Self.baseModelStem(raw))
         }
         if let def = availableModels.first(where: { $0.isDefault == true }) ?? availableModels.first {
-            return Self.shortModelName(def.label)
+            return Self.cleanBaseDisplayLabel(def.label)
         }
         return HarnessVisual.forKind(session.harness).label
     }
 
     private var currentEffortLabel: String? {
+        if let embedded = Self.embeddedEffort(from: session.model) {
+            return embedded.capitalized
+        }
         guard !reasoningLevels.isEmpty else { return nil }
         return (session.reasoningEffort ?? reasoningLevels.last)?.capitalized
     }
@@ -234,7 +286,7 @@ public struct ComposerView: View {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(SHColor.inkSecondary)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .background(SHColor.surfaceBubble, in: Circle())
         }
         .accessibilityLabel("Attach media or file")
@@ -246,26 +298,28 @@ public struct ComposerView: View {
         if !availableModels.isEmpty, let onSelectModel {
             Menu {
                 Section("Model") {
-                    ForEach(availableModels) { option in
+                    let currentStem = session.model.map(Self.baseModelStem)
+                    ForEach(menuModelOptions, id: \.stem) { item in
                         Button {
-                            onSelectModel(option)
+                            onSelectModel(item.representative)
                         } label: {
-                            let isSelected = (session.model == option.id || session.model == option.label)
+                            let isSelected = (currentStem == item.stem || session.model == item.representative.id || session.model == item.representative.label)
                             if isSelected {
-                                Label(option.label, systemImage: "checkmark")
+                                Label(item.displayLabel, systemImage: "checkmark")
                             } else {
-                                Text(option.label)
+                                Text(item.displayLabel)
                             }
                         }
                     }
                 }
                 if !reasoningLevels.isEmpty, let onSelectReasoningEffort {
+                    let activeEffort = Self.embeddedEffort(from: session.model) ?? session.reasoningEffort ?? reasoningLevels.last
                     Section("Thinking Effort") {
                         ForEach(reasoningLevels, id: \.self) { level in
                             Button {
                                 onSelectReasoningEffort(level)
                             } label: {
-                                if session.reasoningEffort == level {
+                                if activeEffort?.lowercased() == level.lowercased() {
                                     Label(level.capitalized, systemImage: "checkmark")
                                 } else {
                                     Text(level.capitalized)
@@ -287,9 +341,12 @@ public struct ComposerView: View {
                             .foregroundStyle(SHColor.inkMuted)
                             .lineLimit(1)
                     }
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(SHColor.inkFaint)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 11)
+                .frame(height: 32)
                 .background(SHColor.surfaceBubble, in: Capsule())
             }
             .accessibilityLabel("Switch model and effort")
@@ -301,8 +358,8 @@ public struct ComposerView: View {
                     .foregroundStyle(SHColor.inkMuted)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
             .background(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
         }
     }
@@ -318,7 +375,7 @@ public struct ComposerView: View {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(SHColor.surfaceBubble, in: Circle())
             }
             .buttonStyle(.plain)
@@ -341,8 +398,8 @@ public struct ComposerView: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(SHColor.statusDanger)
                 }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
                 .background(SHColor.statusDanger.opacity(0.16), in: Capsule())
             }
             .buttonStyle(.plain)
@@ -353,7 +410,7 @@ public struct ComposerView: View {
             ProgressView()
                 .controlSize(.mini)
                 .tint(SHColor.brandAntigravity)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityLabel("Transcribing voice dictation")
                 .accessibilityIdentifier("composer.mic")
@@ -383,7 +440,7 @@ public struct ComposerView: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(SHColor.surfaceRail)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(SHColor.inkPrimary, in: Circle())
             }
             .buttonStyle(.plain)
@@ -405,7 +462,7 @@ public struct ComposerView: View {
                             .foregroundStyle(SHColor.surfaceRail)
                     }
                 }
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .background(SHColor.inkPrimary, in: Circle())
                 .opacity(hasContent && !isSending ? 1.0 : 0.28)
             }

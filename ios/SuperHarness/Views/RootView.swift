@@ -62,6 +62,12 @@ public struct RootView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .environment(\.openURL, OpenURLAction { url in
+            if store.openSessionLink(url) {
+                return .handled
+            }
+            return .systemAction
+        })
         .fullScreenCover(item: $store.lightboxPayload) { payload in
             ImageLightboxView(payload: payload) { path in
                 await store.loadMediaData(path: path)
@@ -172,26 +178,13 @@ public struct ConnectionStatusPill: View {
 
     public var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image("SuperHarnessLogo")
-                    .renderingMode(.original)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 16, height: 16)
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 6.5, height: 6.5)
-                Text(health.label)
-                    .font(SHTypography.micro.weight(.semibold))
-                    .foregroundStyle(SHColor.inkPrimary)
-                    .lineLimit(1)
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 6)
+            SuperHarnessStatusLogo(statusColor: dotColor, size: 22)
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Super Harness · \(health.label)")
+        .accessibilityIdentifier("header.status")
     }
 
     private var dotColor: Color {

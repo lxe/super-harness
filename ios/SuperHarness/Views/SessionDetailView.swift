@@ -18,6 +18,7 @@ public struct SessionDetailView: View {
     @State private var anchoredSessionId: String? = nil
     @State private var suppressUnpinUntil: Date = .distantPast
     @State private var stableQueuedMessages: [QueuedMessageItem] = []
+    @State private var composerHeight: CGFloat = 96
 
     public init(store: AppStore, session: UnifiedSession) {
         self.store = store
@@ -46,27 +47,40 @@ public struct SessionDetailView: View {
         let availableReasoningLevels = currentSession.isMaster ? [] : (currentModelOption?.reasoningLevels ?? [])
         let harnessKind = currentSession.harness
 
-        // Filter out transient queue entries that match an active optimistic message or recent user turn
-        // so sending a steer message never flashes a Queued banner in and out.
+        // Strict invariant: never show harness-internal transient steering handoffs (source == "native")
+        // or items already in the main chat lane. Only explicitly queued messages (source != "native") appear.
         let filteredQueued: [QueuedMessageItem] = {
             guard let raw = liveActivity?.queuedMessages, !raw.isEmpty else { return [] }
-            let recentUserTexts: Set<String> = Set(
-                messages.suffix(4).filter { $0.role == .user }.map { msg in
+            let loadedUserTexts: Set<String> = Set(
+                messages.filter { $0.role == .user }.map { msg in
                     msg.blocks.compactMap { if case .text(let t) = $0 { return t }; return nil }
                         .joined(separator: "\n")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                 }
             )
             return raw.filter { item in
+                if item.source.lowercased() == "native" { return false }
                 let trimmed = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return !trimmed.isEmpty && !recentUserTexts.contains(trimmed)
+                return !trimmed.isEmpty && !loadedUserTexts.contains(trimmed)
             }
         }()
         let filteredQueuedKey = filteredQueued.map(\.id).joined(separator: "|")
 
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
             ZStack(alignment: .top) {
                 ZStack(alignment: .bottomTrailing) {
+                    Group {
+                    if isLoadingInitialTranscript {
+                        // Bottom-aligned shimmering skeleton right above the floating composer
+                        VStack(spacing: 0) {
+                            Spacer(minLength: SHLayout.headerHeight)
+                            TranscriptSkeletonView()
+                                .padding(.horizontal, SHLayout.screenPad)
+                                .padding(.bottom, max(composerHeight + 12, 108))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(SHColor.surfaceCanvas)
+                    } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: SHLayout.messageGap) {
                             // Top spacer so first message clears the floating Liquid Glass header pills.
@@ -76,9 +90,7 @@ public struct SessionDetailView: View {
                                 loadEarlierButton
                             }
 
-                            if isLoadingInitialTranscript {
-                                TranscriptSkeletonView()
-                            } else if messages.isEmpty {
+                            if messages.isEmpty {
                                 emptyTranscriptView(for: currentSession)
                             } else {
                                 ForEach(messages) { message in
@@ -107,26 +119,28 @@ public struct SessionDetailView: View {
                                 }
                             }
 
-                            // Scrollable inline activity row — never pinned above the composer.
+                            // Scrollable inline activity row — equalized 8pt rhythm below assistant blocks.
                             if let activity = liveActivity,
                                activity.isWorking || !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true) {
                                 LiveStepsBarView(
                                     activity: activity,
                                     accentColor: SHColor.harness(currentSession.harness)
                                 )
+                                .padding(.top, messages.last?.role == .assistant ? -(SHLayout.messageGap - SHLayout.blockGap) : 0)
                             }
 
-                            // Debounced queued tray inside transcript so it never shoves the composer.
+                            // Manually queued tray inside transcript (never native steering echoes).
                             if !stableQueuedMessages.isEmpty {
                                 QueuedMessagesTrayView(items: stableQueuedMessages)
                             }
 
+                            // Dynamic bottom clearance so last message clears the floating composer
+                            // while scrolled content glides smoothly behind its rounded corners.
                             Color.clear
-                                .frame(height: 1)
+                                .frame(height: max(composerHeight + 10, 102))
                                 .id("transcript-bottom")
                         }
                         .padding(.horizontal, SHLayout.screenPad)
-                        .padding(.bottom, SHSpacing.md)
                         .transaction { $0.animation = nil }
                     }
                     .accessibilityIdentifier("transcript.scroll")
@@ -184,24 +198,22 @@ public struct SessionDetailView: View {
                             scrollPosition.scrollTo(edge: .bottom)
                         }
                     }
+                    .task(id: filteredQueuedKey) {
+                        stableQueuedMessages = filteredQueued
+                    }
+                    } // end else (!isLoadingInitialTranscript)
+                    }
                     .task(id: session.id) {
                         isPinnedToBottom = true
                         distanceFromBottom = 0
                         userIsDragging = false
+                        if let group = currentSession.harness.harnessGroup {
+                            Task { await store.refreshCatalogIfNeeded(for: group) }
+                        }
                         if store.transcriptsBySessionId[session.id] == nil {
                             await store.loadTranscript(for: session.id)
                         }
                         anchorBottomIfNeeded(sessionId: session.id, hasMessages: !store.messages(for: session.id).isEmpty)
-                    }
-                    .task(id: filteredQueuedKey) {
-                        if filteredQueued.isEmpty {
-                            stableQueuedMessages = []
-                            return
-                        }
-                        // Wait 1.5s before showing queued tray so brief dispatch handoffs never flash.
-                        try? await Task.sleep(for: .milliseconds(1500))
-                        guard !Task.isCancelled else { return }
-                        stableQueuedMessages = filteredQueued
                     }
 
                     // Floating "↓ Latest" pill — only shown when scrolled high up (>220pt).
@@ -227,7 +239,7 @@ public struct SessionDetailView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("transcript.latest")
                             .padding(.trailing, SHLayout.screenPad)
-                            .padding(.bottom, SHSpacing.sm)
+                            .padding(.bottom, max(composerHeight, 84) + 8)
                             .transition(.opacity.combined(with: .scale(scale: 0.92)))
                         }
                     }
@@ -297,10 +309,23 @@ public struct SessionDetailView: View {
                     }
                 },
                 onSelectReasoningEffort: { effort in
+                    // For Antigravity, effort variants are sibling model slugs (e.g. gemini-4-neon-high -> gemini-4-neon-medium).
+                    var targetModel = currentSession.model
+                    if let raw = currentSession.model {
+                        let suffixes = ["-low", "-medium", "-high", "-xhigh", "-max"]
+                        let lower = raw.lowercased()
+                        for suf in suffixes where lower.hasSuffix(suf) {
+                            let candidate = String(raw.dropLast(suf.count)) + "-" + effort.lowercased()
+                            if availableModels.contains(where: { $0.id.lowercased() == candidate.lowercased() }) {
+                                targetModel = candidate
+                            }
+                            break
+                        }
+                    }
                     Task {
                         await store.setSessionModel(
                             sessionId: session.id,
-                            model: currentSession.model,
+                            model: targetModel,
                             reasoningEffort: effort
                         )
                     }
@@ -320,9 +345,30 @@ public struct SessionDetailView: View {
             .padding(.horizontal, SHSpacing.md)
             .padding(.top, SHSpacing.xs)
             .padding(.bottom, SHSpacing.sm)
-            .background(SHColor.surfaceCanvas)
+            .background(alignment: .bottom) {
+                LinearGradient(
+                    stops: [
+                        .init(color: SHColor.surfaceCanvas.opacity(0.0), location: 0.0),
+                        .init(color: SHColor.surfaceCanvas.opacity(0.68), location: 0.42),
+                        .init(color: SHColor.surfaceCanvas.opacity(0.95), location: 1.0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .padding(.top, -18)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
+            }
+            .onGeometryChange(for: CGFloat.self) { geo in
+                geo.size.height
+            } action: { newHeight in
+                if abs(newHeight - composerHeight) > 0.5 {
+                    composerHeight = newHeight
+                }
+            }
         }
         .background(SHColor.surfaceCanvas)
+        .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)
     }
 
@@ -338,7 +384,7 @@ public struct SessionDetailView: View {
 
             SHFloatingTitlePill(
                 title: currentSession.displayTitle,
-                subtitle: SessionRowFormatting.cleanProjectName(for: currentSession) ?? HarnessVisual.forKind(currentSession.harness).label
+                harness: currentSession.harness
             ) {
                 dismissKeyboard()
             }
@@ -668,3 +714,40 @@ private struct MessageBubbleView: View, Equatable {
         }
     }
 }
+
+
+// MARK: - Native Left-Edge Swipe Back Gesture (Restored when Navigation Bar is Hidden)
+
+#if canImport(UIKit)
+private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        weak var navigationController: UINavigationController?
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let nav = navigationController else { return false }
+            return nav.viewControllers.count > 1
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        UIViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        DispatchQueue.main.async {
+            guard let nav = uiViewController.navigationController else { return }
+            context.coordinator.navigationController = nav
+            nav.interactivePopGestureRecognizer?.isEnabled = true
+            nav.interactivePopGestureRecognizer?.delegate = context.coordinator
+        }
+    }
+}
+#else
+private struct InteractivePopGestureEnabler: View {
+    var body: some View { EmptyView() }
+}
+#endif

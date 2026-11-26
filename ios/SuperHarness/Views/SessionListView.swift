@@ -89,9 +89,37 @@ public struct SessionListView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItemGroup(placement: .topBarLeading) {
                 ConnectionStatusPill(health: store.connectionHealth) {
                     store.isHostSettingsSheetPresented = true
+                }
+
+                if let master = store.masterSession {
+                    let isMasterBusy = store.isSessionBusy(master.id)
+                    Button {
+                        onSelectSession(master.id)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(SHColor.brandMaster)
+                            Text("Master")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(SHColor.inkPrimary)
+                                .lineLimit(1)
+                            if isMasterBusy {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(SHColor.brandMaster)
+                                    .scaleEffect(0.75)
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Master Orchestrator")
+                    .accessibilityIdentifier("header.master")
                 }
             }
 
@@ -171,28 +199,7 @@ public struct SessionListView: View {
                 .listRowBackground(SHColor.surfacePopover)
             }
 
-            // Master Orchestrator pinned row
-            if let master = store.masterSession {
-                Section {
-                    Button {
-                        onSelectSession(master.id)
-                    } label: {
-                        MasterSessionRow(
-                            session: master,
-                            isSelected: store.selectedSessionId == master.id,
-                            isBusy: store.isSessionBusy(master.id)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                    .listRowBackground(
-                        store.selectedSessionId == master.id
-                            ? SHColor.brandMaster.opacity(0.14)
-                            : SHColor.surfaceSubtle
-                    )
-                    .listRowSeparator(.hidden)
-                }
-            }
+
 
             // Horizontal harness switcher pills with live quota bar & quick '+' button
             Section {
@@ -604,24 +611,12 @@ private struct SessionListRow: View {
                         HarnessLogoView(harness: session.harness, size: 17)
                     )
 
-                if isBusy {
-                    Circle()
-                        .fill(vis.color)
-                        .frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.5))
-                        .offset(x: 2, y: 2)
-                } else if session.status == .waitingInput {
-                    Circle()
-                        .fill(SHColor.statusWarning)
-                        .frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.5))
-                        .offset(x: 2, y: 2)
-                } else if session.isLive {
-                    Circle()
-                        .fill(SHColor.statusSuccess)
-                        .frame(width: 7, height: 7)
-                        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.5))
-                        .offset(x: 2, y: 2)
+                if session.status == .waitingInput {
+                    SHQuestionBadge()
+                        .offset(x: 4, y: 4)
+                } else if session.isLive && !isBusy {
+                    SHMiniRobotBadge()
+                        .offset(x: 4, y: 4)
                 }
             }
 

@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { HarnessKind } from '../../shared/types';
+import type { HarnessGroup, HarnessKind, UnifiedSession } from '../../shared/types';
 
 marked.setOptions({
   breaks: true,
@@ -47,6 +47,128 @@ export function renderMarkdownHtml(md: string): string {
 
 export function mediaUrlForPath(filePath: string): string {
   return `sh-media://local?path=${encodeURIComponent(filePath)}`;
+}
+
+export interface ParsedSessionLink {
+  unifiedId?: string;
+  harnessHint?: HarnessGroup;
+  nativeId: string;
+}
+
+const SESSION_LINK_SCHEMES: Record<string, HarnessGroup | undefined> = {
+  conversation: undefined,
+  session: undefined,
+  sh: undefined,
+  'super-harness': undefined,
+  superharness: undefined,
+  antigravity: 'antigravity',
+  agy: 'antigravity',
+  codex: 'codex',
+  claude: 'claude',
+  muse: 'muse',
+};
+
+const KNOWN_HARNESS_PREFIXES = new Set<HarnessGroup>(['antigravity', 'codex', 'claude', 'muse']);
+
+/**
+ * Parses deep links to sessions/conversations across all supported harnesses
+ * (e.g. `conversation://<uuid>`, `session://<id>`, `codex://thread/<uuid>`,
+ * `claude://session/<uuid>`, `muse://session/<uuid>`, `super-harness://session/<id>`).
+ */
+export function parseSessionLinkHref(href: string): ParsedSessionLink | null {
+  const trimmed = href.trim();
+  const schemeMatch = trimmed.match(/^([a-z][a-z0-9+.-]*):\/\/(.+)$/i);
+  if (!schemeMatch) return null;
+
+  const scheme = schemeMatch[1].toLowerCase();
+  if (!(scheme in SESSION_LINK_SCHEMES)) return null;
+
+  const harnessHint = SESSION_LINK_SCHEMES[scheme];
+  // Strip query string / fragment and split path segments
+  const cleanRest = schemeMatch[2].split(/[?#]/)[0].replace(/^\/+|\/+$/g, '');
+  if (!cleanRest) return null;
+
+  let rawTarget: string;
+  try {
+    rawTarget = decodeURIComponent(cleanRest);
+  } catch {
+    rawTarget = cleanRest;
+  }
+
+  const segments = rawTarget.split('/').filter(Boolean);
+  if (segments.length === 0) return null;
+
+  // Allow optional path prefixes like `session/<id>`, `thread/<id>`, `conversation/<id>`, `chat/<id>`
+  let idPart = segments[0];
+  if (
+    segments.length >= 2 &&
+    /^(?:session|sessions|thread|threads|conversation|conversations|chat|chats)$/i.test(segments[0])
+  ) {
+    idPart = segments[1];
+  } else if (segments.length > 1) {
+    idPart = segments[segments.length - 1];
+  }
+  idPart = idPart.trim();
+  if (!idPart) return null;
+
+  // Check if idPart is already a unified session id (`claude:<uuid>`, `antigravity:<uuid>`, etc.)
+  const colonIdx = idPart.indexOf(':');
+  if (colonIdx > 0) {
+    const prefix = idPart.slice(0, colonIdx).toLowerCase() as HarnessGroup;
+    const nativeId = idPart.slice(colonIdx + 1).trim();
+    if (KNOWN_HARNESS_PREFIXES.has(prefix) && nativeId) {
+      return {
+        unifiedId: `${prefix}:${nativeId}`,
+        harnessHint: prefix,
+        nativeId,
+      };
+    }
+  }
+
+  return {
+    harnessHint,
+    nativeId: idPart,
+  };
+}
+
+/**
+ * Resolves a parsed session link against the live list of UnifiedSessions.
+ */
+export function resolveSessionLink(
+  href: string,
+  sessions: UnifiedSession[]
+): UnifiedSession | null {
+  const parsed = parseSessionLinkHref(href);
+  if (!parsed) return null;
+
+  const targetUnified = parsed.unifiedId?.toLowerCase();
+  const targetNative = parsed.nativeId.toLowerCase();
+
+  if (targetUnified) {
+    const exact = sessions.find((s) => s.id.toLowerCase() === targetUnified);
+    if (exact) return exact;
+  }
+
+  if (parsed.harnessHint) {
+    const hinted = sessions.find(
+      (s) => s.harnessGroup === parsed.harnessHint && s.nativeId.toLowerCase() === targetNative
+    );
+    if (hinted) return hinted;
+  }
+
+  const byNative = sessions.find((s) => s.nativeId.toLowerCase() === targetNative);
+  if (byNative) return byNative;
+
+  if (targetNative.length >= 8) {
+    const prefixMatches = sessions.filter(
+      (s) =>
+        (!parsed.harnessHint || s.harnessGroup === parsed.harnessHint) &&
+        s.nativeId.toLowerCase().startsWith(targetNative)
+    );
+    if (prefixMatches.length === 1) return prefixMatches[0];
+  }
+
+  return null;
 }
 
 export function embedUrlForPath(filePath: string, token: string): string {

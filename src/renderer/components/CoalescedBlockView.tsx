@@ -24,6 +24,7 @@ import { Badge, Button, CollapsibleCard, DisclosureRow, WorkingIndicator } from 
 import {
   embedUrlForPath,
   mediaUrlForPath,
+  parseSessionLinkHref,
   parseTaskNotification,
   renderMarkdownHtml,
   splitAgentEmbeds,
@@ -69,9 +70,10 @@ export function segmentBlocks(blocks: UnifiedBlock[]): BlockSegment[] {
 interface TraceGroupProps {
   blocks: TraceBlock[];
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onOpenSessionLink?: (href: string) => void;
 }
 
-export const CollapsedTraceGroup: React.FC<TraceGroupProps> = React.memo(({ blocks, onOpenPath }) => {
+export const CollapsedTraceGroup: React.FC<TraceGroupProps> = React.memo(({ blocks, onOpenPath, onOpenSessionLink }) => {
   const summary = useMemo(() => {
     let thinkCount = 0;
     let cmdCount = 0;
@@ -100,7 +102,12 @@ export const CollapsedTraceGroup: React.FC<TraceGroupProps> = React.memo(({ bloc
   return (
     <DisclosureRow label={summary}>
       {blocks.map((b, i) => (
-        <CoalescedBlockView key={i} block={b} onOpenPath={onOpenPath} />
+        <CoalescedBlockView
+          key={i}
+          block={b}
+          onOpenPath={onOpenPath}
+          onOpenSessionLink={onOpenSessionLink}
+        />
       ))}
     </DisclosureRow>
   );
@@ -209,11 +216,12 @@ interface Props {
   block: UnifiedBlock;
   onQuickReply?: (text: string) => void;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onOpenSessionLink?: (href: string) => void;
   onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
 }
 
 export const CoalescedBlockView: React.FC<Props> = React.memo(
-  ({ block, onQuickReply, onOpenPath, onPreviewImage }) => {
+  ({ block, onQuickReply, onOpenPath, onOpenSessionLink, onPreviewImage }) => {
   const [imageBroken, setImageBroken] = useState(false);
   const textContent = block.type === 'text' ? block.text : '';
   const textSegments = useMemo(() => {
@@ -235,6 +243,11 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
     if (!href) return;
     e.preventDefault();
     e.stopPropagation();
+
+    if (parseSessionLinkHref(href)) {
+      onOpenSessionLink?.(href);
+      return;
+    }
 
     const parsedFile = parseFileLinkHref(href);
     if (parsedFile) {
@@ -637,13 +650,14 @@ function classifyUserMessage(msg: UnifiedMessage): UserMessageClassification {
 interface UserMessageViewProps {
   msg: UnifiedMessage;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onOpenSessionLink?: (href: string) => void;
   onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
   onRetryFailed?: (msg: UnifiedMessage) => void;
   onDismissFailed?: (msgId: string) => void;
 }
 
 export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
-  ({ msg, onOpenPath, onPreviewImage, onRetryFailed, onDismissFailed }) => {
+  ({ msg, onOpenPath, onOpenSessionLink, onPreviewImage, onRetryFailed, onDismissFailed }) => {
     const [expanded, setExpanded] = useState(false);
     const [showErrorDetail, setShowErrorDetail] = useState(true);
     const [brokenThumbs, setBrokenThumbs] = useState<Record<string, boolean>>({});
@@ -837,6 +851,10 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
         if (!href) return;
         e.preventDefault();
         e.stopPropagation();
+        if (parseSessionLinkHref(href)) {
+          onOpenSessionLink?.(href);
+          return;
+        }
         const parsedFile = parseFileLinkHref(href);
         if (parsedFile) {
           onOpenPath?.(parsedFile.filePath, {
@@ -922,6 +940,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                   key={i}
                   block={b}
                   onOpenPath={onOpenPath}
+                  onOpenSessionLink={onOpenSessionLink}
                   onPreviewImage={onPreviewImage}
                 />
               ))}
@@ -1095,6 +1114,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                   key={i}
                   block={b}
                   onOpenPath={onOpenPath}
+                  onOpenSessionLink={onOpenSessionLink}
                   onPreviewImage={onPreviewImage}
                 />
               ))}
@@ -1111,23 +1131,30 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
 interface AssistantMessageViewProps {
   msg: UnifiedMessage;
   onOpenPath?: (filePath: string, opts?: { startLine?: number; endLine?: number }) => void;
+  onOpenSessionLink?: (href: string) => void;
   onQuickReply?: (text: string) => void;
   onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
 }
 
 export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.memo(
-  ({ msg, onOpenPath, onQuickReply, onPreviewImage }) => {
+  ({ msg, onOpenPath, onOpenSessionLink, onQuickReply, onPreviewImage }) => {
     const segments = useMemo(() => segmentBlocks(msg.blocks), [msg.blocks]);
     return (
       <div className="space-y-2.5">
         {segments.map((seg, idx) =>
           seg.kind === 'trace' ? (
-            <CollapsedTraceGroup key={idx} blocks={seg.blocks} onOpenPath={onOpenPath} />
+            <CollapsedTraceGroup
+              key={idx}
+              blocks={seg.blocks}
+              onOpenPath={onOpenPath}
+              onOpenSessionLink={onOpenSessionLink}
+            />
           ) : (
             <CoalescedBlockView
               key={idx}
               block={seg.block}
               onOpenPath={onOpenPath}
+              onOpenSessionLink={onOpenSessionLink}
               onQuickReply={onQuickReply}
               onPreviewImage={onPreviewImage}
             />

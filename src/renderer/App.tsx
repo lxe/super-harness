@@ -8,6 +8,7 @@ import type {
   StartSessionRequest,
   SuperHarnessSettings,
   SuperHarnessState,
+  UnifiedBlock,
   UnifiedSession,
   UsageSnapshot,
 } from '../shared/types';
@@ -16,6 +17,7 @@ import { FilePreviewDrawer, type PreviewTarget } from './components/FilePreviewD
 import { SessionPane, type ComposerDraft } from './components/SessionPane';
 import { SettingsModal } from './components/SettingsModal';
 import { Sidebar, type SidebarFilterTab } from './components/Sidebar';
+import { resolveSessionLink } from './utils/format';
 import {
   isBusyDispatchError,
   loadStoredQueues,
@@ -813,6 +815,32 @@ export const App: React.FC = () => {
     setSplitSessionId(id);
   }, []);
 
+  const handleOpenSessionLink = useCallback(
+    (href: string, inSplitPane = false) => {
+      const target = resolveSessionLink(href, sessions);
+      if (!target) {
+        showToast('Session not found in Super Harness');
+        return;
+      }
+      if (inSplitPane) {
+        handleOpenInSplit(target.id);
+      } else {
+        handleSelectSession(target.id);
+      }
+    },
+    [sessions, handleSelectSession, handleOpenInSplit, showToast]
+  );
+
+  const handleOpenSessionLinkPrimary = useCallback(
+    (href: string) => handleOpenSessionLink(href, false),
+    [handleOpenSessionLink]
+  );
+
+  const handleOpenSessionLinkSplit = useCallback(
+    (href: string) => handleOpenSessionLink(href, true),
+    [handleOpenSessionLink]
+  );
+
   const handleOpenSettings = useCallback(() => {
     setShowSettings(true);
   }, []);
@@ -934,7 +962,7 @@ export const App: React.FC = () => {
                       : launchedDraft.harness === 'antigravity'
                         ? 'agy-resume'
                         : launchedDraft.harness === 'muse'
-                          ? 'muse-exec'
+                          ? 'muse-msp'
                           : launchedDraft.harness === 'claude-tmux'
                             ? 'tmux-send'
                             : 'claude-resume',
@@ -942,7 +970,19 @@ export const App: React.FC = () => {
 
                 setPendingSessions((prev) => ({ ...prev, [newSid]: optimisticSession }));
 
-                if (launchedDraft.prompt.trim()) {
+                const launchAttachments = launchedDraft.attachments ?? [];
+                if (launchedDraft.prompt.trim() || launchAttachments.length > 0) {
+                  const launchBlocks: UnifiedBlock[] = [
+                    ...launchAttachments.map((a) => ({
+                      type: 'image' as const,
+                      path: a.path,
+                      name: a.name,
+                      dataUrl: a.previewDataUrl,
+                    })),
+                    ...(launchedDraft.prompt.trim()
+                      ? [{ type: 'text' as const, text: launchedDraft.prompt.trim() }]
+                      : []),
+                  ];
                   rendererTranscriptCache.set(
                     newSid,
                     {
@@ -952,7 +992,7 @@ export const App: React.FC = () => {
                           id: `optimistic-launch-${now}`,
                           role: 'user',
                           timestamp: now,
-                          blocks: [{ type: 'text', text: launchedDraft.prompt.trim() }],
+                          blocks: launchBlocks,
                         },
                       ],
                       totalCount: 1,
@@ -987,6 +1027,7 @@ export const App: React.FC = () => {
             onOrganize={handleOrganize}
             onArchiveSession={handleArchiveSession}
             onOpenPath={handleOpenPath}
+            onOpenSessionLink={handleOpenSessionLinkPrimary}
             onToggleSplit={handleToggleSplitPrimary}
             onClearMaster={handleClearMaster}
           />
@@ -1010,6 +1051,7 @@ export const App: React.FC = () => {
             onOrganize={handleOrganize}
             onArchiveSession={handleArchiveSession}
             onOpenPath={handleOpenPath}
+            onOpenSessionLink={handleOpenSessionLinkSplit}
             onToggleSplit={handleCloseSplit}
             onCloseSplit={handleCloseSplit}
             onClearMaster={handleClearMaster}

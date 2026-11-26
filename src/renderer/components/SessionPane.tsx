@@ -12,7 +12,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
-import { Badge, Button, WorkingIndicator } from '../ui';
+import { Badge, Button, Modal, WorkingIndicator } from '../ui';
 import { isBusyDispatchError } from '../utils/queueStorage';
 import {
   captureStreamTurnBaseline,
@@ -130,6 +130,7 @@ interface Props {
       tmuxSession?: string;
     }
   ) => void;
+  onOpenSessionLink?: (href: string) => void;
   onToggleSplit: () => void;
   onCloseSplit?: () => void;
   onClearMaster: () => void;
@@ -158,6 +159,7 @@ export const SessionPane: React.FC<Props> = ({
   onOrganize,
   onArchiveSession,
   onOpenPath,
+  onOpenSessionLink,
   onToggleSplit,
   onCloseSplit,
   onClearMaster,
@@ -181,6 +183,8 @@ export const SessionPane: React.FC<Props> = ({
     images: PreviewImageItem[];
     index: number;
   } | null>(null);
+  const [confirmRestartInTmux, setConfirmRestartInTmux] = useState(false);
+  const [restartInTmuxBusy, setRestartInTmuxBusy] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -899,6 +903,29 @@ export const SessionPane: React.FC<Props> = ({
     setLightbox({ images, index });
   }, []);
 
+  const runPromoteToTmux = useCallback(async () => {
+    if (!session) return;
+    setRestartInTmuxBusy(true);
+    try {
+      const res = await window.superHarness.promoteToTmux(session.id);
+      if (res.ok) {
+        setDispatchNote(
+          session.harnessGroup === 'muse'
+            ? `Restarted in tmux (${res.tmuxSession || 'live'}) — Super Harness can now type into that terminal`
+            : `Moved to tmux (${res.tmuxSession || 'live'})`
+        );
+        setStreamError(null);
+      } else {
+        setStreamError(res.error || 'Failed to move session to tmux');
+      }
+    } catch (err) {
+      setStreamError(err instanceof Error ? err.message : 'Failed to move session to tmux');
+    } finally {
+      setRestartInTmuxBusy(false);
+      setConfirmRestartInTmux(false);
+    }
+  }, [session]);
+
   if (!session) {
     return (
       <div className="flex-1 flex items-center justify-center text-ink-faint text-body bg-surface-canvas">
@@ -927,16 +954,10 @@ export const SessionPane: React.FC<Props> = ({
         onReloadTranscript={handleReloadTranscript}
         onPromoteToTmux={
           session.harnessGroup === 'claude' && session.dispatchMode !== 'tmux-send'
-            ? () => {
-                void window.superHarness.promoteToTmux(session.id).then((res) => {
-                  if (res.ok) {
-                    setDispatchNote(`Moved to tmux (${res.tmuxSession || 'live'})`);
-                  } else {
-                    setStreamError(res.error || 'Failed to move session to tmux');
-                  }
-                });
-              }
-            : undefined
+            ? () => void runPromoteToTmux()
+            : session.harnessGroup === 'muse' && session.isTerminalHeld
+              ? () => setConfirmRestartInTmux(true)
+              : undefined
         }
         onArchiveSession={onArchiveSession}
         onClearMaster={onClearMaster}
@@ -984,6 +1005,7 @@ export const SessionPane: React.FC<Props> = ({
                       key={msg.id}
                       msg={msg}
                       onOpenPath={handleMessageOpenPath}
+                      onOpenSessionLink={onOpenSessionLink}
                       onPreviewImage={handlePreviewImage}
                       onRetryFailed={handleRetryFailed}
                       onDismissFailed={handleDismissFailed}
@@ -998,6 +1020,8 @@ export const SessionPane: React.FC<Props> = ({
                         <CoalescedBlockView
                           key={i}
                           block={b}
+                          onOpenPath={handleMessageOpenPath}
+                          onOpenSessionLink={onOpenSessionLink}
                           onPreviewImage={handlePreviewImage}
                         />
                       ))}
@@ -1010,6 +1034,7 @@ export const SessionPane: React.FC<Props> = ({
                     key={msg.id}
                     msg={msg}
                     onOpenPath={handleMessageOpenPath}
+                    onOpenSessionLink={onOpenSessionLink}
                     onQuickReply={handleQuickReply}
                     onPreviewImage={handlePreviewImage}
                   />
@@ -1176,6 +1201,49 @@ export const SessionPane: React.FC<Props> = ({
           initialIndex={lightbox.index}
           onClose={() => setLightbox(null)}
         />
+      )}
+
+      {confirmRestartInTmux && (
+        <Modal
+          onClose={() => {
+            if (!restartInTmuxBusy) setConfirmRestartInTmux(false);
+          }}
+          title="Restart this Muse session in tmux?"
+          subtitle={session.title}
+          width="sm"
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmRestartInTmux(false)}
+                disabled={restartInTmuxBusy}
+              >
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => void runPromoteToTmux()} disabled={restartInTmuxBusy}>
+                {restartInTmuxBusy ? 'Restarting…' : 'Close terminal and restart in tmux'}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-body text-ink-secondary">
+            <p>
+              This session is open in a Muse terminal that Super Harness cannot type into (it has
+              no attach endpoint and is not inside tmux), which is why messages sent from here are
+              not delivered.
+            </p>
+            <p>
+              Super Harness will close that exact Muse terminal process and relaunch the same
+              session with <code>muse resume</code> inside a new tmux session. The conversation
+              is preserved. If the session is mid-turn, Super Harness will refuse rather than kill
+              active work.
+            </p>
+            <p>
+              Afterwards Super Harness can type into that tmux terminal for you, and you can watch
+              or take over any time with <code>tmux attach</code>.
+            </p>
+          </div>
+        </Modal>
       )}
     </section>
   );

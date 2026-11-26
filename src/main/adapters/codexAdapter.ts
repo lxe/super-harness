@@ -1002,12 +1002,27 @@ function parseCodexStreamLine(
   return false;
 }
 
+export function isCodexActiveWriterError(text: string): boolean {
+  return /already has an active writer/i.test(text);
+}
+
 /**
  * Cohesive HarnessDriver encapsulating all OpenAI Codex integration
  * (SQLite state/history/queue stores, rollouts, app-server daemon, CLI).
  */
 export function createCodexDriver(): HarnessDriver {
-  const startedRuns = new Map<string, ChildProcess>();
+  const activeRuns = new Map<string, ChildProcess>();
+
+  const killActiveRun = (sessionId: string) => {
+    const prev = activeRuns.get(sessionId);
+    if (!prev) return;
+    try {
+      prev.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+    activeRuns.delete(sessionId);
+  };
 
   return {
     id: 'codex',
@@ -1100,13 +1115,101 @@ export function createCodexDriver(): HarnessDriver {
         args.push(session.nativeId, prompt.trim() || 'Inspect the attached image(s).');
       }
 
-      ctx.spawnStreaming({
-        sessionId: session.id,
-        runId,
-        bin,
-        args,
+      killActiveRun(session.id);
+      const child = spawn(bin, args, {
         cwd,
-        parseLine: (line) => parseCodexStreamLine(session.id, runId, line, ctx.emitStream),
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      activeRuns.set(session.id, child);
+      ctx.emitStream({ sessionId: session.id, runId, kind: 'start' });
+
+      let stdoutBuf = '';
+      let stderrBuf = '';
+      let gotAnyDelta = false;
+      let hitActiveWriter = false;
+
+      const handleLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (isCodexActiveWriterError(trimmed)) {
+          hitActiveWriter = true;
+          return;
+        }
+        if (parseCodexStreamLine(session.id, runId, trimmed, ctx.emitStream)) {
+          gotAnyDelta = true;
+        }
+      };
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdoutBuf += chunk.toString('utf8');
+        const lines = stdoutBuf.split('\n');
+        stdoutBuf = lines.pop() ?? '';
+        for (const line of lines) handleLine(line);
+      });
+
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderrBuf = (stderrBuf + chunk.toString('utf8')).slice(-4000);
+        if (isCodexActiveWriterError(stderrBuf)) {
+          hitActiveWriter = true;
+        }
+      });
+
+      child.on('error', (err) => {
+        activeRuns.delete(session.id);
+        ctx.emitStream({ sessionId: session.id, runId, kind: 'error', error: err.message });
+        ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
+      });
+
+      child.on('close', (code) => {
+        if (stdoutBuf.trim()) handleLine(stdoutBuf);
+        activeRuns.delete(session.id);
+
+        if (hitActiveWriter || isCodexActiveWriterError(stderrBuf)) {
+          // Another Codex client (e.g. Codex Desktop) holds the active writer lock on this thread.
+          // Route seamlessly through `codex queue --resume` so the active writer receives and runs
+          // the message directly with zero error banner.
+          const queueArgs = ['queue'];
+          if (useDaemon) queueArgs.push('--remote', 'unix://');
+          queueArgs.push(
+            '--thread',
+            session.nativeId,
+            '--message',
+            promptWithImages,
+            '--resume'
+          );
+          execFile(bin, queueArgs, { cwd, timeout: 15_000 }, (qErr, _qOut, qStderr) => {
+            if (qErr) {
+              ctx.emitStream({
+                sessionId: session.id,
+                runId,
+                kind: 'error',
+                error: (qStderr || qErr.message || 'Failed to queue message for active Codex thread').slice(
+                  0,
+                  1000
+                ),
+              });
+            }
+            ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
+            ctx.triggerRefresh(250);
+            ctx.triggerRefresh(1200);
+            ctx.triggerRefresh(3000);
+          });
+          return;
+        }
+
+        if (code && code !== 0) {
+          const errText = stderrBuf.trim() || `Codex exited with code ${code}`;
+          ctx.emitStream({
+            sessionId: session.id,
+            runId,
+            kind: 'error',
+            error: errText.slice(0, 1500),
+          });
+        }
+        ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
+        ctx.triggerRefresh(600);
+        ctx.triggerRefresh(2200);
       });
 
       return {
@@ -1173,7 +1276,7 @@ export function createCodexDriver(): HarnessDriver {
               const obj = JSON.parse(trimmed) as { type?: string; thread_id?: string };
               if (obj.type === 'thread.started' && typeof obj.thread_id === 'string' && obj.thread_id) {
                 sessionId = `codex:${obj.thread_id}`;
-                startedRuns.set(sessionId, child);
+                activeRuns.set(sessionId, child);
                 ctx.emitStream({ sessionId, runId, kind: 'start' });
                 for (const pending of bufferedLines) {
                   if (parseCodexStreamLine(sessionId, runId, pending, ctx.emitStream)) {
@@ -1210,7 +1313,7 @@ export function createCodexDriver(): HarnessDriver {
 
         child.on('error', (err) => {
           if (sessionId) {
-            startedRuns.delete(sessionId);
+            activeRuns.delete(sessionId);
             ctx.emitStream({ sessionId, runId, kind: 'error', error: err.message });
             ctx.emitStream({ sessionId, runId, kind: 'done' });
           }
@@ -1220,7 +1323,7 @@ export function createCodexDriver(): HarnessDriver {
         child.on('close', (code) => {
           if (stdoutBuf.trim()) handleLine(stdoutBuf);
           if (sessionId) {
-            startedRuns.delete(sessionId);
+            activeRuns.delete(sessionId);
             if (code !== 0 && !gotAnyDelta && stderrBuf.trim()) {
               ctx.emitStream({
                 sessionId,
@@ -1245,27 +1348,17 @@ export function createCodexDriver(): HarnessDriver {
     },
 
     abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
-      const proc = startedRuns.get(sessionId);
+      const proc = activeRuns.get(sessionId);
       if (!proc) return false;
-      try {
-        proc.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
-      startedRuns.delete(sessionId);
+      killActiveRun(sessionId);
       emitStream({ sessionId, runId: 'abort', kind: 'done' });
       return true;
     },
 
     shutdown(): void {
-      for (const proc of startedRuns.values()) {
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // ignore
-        }
+      for (const sid of Array.from(activeRuns.keys())) {
+        killActiveRun(sid);
       }
-      startedRuns.clear();
     },
 
     async controlDaemon(

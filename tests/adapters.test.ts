@@ -13,6 +13,7 @@ import {
 } from '../src/main/adapters/claudeAdapter';
 import {
   getCodexTranscriptFingerprint,
+  isCodexActiveWriterError,
   loadCodexTranscriptFromPaths,
 } from '../src/main/adapters/codexAdapter';
 import { closeSqlitePool } from '../src/main/utils/sqlite';
@@ -639,5 +640,14 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     expect(Math.round(pace!.elapsedPercent)).toBe(43);
     expect(pace!.projectedPercent).toBe(75);
     expect(pace!.windowWord).toBe('week');
+  });
+
+  it('detects Codex active-writer lock errors for automatic codex queue fallback', () => {
+    expect(
+      isCodexActiveWriterError(
+        'Error: thread/resume failed: thread 01a214d5-7edc-7480-8b89-f270e244701a already has an active writer (code -32600)'
+      )
+    ).toBe(true);
+    expect(isCodexActiveWriterError('Error: network timeout')).toBe(false);
   });
 });

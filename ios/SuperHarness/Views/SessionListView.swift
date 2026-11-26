@@ -153,6 +153,7 @@ public struct SessionListView: View {
     @State private var isManageFoldersPresented: Bool = false
     @State private var isSearchActive: Bool = false
     @State private var isErrorDetailExpanded: Bool = false
+    @State private var showPinnedChipsBar: Bool = false
     @FocusState private var isSearchFieldFocused: Bool
 
     private var collapsedSectionIds: Set<String> {
@@ -464,71 +465,13 @@ public struct SessionListView: View {
 
 
 
-            // Globally Pinned-to-Top section (icon + chevron header; collapses into 5-per-row pill grid)
+            // Globally Pinned-to-Top section (headless — no header or manual collapse;
+            // scrolling down automatically animates these into a floating top chip strip)
             let topPinned = store.pinnedToTopSessions
             if !topPinned.isEmpty {
-                let pinnedSectionId = "__pinned_to_top__"
-                let isPinnedCollapsed = collapsedSectionIds.contains(pinnedSectionId)
                 Section {
-                    Button {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
-                            toggleCollapsed(pinnedSectionId)
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "pin.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(SHColor.brandMaster)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(SHColor.inkFaint)
-                                .rotationEffect(.degrees(isPinnedCollapsed ? 0 : 90))
-                        }
-                        .padding(.vertical, 2)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Pinned sessions")
-                    .accessibilityIdentifier("section.header.pinned-to-top")
-                    .accessibilityValue(isPinnedCollapsed ? "collapsed" : "expanded")
-                    .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 4, trailing: 20))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-
-                    if isPinnedCollapsed {
-                        PinnedSessionsPillGrid(
-                            sessions: topPinned,
-                            selectedSessionId: store.selectedSessionId,
-                            isBusy: { store.isSessionBusy($0) },
-                            onSelect: onSelectSession,
-                            onToggleUnread: { session in
-                                Task { await store.setUnread(sessionId: session.id, unread: !session.isUnread) }
-                            },
-                            onRename: { session in
-                                renameDraft = session.displayTitle
-                                renamingSession = session
-                            },
-                            onUnpinTop: { session in
-                                Task { await store.togglePinToTop(session) }
-                            },
-                            onArchive: { session in
-                                Task { await store.archiveSession(session) }
-                            }
-                        )
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                    } else {
-                        ForEach(topPinned) { session in
-                            sessionRowButton(session)
-                                .transition(
-                                    .asymmetric(
-                                        insertion: .move(edge: .top).combined(with: .opacity),
-                                        removal: .opacity
-                                    )
-                                )
-                        }
+                    ForEach(topPinned) { session in
+                        sessionRowButton(session, isPinned: true)
                     }
                 }
             }
@@ -652,6 +595,50 @@ public struct SessionListView: View {
             }
         }
         .listStyle(.plain)
+        .onScrollGeometryChange(for: CGFloat.self) { geo in
+            geo.contentOffset.y + geo.contentInsets.top
+        } action: { _, offset in
+            // Hysteresis prevents flicker near the threshold while keeping the transition crisp.
+            if !showPinnedChipsBar && offset > 44 {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    showPinnedChipsBar = true
+                }
+            } else if showPinnedChipsBar && offset < 16 {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
+                    showPinnedChipsBar = false
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            let topPinned = store.pinnedToTopSessions
+            if showPinnedChipsBar && !topPinned.isEmpty && !isSearchActive {
+                PinnedSessionsFloatingStrip(
+                    sessions: topPinned,
+                    selectedSessionId: store.selectedSessionId,
+                    isBusy: { store.isSessionBusy($0) },
+                    onSelect: onSelectSession,
+                    onToggleUnread: { session in
+                        Task { await store.setUnread(sessionId: session.id, unread: !session.isUnread) }
+                    },
+                    onRename: { session in
+                        renameDraft = session.displayTitle
+                        renamingSession = session
+                    },
+                    onUnpinTop: { session in
+                        Task { await store.togglePinToTop(session) }
+                    },
+                    onArchive: { session in
+                        Task { await store.archiveSession(session) }
+                    }
+                )
+                .padding(.top, 4)
+                .transition(
+                    .move(edge: .top)
+                    .combined(with: .opacity)
+                    .combined(with: .scale(scale: 0.94, anchor: .top))
+                )
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if isSearchActive {
                 inlineSearchField
@@ -673,7 +660,7 @@ public struct SessionListView: View {
     }
 
     @ViewBuilder
-    private func sessionRowButton(_ session: UnifiedSession) -> some View {
+    private func sessionRowButton(_ session: UnifiedSession, isPinned: Bool = false) -> some View {
         let isSelected = store.selectedSessionId == session.id
         let isBusy = store.isSessionBusy(session.id)
 
@@ -682,20 +669,20 @@ public struct SessionListView: View {
         } label: {
             SessionListRow(
                 session: session,
-                isBusy: isBusy
+                isBusy: isBusy,
+                isPinned: isPinned
             )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
-                    .fill(isSelected ? SHColor.surfaceRaised : SHColor.surfaceSubtle)
+                    .fill(isSelected ? SHColor.surfaceRaised : Color.clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         }
         .buttonStyle(.plain)
-        // Each row is its own rounded card so swipe actions slide a rounded shape instead of a hard edge.
-        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -846,9 +833,9 @@ private struct MasterSessionRow: View {
     }
 }
 
-// MARK: - Compact Pinned Sessions Pill Grid (4 per row)
+// MARK: - Floating Scroll-Driven Pinned Sessions Strip
 
-private struct PinnedSessionsPillGrid: View {
+private struct PinnedSessionsFloatingStrip: View {
     let sessions: [UnifiedSession]
     let selectedSessionId: String?
     let isBusy: (String) -> Bool
@@ -858,61 +845,55 @@ private struct PinnedSessionsPillGrid: View {
     let onUnpinTop: (UnifiedSession) -> Void
     let onArchive: (UnifiedSession) -> Void
 
-    static let pillsPerRow = 4
-
-    // Plain stacks, not a lazy grid: inside a List row a lazy grid could leave its first row
-    // unrendered, which showed as an empty gap above the remaining pills.
     var body: some View {
-        VStack(spacing: 6) {
-            ForEach(Array(SessionRowFormatting.pillRows(of: sessions, perRow: Self.pillsPerRow).enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 6) {
-                    ForEach(row) { session in
-                        pill(for: session)
-                    }
-                    // Empty slots keep a short last row's pills the same width as the others.
-                    ForEach(0..<(Self.pillsPerRow - row.count), id: \.self) { _ in
-                        Color.clear.frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(SHColor.brandMaster)
+                    .padding(.leading, 4)
+                    .padding(.trailing, 2)
+
+                ForEach(sessions) { session in
+                    PinnedSessionPill(
+                        session: session,
+                        isSelected: selectedSessionId == session.id,
+                        isBusy: isBusy(session.id),
+                        onSelect: { onSelect(session.id) }
+                    )
+                    .contextMenu {
+                        Button {
+                            onToggleUnread(session)
+                        } label: {
+                            if session.isUnread {
+                                Label("Mark as Read", systemImage: "envelope.open")
+                            } else {
+                                Label("Mark as Unread", systemImage: "envelope.badge")
+                            }
+                        }
+                        Button {
+                            onRename(session)
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        Button {
+                            onUnpinTop(session)
+                        } label: {
+                            Label("Remove from Top", systemImage: "pin.slash")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            onArchive(session)
+                        } label: {
+                            Label("Archive Session", systemImage: "archivebox")
+                        }
                     }
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
         }
         .accessibilityIdentifier("pinned.pillGrid")
-    }
-
-    private func pill(for session: UnifiedSession) -> some View {
-                PinnedSessionPill(
-                    session: session,
-                    isSelected: selectedSessionId == session.id,
-                    isBusy: isBusy(session.id),
-                    onSelect: { onSelect(session.id) }
-                )
-                .contextMenu {
-                    Button {
-                        onToggleUnread(session)
-                    } label: {
-                        if session.isUnread {
-                            Label("Mark as Read", systemImage: "envelope.open")
-                        } else {
-                            Label("Mark as Unread", systemImage: "envelope.badge")
-                        }
-                    }
-                    Button {
-                        onRename(session)
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                    Button {
-                        onUnpinTop(session)
-                    } label: {
-                        Label("Remove from Top", systemImage: "pin.slash")
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        onArchive(session)
-                    } label: {
-                        Label("Archive Session", systemImage: "archivebox")
-                    }
-                }
     }
 }
 
@@ -927,7 +908,7 @@ private struct PinnedSessionPill: View {
         let label = SessionRowFormatting.compactPillLabel(for: session)
 
         Button(action: onSelect) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 ZStack {
                     if session.status == .waitingInput, !isBusy {
                         Image(systemName: "questionmark.circle.fill")
@@ -941,28 +922,26 @@ private struct PinnedSessionPill: View {
 
                 // A working session shimmers its title, the same signal the full rows use.
                 if isBusy {
-                    SHShimmerText(text: label, font: .system(size: 11, weight: .medium), isActive: true)
+                    SHShimmerText(text: label, font: .system(size: 11.5, weight: .medium), isActive: true)
                 } else {
                     Text(label)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(isSelected || session.isUnread ? SHColor.inkPrimary : SHColor.inkSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
             }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
-            .background(
-                Capsule()
-                    .fill(isSelected ? SHColor.surfaceRaised : SHColor.surfaceSubtle)
-            )
+            .padding(.horizontal, 10)
+            .frame(minHeight: 34, maxHeight: 34)
+            .frame(maxWidth: 118)
+            .modifier(SHGlassSurfaceModifier(shape: Capsule()))
             .overlay(
                 Capsule()
                     .strokeBorder(
                         isBusy
-                            ? vis.color.opacity(0.42)
-                            : (session.isUnread ? SHColor.brandMaster.opacity(0.45) : SHColor.lineHairline),
-                        lineWidth: isBusy || session.isUnread ? 1 : 0.75
+                            ? vis.color.opacity(0.45)
+                            : (session.isUnread ? SHColor.brandMaster.opacity(0.45) : Color.clear),
+                        lineWidth: isBusy || session.isUnread ? 1 : 0
                     )
             )
             .overlay(alignment: .topTrailing) {
@@ -1175,6 +1154,7 @@ private struct HarnessSwitcherStrip: View {
 private struct SessionListRow: View {
     let session: UnifiedSession
     let isBusy: Bool
+    var isPinned: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1208,7 +1188,12 @@ private struct SessionListRow: View {
                         .foregroundStyle(SHColor.statusWarning)
                         .accessibilityLabel("Question pending")
                 } else {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
+                        if isPinned {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(SHColor.brandMaster.opacity(0.7))
+                        }
                         Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
                             .font(SHTypography.micro.monospacedDigit())
                             .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)

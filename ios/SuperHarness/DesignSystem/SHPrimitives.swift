@@ -105,45 +105,6 @@ public struct SHQuestionBadge: View {
     }
 }
 
-/// Compact emerald mini-robot badge indicating a live running session process on the desktop host.
-public struct SHMiniRobotBadge: View {
-    public init() {}
-
-    public var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color(hex: 0x132E24))
-                .frame(width: 15, height: 15)
-            SHMiniRobotGlyph()
-                .frame(width: 9, height: 9)
-        }
-        .overlay(Circle().stroke(SHColor.statusSuccess.opacity(0.85), lineWidth: 1.0))
-        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.5).padding(-1.2))
-        .shadow(color: Color.black.opacity(0.35), radius: 2, y: 1)
-    }
-}
-
-private struct SHMiniRobotGlyph: View {
-    var body: some View {
-        VStack(spacing: 0.8) {
-            // Antenna tip
-            Circle()
-                .fill(SHColor.statusSuccess)
-                .frame(width: 2.0, height: 2.0)
-            // Robot visor head with two glowing eyes
-            ZStack {
-                RoundedRectangle(cornerRadius: 2.0, style: .continuous)
-                    .fill(SHColor.statusSuccess)
-                    .frame(width: 8.0, height: 5.5)
-                HStack(spacing: 2.0) {
-                    Circle().fill(Color(hex: 0x111215)).frame(width: 1.6, height: 1.6)
-                    Circle().fill(Color(hex: 0x111215)).frame(width: 1.6, height: 1.6)
-                }
-            }
-        }
-    }
-}
-
 // MARK: - Synchronous In-Memory Media Image Cache (Zero-Flash Handoff)
 
 @MainActor

@@ -48,6 +48,48 @@ public enum SessionRowFormatting {
         return rawPreview
     }
 
+    /// Short label for the machine a session runs on: the last IPv4 octet (".3"),
+    /// or the first label of a host name. Mirrors `hostBadgeLabel` on the desktop sidebar.
+    public static func hostBadgeLabel(_ address: String?) -> String? {
+        guard let address else { return nil }
+        var host = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let at = host.lastIndex(of: "@") {
+            host = String(host[host.index(after: at)...])
+        }
+        guard !host.isEmpty else { return nil }
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        let isIPv4 = parts.count == 4 && parts.allSatisfy { part in
+            (1...3).contains(part.count) && part.allSatisfy { $0.isASCII && $0.isNumber }
+        }
+        if isIPv4, let last = parts.last {
+            return ".\(last)"
+        }
+        let first = String((parts.first ?? "").prefix(8))
+        return first.isEmpty ? nil : first
+    }
+
+    public static func hostAccessibilityLabel(address: String, label: String?) -> String {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return "Running on \(trimmed.isEmpty ? address : trimmed) (\(address))"
+    }
+
+    /// Second line of a session row: the start of the person's latest message when the host
+    /// reports it, otherwise the session preview.
+    public static func subtitle(for session: UnifiedSession) -> String? {
+        if let last = session.lastUserText {
+            let oneLine = normalizeWhitespace(last)
+            if !oneLine.isEmpty { return oneLine }
+        }
+        return cleanPreview(for: session).map(normalizeWhitespace)
+    }
+
+    private static func normalizeWhitespace(_ value: String) -> String {
+        value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
     private static func normalize(_ value: String) -> String {
         value
             .lowercased()
@@ -284,7 +326,7 @@ public struct SessionListView: View {
                     if section.isHeadless {
                         Section {
                             ForEach(section.sessions) { session in
-                                sessionRowButton(session, hideProjectSubtitle: false)
+                                sessionRowButton(session)
                             }
                         }
                     } else {
@@ -333,7 +375,7 @@ public struct SessionListView: View {
 
                             if !isCollapsed {
                                 ForEach(section.sessions) { session in
-                                    sessionRowButton(session, hideProjectSubtitle: section.isProjectOrSectionGroup)
+                                    sessionRowButton(session)
                                 }
                             }
                         }
@@ -356,7 +398,7 @@ public struct SessionListView: View {
     }
 
     @ViewBuilder
-    private func sessionRowButton(_ session: UnifiedSession, hideProjectSubtitle: Bool = false) -> some View {
+    private func sessionRowButton(_ session: UnifiedSession) -> some View {
         let isSelected = store.selectedSessionId == session.id
         let isBusy = store.isSessionBusy(session.id)
 
@@ -365,8 +407,7 @@ public struct SessionListView: View {
         } label: {
             SessionListRow(
                 session: session,
-                isBusy: isBusy,
-                hideProjectSubtitle: hideProjectSubtitle
+                isBusy: isBusy
             )
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
@@ -625,84 +666,73 @@ private struct HarnessSwitcherStrip: View {
 private struct SessionListRow: View {
     let session: UnifiedSession
     let isBusy: Bool
-    let hideProjectSubtitle: Bool
 
     var body: some View {
         let vis = HarnessVisual.forKind(session.harness)
-        let project = hideProjectSubtitle ? nil : SessionRowFormatting.cleanProjectName(for: session)
-        let branch = session.gitBranch?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasBranch = !(branch?.isEmpty ?? true)
-        let showsSecondLine = project != nil || hasBranch || session.status == .waitingInput
+        let hostBadge = SessionRowFormatting.hostBadgeLabel(session.hostAddress)
+        let subtitle = SessionRowFormatting.subtitle(for: session)
 
         HStack(alignment: .center, spacing: 12) {
-            ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
-                    .fill(vis.color.opacity(0.10))
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        HarnessLogoView(harness: session.harness, size: 17)
-                    )
+            RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                .fill(vis.color.opacity(0.10))
+                .frame(width: 32, height: 32)
+                .overlay(
+                    HarnessLogoView(harness: session.harness, size: 17)
+                )
 
-                if session.status == .waitingInput {
-                    SHQuestionBadge()
-                        .offset(x: 4, y: 4)
-                } else if session.isLive && !isBusy {
-                    SHMiniRobotBadge()
-                        .offset(x: 4, y: 4)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.displayTitle)
+                    .font(SHTypography.label.weight(.medium))
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if hostBadge != nil || subtitle != nil {
+                    HStack(alignment: .center, spacing: 6) {
+                        if let hostBadge, let address = session.hostAddress {
+                            Text(hostBadge)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(SHColor.inkSecondary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .fill(SHColor.surfaceRaised)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .stroke(SHColor.lineHairline, lineWidth: 1)
+                                )
+                                .fixedSize()
+                                .accessibilityLabel(SessionRowFormatting.hostAccessibilityLabel(address: address, label: session.hostLabel))
+                        }
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(SHTypography.micro)
+                                .foregroundStyle(SHColor.inkMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .center, spacing: 6) {
-                    if session.pinned {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                    Text(session.displayTitle)
-                        .font(SHTypography.label.weight(.medium))
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .lineLimit(showsSecondLine ? 1 : 2)
-                    Spacer(minLength: 6)
-                    if isBusy {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .tint(vis.color)
-                            .frame(width: 14, height: 14)
-                    } else {
-                        Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
-                            .font(SHTypography.micro.monospacedDigit())
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                }
+            Spacer(minLength: 6)
 
-                if showsSecondLine {
-                    HStack(spacing: 8) {
-                        if let project {
-                            Text(project)
-                                .font(SHTypography.micro)
-                                .foregroundStyle(SHColor.inkFaint)
-                                .lineLimit(1)
-                        }
-
-                        if let branch, !branch.isEmpty {
-                            Label(branch, systemImage: "arrow.triangle.branch")
-                                .font(SHTypography.micro)
-                                .foregroundStyle(SHColor.inkFaint)
-                                .lineLimit(1)
-                        }
-
-                        if session.status == .waitingInput {
-                            Text("Input needed")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundStyle(SHColor.statusWarning)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(SHColor.statusWarning.opacity(0.14))
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
+            if isBusy {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(vis.color)
+                    .frame(width: 14, height: 14)
+            } else if session.status == .waitingInput {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(SHColor.statusWarning)
+                    .accessibilityLabel("Question pending")
+            } else {
+                Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
+                    .font(SHTypography.micro.monospacedDigit())
+                    .foregroundStyle(SHColor.inkFaint)
             }
         }
         .contentShape(Rectangle())

@@ -144,7 +144,8 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 dispatchMode: .agyResume,
                 nativeSection: "super-harness",
                 nativeSectionOrder: 0,
-                originApp: .antigravityCli
+                originApp: .antigravityCli,
+                lastUserText: "make the session rows two lines: name on top, then my last message"
             ),
             UnifiedSession(
                 id: "codex:cx-control-server",
@@ -169,7 +170,10 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 tags: ["api", "sse"],
                 dispatchMode: .codexResume,
                 nativeSection: "super-harness",
-                nativeSectionOrder: 0
+                nativeSectionOrder: 0,
+                hostAddress: "lxe@100.64.0.3",
+                hostLabel: "linux-box",
+                lastUserText: "bind to the tailnet address only and ask me before opening the LAN port"
             ),
             UnifiedSession(
                 id: "claude-tmux:cc-usage-redesign",
@@ -196,7 +200,10 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 dispatchMode: .tmuxSend,
                 nativeSection: "super-harness",
                 nativeSectionOrder: 0,
-                permissionMode: "acceptEdits"
+                permissionMode: "acceptEdits",
+                hostAddress: "devbox.tailnet.ts.net",
+                hostLabel: "devbox",
+                lastUserText: "the pace tick should sit on the bar, not under it"
             ),
             UnifiedSession(
                 id: "antigravity:agy-diff-engine",
@@ -287,13 +294,62 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 tags: ["muse", "ios"],
                 dispatchMode: .museExec,
                 nativeSection: "super-harness",
-                nativeSectionOrder: 0
+                nativeSectionOrder: 0,
+                hostAddress: "100.64.0.12"
             ),
         ]
 
         let samplePreviewDataUrl = Self.makeSamplePreviewDataUrl()
 
         self.transcripts = [
+            "codex:cx-test-harness": SessionTranscriptResult(
+                sessionId: "codex:cx-test-harness",
+                messages: [
+                    UnifiedMessage(
+                        id: "th-1",
+                        role: .user,
+                        timestamp: now - 27 * hour,
+                        blocks: [.text(text: "Run the organizer tests and typecheck, then start the watcher.")]
+                    ),
+                    UnifiedMessage(
+                        id: "th-2",
+                        role: .assistant,
+                        timestamp: now - 26 * hour,
+                        blocks: [
+                            .text(text: "Running the session organizer tests first."),
+                            .command(
+                                command: "npm test -- sessionOrganizer",
+                                cwd: "/Users/lxe/Developer/super-harness",
+                                output: "PASS tests/sessionOrganizer.test.ts (42 passed)",
+                                exitCode: 0,
+                                durationMs: 2140,
+                                status: "completed"
+                            ),
+                            .text(text: "Tests pass. The typecheck does not:"),
+                            .command(
+                                command: "npm run typecheck",
+                                cwd: "/Users/lxe/Developer/super-harness",
+                                output: "src/main/folders.ts(88,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
+                                exitCode: 2,
+                                durationMs: 6310,
+                                status: "completed"
+                            ),
+                            .text(text: "I fixed the type error and started the watcher."),
+                            .command(
+                                command: "cat > tests/folders.test.ts <<'EOF'\nimport { describe, expect, it } from 'vitest';\nimport { migrateFolders } from '../src/main/folders';\n\ndescribe('migrateFolders', () => {\n  it('keeps folder ids stable across a rename', () => {\n    expect(migrateFolders([{ id: 'a', name: 'Old' }])).toEqual([{ id: 'a', name: 'Old' }]);\n  });\n});\nEOF\nnpm run test:watch",
+                                cwd: "/Users/lxe/Developer/super-harness",
+                                output: nil,
+                                exitCode: nil,
+                                durationMs: nil,
+                                status: "running"
+                            ),
+                        ],
+                        harnessMeta: MessageHarnessMeta(model: "gpt-5.3-codex", sourceKind: .agent)
+                    ),
+                ],
+                liveActivity: LiveActivityState(isWorking: false)
+            ),
+
             "master:root": SessionTranscriptResult(
                 sessionId: "master:root",
                 messages: [

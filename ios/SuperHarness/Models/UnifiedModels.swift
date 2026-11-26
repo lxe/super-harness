@@ -358,6 +358,11 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
     public var originApp: OriginApp?
     public var nativeMetaPath: String?
     public var permissionMode: String?
+    /// Address of the machine the session runs on, when it is not the control host itself.
+    public var hostAddress: String?
+    public var hostLabel: String?
+    /// Start of the newest message the person sent in this session (one line, host-trimmed).
+    public var lastUserText: String?
 
     public var displayTitle: String {
         if let custom = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
@@ -412,7 +417,10 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         nativeSectionOrder: Int? = nil,
         originApp: OriginApp? = nil,
         nativeMetaPath: String? = nil,
-        permissionMode: String? = nil
+        permissionMode: String? = nil,
+        hostAddress: String? = nil,
+        hostLabel: String? = nil,
+        lastUserText: String? = nil
     ) {
         self.id = id
         self.nativeId = nativeId ?? Self.inferNativeId(from: id)
@@ -452,6 +460,9 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         self.originApp = originApp
         self.nativeMetaPath = nativeMetaPath
         self.permissionMode = permissionMode
+        self.hostAddress = hostAddress
+        self.hostLabel = hostLabel
+        self.lastUserText = lastUserText
     }
 
     public init(from decoder: Decoder) throws {
@@ -500,6 +511,9 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         originApp = try? c.decodeIfPresent(OriginApp.self, forKey: .originApp)
         nativeMetaPath = try c.decodeIfPresent(String.self, forKey: .nativeMetaPath)
         permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode)
+        hostAddress = try? c.decodeIfPresent(String.self, forKey: .hostAddress)
+        hostLabel = try? c.decodeIfPresent(String.self, forKey: .hostLabel)
+        lastUserText = try? c.decodeIfPresent(String.self, forKey: .lastUserText)
     }
 
     private static func inferNativeId(from id: String) -> String {

@@ -37,6 +37,84 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(session.createdAt, 1732500000000)
     }
 
+    func testDecodesLastUserTextAndHostFieldsAndKeepsOldPayloadsDecoding() throws {
+        let json = """
+        {
+          "id": "claude-cli:remote-1",
+          "harness": "claude-cli",
+          "title": "Remote session",
+          "preview": "Assistant preview text",
+          "updatedAt": 1732500000000,
+          "hostAddress": "lxe@192.168.1.3",
+          "hostLabel": "linux-box",
+          "lastUserText": "  fix the\\n row layout  "
+        }
+        """
+        let session = try JSONDecoder().decode(UnifiedSession.self, from: Data(json.utf8))
+        XCTAssertEqual(session.hostAddress, "lxe@192.168.1.3")
+        XCTAssertEqual(session.hostLabel, "linux-box")
+        XCTAssertEqual(session.lastUserText, "  fix the\n row layout  ")
+        XCTAssertEqual(SessionRowFormatting.subtitle(for: session), "fix the row layout")
+
+        // Round-trips through Codable (sessions are cached on disk).
+        let reencoded = try JSONDecoder().decode(UnifiedSession.self, from: JSONEncoder().encode(session))
+        XCTAssertEqual(reencoded, session)
+
+        // Payload from a host that predates the fields.
+        let old = """
+        { "id": "codex:old", "harness": "codex", "title": "Old host", "preview": "Latest assistant line", "updatedAt": 1 }
+        """
+        let oldSession = try JSONDecoder().decode(UnifiedSession.self, from: Data(old.utf8))
+        XCTAssertNil(oldSession.lastUserText)
+        XCTAssertNil(oldSession.hostAddress)
+        XCTAssertEqual(SessionRowFormatting.subtitle(for: oldSession), "Latest assistant line")
+
+        // Blank lastUserText also falls back to the preview.
+        var blank = oldSession
+        blank.lastUserText = "   "
+        XCTAssertEqual(SessionRowFormatting.subtitle(for: blank), "Latest assistant line")
+    }
+
+    func testHostBadgeLabelUsesLastIPv4OctetOrFirstHostLabel() {
+        XCTAssertEqual(SessionRowFormatting.hostBadgeLabel("192.168.1.3"), ".3")
+        XCTAssertEqual(SessionRowFormatting.hostBadgeLabel("lxe@100.64.0.12"), ".12")
+        XCTAssertEqual(SessionRowFormatting.hostBadgeLabel("devbox.tailnet.ts.net"), "devbox")
+        XCTAssertEqual(SessionRowFormatting.hostBadgeLabel("lxe@averyveryverylonghost.local"), "averyver")
+        XCTAssertEqual(SessionRowFormatting.hostBadgeLabel("1.2.3"), "1")
+        XCTAssertNil(SessionRowFormatting.hostBadgeLabel(nil))
+        XCTAssertNil(SessionRowFormatting.hostBadgeLabel("  "))
+        XCTAssertEqual(
+            SessionRowFormatting.hostAccessibilityLabel(address: "192.168.1.3", label: "linux-box"),
+            "Running on linux-box (192.168.1.3)"
+        )
+        XCTAssertEqual(
+            SessionRowFormatting.hostAccessibilityLabel(address: "192.168.1.3", label: nil),
+            "Running on 192.168.1.3 (192.168.1.3)"
+        )
+    }
+
+    func testCommandBlockTrailingBadgeHidesSuccessAndKeepsFailureAndRunning() {
+        XCTAssertNil(CommandBlockView.trailingBadge(exitCode: 0, status: "completed"))
+        XCTAssertNil(CommandBlockView.trailingBadge(exitCode: nil, status: "completed"))
+        XCTAssertNil(CommandBlockView.trailingBadge(exitCode: nil, status: "Success"))
+        XCTAssertNil(CommandBlockView.trailingBadge(exitCode: 0, status: nil))
+        XCTAssertEqual(CommandBlockView.trailingBadge(exitCode: 2, status: "completed")?.text, "exit 2")
+        XCTAssertEqual(CommandBlockView.trailingBadge(exitCode: 2, status: "completed")?.isFailure, true)
+        XCTAssertEqual(CommandBlockView.trailingBadge(exitCode: nil, status: "failed")?.isFailure, true)
+        XCTAssertEqual(CommandBlockView.trailingBadge(exitCode: nil, status: "running")?.text, "running")
+        XCTAssertEqual(CommandBlockView.trailingBadge(exitCode: nil, status: "running")?.isFailure, false)
+    }
+
+    func testCommandFirstLineNeverIncludesLaterLines() {
+        let heredoc = "cat > a.txt <<'EOF'\nline one\nline two\nEOF"
+        XCTAssertEqual(CommandFirstLineText.firstLine(of: heredoc), "cat > a.txt <<'EOF'")
+        XCTAssertEqual(CommandFirstLineText.firstLine(of: "\n  npm test\n"), "npm test")
+        XCTAssertEqual(CommandFirstLineText.firstLine(of: ""), "")
+        XCTAssertTrue(CommandFirstLineText.needsFullView(heredoc))
+        XCTAssertTrue(CommandFirstLineText.needsFullView(String(repeating: "x", count: 80)))
+        XCTAssertFalse(CommandFirstLineText.needsFullView("npm test"))
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

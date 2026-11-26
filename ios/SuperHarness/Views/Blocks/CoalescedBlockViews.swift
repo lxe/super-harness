@@ -175,11 +175,11 @@ private struct CompactTraceRowView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Button {
-                    if hasOutput || cleanCmd.count > 44 {
+                    if hasOutput || CommandFirstLineText.needsFullView(cleanCmd) {
                         withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
                     }
                 } label: {
-                    HStack(spacing: 7) {
+                    HStack(alignment: .center, spacing: 7) {
                         if isRunning {
                             ProgressView()
                                 .controlSize(.mini)
@@ -191,18 +191,13 @@ private struct CompactTraceRowView: View {
                                 .foregroundStyle(failed ? SHColor.statusDanger : SHColor.inkFaint)
                                 .frame(width: 12)
                         }
-                        Text(cleanCmd)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(SHColor.inkSecondary)
-                            .lineLimit(isDetailOpen ? nil : 1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 4)
+                        CommandFirstLineText(text: cleanCmd, color: SHColor.inkSecondary)
                         if let durationMs, durationMs >= 1000 {
                             Text(String(format: "%.1fs", durationMs / 1000.0))
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(SHColor.inkFaint)
                         }
-                        if hasOutput {
+                        if hasOutput || CommandFirstLineText.needsFullView(cleanCmd) {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(SHColor.inkFaint)
@@ -214,6 +209,14 @@ private struct CompactTraceRowView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                if isDetailOpen, CommandFirstLineText.needsFullView(cleanCmd) {
+                    FullCommandText(command: cleanCmd)
+                        .padding(9)
+                        .background(SHColor.surfaceCode)
+                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
+                        .padding(.leading, 18)
+                }
 
                 if isDetailOpen, let output, !output.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -279,7 +282,7 @@ private struct CompactTraceRowView: View {
                         withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
                     }
                 } label: {
-                    HStack(spacing: 7) {
+                    HStack(alignment: .center, spacing: 7) {
                         if isRunning {
                             ProgressView().controlSize(.mini).scaleEffect(0.75).frame(width: 12, height: 12)
                         } else {
@@ -703,7 +706,7 @@ private struct ThinkingBlockView: View, Equatable {
 
 // MARK: - 4. Command Terminal Block
 
-private struct CommandBlockView: View, Equatable {
+struct CommandBlockView: View, Equatable {
     let command: String
     let cwd: String?
     let output: String?
@@ -727,18 +730,16 @@ private struct CommandBlockView: View, Equatable {
                 withAnimation(.easeInOut(duration: 0.16)) { isExpanded.toggle() }
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(SHColor.inkMuted)
-                        Text("$ \(command)")
-                            .font(SHTypography.mono)
-                            .foregroundStyle(SHColor.inkPrimary)
-                            .lineLimit(isExpanded ? nil : 1)
-                        Spacer(minLength: 4)
+                        CommandFirstLineText(text: "$ \(command)", color: SHColor.inkPrimary)
                         exitBadge
                     }
 
+                    let canExpand = !(output ?? "").isEmpty || CommandFirstLineText.needsFullView(command)
+                    if !(cwd ?? "").isEmpty || durationMs != nil || canExpand {
                     HStack(spacing: 8) {
                         if let cwd, !cwd.isEmpty {
                             Text((cwd as NSString).lastPathComponent)
@@ -752,17 +753,26 @@ private struct CommandBlockView: View, Equatable {
                                 .foregroundStyle(SHColor.inkFaint)
                         }
                         Spacer()
-                        if let output, !output.isEmpty {
-                            Text(isExpanded ? "Hide output" : "Output")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(SHColor.inkMuted)
+                        if canExpand {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
+                                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                                .accessibilityLabel(isExpanded ? "Collapse" : "Expand")
                         }
+                    }
                     }
                 }
                 .padding(13)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            if isExpanded, CommandFirstLineText.needsFullView(command) {
+                Divider().overlay(SHColor.lineHairline)
+                FullCommandText(command: command)
+                    .padding(13)
+            }
 
             if isExpanded, let output, !output.isEmpty {
                 Divider().overlay(SHColor.lineHairline)
@@ -779,22 +789,101 @@ private struct CommandBlockView: View, Equatable {
         .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
     }
 
+    /// Status words that mean the command finished normally; nothing is shown for these.
+    nonisolated static let quietStatuses: Set<String> = ["completed", "complete", "success", "succeeded", "done", "ok", "finished"]
+
+    /// Trailing badge text: the exit code when it is non-zero, otherwise any status that is
+    /// not a plain success (running, failed, cancelled...). Nil means show nothing.
+    nonisolated static func trailingBadge(exitCode: Int?, status: String?) -> (text: String, isFailure: Bool)? {
+        if let code = exitCode, code != 0 {
+            return ("exit \(code)", true)
+        }
+        let trimmed = status?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, !quietStatuses.contains(trimmed.lowercased()) else { return nil }
+        if exitCode == 0, trimmed.lowercased() != "running" { return nil }
+        let failureWords: Set<String> = ["failed", "failure", "error", "errored", "timeout", "timed_out", "cancelled", "canceled", "interrupted"]
+        return (trimmed, failureWords.contains(trimmed.lowercased()))
+    }
+
     @ViewBuilder
     private var exitBadge: some View {
-        if let code = exitCode {
-            let ok = code == 0
-            Text("exit \(code)")
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(ok ? SHColor.statusSuccess : SHColor.statusDanger)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background((ok ? SHColor.statusSuccess : SHColor.statusDanger).opacity(0.14))
-                .clipShape(Capsule())
-        } else if let status, !status.isEmpty {
-            Text(status)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(SHColor.inkMuted)
+        if let badge = Self.trailingBadge(exitCode: exitCode, status: status) {
+            if badge.isFailure {
+                Text(badge.text)
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(SHColor.statusDanger)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(SHColor.statusDanger.opacity(0.14))
+                    .clipShape(Capsule())
+            } else {
+                Text(badge.text)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(SHColor.inkMuted)
+            }
         }
+    }
+}
+
+/// The beginning of a command on exactly one line. Command text never wraps on mobile:
+/// only the first line is shown, and text wider than the row fades out at the trailing edge.
+struct CommandFirstLineText: View {
+    let text: String
+    let color: Color
+
+    static let font = Font.system(size: 11.5, design: .monospaced)
+    /// Longest command that reliably fits a phone-width row at `font`.
+    static let fittingCharacterCount = 38
+
+    nonisolated static func firstLine(of command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+    }
+
+    /// True when the single faded line cannot show the whole command, so the
+    /// expanded state needs a separate full-command view.
+    nonisolated static func needsFullView(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.contains(where: \.isNewline) || trimmed.count > fittingCharacterCount
+    }
+
+    var body: some View {
+        Text(Self.firstLine(of: text))
+            .font(Self.font)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.86),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .accessibilityLabel(text)
+    }
+}
+
+/// The whole command, shown only when a block is expanded. Lines keep their own breaks and
+/// scroll sideways instead of wrapping.
+struct FullCommandText: View {
+    let command: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(command.trimmingCharacters(in: .whitespacesAndNewlines))
+                .font(CommandFirstLineText.font)
+                .foregroundStyle(SHColor.inkSecondary)
+                .fixedSize(horizontal: true, vertical: true)
+                .textSelection(.enabled)
+        }
+        .frame(maxHeight: 220)
     }
 }
 

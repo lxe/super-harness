@@ -301,26 +301,28 @@ export const SettingsModal: React.FC<Props> = ({
         {/* Left Navigation Rail */}
         <aside className="w-60 shrink-0 bg-surface-rail border-r border-line-hairline flex flex-col">
           <div className="px-4 pt-6 pb-4">
-            <div className="h-9 px-3 rounded-lg bg-surface-subtle border border-line-hairline focus-within:border-line-subtle flex items-center gap-2">
-              <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+            <div className="h-9 pl-3 pr-2 rounded-lg bg-surface-subtle border border-line-hairline focus-within:border-line-subtle flex items-center gap-2">
+              <Search className="w-4 h-4 text-ink-faint shrink-0" />
               <input
                 ref={searchInputRef}
                 value={navSearch}
                 onChange={(e) => setNavSearch(e.target.value)}
                 placeholder="Search settings"
-                className="flex-1 min-w-0 bg-transparent text-caption text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+                className="flex-1 min-w-0 bg-transparent text-caption leading-[1.35] pt-[1px] text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
               />
               {navSearch ? (
                 <button
                   type="button"
                   onClick={() => setNavSearch('')}
-                  className="text-ink-faint hover:text-ink-primary cursor-pointer focus:outline-none focus-visible:shadow-none"
+                  className="w-[22px] h-[22px] inline-flex items-center justify-center rounded-md text-ink-faint hover:text-ink-primary hover:bg-white/[0.06] cursor-pointer shrink-0 focus:outline-none focus-visible:shadow-none"
                   aria-label="Clear search"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               ) : (
-                <kbd className="text-[11px] font-mono text-ink-faint">/</kbd>
+                <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-md border border-line-hairline bg-white/[0.04] text-[12px] leading-none font-mono text-ink-muted shrink-0">
+                  /
+                </kbd>
               )}
             </div>
           </div>

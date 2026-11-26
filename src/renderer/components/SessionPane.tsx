@@ -1046,7 +1046,7 @@ export const SessionPane: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => setTasksExpanded((v) => !v)}
-                        className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5 px-1 -mx-1 rounded-md outline-none focus:outline-none focus-visible:ring-1 focus-visible:ring-white/20"
+                        className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5 px-1 -mx-1 rounded-md outline-none focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
                       >
                         <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
                         <span>

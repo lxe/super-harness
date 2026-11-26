@@ -40,7 +40,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
         type="button"
         onClick={() => setCollapsed((v) => !v)}
         aria-expanded={!collapsed}
-        className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none"
+        className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-caption font-semibold text-ink-secondary leading-[1.35] pt-[1px]">

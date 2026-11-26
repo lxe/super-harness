@@ -50,7 +50,7 @@ export const CollapsibleCard: React.FC<CollapsibleCardProps> = ({
         type="button"
         onClick={toggle}
         aria-expanded={isOpen}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
       >
         {isOpen ? (
           <ChevronDown className="w-3.5 h-3.5 text-ink-faint shrink-0" />

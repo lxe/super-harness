@@ -107,12 +107,12 @@ final class UnifiedModelsTests: XCTestCase {
 
     func testCommandFirstLineNeverIncludesLaterLines() {
         let heredoc = "cat > a.txt <<'EOF'\nline one\nline two\nEOF"
-        XCTAssertEqual(CommandFirstLineText.firstLine(of: heredoc), "cat > a.txt <<'EOF'")
-        XCTAssertEqual(CommandFirstLineText.firstLine(of: "\n  npm test\n"), "npm test")
-        XCTAssertEqual(CommandFirstLineText.firstLine(of: ""), "")
-        XCTAssertTrue(CommandFirstLineText.needsFullView(heredoc))
-        XCTAssertTrue(CommandFirstLineText.needsFullView(String(repeating: "x", count: 80)))
-        XCTAssertFalse(CommandFirstLineText.needsFullView("npm test"))
+        XCTAssertEqual(ScrollingCommandText.firstLine(of: heredoc), "cat > a.txt <<'EOF'")
+        XCTAssertEqual(ScrollingCommandText.firstLine(of: "\n  npm test\n"), "npm test")
+        XCTAssertEqual(ScrollingCommandText.firstLine(of: ""), "")
+        XCTAssertTrue(ScrollingCommandText.isMultiLine(heredoc))
+        XCTAssertFalse(ScrollingCommandText.isMultiLine(String(repeating: "x", count: 200)))
+        XCTAssertFalse(ScrollingCommandText.isMultiLine("npm test\n"))
     }
 
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {

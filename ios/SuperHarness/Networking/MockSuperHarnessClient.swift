@@ -327,7 +327,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             ),
                             .text(text: "Tests pass. The typecheck does not:"),
                             .command(
-                                command: "npm run typecheck",
+                                command: "git log --oneline -1 && (cd frontend && npm run -s build > /tmp/frontend-build.log 2>&1) && npm run typecheck -- --pretty false",
                                 cwd: "/Users/lxe/Developer/super-harness",
                                 output: "src/main/folders.ts(88,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
                                 exitCode: 2,

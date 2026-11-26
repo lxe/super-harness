@@ -174,49 +174,45 @@ private struct CompactTraceRowView: View {
             let hasOutput = !(output ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
             VStack(alignment: .leading, spacing: 4) {
-                Button {
-                    if hasOutput || CommandFirstLineText.needsFullView(cleanCmd) {
-                        withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
-                    }
-                } label: {
-                    HStack(alignment: .center, spacing: 7) {
+                let canExpand = hasOutput || ScrollingCommandText.isMultiLine(cleanCmd)
+                Group {
+                    HStack(alignment: .top, spacing: 7) {
                         if isRunning {
                             ProgressView()
                                 .controlSize(.mini)
                                 .scaleEffect(0.75)
-                                .frame(width: 12, height: 12)
+                                .frame(width: 12, height: ScrollingCommandText.lineHeight)
                         } else {
                             Image(systemName: failed ? "xmark.circle.fill" : "terminal")
                                 .font(.system(size: 10.5, weight: .medium))
                                 .foregroundStyle(failed ? SHColor.statusDanger : SHColor.inkFaint)
-                                .frame(width: 12)
+                                .frame(width: 12, height: ScrollingCommandText.lineHeight)
                         }
-                        CommandFirstLineText(text: cleanCmd, color: SHColor.inkSecondary)
+                        ScrollingCommandText(text: cleanCmd, color: SHColor.inkSecondary, showsAllLines: isDetailOpen)
                         if let durationMs, durationMs >= 1000 {
                             Text(String(format: "%.1fs", durationMs / 1000.0))
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(SHColor.inkFaint)
+                                .frame(height: ScrollingCommandText.lineHeight)
                         }
-                        if hasOutput || CommandFirstLineText.needsFullView(cleanCmd) {
+                        if canExpand {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(SHColor.inkFaint)
                                 .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
+                                .frame(height: ScrollingCommandText.lineHeight)
                         }
                     }
                     .padding(.vertical, 5)
                     .padding(.horizontal, 6)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-
-                if isDetailOpen, CommandFirstLineText.needsFullView(cleanCmd) {
-                    FullCommandText(command: cleanCmd)
-                        .padding(9)
-                        .background(SHColor.surfaceCode)
-                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
-                        .padding(.leading, 18)
+                .onTapGesture {
+                    if canExpand {
+                        withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
+                    }
                 }
+                .accessibilityAddTraits(canExpand ? .isButton : [])
 
                 if isDetailOpen, let output, !output.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -726,19 +722,19 @@ struct CommandBlockView: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.16)) { isExpanded.toggle() }
-            } label: {
+            let canExpand = !(output ?? "").isEmpty || ScrollingCommandText.isMultiLine(command)
+            Group {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(SHColor.inkMuted)
-                        CommandFirstLineText(text: "$ \(command)", color: SHColor.inkPrimary)
+                            .frame(height: ScrollingCommandText.lineHeight)
+                        ScrollingCommandText(text: "$ \(command.trimmingCharacters(in: .whitespacesAndNewlines))", color: SHColor.inkPrimary, showsAllLines: isExpanded)
                         exitBadge
+                            .frame(minHeight: ScrollingCommandText.lineHeight)
                     }
 
-                    let canExpand = !(output ?? "").isEmpty || CommandFirstLineText.needsFullView(command)
                     if !(cwd ?? "").isEmpty || durationMs != nil || canExpand {
                     HStack(spacing: 8) {
                         if let cwd, !cwd.isEmpty {
@@ -766,13 +762,12 @@ struct CommandBlockView: View, Equatable {
                 .padding(13)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-
-            if isExpanded, CommandFirstLineText.needsFullView(command) {
-                Divider().overlay(SHColor.lineHairline)
-                FullCommandText(command: command)
-                    .padding(13)
+            .onTapGesture {
+                if canExpand {
+                    withAnimation(.easeInOut(duration: 0.16)) { isExpanded.toggle() }
+                }
             }
+            .accessibilityAddTraits(canExpand ? .isButton : [])
 
             if isExpanded, let output, !output.isEmpty {
                 Divider().overlay(SHColor.lineHairline)
@@ -825,65 +820,38 @@ struct CommandBlockView: View, Equatable {
     }
 }
 
-/// The beginning of a command on exactly one line. Command text never wraps on mobile:
-/// only the first line is shown, and text wider than the row fades out at the trailing edge.
-struct CommandFirstLineText: View {
+/// Command text that never wraps. Collapsed it shows the first line only; expanded it shows
+/// every line. Text wider than the block scrolls sideways inside the block, so a long command
+/// can never widen the chat column.
+struct ScrollingCommandText: View {
     let text: String
     let color: Color
+    let showsAllLines: Bool
 
     static let font = Font.system(size: 11.5, design: .monospaced)
-    /// Longest command that reliably fits a phone-width row at `font`.
-    nonisolated static let fittingCharacterCount = 38
+    /// Height of one line at `font`; icons and badges beside the text use it to sit on the first line.
+    static let lineHeight: CGFloat = 15
 
     nonisolated static func firstLine(of command: String) -> String {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
     }
 
-    /// True when the single faded line cannot show the whole command, so the
-    /// expanded state needs a separate full-command view.
-    nonisolated static func needsFullView(_ command: String) -> Bool {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.contains(where: \.isNewline) || trimmed.count > fittingCharacterCount
+    nonisolated static func isMultiLine(_ command: String) -> Bool {
+        command.trimmingCharacters(in: .whitespacesAndNewlines).contains(where: \.isNewline)
     }
-
-    var body: some View {
-        Text(Self.firstLine(of: text))
-            .font(Self.font)
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .clipped()
-            .mask(
-                LinearGradient(
-                    stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black, location: 0.86),
-                        .init(color: .clear, location: 1),
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .accessibilityLabel(text)
-    }
-}
-
-/// The whole command, shown only when a block is expanded. Lines keep their own breaks and
-/// scroll sideways instead of wrapping.
-struct FullCommandText: View {
-    let command: String
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            Text(command.trimmingCharacters(in: .whitespacesAndNewlines))
-                .font(CommandFirstLineText.font)
-                .foregroundStyle(SHColor.inkSecondary)
+            Text(showsAllLines ? text.trimmingCharacters(in: .whitespacesAndNewlines) : Self.firstLine(of: text))
+                .font(Self.font)
+                .foregroundStyle(color)
+                .lineLimit(showsAllLines ? nil : 1)
                 .fixedSize(horizontal: true, vertical: true)
-                .textSelection(.enabled)
+                .frame(minHeight: Self.lineHeight, alignment: .topLeading)
         }
-        .frame(maxHeight: 220)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(text)
     }
 }
 

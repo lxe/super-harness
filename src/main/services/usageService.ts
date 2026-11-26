@@ -22,6 +22,11 @@ const CODEX_SESSIONS_DIR = path.join(HOME, '.codex', 'sessions');
 const CODEX_STATE_DB = path.join(HOME, '.codex', 'state_5.sqlite');
 const AGY_APP_BRAIN = path.join(HOME, '.gemini', 'antigravity', 'brain');
 const AGY_CLI_BRAIN = path.join(HOME, '.gemini', 'antigravity-cli', 'brain');
+const MUSE_SESSIONS_DIR = path.join(
+  process.env.XDG_DATA_HOME || path.join(HOME, '.local', 'share'),
+  'muse',
+  'sessions'
+);
 const USAGE_CACHE_PATH = path.join(HOME, '.config', 'super-harness', 'usage-cache.json');
 
 const HOUR_MS = 3600 * 1000;
@@ -204,6 +209,35 @@ function priceCodexTokens(
   }
 
   return (uncachedInput * inRate + cachedInput * cachedRate + output * outRate) / 1_000_000;
+}
+
+function priceMuseTokens(
+  model: string,
+  uncachedInput: number,
+  cacheWrite: number,
+  cacheRead: number,
+  output: number
+): number {
+  const m = model.toLowerCase();
+  let inRate = 3.0;
+  let cacheWriteRate = 3.75;
+  let cacheReadRate = 0.3;
+  let outRate = 15.0;
+
+  if (m.includes('mini') || m.includes('flash') || m.includes('fast') || m.includes('lite')) {
+    inRate = 0.8;
+    cacheWriteRate = 1.0;
+    cacheReadRate = 0.08;
+    outRate = 4.0;
+  }
+
+  return (
+    (uncachedInput * inRate +
+      cacheWrite * cacheWriteRate +
+      cacheRead * cacheReadRate +
+      output * outRate) /
+    1_000_000
+  );
 }
 
 function priceAntigravityTokens(
@@ -522,7 +556,7 @@ export class UsageService {
         this.collectAntigravityUsage(now, markDirty, force),
         this.collectCodexUsage(now, markDirty),
         this.collectClaudeUsage(now, markDirty),
-        this.collectMuseUsage(now),
+        this.collectMuseUsage(now, markDirty),
       ]);
       if (dirty) {
         saveDiskCache(this.fileCache, this.agyLiveQuota);
@@ -592,41 +626,124 @@ export class UsageService {
     }
   }
 
-  private async collectMuseUsage(now: number): Promise<HarnessUsageSummary> {
-    const empty: HarnessUsageSummary = {
+  private async collectMuseUsage(
+    now: number,
+    markDirty: () => void
+  ): Promise<HarnessUsageSummary> {
+    const cutoff = now - 14 * DAY_MS;
+    const recentFiles: Array<{ path: string; mtimeMs: number; size: number }> = [];
+    const walk = (dir: string, depth: number) => {
+      if (depth > 5 || !fs.existsSync(dir)) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(p, depth + 1);
+        } else if (e.isFile() && e.name.endsWith('.jsonl')) {
+          try {
+            const st = fs.statSync(p);
+            if (st.mtimeMs >= cutoff) {
+              recentFiles.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+    walk(MUSE_SESSIONS_DIR, 0);
+
+    const acc = createAccumulator();
+    for (const file of recentFiles) {
+      const cacheKey = `muse:${file.path}`;
+      const cached = this.fileCache[cacheKey];
+      if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+        foldBuckets(acc, cached.buckets, now);
+        continue;
+      }
+
+      const hourMap = new Map<number, FileHourBucket>();
+      await scanJsonlLines(file.path, (line) => {
+        if (!line.includes('"model_completed"')) return;
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        const payload = obj.payload as Record<string, unknown> | undefined;
+        const ev = payload?.event as Record<string, unknown> | undefined;
+        if (!ev || ev.kind !== 'model_completed') return;
+        const usage = ev.usage as Record<string, unknown> | undefined;
+        if (!usage) return;
+
+        const rawTs = Number(obj.recorded_at || 0);
+        const ts = rawTs > 1e14 ? Math.floor(rawTs / 1000) : rawTs;
+        if (!Number.isFinite(ts) || ts < cutoff) return;
+
+        const model = String(ev.model || 'muse-wonder-full-1.0');
+        const input = Math.max(0, Number(usage.input_tokens || 0));
+        const cacheRead = Math.max(
+          0,
+          Number(usage.cache_read_tokens || usage.cached_tokens || 0)
+        );
+        const cacheWrite = Math.max(0, Number(usage.cache_write_tokens || 0));
+        const output =
+          Math.max(0, Number(usage.output_tokens || 0)) +
+          Math.max(0, Number(usage.reasoning_tokens || 0));
+        const uncachedInput = Math.max(0, input - cacheRead);
+        const totalTokens = input + cacheWrite + output;
+        if (totalTokens <= 0) return;
+
+        const spend = priceMuseTokens(model, uncachedInput, cacheWrite, cacheRead, output);
+        addEventToHourMap(hourMap, ts, spend, totalTokens);
+      });
+
+      const buckets = Array.from(hourMap.values());
+      this.fileCache[cacheKey] = { mtimeMs: file.mtimeMs, size: file.size, buckets };
+      markDirty();
+      foldBuckets(acc, buckets, now);
+    }
+
+    const base: HarnessUsageSummary = {
       harness: 'muse',
       updatedAt: now,
       planLabel: 'Muse',
       barPercent: null,
       barIsEstimated: false,
       windows: [],
-      spend5hUsd: 0,
-      spend24hUsd: 0,
-      spend7dUsd: 0,
-      spend14dUsd: 0,
-      tokens7d: 0,
-      dailySpend7d: [],
+      spend5hUsd: round2(acc.spend5h),
+      spend24hUsd: round2(acc.spend24h),
+      spend7dUsd: round2(acc.spend7d),
+      spend14dUsd: round2(acc.spend14d),
+      tokens7d: Math.round(acc.tokens7d),
+      dailySpend7d: buildDailySeries7d(acc, now),
       spendIsEstimated: true,
-      note: 'Quota from `muse usage`; no local spend pricing for Muse models yet',
+      note: 'Quota from `muse usage`; API-equivalent spend from local transcripts',
     };
     try {
       const bin = await whichBinary('muse');
-      if (!bin) return empty;
+      if (!bin) return base;
       const { stdout } = await execFileAsync(bin, ['usage'], {
         timeout: 8000,
         maxBuffer: 256 * 1024,
       });
       const { planLabel, windows } = parseMuseUsageOutput(stdout, now);
-      if (windows.length === 0) return empty;
+      if (windows.length === 0) return base;
       const primary = windows.find((w) => w.id === 'five_hour') ?? windows[0];
       return {
-        ...empty,
-        planLabel: planLabel || empty.planLabel,
+        ...base,
+        planLabel: planLabel || base.planLabel,
         barPercent: primary.usedPercent,
         windows,
       };
     } catch {
-      return empty;
+      return base;
     }
   }
 

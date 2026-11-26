@@ -135,6 +135,8 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {
   icon?: React.ReactNode;
   title: string;
+  /** Subtle age-based opacity for inactive rows (restored to 1.0 on active/selected/hover). */
+  titleOpacity?: number;
   meta?: React.ReactNode;
   hoverActions?: React.ReactNode;
   active?: boolean;
@@ -146,6 +148,7 @@ export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {
 export const NavRow: React.FC<NavRowProps> = ({
   icon,
   title,
+  titleOpacity,
   meta,
   hoverActions,
   active = false,
@@ -155,6 +158,11 @@ export const NavRow: React.FC<NavRowProps> = ({
   className,
   ...rest
 }) => {
+  const effectiveOpacity =
+    active || secondaryActive || selected || working || titleOpacity === undefined
+      ? undefined
+      : titleOpacity;
+
   return (
       <div
         className={cn(
@@ -171,7 +179,12 @@ export const NavRow: React.FC<NavRowProps> = ({
         {...rest}
       >
         {icon && <span className="shrink-0 inline-flex items-center">{icon}</span>}
-        <span className="text-body leading-[1.35] pt-[1px] truncate flex-1">{title}</span>
+        <span
+          style={effectiveOpacity !== undefined ? { opacity: effectiveOpacity } : undefined}
+          className="text-body leading-[1.35] pt-[1px] truncate flex-1 transition-opacity group-hover:!opacity-100"
+        >
+          {title}
+        </span>
         {meta && (
           <span className="shrink-0 inline-flex items-center gap-1.5 group-hover:opacity-0 transition-opacity">
             {meta}

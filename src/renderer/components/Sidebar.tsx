@@ -35,11 +35,11 @@ import {
   MenuSectionLabel,
   NavRow,
   PopoverSurface,
-  RecencyClock,
   SectionHeader,
   SegmentedControl,
 } from '../ui';
 import {
+  computeThreadRecencyOpacity,
   filterSidebarSessions,
   flattenVisibleSessions,
   getGlobalPinnedSessions,
@@ -501,6 +501,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
       <Pin className="w-3.5 h-3.5 text-amber-400/80" />
     ) : undefined;
 
+    const recencyOpacity = computeThreadRecencyOpacity(s.updatedAt);
+
     return (
       <NavRow
         key={s.id}
@@ -508,22 +510,20 @@ export const Sidebar: React.FC<Props> = React.memo(({
         aria-current={isPrimary ? 'page' : undefined}
         icon={leadingIcon}
         title={s.title}
+        titleOpacity={recencyOpacity}
         active={isPrimary}
         secondaryActive={isSplit}
         selected={isMultiSelected}
         working={s.status === 'running'}
         meta={
-          <>
-            {s.harness === 'claude-tmux' && (
-              <span
-                title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'remote'}`}
-                className="text-ink-muted"
-              >
-                <Laptop className="w-3.5 h-3.5" />
-              </span>
-            )}
-            {s.status !== 'running' && <RecencyClock updatedAt={s.updatedAt} />}
-          </>
+          s.harness === 'claude-tmux' ? (
+            <span
+              title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'remote'}`}
+              className="text-ink-muted"
+            >
+              <Laptop className="w-3.5 h-3.5" />
+            </span>
+          ) : undefined
         }
         hoverActions={
           <IconButton

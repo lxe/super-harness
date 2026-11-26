@@ -34,6 +34,21 @@ const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
 ];
 
 /**
+ * Computes a gentle logarithmic opacity fade for sidebar conversation rows
+ * based on how long ago they were active (1.0 for fresh chats, flooring at
+ * 0.58 for week+ old threads so they stay cleanly legible).
+ */
+export function computeThreadRecencyOpacity(updatedAt: number, now = Date.now()): number {
+  const ageMin = Math.max(0, (now - updatedAt) / 60_000);
+  if (ageMin <= 15) return 1;
+  // Smooth log curve from 15m -> 14d (20,160m), mapping [0..1] to [1.0..0.58]
+  const minLog = Math.log10(15);
+  const maxLog = Math.log10(14 * 24 * 60);
+  const t = Math.min(1, Math.max(0, (Math.log10(ageMin) - minLog) / (maxLog - minLog)));
+  return Number((1 - t * 0.42).toFixed(3));
+}
+
+/**
  * Returns all Super Harness top-pinned chats across every harness (rendered
  * directly below Master Orchestrator and above the harness switcher).
  */

@@ -38,8 +38,13 @@ const usageService = new UsageService();
 const catalogService = new HarnessCatalogService();
 
 function broadcastToRenderer(channel: string, payload: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const wc = mainWindow.webContents;
+  if (!wc || wc.isDestroyed() || wc.isCrashed()) return;
+  try {
+    wc.send(channel, payload);
+  } catch {
+    // Ignore transient disposal races if the renderer frame is unloading or restarting
   }
 }
 
@@ -216,6 +221,22 @@ function createWindow(): void {
     return { action: 'deny' };
   });
 
+  // Auto-recover if the Chromium renderer process ever crashes (e.g. GPU reset or memory spike)
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit') return;
+    console.error(`[super-harness] renderer process gone (${details.reason}); reloading window`);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const devUrl = process.env.VITE_DEV_SERVER_URL;
+        if (devUrl) {
+          void mainWindow.loadURL(devUrl);
+        } else {
+          void mainWindow.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'));
+        }
+      }
+    }, 300);
+  });
+
   // Never allow clicking file:// or http(s):// links inside markdown to hijack the Electron window!
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -344,6 +365,13 @@ function registerIpcHandlers(): void {
         return masterEngine.handlePrompt(prompt, attachments);
       }
       return dispatcher.sendToSession(sessionId, prompt, attachments);
+    }
+  );
+
+  ipcMain.handle(
+    'sh:queue-message',
+    async (_ev, sessionId: string, prompt: string, attachments?: ImageAttachment[]) => {
+      return dispatcher.queueToSession(sessionId, prompt, attachments);
     }
   );
 

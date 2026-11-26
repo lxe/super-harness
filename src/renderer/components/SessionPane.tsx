@@ -692,6 +692,24 @@ export const SessionPane: React.FC<Props> = ({
 
       // If the agent is currently working, queue the message cleanly instead of clobbering the turn
       if (isAgentBusy && !customText) {
+        if (session.harnessGroup === 'codex') {
+          try {
+            const qRes = await window.superHarness.queueMessage(
+              session.id,
+              prompt,
+              currentAttachments.length > 0 ? currentAttachments : undefined
+            );
+            if (qRes.ok) {
+              setDispatchNote(qRes.dispatchedVia || 'Codex queue');
+              void loadTranscript(true);
+              setTimeout(() => void loadTranscript(true), 600);
+              return;
+            }
+          } catch {
+            // Fall back to Super Harness's persistent queue below
+          }
+        }
+
         const queuedItem: QueuedMessageItem = {
           id: `sh-q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           text: prompt,
@@ -705,22 +723,20 @@ export const SessionPane: React.FC<Props> = ({
 
       await dispatchMessageNow(prompt, currentAttachments);
     },
-    [session, input, attachments, isAgentBusy, onDraftChange, onQueueChange, dispatchMessageNow]
+    [
+      session,
+      input,
+      attachments,
+      isAgentBusy,
+      onDraftChange,
+      onQueueChange,
+      dispatchMessageNow,
+      loadTranscript,
+    ]
   );
 
-  // Auto-dequeue the next Super Harness queued message once the agent (and its native queue) finishes working
-  const nativeQueueCount = liveActivity?.queuedMessages?.length ?? 0;
-  useEffect(() => {
-    if (!session || isAgentBusy || sending || nativeQueueCount > 0 || queuedMessages.length === 0) return;
-    const nextItem = queuedMessages[0];
-    const targetSid = session.id;
-    const timer = window.setTimeout(() => {
-      if (currentSessionRef.current !== targetSid) return;
-      onQueueChange(targetSid, (prev) => prev.filter((x) => x.id !== nextItem.id));
-      void dispatchMessageNow(nextItem.text, nextItem.attachments ?? []);
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [session?.id, isAgentBusy, sending, nativeQueueCount, queuedMessages, onQueueChange, dispatchMessageNow]);
+  // Auto-dequeue is coordinated globally in App.tsx so queued messages drain across
+  // all sessions (active, split, and background tabs) and persist across restarts.
 
   const handleQueueSendNow = useCallback(
     (id: string) => {

@@ -17,6 +17,11 @@ import { SessionPane, type ComposerDraft } from './components/SessionPane';
 import { SettingsModal } from './components/SettingsModal';
 import { Sidebar, type SidebarFilterTab } from './components/Sidebar';
 import {
+  isBusyDispatchError,
+  loadStoredQueues,
+  saveStoredQueues,
+} from './utils/queueStorage';
+import {
   DEFAULT_TRANSCRIPT_LIMIT,
   prefetchSessionTranscript,
   rendererTranscriptCache,
@@ -77,7 +82,14 @@ export const App: React.FC = () => {
     }
   }, [splitSessionId]);
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
-  const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessageItem[]>>({});
+  const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessageItem[]>>(
+    () => loadStoredQueues()
+  );
+  const queuedBySessionRef = useRef(queuedBySession);
+  queuedBySessionRef.current = queuedBySession;
+  const [queueDrainTick, setQueueDrainTick] = useState(0);
+  const drainingQueuesRef = useRef<Set<string>>(new Set());
+  const queueTimersRef = useRef<Map<string, number>>(new Map());
   const [draftConversations, setDraftConversations] = useState<DraftConversation[]>([]);
   const [pendingSessions, setPendingSessions] = useState<Record<string, UnifiedSession>>({});
   const [toast, setToast] = useState<string | null>(null);
@@ -225,6 +237,13 @@ export const App: React.FC = () => {
           return { ...prev, [res.sessionId]: res.liveActivity!.isWorking };
         });
       }
+      if (
+        !res.liveActivity?.isWorking &&
+        (res.liveActivity?.queuedMessages?.length ?? 0) === 0 &&
+        (queuedBySessionRef.current[res.sessionId]?.length ?? 0) > 0
+      ) {
+        setQueueDrainTick((t) => t + 1);
+      }
     });
 
     return () => {
@@ -296,11 +315,141 @@ export const App: React.FC = () => {
       setQueuedBySession((prev) => {
         const current = prev[sessionId] ?? EMPTY_QUEUE;
         const next = typeof updater === 'function' ? updater(current) : updater;
+        if (next.length === 0) {
+          if (!(sessionId in prev)) return prev;
+          const copy = { ...prev };
+          delete copy[sessionId];
+          return copy;
+        }
         return { ...prev, [sessionId]: next };
       });
     },
     []
   );
+
+  // Persist Super Harness session queues across restarts
+  useEffect(() => {
+    saveStoredQueues(queuedBySession);
+  }, [queuedBySession]);
+
+  // Background auto-dequeue across ALL sessions (active, split, and background tabs)
+  // so queued messages drain automatically as soon as each harness finishes its turn.
+  useEffect(() => {
+    if (sessions.length === 0) return;
+
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+    const activeQueuedSids = new Set<string>();
+
+    for (const [sid, items] of Object.entries(queuedBySession)) {
+      if (!items || items.length === 0) continue;
+      const session = sessionById.get(sid);
+      if (!session || session.harness === 'master') continue;
+
+      const isBusy =
+        streamingIds.has(sid) ||
+        Boolean(liveWorkingMap[sid]) ||
+        session.status === 'running';
+      const nativeQueueCount =
+        rendererTranscriptCache.get(sid)?.result.liveActivity?.queuedMessages?.length ?? 0;
+
+      if (isBusy || nativeQueueCount > 0 || drainingQueuesRef.current.has(sid)) {
+        const existingTimer = queueTimersRef.current.get(sid);
+        if (existingTimer !== undefined) {
+          window.clearTimeout(existingTimer);
+          queueTimersRef.current.delete(sid);
+        }
+        continue;
+      }
+
+      activeQueuedSids.add(sid);
+      if (queueTimersRef.current.has(sid)) continue;
+
+      const nextItem = items[0];
+      const timer = window.setTimeout(() => {
+        queueTimersRef.current.delete(sid);
+        if (drainingQueuesRef.current.has(sid)) return;
+        drainingQueuesRef.current.add(sid);
+
+        // Pop item atomically before dispatching
+        handleQueueChange(sid, (prev) => prev.filter((q) => q.id !== nextItem.id));
+
+        void window.superHarness
+          .sendMessage(
+            sid,
+            nextItem.text,
+            nextItem.attachments && nextItem.attachments.length > 0
+              ? nextItem.attachments
+              : undefined
+          )
+          .then((res) => {
+            if (!res.ok) {
+              if (isBusyDispatchError(res.error)) {
+                // Harness still finishing an external turn — put item back at front & retry after backoff
+                handleQueueChange(sid, (prev) =>
+                  prev.some((q) => q.id === nextItem.id) ? prev : [nextItem, ...prev]
+                );
+                window.setTimeout(() => {
+                  drainingQueuesRef.current.delete(sid);
+                  setQueueDrainTick((t) => t + 1);
+                }, 4000);
+                return;
+              }
+              // Non-busy failure: restore text to session draft so nothing is ever lost & notify user
+              setDrafts((prev) => {
+                const cur = prev[sid] ?? EMPTY_DRAFT;
+                return {
+                  ...prev,
+                  [sid]: {
+                    text: cur.text ? `${nextItem.text}\n${cur.text}` : nextItem.text,
+                    attachments: [...(nextItem.attachments ?? []), ...cur.attachments],
+                  },
+                };
+              });
+              setToast(`Queued message not sent: ${res.error || 'Dispatch failed'}`);
+              drainingQueuesRef.current.delete(sid);
+              return;
+            }
+            // Hold brief cooldown so streamingIds / session.status catches up before checking item #2
+            window.setTimeout(() => {
+              drainingQueuesRef.current.delete(sid);
+              setQueueDrainTick((t) => t + 1);
+            }, 1800);
+          })
+          .catch((err) => {
+            handleQueueChange(sid, (prev) =>
+              prev.some((q) => q.id === nextItem.id) ? prev : [nextItem, ...prev]
+            );
+            setToast(
+              `Queued message error: ${err instanceof Error ? err.message : String(err)}`
+            );
+            window.setTimeout(() => {
+              drainingQueuesRef.current.delete(sid);
+              setQueueDrainTick((t) => t + 1);
+            }, 4000);
+          });
+      }, 450);
+
+      queueTimersRef.current.set(sid, timer);
+    }
+
+    // Cancel stale timers for sessions whose queue was emptied or removed
+    for (const [sid, timer] of Array.from(queueTimersRef.current.entries())) {
+      if (!activeQueuedSids.has(sid)) {
+        window.clearTimeout(timer);
+        queueTimersRef.current.delete(sid);
+      }
+    }
+  }, [queuedBySession, sessions, streamingIds, liveWorkingMap, queueDrainTick, handleQueueChange]);
+
+  // Clear pending queue timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const timer of queueTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      queueTimersRef.current.clear();
+    };
+  }, []);
 
   // Global keyboard shortcuts
   useEffect(() => {

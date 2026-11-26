@@ -31,6 +31,11 @@ const api: SuperHarnessApi = {
     prompt: string,
     attachments?: import('../shared/types').ImageAttachment[]
   ) => ipcRenderer.invoke('sh:send', sessionId, prompt, attachments),
+  queueMessage: (
+    sessionId: string,
+    prompt: string,
+    attachments?: import('../shared/types').ImageAttachment[]
+  ) => ipcRenderer.invoke('sh:queue-message', sessionId, prompt, attachments),
   abortRun: (sessionId: string) => ipcRenderer.invoke('sh:abort', sessionId),
   startSession: (req: StartSessionRequest) => ipcRenderer.invoke('sh:start-session', req),
   controlHarness: (

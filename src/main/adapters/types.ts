@@ -84,6 +84,18 @@ export interface HarnessDriver {
     ctx: DispatchContext
   ): Promise<SendMessageResult>;
 
+  /**
+   * Optional native queue dispatch (e.g., `codex queue --thread <id> --message ... --resume`)
+   * so queued items persist inside the harness's own queue and stay synchronized with its Desktop/CLI UI.
+   * Return `null` if the harness does not support native queueing.
+   */
+  queueMessage?(
+    session: UnifiedSession,
+    prompt: string,
+    attachments: ImageAttachment[] | undefined,
+    ctx: DispatchContext
+  ): Promise<SendMessageResult | null>;
+
   /** Launch a brand-new session for this harness. */
   startSession(
     req: StartSessionRequest,

@@ -1252,6 +1252,22 @@ export function buildCodexStartArgs(req: StartSessionRequest, cwd: string): stri
 }
 
 /**
+ * Builds the `codex queue` CLI arguments used to enqueue a follow-up prompt into
+ * Codex's native SQLite queue (`~/.codex/queue_1.sqlite`) so it stays synchronized
+ * with Codex Desktop and survives restarts.
+ */
+export function buildCodexQueueArgs(
+  nativeThreadId: string,
+  promptWithImages: string,
+  useDaemon: boolean
+): string[] {
+  const args = ['queue'];
+  if (useDaemon) args.push('--remote', 'unix://');
+  args.push('--thread', nativeThreadId, '--message', promptWithImages, '--resume');
+  return args;
+}
+
+/**
  * Cohesive HarnessDriver encapsulating all OpenAI Codex integration
  * (SQLite state/history/queue stores, rollouts, app-server daemon, CLI).
  */
@@ -1416,15 +1432,7 @@ export function createCodexDriver(): HarnessDriver {
           // Another Codex client (e.g. Codex Desktop) holds the active writer lock on this thread.
           // Route seamlessly through `codex queue --resume` so the active writer receives and runs
           // the message directly with zero error banner.
-          const queueArgs = ['queue'];
-          if (useDaemon) queueArgs.push('--remote', 'unix://');
-          queueArgs.push(
-            '--thread',
-            session.nativeId,
-            '--message',
-            promptWithImages,
-            '--resume'
-          );
+          const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon);
           execFile(bin, queueArgs, { cwd, timeout: 15_000 }, (qErr, _qOut, qStderr) => {
             if (qErr) {
               ctx.emitStream({
@@ -1468,6 +1476,34 @@ export function createCodexDriver(): HarnessDriver {
             : 'Codex live daemon'
           : 'Codex CLI',
       };
+    },
+
+    async queueMessage(
+      session: UnifiedSession,
+      prompt: string,
+      attachments: ImageAttachment[] | undefined,
+      ctx: DispatchContext
+    ): Promise<SendMessageResult | null> {
+      const bin = await resolveCodexBinary();
+      if (!bin) return { ok: false, error: 'codex binary not found in PATH' };
+
+      const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
+      const useDaemon = hasCodexDaemonSocket();
+      const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
+      const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon);
+
+      try {
+        await execFileAsync(bin, queueArgs, { cwd, timeout: 15_000 });
+        ctx.triggerRefresh(150);
+        ctx.triggerRefresh(800);
+        return {
+          ok: true,
+          dispatchedVia: 'Codex queue',
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: msg.slice(0, 1000) };
+      }
     },
 
     async startSession(

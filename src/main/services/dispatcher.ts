@@ -107,6 +107,35 @@ export class HarnessDispatcher {
     return driver.sendMessage(session, prompt, attachments, this.createContext());
   }
 
+  async queueToSession(
+    sessionId: string,
+    prompt: string,
+    attachments?: ImageAttachment[]
+  ): Promise<SendMessageResult> {
+    let session = this.registry.getSession(sessionId);
+    if (!session) {
+      await this.registry.discover();
+      session = this.registry.getSession(sessionId);
+    }
+    if (!session) {
+      return { ok: false, error: `Session not found: ${sessionId}` };
+    }
+    if (session.harnessGroup === 'master') {
+      return { ok: false, error: 'Master session does not support native queueing' };
+    }
+
+    const driver = this.registry.getDriver(session.harnessGroup);
+    if (!driver?.queueMessage) {
+      return { ok: false, error: `Native queueing not supported for ${session.harnessGroup}` };
+    }
+
+    const res = await driver.queueMessage(session, prompt, attachments, this.createContext());
+    if (!res) {
+      return { ok: false, error: `Native queueing not supported for ${session.harnessGroup}` };
+    }
+    return res;
+  }
+
   async startNewSession(req: StartSessionRequest): Promise<{
     ok: boolean;
     sessionId?: string;

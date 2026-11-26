@@ -7,6 +7,66 @@ import { whichBinary } from '../utils/system';
 
 type AppDataDirName = 'antigravity' | 'antigravity-cli';
 
+const EXTERNAL_TURN_FRESHNESS_MS = 35_000;
+
+/**
+ * Inspects the tail of an Antigravity `transcript.jsonl` file to determine whether
+ * an external Antigravity Desktop/CLI process is actively executing a turn right now.
+ * Prevents `agy acp` from starting an overlapping parallel turn that would fork
+ * conversation state on disk.
+ */
+export function isExternalAntigravityTurnActive(
+  transcriptPath: string,
+  nowMs: number = Date.now()
+): boolean {
+  try {
+    if (!fs.existsSync(transcriptPath)) return false;
+    const st = fs.statSync(transcriptPath);
+    if (nowMs - st.mtimeMs >= EXTERNAL_TURN_FRESHNESS_MS) return false;
+
+    const readBytes = Math.min(st.size, 65_536);
+    if (readBytes <= 0) return false;
+
+    const fd = fs.openSync(transcriptPath, 'r');
+    let tailText = '';
+    try {
+      const buf = Buffer.allocUnsafe(readBytes);
+      const bytesRead = fs.readSync(fd, buf, 0, readBytes, Math.max(0, st.size - readBytes));
+      tailText = buf.subarray(0, bytesRead).toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    const lines = tailText.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) continue;
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(trimmed) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const stepType = typeof obj.type === 'string' ? obj.type : '';
+      const status = typeof obj.status === 'string' ? obj.status : '';
+      if (!stepType && !status) continue;
+
+      if (status === 'RUNNING') return true;
+      if (stepType === 'GENERIC' || stepType === 'SYSTEM_MESSAGE' || stepType === 'USER_INPUT') {
+        return true;
+      }
+      if (stepType === 'PLANNER_RESPONSE') {
+        return Array.isArray(obj.tool_calls) && obj.tool_calls.length > 0;
+      }
+      // Any other completed terminal step (e.g. final text-only PLANNER_RESPONSE or DONE)
+      return false;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 interface PendingRpc {
   resolve: (result: Record<string, unknown>) => void;
   reject: (err: Error) => void;
@@ -42,18 +102,22 @@ class AcpConnection {
 
   constructor(private readonly appDataDir: AppDataDirName) {}
 
+  private getTranscriptPath(nativeSessionId: string): string {
+    return path.join(
+      os.homedir(),
+      '.gemini',
+      this.appDataDir,
+      'brain',
+      nativeSessionId,
+      '.system_generated',
+      'logs',
+      'transcript.jsonl'
+    );
+  }
+
   private getTranscriptMtime(nativeSessionId: string): number {
     try {
-      const tr = path.join(
-        os.homedir(),
-        '.gemini',
-        this.appDataDir,
-        'brain',
-        nativeSessionId,
-        '.system_generated',
-        'logs',
-        'transcript.jsonl'
-      );
+      const tr = this.getTranscriptPath(nativeSessionId);
       return fs.existsSync(tr) ? fs.statSync(tr).mtimeMs : 0;
     } catch {
       return 0;
@@ -260,6 +324,19 @@ class AcpConnection {
     onEvent: (ev: StreamEvent) => void,
     onComplete: () => void
   ): Promise<void> {
+    if (this.activeRuns.has(nativeSessionId)) {
+      throw new Error(
+        'This Antigravity conversation is already running a turn in Super Harness. Wait for it to finish or queue your message.'
+      );
+    }
+
+    const transcriptPath = this.getTranscriptPath(nativeSessionId);
+    if (isExternalAntigravityTurnActive(transcriptPath)) {
+      throw new Error(
+        'Antigravity Desktop is currently running a turn on this conversation. Wait for it to finish before sending from Super Harness so the conversation does not fork.'
+      );
+    }
+
     const currentMtime = this.getTranscriptMtime(nativeSessionId);
     const prevMtime = this.lastTranscriptMtime.get(nativeSessionId) ?? 0;
     const externallyUpdated =

@@ -443,7 +443,7 @@ export async function detectClaude(
       p.args.includes('app.asar')
   );
 
-  // Load exact native Claude Desktop sidebar sections (Muse, PhoneUse, Orble, Pocket Model, DSX, Hill Climber...)
+  // Load exact native Claude Desktop sidebar sections (projects, custom groups, and starred items)
   const nativeSec = loadClaudeNativeSections();
 
   // 0. Pre-load Claude Desktop metadata (~/.config/Claude/claude-code-sessions/*/*/local_*.json)
@@ -778,6 +778,39 @@ export async function detectClaude(
   return { detection, sessions: allSessions };
 }
 
+const CLAUDE_IMAGE_CACHE_DIR = path.join(
+  os.homedir(),
+  '.config',
+  'super-harness',
+  'attachments',
+  'claude-cache'
+);
+
+function cacheClaudeBase64Image(base64Data: string, mimeType: string): string | null {
+  try {
+    const extMap: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+    };
+    const ext = extMap[mimeType.toLowerCase()] || 'png';
+    const rawB64 = base64Data.startsWith('data:')
+      ? base64Data.slice(base64Data.indexOf(',') + 1)
+      : base64Data;
+    const hash = crypto.createHash('sha1').update(rawB64).digest('hex').slice(0, 20);
+    const outPath = path.join(CLAUDE_IMAGE_CACHE_DIR, `${hash}.${ext}`);
+    if (!fs.existsSync(outPath)) {
+      fs.mkdirSync(CLAUDE_IMAGE_CACHE_DIR, { recursive: true });
+      fs.writeFileSync(outPath, Buffer.from(rawB64, 'base64'));
+    }
+    return outPath;
+  } catch {
+    return null;
+  }
+}
+
 function parseClaudeImageBlock(
   b: Record<string, unknown>
 ): Extract<UnifiedBlock, { type: 'image' }> | null {
@@ -794,6 +827,18 @@ function parseClaudeImageBlock(
         typeof source.media_type === 'string' && source.media_type
           ? source.media_type
           : 'image/png';
+      // Materialize large base64 blobs (>16KB) to disk once so Electron IPC never re-serializes
+      // multi-MB strings on every live transcript push.
+      if (source.data.length > 16_384) {
+        const cachedPath = cacheClaudeBase64Image(source.data, mimeType);
+        if (cachedPath) {
+          return {
+            type: 'image',
+            path: cachedPath,
+            name: 'Attached image',
+          };
+        }
+      }
       return {
         type: 'image',
         path: '',

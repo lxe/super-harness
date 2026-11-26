@@ -431,6 +431,11 @@ export interface SuperHarnessApi {
     prompt: string,
     attachments?: ImageAttachment[]
   ) => Promise<SendMessageResult>;
+  queueMessage: (
+    sessionId: string,
+    prompt: string,
+    attachments?: ImageAttachment[]
+  ) => Promise<SendMessageResult>;
   abortRun: (sessionId: string) => Promise<{ ok: boolean }>;
   startSession: (req: StartSessionRequest) => Promise<{
     ok: boolean;

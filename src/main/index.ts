@@ -43,8 +43,39 @@ function broadcastToRenderer(channel: string, payload: unknown): void {
   }
 }
 
+function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachment {
+  const attachDir = path.join(os.homedir(), '.config', 'super-harness', 'attachments');
+  fs.mkdirSync(attachDir, { recursive: true });
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  const mimeType = match?.[1] || 'image/png';
+  const base64 = match?.[2] || '';
+  const extMap: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+  };
+  const ext = extMap[mimeType] || 'png';
+  const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const safeName = (filename || `pasted-${id}.${ext}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const filePath = path.join(attachDir, `${id}-${safeName}`);
+  fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+  return {
+    id,
+    name: safeName,
+    path: filePath,
+    mimeType,
+    previewDataUrl: dataUrl,
+  };
+}
+
+let controlServerRef: ControlServer | null = null;
+let masterEngineRef: MasterEngine | null = null;
+
 const emitStream = (ev: StreamEvent) => {
   broadcastToRenderer('sh:stream', ev);
+  controlServerRef?.broadcastEvent('stream', ev);
 };
 
 let refreshInFlight: Promise<{
@@ -58,6 +89,7 @@ async function refreshAndBroadcast() {
     .discover()
     .then((result) => {
       broadcastToRenderer('sh:sessions-updated', result);
+      controlServerRef?.broadcastEvent('sessions', result);
       return result;
     })
     .finally(() => {
@@ -70,9 +102,40 @@ const dispatcher = new HarnessDispatcher(registry, store, emitStream, () => {
   void refreshAndBroadcast();
 });
 
-const controlServer = new ControlServer(store, registry, dispatcher, async () => {
-  await refreshAndBroadcast();
-});
+const controlServer = new ControlServer(
+  store,
+  registry,
+  dispatcher,
+  async () => {
+    await refreshAndBroadcast();
+  },
+  {
+    getUsage: async (force) => usageService.getUsage(force),
+    getCatalog: async (force) => {
+      let { sessions } = registry.getCached();
+      if (sessions.length === 0) {
+        sessions = (await registry.discover()).sessions;
+      }
+      return catalogService.getCatalog(sessions, force);
+    },
+    sendMessage: async (sessionId, prompt, attachments) => {
+      if (sessionId === 'master:root' && masterEngineRef) {
+        return masterEngineRef.handlePrompt(prompt, attachments);
+      }
+      return dispatcher.sendToSession(sessionId, prompt, attachments);
+    },
+    abortRun: async (sessionId) => {
+      if (sessionId === 'master:root' && masterEngineRef) {
+        return { ok: masterEngineRef.abort() };
+      }
+      return { ok: dispatcher.abort(sessionId) };
+    },
+    saveAttachment: async (dataUrl, filename) => saveDataUrlAttachment(dataUrl, filename),
+    readFilePreview: async (filePath, startLine, endLine) =>
+      readFilePreview(filePath, startLine, endLine),
+  }
+);
+controlServerRef = controlServer;
 
 const liveSync = new LiveSyncService(
   registry,
@@ -81,6 +144,7 @@ const liveSync = new LiveSyncService(
   },
   (transcript) => {
     broadcastToRenderer('sh:transcript-updated', transcript);
+    controlServer.broadcastEvent('transcript', transcript);
     controlServer.broadcastEvent('transcript_updated', {
       sessionId: transcript.sessionId,
       totalCount: transcript.totalCount,
@@ -99,10 +163,13 @@ const masterEngine = new MasterEngine(
     await refreshAndBroadcast();
   }
 );
+masterEngineRef = masterEngine;
 
 store.subscribe((state) => {
   broadcastToRenderer('sh:state-changed', state);
+  controlServer.broadcastEvent('state', state);
   schedulePolling(state.settings.pollIntervalMs);
+  void controlServer.syncMobileListener(state.settings.mobileApi);
 });
 
 function schedulePolling(intervalMs: number): void {
@@ -212,33 +279,6 @@ function registerIpcHandlers(): void {
   ipcMain.handle('sh:capture-tmux', async (_ev, target: string) => {
     return registry.captureTmux(target);
   });
-
-  const saveDataUrlAttachment = (dataUrl: string, filename?: string): ImageAttachment => {
-    const attachDir = path.join(os.homedir(), '.config', 'super-harness', 'attachments');
-    fs.mkdirSync(attachDir, { recursive: true });
-    const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-    const mimeType = match?.[1] || 'image/png';
-    const base64 = match?.[2] || '';
-    const extMap: Record<string, string> = {
-      'image/png': 'png',
-      'image/jpeg': 'jpg',
-      'image/jpg': 'jpg',
-      'image/webp': 'webp',
-      'image/gif': 'gif',
-    };
-    const ext = extMap[mimeType] || 'png';
-    const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    const safeName = (filename || `pasted-${id}.${ext}`).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filePath = path.join(attachDir, `${id}-${safeName}`);
-    fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
-    return {
-      id,
-      name: safeName,
-      path: filePath,
-      mimeType,
-      previewDataUrl: dataUrl,
-    };
-  };
 
   ipcMain.handle(
     'sh:save-attachment',
@@ -403,6 +443,7 @@ async function refreshUsageAndBroadcast(): Promise<void> {
   try {
     const snap = await usageService.getUsage(true);
     broadcastToRenderer('sh:usage-updated', snap);
+    controlServer.broadcastEvent('usage', snap);
   } catch {
     // ignore background usage refresh failures
   }
@@ -467,6 +508,7 @@ app.whenReady().then(async () => {
   });
 
   await controlServer.start();
+  await controlServer.syncMobileListener(store.getState().settings.mobileApi);
   registerIpcHandlers();
   createWindow();
   liveSync.start();

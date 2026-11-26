@@ -279,6 +279,13 @@ export interface FilePreviewData {
   error?: string;
 }
 
+export interface MobileApiSettings {
+  enabled: boolean;
+  bindHost: string;
+  port: number;
+  token: string;
+}
+
 export interface SuperHarnessSettings {
   pollIntervalMs: number;
   maxSessionsPerHarness: number;
@@ -289,6 +296,7 @@ export interface SuperHarnessSettings {
   master: MasterEngineConfig;
   defaultNewSessionCwd: string;
   apps: ExternalAppsSettings;
+  mobileApi?: MobileApiSettings;
 }
 
 export interface SuperHarnessState {

@@ -1122,6 +1122,74 @@ export const SettingsModal: React.FC<Props> = ({
                     }
                   />
                 </SettingsGroup>
+
+                <SettingsGroup title="Mobile companion API">
+                  <SettingsRow
+                    label="Enable LAN / Tailscale API"
+                    description="Serve HTTP + SSE endpoints for the native iOS companion app"
+                    control={
+                      <Switch
+                        checked={settings.mobileApi?.enabled ?? true}
+                        onChange={(enabled) =>
+                          onUpdateSettings({
+                            mobileApi: {
+                              enabled,
+                              bindHost: settings.mobileApi?.bindHost ?? '0.0.0.0',
+                              port: settings.mobileApi?.port ?? 47890,
+                              token: settings.mobileApi?.token ?? '',
+                            },
+                          })
+                        }
+                      />
+                    }
+                  />
+                  <SettingsRow
+                    label="Listen port"
+                    description={`Bound on ${settings.mobileApi?.bindHost ?? '0.0.0.0'}`}
+                    control={
+                      <Input
+                        inputSize="sm"
+                        mono
+                        className="w-28 text-right"
+                        value={String(settings.mobileApi?.port ?? 47890)}
+                        onChange={(e) => {
+                          const parsed = Number(e.target.value.replace(/[^0-9]/g, ''));
+                          if (parsed > 0 && parsed <= 65535) {
+                            onUpdateSettings({
+                              mobileApi: {
+                                enabled: settings.mobileApi?.enabled ?? true,
+                                bindHost: settings.mobileApi?.bindHost ?? '0.0.0.0',
+                                port: parsed,
+                                token: settings.mobileApi?.token ?? '',
+                              },
+                            });
+                          }
+                        }}
+                      />
+                    }
+                  />
+                  <SettingsRow
+                    label="Bearer token"
+                    description="Paste into Host Connection in the iOS app (stored in Keychain)"
+                    control={
+                      <div className="flex items-center gap-1.5">
+                        <code className="px-2 py-1 rounded-md bg-surface-code border border-line-hairline font-mono text-micro text-ink-secondary max-w-[180px] truncate">
+                          {settings.mobileApi?.token || 'Generating…'}
+                        </code>
+                        <IconButton
+                          label="Copy Bearer token"
+                          onClick={() => {
+                            if (settings.mobileApi?.token) {
+                              void navigator.clipboard.writeText(settings.mobileApi.token);
+                            }
+                          }}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </IconButton>
+                      </div>
+                    }
+                  />
+                </SettingsGroup>
               </div>
             )}
           </div>

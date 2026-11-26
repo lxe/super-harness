@@ -39,6 +39,12 @@ export function createDefaultState(): SuperHarnessState {
         fileManagerCommand: '',
         terminalCommand: '',
       },
+      mobileApi: {
+        enabled: true,
+        bindHost: '0.0.0.0',
+        port: 47890,
+        token: crypto.randomBytes(24).toString('hex'),
+      },
     },
     folders: [
       { id: 'folder-active', name: 'Active Workstreams', color: '#22c55e', order: 0 },
@@ -79,7 +85,18 @@ export class ConfigStore {
   private listeners = new Set<(state: SuperHarnessState) => void>();
 
   constructor() {
+    const hadStateFile = fs.existsSync(STATE_FILE);
     this.state = this.load();
+    if (hadStateFile) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) as Partial<SuperHarnessState>;
+        if (!raw.settings?.mobileApi?.token) {
+          this.save();
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
   }
 
   private load(): SuperHarnessState {
@@ -109,6 +126,11 @@ export class ConfigStore {
           apps: {
             ...def.settings.apps,
             ...(raw.settings?.apps ?? {}),
+          },
+          mobileApi: {
+            ...def.settings.mobileApi!,
+            ...(raw.settings?.mobileApi ?? {}),
+            token: raw.settings?.mobileApi?.token || def.settings.mobileApi!.token,
           },
         },
         folders: Array.isArray(raw.folders) ? raw.folders : def.folders,
@@ -164,6 +186,13 @@ export class ConfigStore {
       apps: {
         ...this.state.settings.apps,
         ...(patch.apps ?? {}),
+      },
+      mobileApi: {
+        enabled: this.state.settings.mobileApi?.enabled ?? true,
+        bindHost: this.state.settings.mobileApi?.bindHost ?? '0.0.0.0',
+        port: this.state.settings.mobileApi?.port ?? 47890,
+        token: this.state.settings.mobileApi?.token || crypto.randomBytes(24).toString('hex'),
+        ...(patch.mobileApi ?? {}),
       },
     };
     this.save();

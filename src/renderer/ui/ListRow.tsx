@@ -54,7 +54,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         isTopLevel
           ? 'h-8 px-2.5 bg-surface-subtle/90 hover:bg-surface-raised/90 border border-line-hairline text-[13px] font-semibold tracking-[-0.01em] text-ink-primary backdrop-blur-md'
           : 'h-7 px-2 bg-surface-rail/95 hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary backdrop-blur-sm',
-        sticky && (isTopLevel ? 'sticky top-0 z-20' : 'sticky top-8 z-10'),
+        sticky &&
+          (isTopLevel
+            ? "sticky top-2 z-20 before:content-[''] before:absolute before:-top-2 before:inset-x-[-10px] before:h-2 before:bg-surface-rail before:pointer-events-none"
+            : 'sticky top-10 z-10'),
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}

@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import type {
   FilePreviewData,
   HarnessCatalog,
@@ -42,6 +44,39 @@ interface BufferedEvent {
   seq: number;
   event: string;
   frame: string;
+}
+
+interface DictationServerConfig {
+  url: string;
+  token: string;
+}
+
+function readLocalYapYapConfig(): DictationServerConfig | null {
+  try {
+    const cfgPath = path.join(os.homedir(), '.config', 'yapyap', 'config.toml');
+    if (!fs.existsSync(cfgPath)) return null;
+    const raw = fs.readFileSync(cfgPath, 'utf8');
+    let inServer = false;
+    let url = '';
+    let token = '';
+    for (const rawLine of raw.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      if (line.startsWith('[')) {
+        inServer = line === '[server]';
+        continue;
+      }
+      if (!inServer) continue;
+      const urlMatch = line.match(/^url\s*=\s*["']([^"']+)["']/);
+      if (urlMatch) url = urlMatch[1].replace(/\/+$/, '');
+      const tokMatch = line.match(/^token\s*=\s*["']([^"']+)["']/);
+      if (tokMatch) token = tokMatch[1];
+    }
+    if (!url) return null;
+    return { url, token };
+  } catch {
+    return null;
+  }
 }
 
 const MEDIA_MIME_TYPES: Record<string, string> = {
@@ -126,16 +161,31 @@ export class ControlServer {
 
   private createRequestHandler(expectedToken: string): http.RequestListener {
     return async (req, res) => {
-      res.setHeader('Content-Type', 'application/json');
+      const acceptsGzip = String(req.headers['accept-encoding'] || '').includes('gzip');
+      const sendJson = (payload: unknown, statusCode = 200): void => {
+        const buf = Buffer.from(JSON.stringify(payload), 'utf8');
+        res.statusCode = statusCode;
+        res.setHeader('Content-Type', 'application/json');
+        if (acceptsGzip && buf.length > 1024) {
+          const gz = zlib.gzipSync(buf, { level: 6 });
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Vary', 'Accept-Encoding');
+          res.setHeader('Content-Length', String(gz.length));
+          res.end(gz);
+        } else {
+          res.setHeader('Content-Length', String(buf.length));
+          res.end(buf);
+        }
+      };
+
       const auth = req.headers.authorization;
       if (!expectedToken || auth !== `Bearer ${expectedToken}`) {
-        res.statusCode = 401;
-        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        sendJson({ error: 'Unauthorized' }, 401);
         return;
       }
 
       const url = new URL(req.url || '/', 'http://127.0.0.1');
-      const readBody = async (): Promise<Record<string, unknown>> => {
+      const readRawBody = async (): Promise<Buffer> => {
         const chunks: Buffer[] = [];
         let total = 0;
         const maxBytes = 25 * 1024 * 1024;
@@ -147,20 +197,109 @@ export class ControlServer {
           }
           chunks.push(buf);
         }
-        const raw = Buffer.concat(chunks).toString('utf8').trim();
+        return Buffer.concat(chunks);
+      };
+      const readBody = async (): Promise<Record<string, unknown>> => {
+        const raw = (await readRawBody()).toString('utf8').trim();
         return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
       };
 
       try {
         if (req.method === 'GET' && url.pathname === '/api/health') {
-          res.end(
-            JSON.stringify({
+          sendJson({
+            ok: true,
+            protocolVersion: MOBILE_PROTOCOL_VERSION,
+            seq: this.eventSeq,
+            uptimeMs: Date.now() - this.startedAt,
+          });
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/dictate/status') {
+          const overrideUrl = String(req.headers['x-dictation-url'] || '').trim().replace(/\/+$/, '');
+          const cfg = overrideUrl
+            ? { url: overrideUrl, token: String(req.headers['x-dictation-token'] || '') }
+            : readLocalYapYapConfig();
+          if (!cfg) {
+            sendJson({ ok: true, configured: false, healthy: false });
+            return;
+          }
+          try {
+            const ac = new AbortController();
+            const timer = setTimeout(() => ac.abort(), 3000);
+            const hRes = await fetch(`${cfg.url}/health`, { signal: ac.signal });
+            clearTimeout(timer);
+            const info = hRes.ok ? ((await hRes.json().catch(() => ({}))) as Record<string, unknown>) : {};
+            sendJson({
               ok: true,
-              protocolVersion: MOBILE_PROTOCOL_VERSION,
-              seq: this.eventSeq,
-              uptimeMs: Date.now() - this.startedAt,
-            })
-          );
+              configured: true,
+              url: cfg.url,
+              healthy: hRes.ok,
+              model: typeof info.model === 'string' ? info.model : undefined,
+            });
+          } catch (err) {
+            sendJson({
+              ok: true,
+              configured: true,
+              url: cfg.url,
+              healthy: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/dictate') {
+          const overrideUrl = String(req.headers['x-dictation-url'] || '').trim().replace(/\/+$/, '');
+          const overrideToken = String(req.headers['x-dictation-token'] || '').trim();
+          const localCfg = readLocalYapYapConfig();
+          const targetUrl = overrideUrl || localCfg?.url || '';
+          const targetToken = overrideUrl ? overrideToken : localCfg?.token || '';
+          if (!targetUrl) {
+            sendJson({ ok: false, error: 'Dictation server not configured on host (~/.config/yapyap/config.toml)' }, 503);
+            return;
+          }
+          const audioBuf = await readRawBody();
+          if (audioBuf.length === 0) {
+            sendJson({ ok: false, error: 'Empty audio payload' }, 400);
+            return;
+          }
+          const contentType = String(req.headers['content-type'] || 'audio/wav').split(';')[0].trim();
+          const ext = contentType.includes('m4a') || contentType.includes('mp4')
+            ? 'm4a'
+            : contentType.includes('ogg')
+              ? 'ogg'
+              : 'wav';
+          const language = url.searchParams.get('language') || '';
+          const prompt = url.searchParams.get('prompt') || '';
+
+          const form = new FormData();
+          form.append('file', new Blob([new Uint8Array(audioBuf)], { type: contentType }), `dictation.${ext}`);
+          if (language) form.append('language', language);
+          if (prompt) form.append('prompt', prompt);
+          form.append('response_format', 'json');
+
+          const headers: Record<string, string> = {};
+          if (targetToken) headers.Authorization = `Bearer ${targetToken}`;
+
+          const upRes = await fetch(`${targetUrl}/v1/audio/transcriptions`, {
+            method: 'POST',
+            headers,
+            body: form,
+          });
+          const rawText = await upRes.text();
+          if (!upRes.ok) {
+            sendJson({ ok: false, error: `YapYap HTTP ${upRes.status}: ${rawText.slice(0, 240)}` }, 502);
+            return;
+          }
+          let text = rawText.trim();
+          try {
+            const parsed = JSON.parse(rawText) as { text?: string };
+            if (typeof parsed.text === 'string') text = parsed.text.trim();
+          } catch {
+            // plain text response
+          }
+          sendJson({ ok: true, text });
           return;
         }
 
@@ -221,17 +360,15 @@ export class ControlServer {
             this.hooks.getUsage ? this.hooks.getUsage(false).catch(() => undefined) : Promise.resolve(undefined),
             this.hooks.getCatalog ? this.hooks.getCatalog(false).catch(() => undefined) : Promise.resolve(undefined),
           ]);
-          res.end(
-            JSON.stringify({
-              protocolVersion: MOBILE_PROTOCOL_VERSION,
-              seq: this.eventSeq,
-              harnesses,
-              sessions,
-              state: this.store.getState(),
-              usage,
-              catalog,
-            })
-          );
+          sendJson({
+            protocolVersion: MOBILE_PROTOCOL_VERSION,
+            seq: this.eventSeq,
+            harnesses,
+            sessions,
+            state: this.store.getState(),
+            usage,
+            catalog,
+          });
           return;
         }
 
@@ -299,45 +436,41 @@ export class ControlServer {
             }
             return true;
           });
-          res.end(
-            JSON.stringify({
-              count: filtered.length,
-              harnesses,
-              sessions: filtered.slice(0, 200),
-            })
-          );
+          sendJson({
+            count: filtered.length,
+            harnesses,
+            sessions: filtered.slice(0, 200),
+          });
           return;
         }
 
         if (req.method === 'GET' && url.pathname === '/api/transcript') {
           const sessionId = url.searchParams.get('sessionId') || '';
-          const limit = Number(url.searchParams.get('limit') || '40');
+          const limit = Number(url.searchParams.get('limit') || '20');
           const tr = await this.registry.getTranscript(sessionId, Math.max(1, Math.min(limit, 200)));
-          res.end(JSON.stringify(tr));
+          sendJson(tr);
           return;
         }
 
         if (req.method === 'GET' && url.pathname === '/api/usage') {
           if (!this.hooks.getUsage) {
-            res.statusCode = 404;
-            res.end(JSON.stringify({ error: 'Usage endpoint not configured' }));
+            sendJson({ error: 'Usage endpoint not configured' }, 404);
             return;
           }
           const force = url.searchParams.get('force') === 'true';
           const usage = await this.hooks.getUsage(force);
-          res.end(JSON.stringify(usage));
+          sendJson(usage);
           return;
         }
 
         if (req.method === 'GET' && url.pathname === '/api/catalog') {
           if (!this.hooks.getCatalog) {
-            res.statusCode = 404;
-            res.end(JSON.stringify({ error: 'Catalog endpoint not configured' }));
+            sendJson({ error: 'Catalog endpoint not configured' }, 404);
             return;
           }
           const force = url.searchParams.get('force') === 'true';
           const catalog = await this.hooks.getCatalog(force);
-          res.end(JSON.stringify(catalog));
+          sendJson(catalog);
           return;
         }
 
@@ -351,7 +484,7 @@ export class ControlServer {
           const result = this.hooks.sendMessage
             ? await this.hooks.sendMessage(sessionId, message, attachments)
             : await this.dispatcher.sendToSession(sessionId, message, attachments);
-          res.end(JSON.stringify(result));
+          sendJson(result);
           return;
         }
 
@@ -361,7 +494,7 @@ export class ControlServer {
           const result = this.hooks.abortRun
             ? await this.hooks.abortRun(sessionId)
             : { ok: this.dispatcher.abort(sessionId) };
-          res.end(JSON.stringify(result));
+          sendJson(result);
           return;
         }
 
@@ -371,7 +504,7 @@ export class ControlServer {
             body as unknown as StartSessionRequest
           );
           await this.triggerRefresh();
-          res.end(JSON.stringify(result));
+          sendJson(result);
           return;
         }
 
@@ -382,7 +515,7 @@ export class ControlServer {
             : [body as unknown as OrganizeAction];
           const state = this.store.applyOrganize(actions);
           await this.triggerRefresh();
-          res.end(JSON.stringify({ ok: true, folders: state.folders, state }));
+          sendJson({ ok: true, folders: state.folders, state });
           return;
         }
 
@@ -392,28 +525,26 @@ export class ControlServer {
           const killTmux = Boolean(body.killTmux);
           const result = await this.dispatcher.archiveSession(sessionId, { killTmux });
           await this.triggerRefresh();
-          res.end(JSON.stringify(result));
+          sendJson(result);
           return;
         }
 
         if (req.method === 'POST' && url.pathname === '/api/attachments') {
           if (!this.hooks.saveAttachment) {
-            res.statusCode = 404;
-            res.end(JSON.stringify({ error: 'Attachments endpoint not configured' }));
+            sendJson({ error: 'Attachments endpoint not configured' }, 404);
             return;
           }
           const body = await readBody();
           const dataUrl = String(body.dataUrl || '');
           const filename = body.filename ? String(body.filename) : undefined;
           const attachment = await this.hooks.saveAttachment(dataUrl, filename);
-          res.end(JSON.stringify(attachment));
+          sendJson(attachment);
           return;
         }
 
         if (req.method === 'GET' && url.pathname === '/api/files/preview') {
           if (!this.hooks.readFilePreview) {
-            res.statusCode = 404;
-            res.end(JSON.stringify({ error: 'File preview endpoint not configured' }));
+            sendJson({ error: 'File preview endpoint not configured' }, 404);
             return;
           }
           const filePath = url.searchParams.get('path') || '';
@@ -424,7 +555,7 @@ export class ControlServer {
             ? Number(url.searchParams.get('endLine'))
             : undefined;
           const preview = await this.hooks.readFilePreview(filePath, startLine, endLine);
-          res.end(JSON.stringify(preview));
+          sendJson(preview);
           return;
         }
 
@@ -432,7 +563,7 @@ export class ControlServer {
           const body = await readBody();
           const state = this.store.updateSettings(body as Partial<SuperHarnessSettings>);
           await this.triggerRefresh();
-          res.end(JSON.stringify({ ok: true, settings: state.settings }));
+          sendJson({ ok: true, settings: state.settings });
           return;
         }
 
@@ -443,18 +574,17 @@ export class ControlServer {
             body.action as 'start_remote' | 'stop_remote' | 'open_desktop'
           );
           await this.triggerRefresh();
-          res.end(JSON.stringify(result));
+          sendJson(result);
           return;
         }
 
-        res.statusCode = 404;
-        res.end(JSON.stringify({ error: 'Not found' }));
+        sendJson({ error: 'Not found' }, 404);
       } catch (err) {
-        res.statusCode = 500;
-        res.end(
-          JSON.stringify({
+        sendJson(
+          {
             error: err instanceof Error ? err.message : String(err),
-          })
+          },
+          500
         );
       }
     };

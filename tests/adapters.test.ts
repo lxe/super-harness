@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  decodeAntigravityStepPayload,
   loadAntigravityTranscript,
   parseAntigravityJsonlLines,
+  readAntigravityNativeQueue,
 } from '../src/main/adapters/antigravityAdapter';
 import {
   createClaudeDriver,
@@ -15,7 +17,9 @@ import {
   getCodexTranscriptFingerprint,
   isCodexActiveWriterError,
   loadCodexTranscriptFromPaths,
+  parseCodexQueuedPayload,
 } from '../src/main/adapters/codexAdapter';
+import { isTranscriptEquivalent } from '../src/renderer/utils/transcriptCache';
 import { closeSqlitePool } from '../src/main/utils/sqlite';
 import {
   inferWeeklyResetFromSamples,
@@ -652,5 +656,203 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       isCodexActiveWriterError('Error: remote thread already has an active turn')
     ).toBe(true);
     expect(isCodexActiveWriterError('Error: network timeout')).toBe(false);
+  });
+
+  it('decodes Antigravity native queued user messages from .system_generated/messages and ignores read or task items', async () => {
+    const encodeVarint = (n: number): Buffer => {
+      const bytes: number[] = [];
+      let v = n;
+      do {
+        let b = v & 0x7f;
+        v = Math.floor(v / 128);
+        if (v > 0) b |= 0x80;
+        bytes.push(b);
+      } while (v > 0);
+      return Buffer.from(bytes);
+    };
+    const protoBytes = (field: number, payload: Buffer): Buffer =>
+      Buffer.concat([encodeVarint((field << 3) | 2), encodeVarint(payload.length), payload]);
+    const protoStr = (field: number, s: string): Buffer => protoBytes(field, Buffer.from(s, 'utf8'));
+    const buildStepPayload = (text: string, imgPath?: string): string => {
+      const userInputParts: Buffer[] = [protoStr(2, text)];
+      if (imgPath) {
+        const media = Buffer.concat([
+          protoStr(1, 'image/png'),
+          protoStr(4, 'screenshot.png'),
+          protoStr(5, imgPath),
+        ]);
+        userInputParts.push(protoBytes(9, media));
+      }
+      const userInput = Buffer.concat(userInputParts);
+      const step = Buffer.concat([
+        encodeVarint((1 << 3) | 0),
+        encodeVarint(14),
+        protoBytes(19, userInput),
+      ]);
+      return step.toString('base64');
+    };
+
+    const decoded = decodeAntigravityStepPayload(
+      buildStepPayload('Check queue sync', '/tmp/mock-shot.png')
+    );
+    expect(decoded.text).toBe('Check queue sync');
+    expect(decoded.attachments).toHaveLength(1);
+    expect(decoded.attachments[0]).toMatchObject({
+      name: 'screenshot.png',
+      path: '/tmp/mock-shot.png',
+      mimeType: 'image/png',
+    });
+
+    const convRoot = path.join(tmpDir, 'agy-queue-conv', '.system_generated');
+    const logsDir = path.join(convRoot, 'logs');
+    const msgsDir = path.join(convRoot, 'messages');
+    fs.mkdirSync(logsDir, { recursive: true });
+    fs.mkdirSync(msgsDir, { recursive: true });
+
+    const transcriptFile = path.join(logsDir, 'transcript.jsonl');
+    fs.writeFileSync(
+      transcriptFile,
+      JSON.stringify({
+        step_index: 0,
+        type: 'USER_INPUT',
+        created_at: 1000,
+        content: '<USER_REQUEST>Initial prompt</USER_REQUEST>',
+      }) + '\n'
+    );
+
+    fs.writeFileSync(
+      path.join(msgsDir, 'read.json'),
+      JSON.stringify({ 'msg-read': true, 'task-done': true })
+    );
+    fs.writeFileSync(
+      path.join(msgsDir, 'msg-read.json'),
+      JSON.stringify({
+        id: 'msg-read',
+        sender: 'user',
+        timestamp: '2026-11-26T00:01:00Z',
+        stepPayload: buildStepPayload('Already consumed'),
+      })
+    );
+    fs.writeFileSync(
+      path.join(msgsDir, 'msg-task-unread.json'),
+      JSON.stringify({
+        id: 'msg-task-unread',
+        sender: 'agy-queue-conv/task-99',
+        timestamp: '2026-11-26T00:02:00Z',
+        content: 'Background task finished',
+      })
+    );
+    fs.writeFileSync(
+      path.join(msgsDir, 'msg-q2.json'),
+      JSON.stringify({
+        id: 'msg-q2',
+        sender: 'user',
+        timestamp: '2026-11-26T00:04:00Z',
+        stepPayload: buildStepPayload('Second queued item', '/tmp/second.png'),
+      })
+    );
+    fs.writeFileSync(
+      path.join(msgsDir, 'msg-q1.json'),
+      JSON.stringify({
+        id: 'msg-q1',
+        sender: 'user',
+        timestamp: '2026-11-26T00:03:00Z',
+        stepPayload: buildStepPayload('First queued item'),
+      })
+    );
+
+    const direct = readAntigravityNativeQueue(msgsDir);
+    expect(direct.items.map((i) => i.text)).toEqual(['First queued item', 'Second queued item']);
+    expect(direct.items[1].attachments?.[0]?.path).toBe('/tmp/second.png');
+
+    const loaded = await loadAntigravityTranscript('agy-queue-conv', transcriptFile, 40);
+    expect(loaded.liveActivity?.queuedMessages?.map((q) => q.text)).toEqual([
+      'First queued item',
+      'Second queued item',
+    ]);
+  });
+
+  it('parses Codex native UserInput queue payloads including images', () => {
+    const parsed = parseCodexQueuedPayload(
+      JSON.stringify({
+        UserInput: {
+          content: [
+            { type: 'text', text: 'Follow up after tests pass.\n', text_elements: [] },
+            { type: 'local_image', path: '/tmp/ui-diff.png', mime_type: 'image/png' },
+          ],
+          client_id: 'abc',
+        },
+      })
+    );
+    expect(parsed.text).toBe('Follow up after tests pass.');
+    expect(parsed.attachments).toHaveLength(1);
+    expect(parsed.attachments?.[0]?.path).toBe('/tmp/ui-diff.png');
+  });
+
+  it('tracks Claude queue-operation enqueue/remove/dequeue while filtering internal notifications', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'queue-operation',
+        operation: 'enqueue',
+        timestamp: '2026-11-26T00:01:00Z',
+        content: '<task-notification><task-id>t1</task-id></task-notification>',
+      }),
+      JSON.stringify({
+        type: 'queue-operation',
+        operation: 'enqueue',
+        timestamp: '2026-11-26T00:02:00Z',
+        content: '  Trimmed user follow-up  \n',
+      }),
+      JSON.stringify({
+        type: 'queue-operation',
+        operation: 'enqueue',
+        timestamp: '2026-11-26T00:03:00Z',
+        content: 'Still queued follow-up',
+      }),
+      // Dequeue removes the FIFO internal task-notification, leaving both user items
+      JSON.stringify({
+        type: 'queue-operation',
+        operation: 'dequeue',
+        timestamp: '2026-11-26T00:04:00Z',
+      }),
+      // Remove with whitespace matches the trimmed first user item
+      JSON.stringify({
+        type: 'queue-operation',
+        operation: 'remove',
+        timestamp: '2026-11-26T00:05:00Z',
+        content: 'Trimmed user follow-up\n',
+      }),
+    ];
+    const parsed = parseClaudeJsonlLines(lines, 'claude:test-q', Date.now(), 40);
+    expect(parsed.liveActivity?.queuedMessages?.map((q) => q.text)).toEqual([
+      'Still queued follow-up',
+    ]);
+  });
+
+  it('detects queued message content changes in isTranscriptEquivalent even at equal queue length', () => {
+    const base = {
+      sessionId: 'antigravity:s1',
+      messages: [],
+      totalCount: 0,
+      hasMore: false,
+      sourceMtimeMs: 1000,
+      liveActivity: {
+        isWorking: true,
+        queuedMessages: [
+          { id: 'q1', text: 'First prompt', createdAt: 1000, source: 'native' as const },
+        ],
+      },
+    };
+    const changed = {
+      ...base,
+      liveActivity: {
+        isWorking: true,
+        queuedMessages: [
+          { id: 'q2', text: 'Second prompt', createdAt: 2000, source: 'native' as const },
+        ],
+      },
+    };
+    expect(isTranscriptEquivalent(base, base)).toBe(true);
+    expect(isTranscriptEquivalent(base, changed)).toBe(false);
   });
 });

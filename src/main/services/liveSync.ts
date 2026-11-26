@@ -117,10 +117,22 @@ export class LiveSyncService {
     for (const filePath of driver.getSessionWatchFiles(session)) {
       if (!filePath) continue;
       watchedFiles.push(filePath);
-      const dir = path.dirname(filePath);
-      const base = path.basename(filePath);
-      if (!dirsToWatch.has(dir)) dirsToWatch.set(dir, new Set());
-      dirsToWatch.get(dir)!.add(base);
+      let isDir = false;
+      try {
+        isDir = fs.existsSync(filePath) && fs.statSync(filePath).isDirectory();
+      } catch {
+        isDir = false;
+      }
+      if (isDir) {
+        // Watch the directory itself for any added/modified/removed files (e.g. queued messages)
+        if (!dirsToWatch.has(filePath)) dirsToWatch.set(filePath, new Set());
+        dirsToWatch.get(filePath)!.add('*');
+      } else {
+        const dir = path.dirname(filePath);
+        const base = path.basename(filePath);
+        if (!dirsToWatch.has(dir)) dirsToWatch.set(dir, new Set());
+        dirsToWatch.get(dir)!.add(base);
+      }
     }
 
     const pw: PaneWatch = {
@@ -136,10 +148,11 @@ export class LiveSyncService {
     // Watch parent directories so atomic renames/appends & WAL writes always fire reliably
     for (const [dir, allowedBases] of dirsToWatch.entries()) {
       if (!fs.existsSync(dir)) continue;
+      const watchAll = allowedBases.has('*');
       try {
         const w = fs.watch(dir, { persistent: false }, (_event, filename) => {
           const name = filename ? String(filename) : '';
-          if (name && !allowedBases.has(name) && !name.endsWith('-wal')) return;
+          if (!watchAll && name && !allowedBases.has(name) && !name.endsWith('-wal')) return;
           pw.lastFingerprint = this.computeFilesFingerprint(pw.watchedFiles);
           this.schedulePanePush(pw, 65);
         });
@@ -156,6 +169,7 @@ export class LiveSyncService {
     for (const fp of watchedFiles) {
       if (!fs.existsSync(fp)) continue;
       try {
+        if (fs.statSync(fp).isDirectory()) continue;
         const w = fs.watch(fp, { persistent: false }, () => {
           pw.lastFingerprint = this.computeFilesFingerprint(pw.watchedFiles);
           this.schedulePanePush(pw, 65);
@@ -206,6 +220,10 @@ export class LiveSyncService {
       .map((f) => {
         try {
           const st = fs.statSync(f);
+          if (st.isDirectory()) {
+            const count = fs.readdirSync(f).length;
+            return `dir:${count}:${Math.floor(st.mtimeMs)}`;
+          }
           return `${st.size}:${Math.floor(st.mtimeMs)}`;
         } catch {
           return '0:0';

@@ -3,19 +3,24 @@ import { ArrowRight, ChevronDown, ChevronUp, Pencil, Trash2 } from 'lucide-react
 import type { QueuedMessageItem } from '../../shared/types';
 import { Badge, IconButton } from '../ui';
 import { mediaUrlForPath } from '../utils/format';
+import type { PreviewImageItem } from './ImageLightbox';
 
 interface Props {
   items: QueuedMessageItem[];
+  harnessLabel?: string;
   onSendNow: (id: string) => void;
   onEdit: (id: string) => void;
   onRemove: (id: string) => void;
+  onPreviewImage?: (images: PreviewImageItem[], index: number) => void;
 }
 
 export const QueuedMessagesTray: React.FC<Props> = ({
   items,
+  harnessLabel,
   onSendNow,
   onEdit,
   onRemove,
+  onPreviewImage,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -47,60 +52,76 @@ export const QueuedMessagesTray: React.FC<Props> = ({
 
       {!collapsed && (
         <div className="border-t border-line-hairline divide-y divide-line-hairline max-h-48 overflow-y-auto">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="px-3.5 py-2.5 flex items-center gap-3 hover:bg-white/[0.02] transition-colors"
-            >
-              {item.attachments && item.attachments.length > 0 && (
-                <div className="flex items-center gap-1 shrink-0">
-                  {item.attachments.slice(0, 3).map((att) => (
-                    <img
-                      key={att.id}
-                      src={att.previewDataUrl || mediaUrlForPath(att.path)}
-                      alt={att.name}
-                      className="w-8 h-8 rounded-md object-cover border border-line-subtle bg-black/40"
-                    />
-                  ))}
-                </div>
-              )}
+          {items.map((item) => {
+            const itemImages: PreviewImageItem[] = (item.attachments ?? []).map((att) => ({
+              src: att.previewDataUrl || mediaUrlForPath(att.path),
+              name: att.name,
+              path: att.path,
+            }));
+            return (
+              <div
+                key={item.id}
+                className="px-3.5 py-2.5 flex items-center gap-3 hover:bg-white/[0.02] transition-colors"
+              >
+                {item.attachments && item.attachments.length > 0 && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {item.attachments.slice(0, 3).map((att, idx) => (
+                      <button
+                        key={att.id}
+                        type="button"
+                        onClick={() => onPreviewImage?.(itemImages, idx)}
+                        className="rounded-md overflow-hidden border border-line-subtle bg-black/40 hover:border-white/30 transition-colors cursor-pointer"
+                        title={att.name}
+                      >
+                        <img
+                          src={att.previewDataUrl || mediaUrlForPath(att.path)}
+                          alt={att.name}
+                          className="w-8 h-8 object-cover block"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-              <div className="flex-1 min-w-0">
-                <p className="text-body text-ink-primary line-clamp-2 leading-snug break-words">
-                  {item.text || '(attached image)'}
-                </p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-body text-ink-primary line-clamp-2 leading-snug break-words">
+                    {item.text || '(attached image)'}
+                  </p>
+                </div>
+
+                {item.source === 'super-harness' ? (
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <IconButton
+                      size="xs"
+                      label="Send now"
+                      onClick={() => onSendNow(item.id)}
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </IconButton>
+                    <IconButton
+                      size="xs"
+                      label="Edit queued message"
+                      onClick={() => onEdit(item.id)}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </IconButton>
+                    <IconButton
+                      size="xs"
+                      tone="danger"
+                      label="Delete queued message"
+                      onClick={() => onRemove(item.id)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </IconButton>
+                  </div>
+                ) : (
+                  <Badge tone="neutral">
+                    {harnessLabel ? `${harnessLabel} queue` : 'Harness queue'}
+                  </Badge>
+                )}
               </div>
-
-              {item.source === 'super-harness' ? (
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <IconButton
-                    size="xs"
-                    label="Send now"
-                    onClick={() => onSendNow(item.id)}
-                  >
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </IconButton>
-                  <IconButton
-                    size="xs"
-                    label="Edit queued message"
-                    onClick={() => onEdit(item.id)}
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </IconButton>
-                  <IconButton
-                    size="xs"
-                    tone="danger"
-                    label="Delete queued message"
-                    onClick={() => onRemove(item.id)}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </IconButton>
-                </div>
-              ) : (
-                <Badge tone="neutral">Harness queue</Badge>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

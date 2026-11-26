@@ -782,10 +782,15 @@ export function parseClaudeJsonlLines(
   const uniqueId = createUniqueIdGenerator();
   const toolBlockById = new Map<string, UnifiedBlock>();
   const pendingToolNames = new Map<string, string>();
-  const nativeQueue: QueuedMessageItem[] = [];
+  const rawNativeQueue: Array<{ item: QueuedMessageItem; isInternal: boolean }> = [];
   let latestSteps: LiveStepItem[] | undefined;
   let currentAssistant: UnifiedMessage | null = null;
   let seq = 0;
+
+  const isInternalClaudeQueueContent = (txt: string): boolean =>
+    /^<(?:task-notification|cross-session-message|teammate-message|system-reminder|local-command-|command-name)\b/i.test(
+      txt
+    );
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -809,19 +814,24 @@ export function parseClaudeJsonlLines(
     if (type === 'queue-operation') {
       const op = String(obj.operation || '');
       if (op === 'enqueue' && typeof obj.content === 'string' && obj.content.trim()) {
-        nativeQueue.push({
-          id: `claude-q-${seq++}`,
-          text: obj.content.trim(),
-          createdAt: normalizeTimestamp(obj.timestamp),
-          source: 'native',
+        const trimmed = obj.content.trim();
+        rawNativeQueue.push({
+          item: {
+            id: `claude-q-${seq++}`,
+            text: trimmed,
+            createdAt: normalizeTimestamp(obj.timestamp),
+            source: 'native',
+          },
+          isInternal: isInternalClaudeQueueContent(trimmed),
         });
       } else if (op === 'dequeue') {
-        nativeQueue.shift();
+        rawNativeQueue.shift();
       } else if (op === 'popAll' || op === 'clear') {
-        nativeQueue.length = 0;
+        rawNativeQueue.length = 0;
       } else if (op === 'remove' && typeof obj.content === 'string') {
-        const idx = nativeQueue.findIndex((q) => q.text === obj.content);
-        if (idx >= 0) nativeQueue.splice(idx, 1);
+        const target = obj.content.trim();
+        const idx = rawNativeQueue.findIndex((q) => q.item.text === target);
+        if (idx >= 0) rawNativeQueue.splice(idx, 1);
       }
       continue;
     }
@@ -1090,11 +1100,14 @@ export function parseClaudeJsonlLines(
     tailActivity.working ||
     (Date.now() - sourceMtimeMs < 30_000 &&
       (pendingToolNames.size > 0 || Boolean(latestSteps?.some((s) => s.status === 'in_progress'))));
+  const visibleNativeQueue = rawNativeQueue
+    .filter((entry) => !entry.isInternal)
+    .map((entry) => entry.item);
   const liveActivity: LiveActivityState = {
     isWorking,
     focus: activeTool ? `Running ${activeTool}` : undefined,
     steps: latestSteps,
-    queuedMessages: nativeQueue.length > 0 ? nativeQueue : undefined,
+    queuedMessages: visibleNativeQueue.length > 0 ? visibleNativeQueue : undefined,
     lastEventAt: sourceMtimeMs,
   };
 

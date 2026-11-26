@@ -595,13 +595,17 @@ export async function getCodexTranscriptFingerprint(
 
   let queuePart = '0';
   if (fs.existsSync(dbs.queueDb)) {
-    const qStat = await querySqliteReadOnly<{ cnt: number; maxTs: number | null }>(
+    const qStat = await querySqliteReadOnly<{
+      cnt: number;
+      maxTs: number | null;
+      maxUpdated: number | null;
+    }>(
       dbs.queueDb,
-      'SELECT COUNT(*) as cnt, MAX(created_at_ms) as maxTs FROM queued_items WHERE thread_id = ?',
+      'SELECT COUNT(*) as cnt, MAX(created_at_ms) as maxTs, MAX(updated_at_ms) as maxUpdated FROM queued_items WHERE thread_id = ?',
       [nativeId]
     );
     if (qStat[0]) {
-      queuePart = `${Number(qStat[0].cnt ?? 0)}:${Number(qStat[0].maxTs ?? 0)}`;
+      queuePart = `${Number(qStat[0].cnt ?? 0)}:${Number(qStat[0].maxTs ?? 0)}:${Number(qStat[0].maxUpdated ?? 0)}`;
     }
   }
 
@@ -729,6 +733,75 @@ function parseCodexRolloutLines(lines: string[]): UnifiedMessage[] {
   return messages;
 }
 
+export function parseCodexQueuedPayload(payloadJson: string): {
+  text: string;
+  attachments?: ImageAttachment[];
+} {
+  const texts: string[] = [];
+  const attachments: ImageAttachment[] = [];
+
+  const collectParts = (items: unknown[]) => {
+    for (const raw of items) {
+      if (!raw || typeof raw !== 'object') continue;
+      const item = raw as Record<string, unknown>;
+      const t = String(item.type || '');
+      if (typeof item.text === 'string' && item.text.trim()) {
+        texts.push(item.text.trim());
+      } else if (
+        t === 'local_image' ||
+        t === 'image' ||
+        t === 'input_image'
+      ) {
+        const imgPath =
+          typeof item.path === 'string'
+            ? item.path
+            : typeof item.image_path === 'string'
+              ? item.image_path
+              : '';
+        if (imgPath && path.isAbsolute(imgPath)) {
+          attachments.push({
+            id: `codex-q-att-${attachments.length + 1}`,
+            name: path.basename(imgPath),
+            path: imgPath,
+            mimeType: typeof item.mime_type === 'string' ? item.mime_type : 'image/png',
+          });
+        }
+      }
+    }
+  };
+
+  try {
+    const p = JSON.parse(payloadJson) as Record<string, unknown>;
+    const userInput = (p.UserInput ?? p.user_input) as Record<string, unknown> | undefined;
+    if (userInput && typeof userInput === 'object') {
+      if (Array.isArray(userInput.content)) {
+        collectParts(userInput.content);
+      } else if (typeof userInput.text === 'string') {
+        texts.push(userInput.text.trim());
+      }
+    } else if (typeof p.text === 'string') {
+      texts.push(p.text.trim());
+    } else if (typeof p.prompt === 'string') {
+      texts.push(p.prompt.trim());
+    } else if (typeof p.message === 'string') {
+      texts.push(p.message.trim());
+    } else if (Array.isArray(p.input)) {
+      collectParts(p.input);
+    } else if (Array.isArray(p.content)) {
+      collectParts(p.content);
+    } else {
+      texts.push(payloadJson.slice(0, 300).trim());
+    }
+  } catch {
+    texts.push(payloadJson.slice(0, 300).trim());
+  }
+
+  return {
+    text: texts.filter(Boolean).join('\n').trim(),
+    attachments: attachments.length > 0 ? attachments : undefined,
+  };
+}
+
 export async function loadCodexTranscriptFromPaths(
   nativeId: string,
   rolloutPath: string | undefined,
@@ -741,9 +814,12 @@ export async function loadCodexTranscriptFromPaths(
     const dbMtime = fs.existsSync(dbs.historyDb) ? fs.statSync(dbs.historyDb).mtimeMs : 0;
     const walPath = `${dbs.historyDb}-wal`;
     const walMtime = fs.existsSync(walPath) ? fs.statSync(walPath).mtimeMs : 0;
+    const queueMtime = fs.existsSync(dbs.queueDb) ? fs.statSync(dbs.queueDb).mtimeMs : 0;
+    const queueWalPath = `${dbs.queueDb}-wal`;
+    const queueWalMtime = fs.existsSync(queueWalPath) ? fs.statSync(queueWalPath).mtimeMs : 0;
     const rolloutMtime =
       rolloutPath && fs.existsSync(rolloutPath) ? fs.statSync(rolloutPath).mtimeMs : 0;
-    sourceMtimeMs = Math.max(dbMtime, walMtime, rolloutMtime) || Date.now();
+    sourceMtimeMs = Math.max(dbMtime, walMtime, queueMtime, queueWalMtime, rolloutMtime) || Date.now();
   } catch {
     // ignore stat errors
   }
@@ -832,27 +908,12 @@ export async function loadCodexTranscriptFromPaths(
         [nativeId]
       );
       for (const qr of qRows) {
-        let text = '';
-        try {
-          const p = JSON.parse(qr.payload_json) as Record<string, unknown>;
-          if (typeof p.text === 'string') text = p.text;
-          else if (typeof p.prompt === 'string') text = p.prompt;
-          else if (typeof p.message === 'string') text = p.message;
-          else if (Array.isArray(p.input)) {
-            text = (p.input as Array<Record<string, unknown>>)
-              .map((x) => (typeof x?.text === 'string' ? x.text : ''))
-              .filter(Boolean)
-              .join('\n');
-          } else {
-            text = qr.payload_json.slice(0, 300);
-          }
-        } catch {
-          text = qr.payload_json.slice(0, 300);
-        }
-        if (text.trim()) {
+        const parsed = parseCodexQueuedPayload(qr.payload_json);
+        if (parsed.text || (parsed.attachments && parsed.attachments.length > 0)) {
           nativeQueued.push({
             id: `codex-q-${qr.id}`,
-            text: text.trim(),
+            text: parsed.text,
+            attachments: parsed.attachments,
             createdAt: normalizeTimestamp(qr.created_at_ms),
             source: 'native',
           });
@@ -1052,7 +1113,9 @@ export function createCodexDriver(): HarnessDriver {
         {
           dir: CODEX_DIR,
           filter: (fn) =>
-            fn.startsWith('state_5.sqlite') || fn.startsWith('thread_history_1.sqlite'),
+            fn.startsWith('state_5.sqlite') ||
+            fn.startsWith('thread_history_1.sqlite') ||
+            fn.startsWith('queue_1.sqlite'),
         },
       ];
       // Watch today's Codex rollout directory so active working spinners update immediately

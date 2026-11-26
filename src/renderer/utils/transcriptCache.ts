@@ -117,9 +117,11 @@ export function isTranscriptEquivalent(
   if (a.messages.length !== b.messages.length) return false;
   if (Boolean(a.liveActivity?.isWorking) !== Boolean(b.liveActivity?.isWorking)) return false;
   if (a.liveActivity?.focus !== b.liveActivity?.focus) return false;
-  const aQueue = a.liveActivity?.queuedMessages?.length ?? 0;
-  const bQueue = b.liveActivity?.queuedMessages?.length ?? 0;
-  if (aQueue !== bQueue) return false;
+  const queueSig = (items: SessionTranscriptResult['liveActivity'] | undefined) =>
+    items?.queuedMessages
+      ?.map((q) => `${q.id}:${q.text}:${q.attachments?.length ?? 0}`)
+      .join('\u001f') ?? '';
+  if (queueSig(a.liveActivity) !== queueSig(b.liveActivity)) return false;
   const aTasks = a.liveActivity?.runningTasks?.map((t) => t.id).join(',') ?? '';
   const bTasks = b.liveActivity?.runningTasks?.map((t) => t.id).join(',') ?? '';
   if (aTasks !== bTasks) return false;

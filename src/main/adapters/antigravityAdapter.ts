@@ -9,6 +9,7 @@ import type {
   ImageAttachment,
   LiveActivityState,
   LiveStepItem,
+  QueuedMessageItem,
   RunningTaskItem,
   SendMessageResult,
   SessionTranscriptResult,
@@ -730,6 +731,262 @@ export function parseAntigravityJsonlLines(
   };
 }
 
+interface ProtoField {
+  field: number;
+  wireType: number;
+  bytes?: Buffer;
+}
+
+function readProtoVarint(buf: Buffer, offset: number): { value: number; next: number } | null {
+  let result = 0;
+  let shift = 0;
+  let pos = offset;
+  while (pos < buf.length && shift < 64) {
+    const b = buf[pos++];
+    if (shift < 49) {
+      result += (b & 0x7f) * 2 ** shift;
+    }
+    if ((b & 0x80) === 0) {
+      return { value: result, next: pos };
+    }
+    shift += 7;
+  }
+  return null;
+}
+
+function parseProtoFields(buf: Buffer): ProtoField[] {
+  const out: ProtoField[] = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    const tagRes = readProtoVarint(buf, pos);
+    if (!tagRes || tagRes.value <= 0) break;
+    pos = tagRes.next;
+    const wireType = tagRes.value & 7;
+    const field = Math.floor(tagRes.value / 8);
+    if (wireType === 0) {
+      const v = readProtoVarint(buf, pos);
+      if (!v) break;
+      pos = v.next;
+      out.push({ field, wireType });
+    } else if (wireType === 1) {
+      if (pos + 8 > buf.length) break;
+      pos += 8;
+      out.push({ field, wireType });
+    } else if (wireType === 2) {
+      const lenRes = readProtoVarint(buf, pos);
+      if (!lenRes || lenRes.value < 0 || pos + lenRes.value > buf.length) break;
+      const start = lenRes.next;
+      const end = start + lenRes.value;
+      if (end > buf.length) break;
+      out.push({ field, wireType, bytes: buf.subarray(start, end) });
+      pos = end;
+    } else if (wireType === 5) {
+      if (pos + 4 > buf.length) break;
+      pos += 4;
+      out.push({ field, wireType });
+    } else {
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Decodes an Antigravity `.system_generated/messages/<uuid>.json` base64
+ * `stepPayload` protobuf (CortexStep -> field 19 UserInputStep -> field 2 text,
+ * field 3 text chunks, field 9 media attachments).
+ */
+export function decodeAntigravityStepPayload(base64Payload: string): {
+  text: string;
+  attachments: ImageAttachment[];
+} {
+  if (!base64Payload) return { text: '', attachments: [] };
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(base64Payload, 'base64');
+  } catch {
+    return { text: '', attachments: [] };
+  }
+  if (buf.length === 0) return { text: '', attachments: [] };
+
+  let primaryText = '';
+  const fallbackChunks: string[] = [];
+  const attachments: ImageAttachment[] = [];
+
+  for (const top of parseProtoFields(buf)) {
+    if (top.field !== 19 || top.wireType !== 2 || !top.bytes) continue;
+    for (const sub of parseProtoFields(top.bytes)) {
+      if (sub.field === 2 && sub.wireType === 2 && sub.bytes) {
+        const s = sub.bytes.toString('utf8').trim();
+        if (s) primaryText = s;
+      } else if (sub.field === 3 && sub.wireType === 2 && sub.bytes) {
+        for (const itemField of parseProtoFields(sub.bytes)) {
+          if (itemField.field === 1 && itemField.wireType === 2 && itemField.bytes) {
+            const chunk = itemField.bytes.toString('utf8');
+            if (chunk) fallbackChunks.push(chunk);
+          }
+        }
+      } else if (sub.field === 9 && sub.wireType === 2 && sub.bytes) {
+        let mimeType = '';
+        let name = '';
+        let filePath = '';
+        for (const mediaField of parseProtoFields(sub.bytes)) {
+          if (mediaField.wireType !== 2 || !mediaField.bytes) continue;
+          if (mediaField.field === 1) mimeType = mediaField.bytes.toString('utf8').trim();
+          else if (mediaField.field === 4) name = mediaField.bytes.toString('utf8').trim();
+          else if (mediaField.field === 5) filePath = mediaField.bytes.toString('utf8').trim();
+        }
+        if (
+          filePath &&
+          path.isAbsolute(filePath) &&
+          (mimeType.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(filePath))
+        ) {
+          attachments.push({
+            id: `agy-q-att-${attachments.length + 1}`,
+            name: name || path.basename(filePath),
+            path: filePath,
+            mimeType: mimeType || 'image/png',
+          });
+        }
+      }
+    }
+  }
+
+  const text = (primaryText || fallbackChunks.join('')).trim();
+  return { text, attachments };
+}
+
+function resolveAntigravityMessagesDir(
+  nativeId: string,
+  resolvedTranscriptPath?: string | null
+): string {
+  if (resolvedTranscriptPath) {
+    // <brain>/<id>/.system_generated/logs/transcript.jsonl -> <brain>/<id>/.system_generated/messages
+    return path.resolve(path.dirname(resolvedTranscriptPath), '..', 'messages');
+  }
+  for (const root of [AGY_APP_DIR, AGY_CLI_DIR]) {
+    const dir = path.join(root, 'brain', nativeId, '.system_generated', 'messages');
+    if (fs.existsSync(dir)) return dir;
+  }
+  return path.join(AGY_APP_DIR, 'brain', nativeId, '.system_generated', 'messages');
+}
+
+function readAntigravityReadMap(messagesDir: string): Set<string> {
+  const readSet = new Set<string>();
+  const readPath = path.join(messagesDir, 'read.json');
+  if (!fs.existsSync(readPath)) return readSet;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(readPath, 'utf8')) as unknown;
+    if (Array.isArray(parsed)) {
+      for (const id of parsed) {
+        if (typeof id === 'string') readSet.add(id);
+      }
+    } else if (parsed && typeof parsed === 'object') {
+      for (const [id, flag] of Object.entries(parsed as Record<string, unknown>)) {
+        if (flag) readSet.add(id);
+      }
+    }
+  } catch {
+    // ignore transient read.json write races
+  }
+  return readSet;
+}
+
+/**
+ * Reads pending (unread) user-queued messages persisted by Antigravity Desktop
+ * or CLI in `<brain>/<conversation-id>/.system_generated/messages/`.
+ */
+export function readAntigravityNativeQueue(messagesDir: string | null | undefined): {
+  items: QueuedMessageItem[];
+  latestMtimeMs: number;
+} {
+  if (!messagesDir || !fs.existsSync(messagesDir)) {
+    return { items: [], latestMtimeMs: 0 };
+  }
+
+  let latestMtimeMs = 0;
+  try {
+    latestMtimeMs = Math.max(latestMtimeMs, fs.statSync(messagesDir).mtimeMs);
+    const readPath = path.join(messagesDir, 'read.json');
+    if (fs.existsSync(readPath)) {
+      latestMtimeMs = Math.max(latestMtimeMs, fs.statSync(readPath).mtimeMs);
+    }
+  } catch {
+    // ignore stat errors
+  }
+
+  const readSet = readAntigravityReadMap(messagesDir);
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(messagesDir);
+  } catch {
+    return { items: [], latestMtimeMs };
+  }
+
+  const items: QueuedMessageItem[] = [];
+  for (const fn of entries) {
+    if (!fn.endsWith('.json') || fn === 'read.json') continue;
+    const fileId = fn.slice(0, -5);
+    if (readSet.has(fileId)) continue;
+
+    const fullPath = path.join(messagesDir, fn);
+    try {
+      const st = fs.statSync(fullPath);
+      latestMtimeMs = Math.max(latestMtimeMs, st.mtimeMs);
+      const raw = fs.readFileSync(fullPath, 'utf8');
+      const obj = JSON.parse(raw) as Record<string, unknown>;
+      const id = typeof obj.id === 'string' && obj.id ? obj.id : fileId;
+      if (readSet.has(id)) continue;
+      if (obj.sender !== 'user') continue;
+
+      let text = '';
+      let attachments: ImageAttachment[] = [];
+      if (typeof obj.stepPayload === 'string' && obj.stepPayload) {
+        const decoded = decodeAntigravityStepPayload(obj.stepPayload);
+        text = decoded.text;
+        attachments = decoded.attachments;
+      }
+      if (!text && typeof obj.content === 'string') {
+        text = obj.content.trim();
+      }
+      if (!text && attachments.length === 0) continue;
+
+      items.push({
+        id: `agy-q-${id}`,
+        text,
+        attachments: attachments.length > 0 ? attachments : undefined,
+        createdAt: normalizeTimestamp(obj.timestamp || st.mtimeMs),
+        source: 'native',
+      });
+    } catch {
+      // ignore malformed or mid-write message file
+    }
+  }
+
+  items.sort((a, b) => a.createdAt - b.createdAt);
+  return { items, latestMtimeMs };
+}
+
+function computeAntigravityMessagesFingerprint(messagesDir: string | null | undefined): string {
+  if (!messagesDir || !fs.existsSync(messagesDir)) return 'q0';
+  try {
+    const readPath = path.join(messagesDir, 'read.json');
+    const readStat = fs.existsSync(readPath) ? fs.statSync(readPath) : null;
+    const readSet = readAntigravityReadMap(messagesDir);
+    const entries = fs.readdirSync(messagesDir);
+    const unreadIds: string[] = [];
+    for (const fn of entries) {
+      if (!fn.endsWith('.json') || fn === 'read.json') continue;
+      const id = fn.slice(0, -5);
+      if (!readSet.has(id)) unreadIds.push(id);
+    }
+    unreadIds.sort();
+    return `q:${entries.length}:${readStat ? `${readStat.size}:${Math.floor(readStat.mtimeMs)}` : '0'}:${unreadIds.join(',')}`;
+  } catch {
+    return 'q0';
+  }
+}
+
 export async function loadAntigravityTranscript(
   nativeId: string,
   transcriptPath: string | undefined,
@@ -737,6 +994,8 @@ export async function loadAntigravityTranscript(
 ): Promise<SessionTranscriptResult> {
   const sessionId = `antigravity:${nativeId}`;
   const resolved = resolveAntigravityTranscriptPath(nativeId, transcriptPath);
+  const messagesDir = resolveAntigravityMessagesDir(nativeId, resolved);
+  const nativeQueue = readAntigravityNativeQueue(messagesDir);
 
   if (!resolved) {
     return {
@@ -744,7 +1003,15 @@ export async function loadAntigravityTranscript(
       messages: [],
       totalCount: 0,
       hasMore: false,
-      sourceMtimeMs: Date.now(),
+      sourceMtimeMs: nativeQueue.latestMtimeMs || Date.now(),
+      liveActivity:
+        nativeQueue.items.length > 0
+          ? {
+              isWorking: false,
+              queuedMessages: nativeQueue.items,
+              lastEventAt: nativeQueue.latestMtimeMs || Date.now(),
+            }
+          : undefined,
     };
   }
 
@@ -767,11 +1034,29 @@ export async function loadAntigravityTranscript(
       messages: [],
       totalCount: 0,
       hasMore: false,
-      sourceMtimeMs: Date.now(),
+      sourceMtimeMs: nativeQueue.latestMtimeMs || Date.now(),
+      liveActivity:
+        nativeQueue.items.length > 0
+          ? {
+              isWorking: false,
+              queuedMessages: nativeQueue.items,
+              lastEventAt: nativeQueue.latestMtimeMs || Date.now(),
+            }
+          : undefined,
     };
   }
 
-  return outcome.parsed;
+  const res = outcome.parsed;
+  if (nativeQueue.latestMtimeMs > res.sourceMtimeMs) {
+    res.sourceMtimeMs = nativeQueue.latestMtimeMs;
+  }
+  if (nativeQueue.items.length > 0) {
+    res.liveActivity = {
+      ...(res.liveActivity ?? { isWorking: false }),
+      queuedMessages: nativeQueue.items,
+    };
+  }
+  return res;
 }
 
 /**
@@ -791,7 +1076,8 @@ export function createAntigravityDriver(): HarnessDriver {
 
     async getTranscriptFingerprint(session) {
       const resolved = resolveAntigravityTranscriptPath(session.nativeId, session.transcriptPath);
-      return computeFileFingerprint(resolved);
+      const messagesDir = resolveAntigravityMessagesDir(session.nativeId, resolved);
+      return `${computeFileFingerprint(resolved)}|${computeAntigravityMessagesFingerprint(messagesDir)}`;
     },
 
     loadTranscript(session, limit) {
@@ -808,7 +1094,7 @@ export function createAntigravityDriver(): HarnessDriver {
 
     getSessionWatchFiles(session: UnifiedSession): string[] {
       const tr =
-        session.transcriptPath ||
+        resolveAntigravityTranscriptPath(session.nativeId, session.transcriptPath) ||
         path.join(
           AGY_APP_DIR,
           'brain',
@@ -817,7 +1103,8 @@ export function createAntigravityDriver(): HarnessDriver {
           'logs',
           'transcript.jsonl'
         );
-      return [tr];
+      const messagesDir = resolveAntigravityMessagesDir(session.nativeId, tr);
+      return [tr, messagesDir, path.join(messagesDir, 'read.json')];
     },
 
     async sendMessage(

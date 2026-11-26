@@ -630,9 +630,10 @@ export const SessionPane: React.FC<Props> = ({
     [session, input, attachments, isAgentBusy, onDraftChange, onQueueChange, dispatchMessageNow]
   );
 
-  // Auto-dequeue the next Super Harness queued message once the agent finishes working
+  // Auto-dequeue the next Super Harness queued message once the agent (and its native queue) finishes working
+  const nativeQueueCount = liveActivity?.queuedMessages?.length ?? 0;
   useEffect(() => {
-    if (!session || isAgentBusy || sending || queuedMessages.length === 0) return;
+    if (!session || isAgentBusy || sending || nativeQueueCount > 0 || queuedMessages.length === 0) return;
     const nextItem = queuedMessages[0];
     const targetSid = session.id;
     const timer = window.setTimeout(() => {
@@ -641,7 +642,7 @@ export const SessionPane: React.FC<Props> = ({
       void dispatchMessageNow(nextItem.text, nextItem.attachments ?? []);
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [session?.id, isAgentBusy, sending, queuedMessages, onQueueChange, dispatchMessageNow]);
+  }, [session?.id, isAgentBusy, sending, nativeQueueCount, queuedMessages, onQueueChange, dispatchMessageNow]);
 
   const handleQueueSendNow = useCallback(
     (id: string) => {
@@ -928,9 +929,19 @@ export const SessionPane: React.FC<Props> = ({
 
           <QueuedMessagesTray
             items={combinedQueue}
+            harnessLabel={
+              session.harnessGroup === 'antigravity'
+                ? 'Antigravity'
+                : session.harnessGroup === 'codex'
+                  ? 'Codex'
+                  : session.harnessGroup === 'claude'
+                    ? 'Claude'
+                    : undefined
+            }
             onSendNow={handleQueueSendNow}
             onEdit={handleQueueEdit}
             onRemove={handleQueueRemove}
+            onPreviewImage={handlePreviewImage}
           />
 
           <SessionComposer

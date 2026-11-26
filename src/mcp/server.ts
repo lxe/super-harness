@@ -20,17 +20,24 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'sh_list_folders',
+    description:
+      'List all custom Super Harness folders, their IDs/colors/session counts, and the current sidebarGroupBy mode.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'sh_list_sessions',
     description:
-      'List and search sessions across all harnesses (Codex, Claude tmux, Claude Desktop, Claude CLI, Antigravity, Muse).',
+      'List and search sessions across all harnesses (Codex, Claude tmux, Claude Desktop, Claude CLI, Antigravity, Muse). Includes title, projectName, cwd, preview, folderId, nativeSection, and status.',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Optional text filter across title, project, cwd, tags' },
+        query: { type: 'string', description: 'Optional text filter across title, project, cwd, preview, tags' },
         harness: {
           type: 'string',
           description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity, muse',
         },
+        folderId: { type: 'string', description: 'Optional folder ID filter' },
         liveOnly: { type: 'boolean', description: 'Only return currently live/running sessions' },
       },
     },
@@ -79,7 +86,7 @@ const TOOLS = [
   {
     name: 'sh_organize',
     description:
-      'Organize the Super Harness sidebar: create/rename/delete folders, assign sessions to folders, pin/unpin, rename, tag, or hide sessions.',
+      'Organize the Super Harness sidebar (syncs live to both Desktop and Mobile): create/rename/delete/reorder custom folders, assign sessions to folders (by folderId or folderName — auto-creates if missing), move sessions between native harness sections, pin/unpin, rename, tag, or hide sessions.',
     inputSchema: {
       type: 'object',
       required: ['actions'],
@@ -96,7 +103,9 @@ const TOOLS = [
                   'create_folder',
                   'delete_folder',
                   'rename_folder',
+                  'reorder_folders',
                   'assign_folder',
+                  'move_section',
                   'pin',
                   'unpin',
                   'pin_top',
@@ -108,8 +117,11 @@ const TOOLS = [
                 ],
               },
               folderId: { type: 'string' },
+              folderIds: { type: 'array', items: { type: 'string' } },
               folderName: { type: 'string' },
               folderColor: { type: 'string' },
+              sectionName: { type: 'string' },
+              sectionOrder: { type: 'number' },
               sessionId: { type: 'string' },
               title: { type: 'string' },
               tags: { type: 'array', items: { type: 'string' } },
@@ -122,11 +134,11 @@ const TOOLS = [
   {
     name: 'sh_update_settings',
     description:
-      'Update Super Harness settings such as sidebarGroupBy (folders|project|harness|recent), pollIntervalMs, maxSessionsPerHarness, showArchived, or enabledHarnesses.',
+      'Update Super Harness settings such as sidebarGroupBy (native|folders|project|harness|recent), pollIntervalMs, maxSessionsPerHarness, showArchived, or enabledHarnesses.',
     inputSchema: {
       type: 'object',
       properties: {
-        sidebarGroupBy: { type: 'string', enum: ['folders', 'project', 'harness', 'recent'] },
+        sidebarGroupBy: { type: 'string', enum: ['native', 'folders', 'project', 'harness', 'recent'] },
         pollIntervalMs: { type: 'number' },
         maxSessionsPerHarness: { type: 'number' },
         showArchived: { type: 'boolean' },
@@ -186,10 +198,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   switch (name) {
     case 'sh_list_harnesses':
       return apiRequest('GET', '/api/harnesses');
+    case 'sh_list_folders':
+      return apiRequest('GET', '/api/folders');
     case 'sh_list_sessions': {
       const qs = new URLSearchParams();
       if (args.query) qs.set('q', String(args.query));
       if (args.harness) qs.set('harness', String(args.harness));
+      if (args.folderId) qs.set('folderId', String(args.folderId));
       if (args.liveOnly) qs.set('live', 'true');
       return apiRequest('GET', `/api/sessions?${qs.toString()}`);
     }

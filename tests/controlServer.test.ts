@@ -87,7 +87,19 @@ function makeFixtureServer() {
 
   const store = {
     getState: () => state,
-    applyOrganize: vi.fn(() => state),
+    applyOrganize: vi.fn((actions: Array<Record<string, unknown>>) => {
+      for (const a of actions) {
+        if (a.action === 'create_folder' && typeof a.name === 'string') {
+          state.folders.push({ id: `folder-${state.folders.length + 1}`, name: a.name });
+        } else if (a.action === 'assign_folder' && typeof a.sessionId === 'string') {
+          state.overrides[a.sessionId] = {
+            ...state.overrides[a.sessionId],
+            folderId: typeof a.folderId === 'string' ? a.folderId : undefined,
+          };
+        }
+      }
+      return state;
+    }),
     updateSettings: vi.fn(() => state),
   } as unknown as ConfigStore;
 
@@ -201,9 +213,50 @@ describe('ControlServer mobile API gateway', () => {
     expect(boot.usage.codex.barPercent).toBe(42);
     expect(boot.catalog.projects[0].name).toBe('super-harness');
 
-    // Usage & catalog direct endpoints
+    // Usage, catalog, and folders direct endpoints
     expect((await fetch(`${base}/api/usage?force=true`, { headers })).status).toBe(200);
     expect((await fetch(`${base}/api/catalog`, { headers })).status).toBe(200);
+    const foldersRes = await fetch(`${base}/api/folders`, { headers });
+    expect(foldersRes.status).toBe(200);
+    const foldersJson = (await foldersRes.json()) as {
+      folders: Array<{ id: string; name: string }>;
+      sidebarGroupBy: string;
+      sessionFolderCounts: Record<string, number>;
+    };
+    expect(Array.isArray(foldersJson.folders)).toBe(true);
+    expect(typeof foldersJson.sidebarGroupBy).toBe('string');
+
+    // Create a folder & assign sample session via /api/organize, then verify /api/folders counts
+    const createFolderRes = await fetch(`${base}/api/organize`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_folder', name: 'Super Harness' }),
+    });
+    expect(createFolderRes.status).toBe(200);
+    const createdState = (await createFolderRes.json()) as {
+      folders: Array<{ id: string; name: string }>;
+    };
+    const shFolder = createdState.folders.find((f) => f.name === 'Super Harness');
+    expect(shFolder).toBeTruthy();
+
+    const assignRes = await fetch(`${base}/api/organize`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assign_folder',
+        sessionId: 'codex:t1',
+        folderId: shFolder!.id,
+      }),
+    });
+    expect(assignRes.status).toBe(200);
+
+    const foldersAfterRes = await fetch(`${base}/api/folders`, { headers });
+    expect(foldersAfterRes.status).toBe(200);
+    const foldersAfter = (await foldersAfterRes.json()) as {
+      folders: Array<{ id: string; name: string }>;
+      sessionFolderCounts: Record<string, number>;
+    };
+    expect(foldersAfter.sessionFolderCounts[shFolder!.id]).toBe(1);
 
     // Abort, archive, and attachment upload
     const abortRes = await fetch(`${base}/api/abort`, {

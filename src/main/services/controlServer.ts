@@ -731,12 +731,14 @@ export class ControlServer {
           ).sort();
           const q = (url.searchParams.get('q') || '').toLowerCase();
           const harness = url.searchParams.get('harness') || '';
+          const folderId = url.searchParams.get('folderId') || '';
           const liveOnly = url.searchParams.get('live') === 'true';
           const includeMaster = url.searchParams.get('includeMaster') === 'true';
           const filtered = sessions.filter((s) => {
             if (!includeMaster && s.harness === 'master') return false;
             if (liveOnly && !s.isLive) return false;
             if (harness && s.harness !== harness && s.harnessGroup !== harness) return false;
+            if (folderId && s.folderId !== folderId) return false;
             if (
               q &&
               !`${s.title} ${s.projectName} ${s.cwd} ${s.preview} ${s.tags.join(' ')}`
@@ -752,6 +754,30 @@ export class ControlServer {
             harnesses,
             sessions: filtered.slice(0, 200),
             activeWorkingSessionIds,
+          });
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/folders') {
+          const state = this.store.getState();
+          const cached =
+            typeof this.registry.getCached === 'function'
+              ? this.registry.getCached()
+              : { harnesses: [], sessions: [] };
+          const { sessions } =
+            cached.sessions.length > 0 ? cached : await this.registry.discover();
+          const sessionFolderCounts: Record<string, number> = {};
+          for (const s of sessions) {
+            if (s.harness === 'master') continue;
+            const ov = state.overrides[s.id];
+            const fid = ov && 'folderId' in ov ? ov.folderId : s.folderId;
+            if (!fid) continue;
+            sessionFolderCounts[fid] = (sessionFolderCounts[fid] ?? 0) + 1;
+          }
+          sendJson({
+            folders: state.folders,
+            sidebarGroupBy: state.settings.sidebarGroupBy,
+            sessionFolderCounts,
           });
           return;
         }

@@ -196,11 +196,7 @@ export class MasterEngine {
         this.failMasterMsg(assistantId, 'muse binary not found. Switch Master engine in Settings.');
         return { ok: false, error: 'muse binary not found' };
       }
-      // Muse configures MCP servers via persisted settings (`muse mcp add`),
-      // not a per-run flag, so the Master-on-Muse path runs preamble-only for
-      // now: it can reason over the live snapshot below but has no `sh_*`
-      // tools unless the user registers super-harness-mcp in Muse settings.
-      const fullPrompt = `${systemPreamble}\n\nNote: in this Muse-backed Master mode you do not have live sh_* MCP tools wired per-run; work from the snapshot above and say so if a request needs live control.\n\nUser request:\n${effectivePrompt}`;
+      const fullPrompt = `${systemPreamble}\n\nNote: If sh_* MCP tools are not directly mounted, you have full live control via HTTP using \`$SUPER_HARNESS_URL\` and \`Authorization: Bearer $SUPER_HARNESS_TOKEN\` (\`GET /api/sessions\`, \`GET /api/folders\`, \`GET /api/transcript?sessionId=...\`, \`POST /api/organize\`, \`POST /api/settings\`, \`POST /api/send\`). Use curl/python/node as needed to carry out folder organization or session actions.\n\nUser request:\n${effectivePrompt}`;
       const args = ['exec', '--json', '--workspace', cwd, '--yolo'];
       if (model) args.push('--model', model);
       if (attachments && attachments.length > 0) {
@@ -208,7 +204,7 @@ export class MasterEngine {
       }
       args.push(fullPrompt);
       this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'muse');
-      return { ok: true, runId, dispatchedVia: 'Master → Muse (preamble snapshot)' };
+      return { ok: true, runId, dispatchedVia: 'Master → Muse + Control API' };
     }
 
     // Antigravity engine
@@ -217,13 +213,13 @@ export class MasterEngine {
       this.failMasterMsg(assistantId, 'agy binary not found. Switch Master engine in Settings.');
       return { ok: false, error: 'agy binary not found' };
     }
-    const fullPrompt = `${systemPreamble}\n\nUser request:\n${effectivePrompt}`;
+    const fullPrompt = `${systemPreamble}\n\nNote: If sh_* MCP tools are not directly mounted, you have full live control via HTTP using \`$SUPER_HARNESS_URL\` and \`Authorization: Bearer $SUPER_HARNESS_TOKEN\` (\`GET /api/sessions\`, \`GET /api/folders\`, \`GET /api/transcript?sessionId=...\`, \`POST /api/organize\`, \`POST /api/settings\`, \`POST /api/send\`).\n\nUser request:\n${effectivePrompt}`;
     const args = ['--output-format', 'stream-json'];
     if (model) args.push('--model', model);
     args.push('--print', fullPrompt);
 
     this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'antigravity');
-    return { ok: true, runId, dispatchedVia: `Master → Antigravity` };
+    return { ok: true, runId, dispatchedVia: `Master → Antigravity + Control API` };
   }
 
   private buildMasterPreamble(): string {
@@ -232,15 +228,21 @@ export class MasterEngine {
     const liveSummary = sessions
       .filter((s) => s.harness !== 'master' && s.isLive)
       .slice(0, 20)
-      .map((s) => `- ${s.id} | ${s.harness} | "${s.title}" | cwd=${s.cwd}${s.tmuxTarget ? ` | tmux=${s.tmuxTarget}` : ''}${s.isRemote ? ' | REMOTE' : ''}`)
+      .map((s) => `- ${s.id} | ${s.harness} | "${s.title}" | cwd=${s.cwd}${s.folderId ? ` | folderId=${s.folderId}` : ''}${s.tmuxTarget ? ` | tmux=${s.tmuxTarget}` : ''}${s.isRemote ? ' | REMOTE' : ''}`)
       .join('\n');
 
     return [
-      'You are the Master Orchestrator inside Super Harness — a unified desktop multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, Antigravity, and Muse.',
-      'You have MCP tools (`sh_list_harnesses`, `sh_list_sessions`, `sh_read_session`, `sh_send_message`, `sh_start_session`, `sh_organize`, `sh_update_settings`, `sh_control_harness`) to inspect, organize, configure, and drive Super Harness live.',
-      'Use these tools proactively whenever the user asks to organize folders, inspect/search sessions, send instructions to another harness, launch new sessions, or update Super Harness settings.',
+      'You are the Master Orchestrator inside Super Harness — a unified desktop & mobile multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, Antigravity, and Muse.',
+      'You have MCP tools (`sh_list_harnesses`, `sh_list_folders`, `sh_list_sessions`, `sh_read_session`, `sh_send_message`, `sh_start_session`, `sh_organize`, `sh_update_settings`, `sh_control_harness`, `sh_restart_app`) — and equivalent local Control API endpoints at `$SUPER_HARNESS_URL` (Bearer `$SUPER_HARNESS_TOKEN`) — to inspect, organize, configure, and drive Super Harness live across both Desktop and Mobile.',
+      'Use these tools proactively whenever the user asks to organize sessions into folders, inspect/search sessions, send instructions to another harness, launch new sessions, or update Super Harness settings.',
+      'When asked to put sessions working on a topic/project into a new or existing folder:',
+      '  1. Call `sh_list_folders` and `sh_list_sessions` (without overly narrow filters first if titles may be generic) — and call `sh_read_session` on any ambiguous session to confirm what it is working on.',
+      '  2. Call `sh_organize` with `create_folder` (if creating a new folder) and `assign_folder` (`sessionId` + `folderName` or `folderId`) for every matching session in one batch. Changes automatically sync to both Desktop and Mobile.',
+      '  3. If `sidebarGroupBy` is not `"folders"` and the user is organizing into folders, switch it via `sh_update_settings({ sidebarGroupBy: "folders" })` (or keep it if they only asked to move native sections).',
+      '  4. When referencing sessions in your reply, format them as clickable markdown links `[Session Title](session://<sessionId>)` so clicking them switches directly to that session on Desktop and Mobile.',
       '',
       `Detected harnesses: ${harnesses.map((h) => `${h.name} (installed=${h.installed}, active=${h.activeSessionCount}, total=${h.totalSessionCount}, remote=${h.remoteControlEnabled})`).join('; ')}`,
+      `Sidebar grouping: ${state.settings.sidebarGroupBy}`,
       `Existing folders: ${state.folders.map((f) => `${f.name} (${f.id})`).join(', ') || 'none'}`,
       `Live sessions (${sessions.filter((s) => s.harness !== 'master' && s.isLive).length}):`,
       liveSummary || '(none)',
@@ -258,7 +260,11 @@ export class MasterEngine {
     this.abort();
     const child = spawn(bin, args, {
       cwd,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        SUPER_HARNESS_URL: `http://127.0.0.1:${this.controlServer.port}`,
+        SUPER_HARNESS_TOKEN: this.controlServer.token,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.activeChild = child;

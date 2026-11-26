@@ -12,6 +12,7 @@ import type {
 } from '../../shared/types';
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { projectNameFromCwd, whichBinary } from '../utils/system';
+import { runPiRpcQuery } from './piRpcClient';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +45,45 @@ const MUSE_MODEL_EFFORT_LEVELS = [
   'max',
   'ultra',
 ];
+
+const PI_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * Maps Pi RPC `get_available_models` Model objects into picker options (`provider/id`).
+ * Thinking levels come from the model's `thinkingLevelMap`, where `null` marks a level
+ * the provider does not support; reasoning models without a map get Pi's standard set.
+ */
+export function parsePiModels(
+  models: unknown,
+  defaultRef?: string,
+  defaultThinking?: string
+): HarnessModelOption[] {
+  const out: HarnessModelOption[] = [];
+  for (const raw of Array.isArray(models) ? models : []) {
+    const m = (raw ?? {}) as Record<string, unknown>;
+    if (typeof m.provider !== 'string' || typeof m.id !== 'string') continue;
+    const id = `${m.provider}/${m.id}`;
+    let levels: string[] | undefined;
+    if (m.reasoning === true) {
+      const map = m.thinkingLevelMap as Record<string, unknown> | undefined;
+      levels = map
+        ? PI_LEVELS.filter((l) => l === 'off' || (l in map && map[l] !== null))
+        : ['off', 'minimal', 'low', 'medium', 'high'];
+    }
+    const ctx = typeof m.contextWindow === 'number' ? `${Math.round(m.contextWindow / 1024)}K context` : undefined;
+    out.push({
+      id,
+      label: typeof m.name === 'string' && m.name ? `${m.name}` : String(m.id),
+      description: [id, ctx].filter(Boolean).join(' · '),
+      group: m.provider,
+      isDefault: id === defaultRef,
+      reasoningLevels: levels,
+      defaultReasoningLevel: id === defaultRef && defaultThinking && levels?.includes(defaultThinking) ? defaultThinking : undefined,
+    });
+  }
+  out.sort((a, b) => Number(Boolean(b.isDefault)) - Number(Boolean(a.isDefault)));
+  return out;
+}
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const AGY_EFFORT_SUFFIX_RE = /^(.*)-(low|medium|high|xhigh|max)$/i;
@@ -392,9 +432,10 @@ export class HarnessCatalogService {
 
     this.inFlight = (async () => {
       const museCfg = readMuseSettingsDefaults();
-      const [agyModels, museModels, codexProjects, agyProjects] = await Promise.all([
+      const [agyModels, museModels, pi, codexProjects, agyProjects] = await Promise.all([
         this.fetchAgyModels(sessions),
         this.fetchMuseModels(museCfg.model),
+        this.fetchPiModels(),
         this.fetchCodexProjects(),
         this.fetchAgyProjects(),
       ]);
@@ -432,12 +473,14 @@ export class HarnessCatalogService {
           codex: codexModels,
           claude: claudeModels,
           muse: museModels,
+          pi: pi.models,
         },
         defaultReasoningEffort: {
           codex: codexCfg.reasoningEffort,
           claude: claudeEffort,
           antigravity: agyModels[0]?.defaultReasoningLevel || 'high',
           muse: museCfg.reasoningEffort,
+          pi: pi.thinking,
         },
         projects: mergeHarnessProjects(rawProjects),
         updatedAt: Date.now(),
@@ -509,6 +552,21 @@ export class HarnessCatalogService {
       }
     }
     return parseAgyModelsOutput(knownLines.join('\n'));
+  }
+
+  private async fetchPiModels(): Promise<{ models: HarnessModelOption[]; thinking?: string }> {
+    try {
+      const bin = await whichBinary('pi');
+      if (!bin) return { models: [] };
+      const [models, state] = await runPiRpcQuery(bin, [{ type: 'get_available_models' }, { type: 'get_state' }]);
+      const model = (state?.model ?? {}) as Record<string, unknown>;
+      const defaultRef =
+        typeof model.provider === 'string' && typeof model.id === 'string' ? `${model.provider}/${model.id}` : undefined;
+      const thinking = typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : undefined;
+      return { models: parsePiModels(models?.models, defaultRef, thinking), thinking };
+    } catch {
+      return { models: [] };
+    }
   }
 
   private async fetchMuseModels(defaultModelId?: string): Promise<HarnessModelOption[]> {

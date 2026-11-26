@@ -13,6 +13,8 @@ import type {
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { whichBinary } from '../utils/system';
 
+import { piSessionsDir } from '../adapters/piAdapter';
+
 const execFileAsync = promisify(execFile);
 
 const HOME = os.homedir();
@@ -674,11 +676,12 @@ export class UsageService {
       const markDirty = () => {
         dirty = true;
       };
-      const [antigravity, codex, claude, muse] = await Promise.all([
+      const [antigravity, codex, claude, muse, pi] = await Promise.all([
         this.collectAntigravityUsage(now, markDirty, force),
         this.collectCodexUsage(now, markDirty),
         this.collectClaudeUsage(now, markDirty),
         this.collectMuseUsage(now, markDirty),
+        this.collectPiUsage(now, markDirty),
       ]);
       if (dirty) {
         saveDiskCache(this.fileCache, this.agyLiveQuota, this.museQuotaSamples);
@@ -688,6 +691,7 @@ export class UsageService {
         codex,
         claude,
         muse,
+        pi,
       };
       this.cache = snapshot;
       this.lastComputedAt = Date.now();
@@ -746,6 +750,87 @@ export class UsageService {
     } finally {
       this.agyQuotaInFlight = null;
     }
+  }
+
+  /**
+   * Pi runs on API keys, so there is no quota: the gauge shows spend. Pi records the real
+   * cost of every model call it makes (assistant `usage.cost.total`, plus compaction and
+   * `usage` entries), priced from its model catalog, so the totals are not estimates.
+   * Local providers with zero pricing count tokens but no spend.
+   */
+  private async collectPiUsage(now: number, markDirty: () => void): Promise<HarnessUsageSummary> {
+    const cutoff = now - 14 * DAY_MS;
+    const files: Array<{ path: string; mtimeMs: number; size: number }> = [];
+    const dir = piSessionsDir();
+    try {
+      for (const sub of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!sub.isDirectory()) continue;
+        for (const f of fs.readdirSync(path.join(dir, sub.name))) {
+          if (!f.endsWith('.jsonl')) continue;
+          const p = path.join(dir, sub.name, f);
+          try {
+            const st = fs.statSync(p);
+            if (st.mtimeMs >= cutoff) files.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
+          } catch {
+            // raced away
+          }
+        }
+      }
+    } catch {
+      // no sessions
+    }
+
+    const acc = createAccumulator();
+    for (const file of files) {
+      const cacheKey = `pi:${file.path}`;
+      const cached = this.fileCache[cacheKey];
+      if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+        foldBuckets(acc, cached.buckets, now);
+        continue;
+      }
+      const hourMap = new Map<number, FileHourBucket>();
+      await scanJsonlLines(file.path, (line) => {
+        if (!line.includes('"cost"')) return;
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        const msg = (obj.message ?? {}) as Record<string, unknown>;
+        const usage = (obj.type === 'message' ? msg.usage : obj.usage) as Record<string, unknown> | undefined;
+        if (!usage) return;
+        const ts =
+          typeof msg.timestamp === 'number' ? msg.timestamp : Date.parse(String(obj.timestamp ?? ''));
+        if (!Number.isFinite(ts) || ts < cutoff) return;
+        const cost = (usage.cost ?? {}) as Record<string, unknown>;
+        const spend = Math.max(0, Number(cost.total || 0));
+        const tokens = Math.max(0, Number(usage.totalTokens || 0));
+        if (spend <= 0 && tokens <= 0) return;
+        addEventToHourMap(hourMap, ts, spend, tokens);
+      });
+      const buckets = Array.from(hourMap.values());
+      this.fileCache[cacheKey] = { mtimeMs: file.mtimeMs, size: file.size, buckets };
+      markDirty();
+      foldBuckets(acc, buckets, now);
+    }
+
+    return {
+      harness: 'pi',
+      updatedAt: now,
+      planLabel: 'API keys',
+      barPercent: null,
+      barIsEstimated: false,
+      windows: [],
+      spend5hUsd: round2(acc.spend5h),
+      spend24hUsd: round2(acc.spend24h),
+      spend7dUsd: round2(acc.spend7d),
+      spend14dUsd: round2(acc.spend14d),
+      tokens7d: Math.round(acc.tokens7d),
+      dailySpend7d: buildDailySeries7d(acc, now),
+      spendIsEstimated: false,
+      note: 'Spend as recorded by Pi for each model call (API keys, no quota)',
+    };
   }
 
   private async collectMuseUsage(

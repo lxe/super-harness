@@ -5,9 +5,10 @@ export type HarnessKind =
   | 'claude-desktop'
   | 'claude-cli'
   | 'antigravity'
-  | 'muse';
+  | 'muse'
+  | 'pi';
 
-export type HarnessGroup = 'codex' | 'claude' | 'antigravity' | 'muse';
+export type HarnessGroup = 'codex' | 'claude' | 'antigravity' | 'muse' | 'pi';
 
 export type SessionStatus =
   | 'running'
@@ -86,10 +87,11 @@ export interface UnifiedSession {
     | 'claude-resume'
     | 'codex-resume'
     | 'agy-resume'
-    | 'muse-msp';
+    | 'muse-msp'
+    | 'pi-rpc';
   /** Live sync ownership indicator for accurate bidirectional status in the UI. */
   liveOwner?: 'daemon' | 'tmux' | 'desktop' | 'super-harness';
-  /** Held by a plain terminal with no programmatic attach endpoint (Muse TUI). */
+  /** Held by a plain terminal with no programmatic attach endpoint (Muse or Pi TUI outside tmux). */
   isTerminalHeld?: boolean;
   /** Subagent / hierarchy metadata */
   isSubagent?: boolean;
@@ -443,7 +445,7 @@ export interface SuperHarnessState {
 }
 
 export interface StartSessionRequest {
-  harness: 'codex' | 'claude-tmux' | 'claude-cli' | 'antigravity' | 'muse';
+  harness: 'codex' | 'claude-tmux' | 'claude-cli' | 'antigravity' | 'muse' | 'pi';
   cwd: string;
   title?: string;
   prompt?: string;

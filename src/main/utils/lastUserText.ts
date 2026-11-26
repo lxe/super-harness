@@ -75,6 +75,16 @@ const FORMATS: Record<string, HarnessFormat> = {
       return textOfBlocks(p?.refill_blocks);
     },
   },
+  // Pi session tree: user-role messages are typed prompts (including steers, which Pi
+  // persists when it delivers them). Content is a string or text/image blocks.
+  pi: {
+    needles: ['"role":"user"'],
+    extract: (o) => {
+      const m = o.message as Record<string, unknown> | undefined;
+      if (o.type !== 'message' || m?.role !== 'user') return undefined;
+      return typeof m.content === 'string' ? m.content : textOfBlocks(m.content);
+    },
+  },
 };
 
 /** One line: no attachment markers, collapsed whitespace, capped length. */

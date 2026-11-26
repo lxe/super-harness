@@ -16,7 +16,7 @@ const TOOLS = [
   {
     name: 'sh_list_harnesses',
     description:
-      'List all detected local AI coding harnesses (Codex, Claude Desktop/tmux, Antigravity, Muse), their running process counts, daemon status, and remote-control state.',
+      'List all detected local AI coding harnesses (Codex, Claude Desktop/tmux, Antigravity, Muse, Pi), their running process counts, daemon status, and remote-control state.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -28,14 +28,14 @@ const TOOLS = [
   {
     name: 'sh_list_sessions',
     description:
-      'List and search sessions across all harnesses (Codex, Claude tmux, Claude Desktop, Claude CLI, Antigravity, Muse). Includes title, projectName, cwd, preview, folderId, nativeSection, and status.',
+      'List and search sessions across all harnesses (Codex, Claude tmux, Claude Desktop, Claude CLI, Antigravity, Muse, Pi). Includes title, projectName, cwd, preview, folderId, nativeSection, and status.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Optional text filter across title, project, cwd, preview, tags' },
         harness: {
           type: 'string',
-          description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity, muse',
+          description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity, muse, pi',
         },
         folderId: { type: 'string', description: 'Optional folder ID filter' },
         liveOnly: { type: 'boolean', description: 'Only return currently live/running sessions' },
@@ -70,12 +70,12 @@ const TOOLS = [
   {
     name: 'sh_start_session',
     description:
-      'Launch a brand-new session on a chosen harness (e.g., claude-tmux with remote-control, codex, claude-cli, antigravity, or muse).',
+      'Launch a brand-new session on a chosen harness (e.g., claude-tmux with remote-control, codex, claude-cli, antigravity, muse, or pi).',
     inputSchema: {
       type: 'object',
       required: ['harness', 'cwd'],
       properties: {
-        harness: { type: 'string', enum: ['codex', 'claude-tmux', 'claude-cli', 'antigravity', 'muse'] },
+        harness: { type: 'string', enum: ['codex', 'claude-tmux', 'claude-cli', 'antigravity', 'muse', 'pi'] },
         cwd: { type: 'string' },
         title: { type: 'string' },
         prompt: { type: 'string' },
@@ -161,7 +161,7 @@ const TOOLS = [
   {
     name: 'sh_update_session',
     description:
-      "Change one session's model, reasoning effort and/or permission mode. Returns a per-field status: applied (in effect now), next_message (Super Harness applies it on the next message it sends), needs_restart (pass restart:true to restart the live terminal process; the conversation resumes), unsupported, invalid (detail lists valid values) or failed. Support by harness: Claude Desktop/CLI sessions — all three, on the next message. Claude in tmux — permission mode switches live (Shift+Tab, verified); model and effort need restart:true (typing /model or /effort would also change the user's global defaults). Codex — all three on the next turn; permission presets default, read-only, auto (workspace-write sandbox), full-access (no sandbox), with escalation off because Super Harness auto-accepts approvals. Muse — model and effort on the next turn; permission mode unsupported (Super Harness runs Muse turns allow-all). Antigravity — model on the next message; effort and permission mode unsupported. Sessions on another machine — unsupported. Aliases like 'bypass', 'yolo', 'full-auto', 'plan', 'sonnet', 'opus' are accepted; an empty string clears the override.",
+      "Change one session's model, reasoning effort and/or permission mode. Returns a per-field status: applied (in effect now), next_message (Super Harness applies it on the next message it sends), needs_restart (pass restart:true to restart the live terminal process; the conversation resumes), unsupported, invalid (detail lists valid values) or failed. Support by harness: Claude Desktop/CLI sessions — all three, on the next message. Claude in tmux — permission mode switches live (Shift+Tab, verified); model and effort need restart:true (typing /model or /effort would also change the user's global defaults). Codex — all three on the next turn; permission presets default, read-only, auto (workspace-write sandbox), full-access (no sandbox), with escalation off because Super Harness auto-accepts approvals. Muse — model and effort on the next turn; permission mode unsupported (Super Harness runs Muse turns allow-all). Antigravity — model on the next message; effort and permission mode unsupported. Pi — model (provider/modelId) and thinking level (off, minimal, low, medium, high, xhigh, max) apply immediately when Super Harness hosts the session, otherwise on the next message; unsupported while the session is open in a Pi terminal; permission mode unsupported (Pi has none). Sessions on another machine — unsupported. Aliases like 'bypass', 'yolo', 'full-auto', 'plan', 'sonnet', 'opus' are accepted; an empty string clears the override.",
     inputSchema: {
       type: 'object',
       required: ['sessionId'],

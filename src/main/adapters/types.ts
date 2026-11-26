@@ -118,10 +118,13 @@ export interface HarnessDriver {
     opts?: { killTmux?: boolean }
   ): Promise<{ ok: boolean; method?: string; error?: string; hideLocally?: boolean } | null>;
 
-  /** Optional hook to cancel a harness-managed run (e.g., Antigravity ACP). */
+  /** Optional hook to cancel a harness-managed run (e.g., Antigravity ACP or Codex app-server). */
   abort?(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean;
 
-  /** Optional cleanup hook called on app quit (e.g., closing persistent ACP connections). */
+  /** Optional hook to sync section moves natively with the harness daemon (e.g., Codex `thread/section/move`). */
+  moveSection?(session: UnifiedSession, sectionName: string | null): Promise<boolean>;
+
+  /** Optional cleanup hook called on app quit (e.g., closing persistent ACP/app-server connections). */
   shutdown?(): void;
 }
 

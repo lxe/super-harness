@@ -19,6 +19,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
+import { ClaudeStreamPool } from '../services/claudeStreamClient';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import {
   cleanTextPreview,
@@ -624,6 +625,11 @@ export async function detectClaude(
           ],
           hidden: false,
           dispatchMode: isTmux ? 'tmux-send' : 'claude-resume',
+          liveOwner: isTmux
+            ? 'tmux'
+            : data.entrypoint === 'claude-desktop'
+              ? 'desktop'
+              : 'super-harness',
         });
       }
     } catch {
@@ -1586,6 +1592,10 @@ export function buildClaudeResumeArgs(
 }
 
 export function createClaudeDriver(): HarnessDriver {
+  const streamPool = new ClaudeStreamPool((sid, rid, line, gotAny, emit) =>
+    parseClaudeStreamLine(sid, rid, line, gotAny, emit)
+  );
+
   const startClaudeSession = async (
     req: StartSessionRequest,
     ctx: DispatchContext
@@ -1754,8 +1764,12 @@ export function createClaudeDriver(): HarnessDriver {
       }
 
       // Guard against spawning a second concurrent `claude --resume` clone process
-      // while Claude Desktop or another live CLI process already owns this session.
-      const liveOwners = findLiveClaudeOwners(session.nativeId);
+      // while Claude Desktop or another external live CLI process is actively running a turn.
+      // Exclude our own warm ClaudeStreamPool worker PID from external owner detection.
+      const ownPid = streamPool.getWorkerPid(session.id);
+      const liveOwners = findLiveClaudeOwners(session.nativeId).filter(
+        (o) => !ownPid || o.pid !== ownPid
+      );
       const decision = resolveClaudeDispatchGuard(liveOwners);
       if (decision.action === 'tmux') {
         return sendViaTmux(decision.tmuxTarget);
@@ -1764,22 +1778,57 @@ export function createClaudeDriver(): HarnessDriver {
         return { ok: false, error: decision.reason };
       }
 
-      const bin = await whichBinary('claude');
-      if (!bin) return { ok: false, error: 'claude binary not found in PATH' };
-
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
-      const args = buildClaudeResumeArgs(session, promptWithImages);
-      ctx.spawnStreaming({
-        sessionId: session.id,
-        runId,
-        bin,
-        args,
-        cwd,
-        parseLine: (line, gotAnyDelta) =>
-          parseClaudeStreamLine(session.id, runId, line, gotAnyDelta, ctx.emitStream),
-      });
-      return { ok: true, runId, dispatchedVia: 'Claude CLI resume' };
+      const hasImages = Boolean(attachments && attachments.length > 0);
+
+      // Primary path: persistent bidirectional `claude --input-format stream-json --output-format stream-json`
+      // worker pool (same wire protocol Claude Desktop uses, with native base64 multimodal image blocks).
+      try {
+        await streamPool.sendTurn({
+          shSessionId: session.id,
+          nativeSessionId: session.nativeId,
+          cwd,
+          prompt,
+          attachments,
+          model: session.model,
+          reasoningEffort: session.reasoningEffort,
+          permissionMode: session.permissionMode,
+          transcriptPath:
+            session.transcriptPath || resolveClaudeTranscriptPath(session.nativeId, session.cwd),
+          runId,
+          onEvent: ctx.emitStream,
+          onComplete: () => {
+            ctx.triggerRefresh(500);
+            ctx.triggerRefresh(1800);
+          },
+        });
+        const desktopOpenNote = liveOwners.some((o) => o.entrypoint === 'claude-desktop')
+          ? ' (reopen tab in Claude Desktop to sync)'
+          : '';
+        return {
+          ok: true,
+          runId,
+          dispatchedVia: `${
+            hasImages
+              ? `Claude stream-json (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
+              : 'Claude stream-json'
+          }${desktopOpenNote}`,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+
+    abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
+      return streamPool.abort(sessionId, emitStream);
+    },
+
+    shutdown(): void {
+      streamPool.closeAll();
     },
 
     startSession: startClaudeSession,

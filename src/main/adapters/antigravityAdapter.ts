@@ -304,6 +304,10 @@ export async function detectAntigravity(
       tags: isSubagent ? ['subagent'] : [d.originApp === 'antigravity-cli' ? 'cli' : 'desktop'],
       hidden: false,
       dispatchMode: 'agy-resume',
+      liveOwner:
+        isRunning && d.originApp === 'antigravity-app' && desktopRunning
+          ? 'desktop'
+          : undefined,
       isSubagent,
       parentSessionId,
       originApp: d.originApp,

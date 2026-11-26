@@ -70,6 +70,8 @@ export interface UnifiedSession {
   hidden: boolean;
   /** Extra dispatch metadata */
   dispatchMode: 'master' | 'tmux-send' | 'claude-resume' | 'codex-resume' | 'agy-resume';
+  /** Live sync ownership indicator for accurate bidirectional status in the UI. */
+  liveOwner?: 'daemon' | 'tmux' | 'desktop' | 'super-harness';
   /** Subagent / hierarchy metadata */
   isSubagent?: boolean;
   parentSessionId?: string;

@@ -17,6 +17,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
+import { CodexAppServerClient } from '../services/codexAppServerClient';
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import {
@@ -365,6 +366,7 @@ export async function detectCodex(
       tags: isSubagent ? ['subagent'] : row.source ? [row.source] : [],
       hidden: false,
       dispatchMode: 'codex-resume',
+      liveOwner: daemonRunning ? 'daemon' : undefined,
       isSubagent,
       parentSessionId: parentId ? `codex:${parentId}` : undefined,
       subagentCount: subCount,
@@ -1312,6 +1314,9 @@ export function buildCodexResumeArgs(
  */
 export function createCodexDriver(): HarnessDriver {
   const activeRuns = new Map<string, ChildProcess>();
+  const appServer = new CodexAppServerClient(undefined, (itemType, raw) =>
+    parseCodexItemToBlocks(itemType, raw)
+  );
 
   const killActiveRun = (sessionId: string) => {
     const prev = activeRuns.get(sessionId);
@@ -1383,19 +1388,67 @@ export function createCodexDriver(): HarnessDriver {
       attachments: ImageAttachment[] | undefined,
       ctx: DispatchContext
     ): Promise<SendMessageResult> {
-      const bin = await resolveCodexBinary();
-      if (!bin) return { ok: false, error: 'codex binary not found in PATH' };
-
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
       const hasImages = Boolean(attachments && attachments.length > 0);
       const useDaemon = hasCodexDaemonSocket();
       const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
 
-      // Route through `--remote unix://` whenever the Codex app-server daemon is running
-      // to avoid `thread already has an active writer` conflicts. Because `--remote` + `-i`
-      // hits an upstream clap parsing bug, pass image paths inline in daemon mode and use
-      // `-i <path> --` in standalone CLI mode.
+      // Primary path: speak directly to Codex's shared `app-server` daemon WebSocket
+      // (the exact same upstream JSON-RPC API Codex Desktop uses), giving native
+      // `localImage` attachments, real-time bidirectional streaming, and `turn/interrupt`.
+      if (appServer.isSocketAvailable()) {
+        try {
+          await appServer.sendTurn({
+            shSessionId: session.id,
+            nativeThreadId: session.nativeId,
+            cwd,
+            prompt,
+            attachments,
+            model: session.model,
+            reasoningEffort: session.reasoningEffort,
+            runId,
+            onEvent: ctx.emitStream,
+            onComplete: () => {
+              ctx.triggerRefresh(400);
+              ctx.triggerRefresh(1800);
+            },
+          });
+          return {
+            ok: true,
+            runId,
+            dispatchedVia: hasImages
+              ? `Codex app-server (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
+              : 'Codex app-server',
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (isCodexActiveWriterError(msg)) {
+            const bin = await resolveCodexBinary();
+            if (bin) {
+              const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, true, {
+                model: session.model,
+                reasoningEffort: session.reasoningEffort,
+              });
+              try {
+                await execFileAsync(bin, queueArgs, { cwd, timeout: 15_000 });
+                ctx.emitStream({ sessionId: session.id, runId, kind: 'done' });
+                ctx.triggerRefresh(200);
+                ctx.triggerRefresh(1000);
+                return { ok: true, runId, dispatchedVia: 'Codex queue' };
+              } catch {
+                // Fall through to CLI fallback below
+              }
+            }
+          }
+          // Fall through cleanly to CLI fallback if socket RPC failed
+        }
+      }
+
+      const bin = await resolveCodexBinary();
+      if (!bin) return { ok: false, error: 'codex binary not found in PATH' };
+
+      // Fallback CLI path when the app-server daemon socket isn't available.
       const args = buildCodexResumeArgs(session.nativeId, prompt, attachments, useDaemon, {
         model: session.model,
         reasoningEffort: session.reasoningEffort,
@@ -1539,9 +1592,46 @@ export function createCodexDriver(): HarnessDriver {
       req: StartSessionRequest,
       ctx: DispatchContext
     ): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
+      const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
+
+      // Primary path: create and start thread directly on the shared Codex app-server daemon
+      // so Codex Desktop sees the new conversation immediately with zero CLI startup delay.
+      if (appServer.isSocketAvailable()) {
+        try {
+          const threadId = await appServer.startThread({
+            cwd,
+            model: req.model,
+            reasoningEffort: req.reasoningEffort,
+          });
+          const shId = `codex:${threadId}`;
+          const prompt = req.prompt?.trim();
+          if (prompt) {
+            const runId = crypto.randomBytes(6).toString('hex');
+            await appServer.sendTurn({
+              shSessionId: shId,
+              nativeThreadId: threadId,
+              cwd,
+              prompt,
+              model: req.model,
+              reasoningEffort: req.reasoningEffort,
+              runId,
+              onEvent: ctx.emitStream,
+              onComplete: () => {
+                ctx.triggerRefresh(400);
+                ctx.triggerRefresh(1600);
+              },
+            });
+          }
+          ctx.triggerRefresh(400);
+          ctx.triggerRefresh(1800);
+          return { ok: true, sessionId: shId };
+        } catch {
+          // Fall back cleanly to standalone CLI below
+        }
+      }
+
       const bin = await resolveCodexBinary();
       if (!bin) return { ok: false, error: 'codex CLI not found' };
-      const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
       const args = buildCodexStartArgs(req, cwd);
 
       const runId = crypto.randomBytes(6).toString('hex');
@@ -1653,6 +1743,14 @@ export function createCodexDriver(): HarnessDriver {
     },
 
     abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
+      if (sessionId.startsWith('codex:')) {
+        const nativeId = sessionId.slice('codex:'.length);
+        if (appServer.hasActiveTurn(nativeId)) {
+          void appServer.interruptTurn(nativeId);
+          emitStream({ sessionId, runId: 'abort', kind: 'done' });
+          return true;
+        }
+      }
       const proc = activeRuns.get(sessionId);
       if (!proc) return false;
       killActiveRun(sessionId);
@@ -1660,7 +1758,13 @@ export function createCodexDriver(): HarnessDriver {
       return true;
     },
 
+    async moveSection(session: UnifiedSession, sectionName: string | null): Promise<boolean> {
+      if (!appServer.isSocketAvailable()) return false;
+      return appServer.moveThreadToSectionByName(session.nativeId, sectionName);
+    },
+
     shutdown(): void {
+      appServer.close();
       for (const sid of Array.from(activeRuns.keys())) {
         killActiveRun(sid);
       }
@@ -1689,6 +1793,10 @@ export function createCodexDriver(): HarnessDriver {
     async archiveSession(
       session: UnifiedSession
     ): Promise<{ ok: boolean; method?: string; error?: string } | null> {
+      if (appServer.isSocketAvailable()) {
+        const ok = await appServer.archiveThread(session.nativeId);
+        if (ok) return { ok: true, method: 'Codex app-server archive' };
+      }
       const bin = await resolveCodexBinary();
       if (!bin) return null;
       await execFileAsync(bin, ['archive', session.nativeId], { timeout: 8000 });

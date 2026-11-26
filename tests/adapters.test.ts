@@ -202,50 +202,29 @@ describe('Claude transcript parsing & tail parity', () => {
     expect(tail.messages.map((m) => m.blocks)).toEqual(full.messages.map((m) => m.blocks));
   });
 
-  it('forwards valid session permissionMode to claude --resume in sendMessage', async () => {
-    const driver = createClaudeDriver();
-    const spawned: Array<{ args: string[] }> = [];
-    const ctx = {
-      spawnStreaming: (opts: { args: string[] }) => {
-        spawned.push({ args: opts.args });
-      },
-      emitStream: () => {},
-      triggerRefresh: () => {},
-    };
+  it('forwards valid session permissionMode to claude --resume in stream worker and CLI args', async () => {
+    const { buildClaudeStreamWorkerArgs } = await import('../src/main/services/claudeStreamClient');
+    const { buildClaudeResumeArgs } = await import('../src/main/adapters/claudeAdapter');
 
-    const res = await driver.sendMessage(
-      {
-        id: 'claude:abc-123',
-        nativeId: 'abc-123',
-        harness: 'claude-desktop',
-        harnessGroup: 'claude',
-        title: 'Test Desktop',
-        preview: 'Test',
-        cwd: tmpDir,
-        projectName: 'tmp',
-        status: 'idle',
-        isLive: false,
-        isRemote: false,
-        createdAt: 1,
-        updatedAt: 2,
-        pinned: false,
-        tags: ['desktop'],
-        hidden: false,
-        dispatchMode: 'claude-resume',
-        permissionMode: 'bypassPermissions',
-      },
-      'Hello Claude',
-      undefined,
-      ctx
+    const workerArgs = buildClaudeStreamWorkerArgs({
+      nativeSessionId: 'abc-123',
+      permissionMode: 'bypassPermissions',
+    });
+    expect(workerArgs).toContain('--permission-mode');
+    expect(workerArgs).toContain('bypassPermissions');
+    expect(workerArgs).toContain('--resume');
+    expect(workerArgs).toContain('abc-123');
+    expect(workerArgs).toContain('--input-format');
+    expect(workerArgs).toContain('stream-json');
+
+    const resumeArgs = buildClaudeResumeArgs(
+      { nativeId: 'abc-123', permissionMode: 'bypassPermissions' },
+      'Hello Claude'
     );
-
-    if (res.ok) {
-      expect(spawned).toHaveLength(1);
-      expect(spawned[0].args).toContain('--permission-mode');
-      expect(spawned[0].args).toContain('bypassPermissions');
-      expect(spawned[0].args).toContain('--resume');
-      expect(spawned[0].args).toContain('abc-123');
-    }
+    expect(resumeArgs).toContain('--permission-mode');
+    expect(resumeArgs).toContain('bypassPermissions');
+    expect(resumeArgs).toContain('--resume');
+    expect(resumeArgs).toContain('abc-123');
   });
 });
 
@@ -1248,7 +1227,7 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       {
         harness: 'codex',
         cwd: '/tmp/proj',
-        model: 'gpt-6.2-sol',
+        model: 'gpt-5.4',
         reasoningEffort: 'high',
         prompt: 'Testing one, two, three.',
       },
@@ -1262,7 +1241,7 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       '-C',
       '/tmp/proj',
       '-m',
-      'gpt-6.2-sol',
+      'gpt-5.4',
       '-c',
       'model_reasoning_effort="high"',
       'Testing one, two, three.',

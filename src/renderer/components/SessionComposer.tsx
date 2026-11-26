@@ -445,11 +445,26 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                   </div>
                 )}
 
-                {dispatchNote && (
+                {dispatchNote ? (
                   <span className="text-micro text-ink-faint truncate pl-1">
                     · {dispatchNote}
                   </span>
-                )}
+                ) : session.liveOwner === 'desktop' ? (
+                  <span
+                    title={
+                      session.harnessGroup === 'claude'
+                        ? 'This tab is currently open in Claude Desktop. Sending from Super Harness works via Claude stream-json; reopen the tab in Claude Desktop to refresh its view.'
+                        : 'Antigravity Desktop is currently running a turn on this conversation.'
+                    }
+                    className="text-micro text-amber-300/75 truncate pl-1"
+                  >
+                    · Open in Desktop
+                  </span>
+                ) : session.liveOwner === 'tmux' ? (
+                  <span className="text-micro text-emerald-300/75 truncate pl-1">
+                    · Live tmux
+                  </span>
+                ) : null}
               </>
             ) : (
               <div className="flex items-center gap-2 min-w-0 pl-1">

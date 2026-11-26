@@ -405,6 +405,18 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('sh:organize', async (_ev, actions: OrganizeAction[]) => {
     const next = store.applyOrganize(actions);
+    // Propagate native section moves upstream to drivers that support it (e.g. Codex app-server)
+    for (const act of actions) {
+      if (act.type === 'move_section' && act.sessionId) {
+        const sess = registry.getSession(act.sessionId);
+        if (sess && sess.harnessGroup !== 'master') {
+          const driver = registry.getDriver(sess.harnessGroup);
+          if (driver?.moveSection) {
+            void driver.moveSection(sess, act.sectionName ?? null).catch(() => {});
+          }
+        }
+      }
+    }
     void refreshAndBroadcast();
     return next;
   });

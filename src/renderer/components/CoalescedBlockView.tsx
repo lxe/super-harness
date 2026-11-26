@@ -530,7 +530,7 @@ interface UserMessageViewProps {
 export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
   ({ msg, onOpenPath, onPreviewImage, onRetryFailed, onDismissFailed }) => {
     const [expanded, setExpanded] = useState(false);
-    const [showErrorDetail, setShowErrorDetail] = useState(false);
+    const [showErrorDetail, setShowErrorDetail] = useState(true);
     const [brokenThumbs, setBrokenThumbs] = useState<Record<string, boolean>>({});
     const [activeVideo, setActiveVideo] = useState<{ src: string; name: string } | null>(null);
     const info = useMemo(() => classifyUserMessage(msg), [msg]);

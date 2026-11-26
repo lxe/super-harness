@@ -1178,7 +1178,7 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     ]);
   });
 
-  it('blocks claude --resume when a live Claude Desktop or concurrent CLI process owns the session', () => {
+  it('routes tmux Claude sessions via tmux, allows idle resume, and only blocks actively busy concurrent writers', () => {
     // Live tmux owner -> routes through tmux without cloning
     expect(
       resolveClaudeDispatchGuard([
@@ -1186,7 +1186,14 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       ])
     ).toEqual({ action: 'tmux', tmuxTarget: 'dev:@1.%1' });
 
-    // Live Claude Desktop owner -> blocks to prevent forked clone session
+    // Idle Claude Desktop background process -> resumes & delivers cleanly
+    expect(
+      resolveClaudeDispatchGuard([
+        { pid: 2001, sessionId: 's1', entrypoint: 'claude-desktop', status: 'idle' },
+      ])
+    ).toEqual({ action: 'resume' });
+
+    // Actively busy Claude Desktop owner -> blocks concurrent conflicting write
     const desktopDecision = resolveClaudeDispatchGuard([
       { pid: 2002, sessionId: 's1', entrypoint: 'claude-desktop', status: 'busy' },
     ]);
@@ -1196,7 +1203,7 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       expect(desktopDecision.reason).toContain('2002');
     }
 
-    // Concurrent sdk-cli owner -> blocks to prevent parallel writers
+    // Actively busy sdk-cli owner -> blocks concurrent parallel writers
     const cliDecision = resolveClaudeDispatchGuard([
       { pid: 3003, sessionId: 's1', entrypoint: 'sdk-cli', status: 'busy' },
     ]);

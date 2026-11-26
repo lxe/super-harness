@@ -1460,8 +1460,10 @@ export function findLiveClaudeOwners(
 }
 
 /**
- * Prevents spawning duplicate `claude --resume` clone processes when a live
- * Claude Desktop or concurrent CLI process already owns the session.
+ * Prevents spawning duplicate `claude --resume` clone processes while another
+ * Claude process is actively running a turn (`status === 'busy' | 'running'`).
+ * Idle sessions (including idle Claude Desktop background processes) are
+ * allowed to resume and deliver messages normally.
  */
 export function resolveClaudeDispatchGuard(owners: LiveClaudeOwner[]): ClaudeDispatchDecision {
   const tmuxOwner = owners.find((o) => Boolean(o.tmux));
@@ -1469,19 +1471,13 @@ export function resolveClaudeDispatchGuard(owners: LiveClaudeOwner[]): ClaudeDis
     return { action: 'tmux', tmuxTarget: tmuxOwner.tmux };
   }
 
-  const desktopOwner = owners.find((o) => o.entrypoint === 'claude-desktop');
-  if (desktopOwner) {
+  const busyOwner = owners.find((o) => o.status === 'busy' || o.status === 'running');
+  if (busyOwner) {
+    const label =
+      busyOwner.entrypoint === 'claude-desktop' ? 'Claude Desktop' : 'another Claude CLI process';
     return {
       action: 'block',
-      reason: `This session is currently open in Claude Desktop (PID ${desktopOwner.pid}). Spawning \`claude --resume\` while Claude Desktop holds it open would fork a duplicate clone session and desynchronize your workspace. Reply in Claude Desktop, close the session in Claude Desktop to resume here, or start new Claude sessions in tmux + Remote Control mode for synchronized two-way control.`,
-    };
-  }
-
-  const activeCliOwner = owners[0];
-  if (activeCliOwner) {
-    return {
-      action: 'block',
-      reason: `Another live Claude CLI process (PID ${activeCliOwner.pid}) is already active on this session. Wait for it to finish before sending so Super Harness does not fork a second concurrent copy.`,
+      reason: `Claude is currently busy in ${label} (PID ${busyOwner.pid}). Wait for the active turn to finish before retrying so two copies do not overwrite each other.`,
     };
   }
 

@@ -71,13 +71,12 @@ public struct SessionDetailView: View {
         let filteredQueuedKey = filteredQueued.map(\.id).joined(separator: "|")
 
         ZStack(alignment: .bottom) {
-            ZStack(alignment: .top) {
-                ZStack(alignment: .bottomTrailing) {
-                    Group {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
                     if isLoadingInitialTranscript {
                         // Bottom-aligned shimmering skeleton right above the floating composer
                         VStack(spacing: 0) {
-                            Spacer(minLength: SHLayout.headerHeight)
+                            Spacer(minLength: 16)
                             TranscriptSkeletonView()
                                 .padding(.horizontal, SHLayout.screenPad)
                                 .padding(.bottom, max(composerHeight + 12, 108))
@@ -87,8 +86,7 @@ public struct SessionDetailView: View {
                     } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: SHLayout.messageGap) {
-                            // Top spacer so first message clears the floating Liquid Glass header pills.
-                            Color.clear.frame(height: SHLayout.headerHeight)
+                            Color.clear.frame(height: 8)
 
                             if transcript?.hasMore == true {
                                 loadEarlierButton
@@ -248,10 +246,6 @@ public struct SessionDetailView: View {
                         }
                     }
                     .animation(.easeInOut(duration: 0.16), value: showLatestButton)
-                }
-
-                // Floating Liquid Glass Header Pills over subtle top fade
-                floatingHeader(for: currentSession, isBusy: isBusy)
             }
 
             // Grounded Composer — ALWAYS anchored flush at bottom (above keyboard when open),
@@ -375,8 +369,44 @@ public struct SessionDetailView: View {
             }
         }
         .background(SHColor.surfaceCanvas)
-        .background(InteractivePopGestureEnabler())
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button {
+                    dismissKeyboard()
+                } label: {
+                    HStack(spacing: 6) {
+                        HarnessLogoView(harness: currentSession.harness, size: 14)
+                        Text(currentSession.displayTitle)
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(SHColor.inkPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .modifier(SHPrincipalGlassPillModifier())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(currentSession.displayTitle)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    sessionActionMenuItems(for: currentSession)
+                } label: {
+                    if isBusy {
+                        SHActivityPulse(tint: SHColor.harness(currentSession.harness), size: 11)
+                            .frame(width: 22, height: 22)
+                    } else {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(SHColor.inkPrimary)
+                    }
+                }
+                .accessibilityLabel("Session actions")
+            }
+        }
         .alert("Rename Thread", isPresented: $isRenameAlertPresented) {
             TextField("Thread title", text: $renameDraft)
             Button("Save") {
@@ -401,128 +431,91 @@ public struct SessionDetailView: View {
         }
     }
 
-    // MARK: - Floating Liquid Glass Top Chrome
+    // MARK: - Native Toolbar Action Menu
 
-    private func floatingHeader(for currentSession: UnifiedSession, isBusy: Bool) -> some View {
-        HStack(spacing: 8) {
-            SHGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
-                dismiss()
+    @ViewBuilder
+    private func sessionActionMenuItems(for currentSession: UnifiedSession) -> some View {
+        if !currentSession.isMaster {
+            Button {
+                renameDraft = currentSession.displayTitle
+                isRenameAlertPresented = true
+            } label: {
+                Label("Rename", systemImage: "pencil")
             }
-
-            Spacer(minLength: 4)
-
-            SHFloatingTitlePill(
-                title: currentSession.displayTitle,
-                harness: currentSession.harness
-            ) {
-                dismissKeyboard()
-            }
-
-            Spacer(minLength: 4)
-
-            SHGlassActionCapsule(
-                isBusy: isBusy,
-                accentColor: SHColor.harness(currentSession.harness)
-            ) {
-                if !currentSession.isMaster {
+            Menu {
+                ForEach(store.folders.sorted(by: { $0.order < $1.order })) { folder in
                     Button {
-                        renameDraft = currentSession.displayTitle
-                        isRenameAlertPresented = true
+                        Task { await store.assignFolder(sessionId: currentSession.id, folderId: folder.id) }
                     } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-                    Menu {
-                        ForEach(store.folders.sorted(by: { $0.order < $1.order })) { folder in
-                            Button {
-                                Task { await store.assignFolder(sessionId: currentSession.id, folderId: folder.id) }
-                            } label: {
-                                if currentSession.folderId == folder.id {
-                                    Label(folder.name, systemImage: "checkmark")
-                                } else {
-                                    Label(folder.name, systemImage: "folder")
-                                }
-                            }
+                        if currentSession.folderId == folder.id {
+                            Label(folder.name, systemImage: "checkmark")
+                        } else {
+                            Label(folder.name, systemImage: "folder")
                         }
-                        if !store.folders.isEmpty {
-                            Divider()
-                        }
-                        Button {
-                            newFolderDraft = ""
-                            isNewFolderAlertPresented = true
-                        } label: {
-                            Label("New Folder…", systemImage: "folder.badge.plus")
-                        }
-                        if currentSession.folderId != nil {
-                            Button(role: .destructive) {
-                                Task { await store.assignFolder(sessionId: currentSession.id, folderId: nil) }
-                            } label: {
-                                Label("Remove from Folder", systemImage: "folder.badge.minus")
-                            }
-                        }
-                    } label: {
-                        Label("Move to Folder", systemImage: "folder")
                     }
-                    Button {
-                        Task { await store.togglePin(currentSession) }
-                    } label: {
-                        Label(currentSession.pinned ? "Unpin" : "Pin", systemImage: currentSession.pinned ? "pin.slash" : "pin")
-                    }
-                    Button {
-                        Task { await store.togglePinToTop(currentSession) }
-                    } label: {
-                        Label(currentSession.pinnedToTop ? "Unpin from Top" : "Pin to Top", systemImage: "arrow.up.to.line")
-                    }
+                }
+                if !store.folders.isEmpty {
                     Divider()
                 }
                 Button {
-                    Task { await store.loadTranscript(for: session.id) }
+                    newFolderDraft = ""
+                    isNewFolderAlertPresented = true
                 } label: {
-                    Label("Refresh Transcript", systemImage: "arrow.clockwise")
+                    Label("New Folder…", systemImage: "folder.badge.plus")
                 }
-                if let group = currentSession.harness.harnessGroup {
-                    Button {
-                        store.openUsageSheet(for: group)
-                    } label: {
-                        Label("\(group.title) Usage", systemImage: "chart.bar.xaxis")
-                    }
-                }
-                if !currentSession.isMaster {
-                    Divider()
-                    Button {
-                        Task {
-                            await store.toggleHideSession(currentSession)
-                            dismiss()
-                        }
-                    } label: {
-                        Label(currentSession.hidden ? "Unhide Session" : "Hide Session", systemImage: currentSession.hidden ? "eye" : "eye.slash")
-                    }
+                if currentSession.folderId != nil {
                     Button(role: .destructive) {
-                        Task {
-                            await store.archiveSession(currentSession)
-                            dismiss()
-                        }
+                        Task { await store.assignFolder(sessionId: currentSession.id, folderId: nil) }
                     } label: {
-                        Label("Archive Session", systemImage: "archivebox")
+                        Label("Remove from Folder", systemImage: "folder.badge.minus")
                     }
                 }
+            } label: {
+                Label("Move to Folder", systemImage: "folder")
+            }
+            Button {
+                Task { await store.togglePin(currentSession) }
+            } label: {
+                Label(currentSession.pinned ? "Unpin" : "Pin", systemImage: currentSession.pinned ? "pin.slash" : "pin")
+            }
+            Button {
+                Task { await store.togglePinToTop(currentSession) }
+            } label: {
+                Label(currentSession.pinnedToTop ? "Unpin from Top" : "Pin to Top", systemImage: "arrow.up.to.line")
+            }
+            Divider()
+        }
+        Button {
+            Task { await store.loadTranscript(for: session.id) }
+        } label: {
+            Label("Refresh Transcript", systemImage: "arrow.clockwise")
+        }
+        if let group = currentSession.harness.harnessGroup {
+            Button {
+                store.openUsageSheet(for: group)
+            } label: {
+                Label("\(group.title) Usage", systemImage: "chart.bar.xaxis")
             }
         }
-        .padding(.horizontal, SHLayout.screenPad)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-        .background(
-            LinearGradient(
-                colors: [
-                    SHColor.surfaceCanvas.opacity(0.95),
-                    SHColor.surfaceCanvas.opacity(0.72),
-                    SHColor.surfaceCanvas.opacity(0.0),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-        )
+        if !currentSession.isMaster {
+            Divider()
+            Button {
+                Task {
+                    await store.toggleHideSession(currentSession)
+                    dismiss()
+                }
+            } label: {
+                Label(currentSession.hidden ? "Unhide Session" : "Hide Session", systemImage: currentSession.hidden ? "eye" : "eye.slash")
+            }
+            Button(role: .destructive) {
+                Task {
+                    await store.archiveSession(currentSession)
+                    dismiss()
+                }
+            } label: {
+                Label("Archive Session", systemImage: "archivebox")
+            }
+        }
     }
 
     // MARK: - Bottom Anchor Helpers
@@ -769,45 +762,15 @@ private struct MessageBubbleView: View, Equatable {
     }
 }
 
-
-// MARK: - Native Left-Edge Swipe Back Gesture (Restored when Navigation Bar is Hidden)
-
-#if canImport(UIKit)
-private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        weak var navigationController: UINavigationController?
-
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let nav = navigationController, nav.viewControllers.count > 1 else { return false }
-            // Only a deliberate rightward drag pops. Vertical scrolls and diagonal drags that
-            // happen to start at the left edge no longer navigate away.
-            if let pan = gestureRecognizer as? UIPanGestureRecognizer {
-                let velocity = pan.velocity(in: pan.view)
-                return velocity.x > 0 && abs(velocity.x) > abs(velocity.y) * 1.5
-            }
-            return true
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIViewController(context: Context) -> UIViewController {
-        UIViewController()
-    }
-
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        DispatchQueue.main.async {
-            guard let nav = uiViewController.navigationController else { return }
-            context.coordinator.navigationController = nav
-            nav.interactivePopGestureRecognizer?.isEnabled = true
-            nav.interactivePopGestureRecognizer?.delegate = context.coordinator
+private struct SHPrincipalGlassPillModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
         }
     }
 }
-#else
-private struct InteractivePopGestureEnabler: View {
-    var body: some View { EmptyView() }
-}
-#endif

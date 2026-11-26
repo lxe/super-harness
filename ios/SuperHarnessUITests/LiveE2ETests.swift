@@ -274,4 +274,28 @@ final class LiveE2ETests: XCTestCase {
         let targetHeader = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Tailscale bind'")).firstMatch
         XCTAssertTrue(targetHeader.waitForExistence(timeout: 4.0), "Tapping conversation:// link must switch directly to target session")
     }
+
+    func testNativeSwipeBackReturnsToSessionList() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["SH_CONNECTION_MODE"] = "demo"
+        app.launch()
+
+        let statusPill = app.buttons["header.status"].firstMatch
+        XCTAssertTrue(statusPill.waitForExistence(timeout: 6.0), "Session list should appear on launch")
+
+        let firstRow = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Super Harness' OR label CONTAINS 'Tailscale'")).firstMatch
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 5.0), "A demo session row should appear")
+        firstRow.tap()
+
+        let composer = app.descendants(matching: .any)["composer.input"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 5.0), "Should navigate into SessionDetailView")
+
+        // Perform a native rightward interactive swipe-back gesture from the left edge.
+        let leftEdge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.50))
+        let rightTarget = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.50))
+        leftEdge.press(forDuration: 0.02, thenDragTo: rightTarget)
+
+        XCTAssertTrue(statusPill.waitForExistence(timeout: 4.0), "Native swipe-back must pop SessionDetailView back to SessionListView")
+        XCTAssertFalse(composer.exists, "Composer must be gone after popping back")
+    }
 }

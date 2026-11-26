@@ -300,6 +300,8 @@ export interface StartSessionRequest {
   title?: string;
   prompt?: string;
   model?: string;
+  /** Optional thinking / reasoning effort level (e.g. low, medium, high, xhigh, max, ultra). */
+  reasoningEffort?: string;
   remoteControl?: boolean;
   tmuxSessionName?: string;
 }
@@ -355,6 +357,10 @@ export interface HarnessModelOption {
   description?: string;
   isDefault?: boolean;
   group?: string;
+  /** Supported thinking / reasoning effort levels for this model, in ascending order. */
+  reasoningLevels?: string[];
+  /** Model's own default reasoning level (e.g. 'low', 'medium', 'high'). */
+  defaultReasoningLevel?: string;
 }
 
 export interface HarnessProjectOption {
@@ -366,6 +372,8 @@ export interface HarnessProjectOption {
 
 export interface HarnessCatalog {
   models: Record<HarnessGroup, HarnessModelOption[]>;
+  /** Configured harness-level default reasoning effort (e.g. from ~/.codex/config.toml). */
+  defaultReasoningEffort?: Partial<Record<HarnessGroup, string>>;
   projects: HarnessProjectOption[];
   updatedAt: number;
 }

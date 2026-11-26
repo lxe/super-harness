@@ -867,7 +867,7 @@ export function createAntigravityDriver(): HarnessDriver {
     ): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
       const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
       try {
-        const nativeId = await acpPool.createSession('antigravity-app', cwd);
+        const nativeId = await acpPool.createSession('antigravity-app', cwd, req.model);
         const shId = `antigravity:${nativeId}`;
         if (req.prompt?.trim()) {
           const runId = crypto.randomBytes(6).toString('hex');

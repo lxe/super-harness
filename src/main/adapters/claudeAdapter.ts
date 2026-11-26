@@ -1285,6 +1285,7 @@ export function createClaudeDriver(): HarnessDriver {
       const flags: string[] = [];
       if (req.remoteControl !== false) flags.push('--remote-control');
       if (req.model) flags.push('--model', req.model);
+      if (req.reasoningEffort) flags.push('--effort', req.reasoningEffort);
       if (req.title) flags.push('--name', req.title);
 
       const cmd = [claudeBin, ...flags].map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
@@ -1319,6 +1320,7 @@ export function createClaudeDriver(): HarnessDriver {
       '--verbose',
     ];
     if (req.model) args.push('--model', req.model);
+    if (req.reasoningEffort) args.push('--effort', req.reasoningEffort);
     const child = spawn(bin, args, { cwd, stdio: 'ignore', detached: true });
     child.unref();
     ctx.triggerRefresh(2000);

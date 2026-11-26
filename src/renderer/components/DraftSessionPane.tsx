@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
+  Brain,
   Check,
   ChevronDown,
   Cpu,
@@ -28,9 +29,25 @@ export interface DraftConversation {
   harness: StartSessionRequest['harness'] | null;
   cwd: string;
   model: string;
+  reasoningEffort?: string;
   remoteControl: boolean;
   prompt: string;
   createdAt: number;
+}
+
+const EFFORT_META: Record<string, { label: string; hint: string }> = {
+  low: { label: 'Low', hint: 'Fastest responses, light reasoning' },
+  medium: { label: 'Medium', hint: 'Balanced speed & reasoning depth' },
+  high: { label: 'High', hint: 'Thorough multi-step reasoning' },
+  xhigh: { label: 'Extra High', hint: 'Extended deep reasoning' },
+  max: { label: 'Max', hint: 'Maximum thinking budget' },
+  ultra: { label: 'Ultra', hint: 'Deepest possible reasoning' },
+};
+
+const AGY_SUFFIX_RE = /^(.*)-(low|medium|high|xhigh|max)$/i;
+
+function formatEffortLabel(level: string): string {
+  return EFFORT_META[level.toLowerCase()]?.label ?? level;
 }
 
 interface Props {
@@ -74,6 +91,7 @@ export const DraftSessionPane: React.FC<Props> = ({
   const [claudeMenuOpen, setClaudeMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
 
   const [projectSearch, setProjectSearch] = useState('');
   const [modelSearch, setModelSearch] = useState('');
@@ -103,12 +121,13 @@ export const DraftSessionPane: React.FC<Props> = ({
 
   // Close open popovers on outside click or Escape
   useEffect(() => {
-    if (!claudeMenuOpen && !projectMenuOpen && !modelMenuOpen) return;
+    if (!claudeMenuOpen && !projectMenuOpen && !modelMenuOpen && !thinkingMenuOpen) return;
     const onDocClick = (e: MouseEvent) => {
       if (!containerRef.current?.contains(e.target as Node)) {
         setClaudeMenuOpen(false);
         setProjectMenuOpen(false);
         setModelMenuOpen(false);
+        setThinkingMenuOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
@@ -116,6 +135,7 @@ export const DraftSessionPane: React.FC<Props> = ({
         setClaudeMenuOpen(false);
         setProjectMenuOpen(false);
         setModelMenuOpen(false);
+        setThinkingMenuOpen(false);
       }
     };
     window.addEventListener('mousedown', onDocClick);
@@ -124,7 +144,7 @@ export const DraftSessionPane: React.FC<Props> = ({
       window.removeEventListener('mousedown', onDocClick);
       window.removeEventListener('keydown', onKey);
     };
-  }, [claudeMenuOpen, projectMenuOpen, modelMenuOpen]);
+  }, [claudeMenuOpen, projectMenuOpen, modelMenuOpen, thinkingMenuOpen]);
 
   const selectedGroup = groupForDraftHarness(draft.harness);
 
@@ -153,6 +173,67 @@ export const DraftSessionPane: React.FC<Props> = ({
     () => availableModels.find((m) => m.id === draft.model),
     [availableModels, draft.model]
   );
+
+  // Resolve available thinking / reasoning modes for the active harness + model
+  const activeModelForThinking = selectedModelOption || defaultModelOption || availableModels[0];
+  const availableThinkingLevels = useMemo<string[]>(() => {
+    if (!selectedGroup) return [];
+    if (activeModelForThinking?.reasoningLevels && activeModelForThinking.reasoningLevels.length > 0) {
+      return activeModelForThinking.reasoningLevels;
+    }
+    if (selectedGroup === 'codex') return ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+    if (selectedGroup === 'claude') return ['low', 'medium', 'high', 'xhigh', 'max'];
+    return ['low', 'medium', 'high', 'xhigh'];
+  }, [selectedGroup, activeModelForThinking]);
+
+  const defaultThinkingLevel = useMemo(() => {
+    if (!selectedGroup) return undefined;
+    if (selectedGroup === 'antigravity') {
+      return activeModelForThinking?.defaultReasoningLevel || catalog?.defaultReasoningEffort?.antigravity;
+    }
+    return (
+      catalog?.defaultReasoningEffort?.[selectedGroup] ||
+      activeModelForThinking?.defaultReasoningLevel
+    );
+  }, [selectedGroup, activeModelForThinking, catalog?.defaultReasoningEffort]);
+
+  const handleSelectModel = (modelId: string) => {
+    const picked = availableModels.find((m) => m.id === modelId);
+    if (selectedGroup === 'antigravity') {
+      const suffixMatch = modelId.match(AGY_SUFFIX_RE);
+      onUpdateDraft({
+        model: modelId,
+        reasoningEffort: suffixMatch ? suffixMatch[2].toLowerCase() : '',
+      });
+    } else {
+      const nextEffort =
+        draft.reasoningEffort &&
+        picked?.reasoningLevels &&
+        !picked.reasoningLevels.includes(draft.reasoningEffort)
+          ? ''
+          : draft.reasoningEffort;
+      onUpdateDraft({ model: modelId, reasoningEffort: nextEffort });
+    }
+    setModelMenuOpen(false);
+  };
+
+  const handleSelectThinking = (level: string) => {
+    if (selectedGroup === 'antigravity' && level) {
+      // Antigravity encodes thinking effort directly into the model slug (e.g. gemini-4-neon-xhigh)
+      const baseModel = selectedModelOption || defaultModelOption || availableModels[0];
+      const m = baseModel?.id.match(AGY_SUFFIX_RE);
+      if (m) {
+        const candidateId = `${m[1]}-${level}`;
+        if (availableModels.some((x) => x.id === candidateId)) {
+          onUpdateDraft({ model: candidateId, reasoningEffort: level });
+          setThinkingMenuOpen(false);
+          return;
+        }
+      }
+    }
+    onUpdateDraft({ reasoningEffort: level });
+    setThinkingMenuOpen(false);
+  };
 
   const projects = useMemo(() => {
     const all = catalog?.projects ?? [];
@@ -183,8 +264,8 @@ export const DraftSessionPane: React.FC<Props> = ({
     const switchingGroup = nextGroup !== selectedGroup;
     onUpdateDraft({
       harness: nextHarness,
-      // Reset model selection when switching between different harnesses
-      ...(switchingGroup ? { model: '' } : {}),
+      // Reset model & thinking selection when switching between different harnesses
+      ...(switchingGroup ? { model: '', reasoningEffort: '' } : {}),
     });
     setError(null);
   };
@@ -227,6 +308,7 @@ export const DraftSessionPane: React.FC<Props> = ({
         harness: draft.harness,
         cwd: draft.cwd,
         model: draft.model.trim() || undefined,
+        reasoningEffort: draft.reasoningEffort?.trim() || undefined,
         prompt: draft.prompt.trim() || undefined,
         remoteControl: draft.remoteControl,
       });
@@ -370,6 +452,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                       setClaudeMenuOpen((v) => !v);
                       setProjectMenuOpen(false);
                       setModelMenuOpen(false);
+                      setThinkingMenuOpen(false);
                     }}
                     title="Choose Claude runtime mode"
                     aria-label="Choose Claude runtime mode"
@@ -481,6 +564,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                     onClick={() => {
                       setProjectMenuOpen((v) => !v);
                       setModelMenuOpen(false);
+                      setThinkingMenuOpen(false);
                       setClaudeMenuOpen(false);
                       setCreatingProject(false);
                       setNewProjectError(null);
@@ -607,6 +691,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                     onClick={() => {
                       setModelMenuOpen((v) => !v);
                       setProjectMenuOpen(false);
+                      setThinkingMenuOpen(false);
                       setClaudeMenuOpen(false);
                     }}
                     disabled={!selectedGroup}
@@ -643,8 +728,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              onUpdateDraft({ model: '' });
-                              setModelMenuOpen(false);
+                              handleSelectModel('');
                             }}
                             className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
                               !draft.model
@@ -671,8 +755,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                               key={m.id}
                               type="button"
                               onClick={() => {
-                                onUpdateDraft({ model: m.id });
-                                setModelMenuOpen(false);
+                                handleSelectModel(m.id);
                               }}
                               className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
                                 active
@@ -711,6 +794,95 @@ export const DraftSessionPane: React.FC<Props> = ({
                             </button>
                           )}
                       </div>
+                    </PopoverSurface>
+                  )}
+                </div>
+
+                {/* Thinking / Reasoning Effort Selector Popover */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThinkingMenuOpen((v) => !v);
+                      setModelMenuOpen(false);
+                      setProjectMenuOpen(false);
+                      setClaudeMenuOpen(false);
+                    }}
+                    disabled={!selectedGroup || availableThinkingLevels.length === 0}
+                    title="Model thinking mode"
+                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.05] border border-line-hairline hover:border-line-subtle hover:bg-white/[0.08] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    <Brain className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                    <span className="font-medium">
+                      {draft.reasoningEffort
+                        ? formatEffortLabel(draft.reasoningEffort)
+                        : defaultThinkingLevel
+                          ? formatEffortLabel(defaultThinkingLevel)
+                          : 'Thinking'}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                  </button>
+
+                  {thinkingMenuOpen && selectedGroup && (
+                    <PopoverSurface
+                      width="auto"
+                      className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-64 p-1.5 space-y-0.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSelectThinking('')}
+                        className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                          !draft.reasoningEffort
+                            ? 'bg-white/[0.1] text-ink-primary'
+                            : 'text-ink-secondary hover:bg-white/[0.05]'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-caption font-medium">Harness default</div>
+                          {defaultThinkingLevel && (
+                            <div className="text-micro text-ink-faint">
+                              Currently {formatEffortLabel(defaultThinkingLevel)}
+                            </div>
+                          )}
+                        </div>
+                        {!draft.reasoningEffort && (
+                          <Check className="w-3.5 h-3.5 text-ink-primary shrink-0" />
+                        )}
+                      </button>
+
+                      <MenuDivider />
+
+                      {availableThinkingLevels.map((lvl) => {
+                        const active = draft.reasoningEffort === lvl;
+                        const meta = EFFORT_META[lvl] ?? { label: lvl, hint: '' };
+                        return (
+                          <button
+                            key={lvl}
+                            type="button"
+                            onClick={() => handleSelectThinking(lvl)}
+                            className={`w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                              active
+                                ? 'bg-white/[0.1] text-ink-primary'
+                                : 'text-ink-secondary hover:bg-white/[0.05]'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-caption font-medium">{meta.label}</span>
+                                {defaultThinkingLevel === lvl && (
+                                  <Badge tone="neutral">default</Badge>
+                                )}
+                              </div>
+                              {meta.hint && (
+                                <div className="text-micro text-ink-faint leading-snug">
+                                  {meta.hint}
+                                </div>
+                              )}
+                            </div>
+                            {active && <Check className="w-3.5 h-3.5 text-ink-primary shrink-0" />}
+                          </button>
+                        );
+                      })}
                     </PopoverSurface>
                   )}
                 </div>

@@ -1129,6 +1129,9 @@ export function createCodexDriver(): HarnessDriver {
       if (hasCodexDaemonSocket()) args.push('--remote', 'unix://');
       args.push('--skip-git-repo-check', '--json', '-C', cwd);
       if (req.model) args.push('-m', req.model);
+      if (req.reasoningEffort) {
+        args.push('-c', `model_reasoning_effort="${req.reasoningEffort}"`);
+      }
       args.push(req.prompt || 'Inspect this directory and wait for further instructions.');
       const child = spawn(bin, args, { cwd, stdio: 'ignore', detached: true });
       child.unref();

@@ -233,12 +233,19 @@ class AcpConnection {
     }
   }
 
-  async createSession(cwd: string): Promise<string> {
+  async createSession(cwd: string, model?: string): Promise<string> {
     await this.ensureConnected();
     const safeCwd = fs.existsSync(cwd) ? cwd : os.homedir();
     const res = await this.request('session/new', { cwd: safeCwd, mcpServers: [] });
     const sid = String(res.sessionId || '');
     if (!sid) throw new Error('ACP session/new did not return a sessionId');
+    if (model) {
+      try {
+        await this.request('session/set_model', { sessionId: sid, modelId: model });
+      } catch {
+        // Ignore if the ACP server doesn't expose session/set_model for this model
+      }
+    }
     this.resumedSessions.add(sid);
     return sid;
   }
@@ -397,10 +404,11 @@ export class AgyAcpPool {
 
   async createSession(
     originApp: 'antigravity-app' | 'antigravity-cli',
-    cwd: string
+    cwd: string,
+    model?: string
   ): Promise<string> {
     const dir: AppDataDirName = originApp === 'antigravity-cli' ? 'antigravity-cli' : 'antigravity';
-    return this.getConn(dir).createSession(cwd);
+    return this.getConn(dir).createSession(cwd, model);
   }
 
   async cancel(nativeSessionId: string): Promise<boolean> {

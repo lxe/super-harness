@@ -30,8 +30,12 @@ const CLAUDE_SETTINGS_PATH = path.join(HOME, '.claude', 'settings.json');
 const AGY_APP_DB = path.join(HOME, '.gemini', 'antigravity', 'conversation_summaries.db');
 const AGY_CLI_DB = path.join(HOME, '.gemini', 'antigravity-cli', 'conversation_summaries.db');
 
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const AGY_EFFORT_SUFFIX_RE = /^(.*)-(low|medium|high|xhigh|max)$/i;
+
 /**
- * Parses `agy models` stdout lines (`<slug>   <Display Name>`) into HarnessModelOption[].
+ * Parses `agy models` stdout lines (`<slug>\t<Display Name>`) into HarnessModelOption[],
+ * annotating sibling thinking/effort variants (e.g. `-low`, `-medium`, `-high`, `-xhigh`).
  */
 export function parseAgyModelsOutput(stdout: string): HarnessModelOption[] {
   const out: HarnessModelOption[] = [];
@@ -58,6 +62,28 @@ export function parseAgyModelsOutput(stdout: string): HarnessModelOption[] {
           : 'Gemini';
     out.push({ id, label, group });
   }
+
+  // Group sibling effort suffixes by base model stem so UI can switch thinking mode cleanly
+  const levelsByBase = new Map<string, Set<string>>();
+  for (const item of out) {
+    const m = item.id.match(AGY_EFFORT_SUFFIX_RE);
+    if (!m) continue;
+    const base = m[1];
+    const eff = m[2].toLowerCase();
+    if (!levelsByBase.has(base)) levelsByBase.set(base, new Set());
+    levelsByBase.get(base)!.add(eff);
+  }
+  for (const item of out) {
+    const m = item.id.match(AGY_EFFORT_SUFFIX_RE);
+    if (!m) continue;
+    const set = levelsByBase.get(m[1]);
+    if (set && set.size > 0) {
+      item.reasoningLevels = Array.from(set).sort(
+        (a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b)
+      );
+      item.defaultReasoningLevel = m[2].toLowerCase();
+    }
+  }
   return out;
 }
 
@@ -76,6 +102,8 @@ export function parseCodexModelsCache(
         description?: string;
         visibility?: string;
         priority?: number;
+        default_reasoning_level?: string;
+        supported_reasoning_levels?: Array<{ effort?: string }>;
       }>;
     };
     const rawModels = Array.isArray(parsed.models) ? parsed.models : [];
@@ -83,23 +111,49 @@ export function parseCodexModelsCache(
       .filter((m) => m.slug && (!m.visibility || m.visibility === 'list'))
       .sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
 
-    return visible.map((m) => ({
-      id: m.slug!,
-      label: m.display_name || m.slug!,
-      description: m.description,
-      isDefault: Boolean(defaultSlug && m.slug === defaultSlug),
-    }));
+    return visible.map((m) => {
+      const levels = Array.isArray(m.supported_reasoning_levels)
+        ? m.supported_reasoning_levels
+            .map((l) => l.effort?.trim().toLowerCase())
+            .filter((x): x is string => Boolean(x))
+        : undefined;
+      return {
+        id: m.slug!,
+        label: m.display_name || m.slug!,
+        description: m.description,
+        isDefault: Boolean(defaultSlug && m.slug === defaultSlug),
+        reasoningLevels: levels && levels.length > 0 ? levels : undefined,
+        defaultReasoningLevel: m.default_reasoning_level?.trim().toLowerCase() || undefined,
+      };
+    });
   } catch {
     return [];
   }
 }
 
-function readCodexDefaultModel(): string | undefined {
+function readCodexConfigDefaults(): { model?: string; reasoningEffort?: string } {
   try {
-    if (!fs.existsSync(CODEX_CONFIG_TOML)) return undefined;
+    if (!fs.existsSync(CODEX_CONFIG_TOML)) return {};
     const raw = fs.readFileSync(CODEX_CONFIG_TOML, 'utf8');
-    const m = raw.match(/^\s*model\s*=\s*"([^"]+)"/m);
-    return m?.[1];
+    const model = raw.match(/^\s*model\s*=\s*"([^"]+)"/m)?.[1];
+    const reasoningEffort = raw
+      .match(/^\s*model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1]
+      ?.toLowerCase();
+    return { model, reasoningEffort };
+  } catch {
+    return {};
+  }
+}
+
+function readClaudeDefaultEffort(): string | undefined {
+  try {
+    if (!fs.existsSync(CLAUDE_SETTINGS_PATH)) return undefined;
+    const s = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS_PATH, 'utf8')) as {
+      effortLevel?: string;
+    };
+    return typeof s.effortLevel === 'string' && s.effortLevel.trim()
+      ? s.effortLevel.trim().toLowerCase()
+      : undefined;
   } catch {
     return undefined;
   }
@@ -171,10 +225,17 @@ function collectClaudeModels(sessions: UnifiedSession[]): HarnessModelOption[] {
   const out: HarnessModelOption[] = [];
   const seen = new Set<string>();
 
+  const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
   const pushModel = (id: string, isDefault?: boolean) => {
     if (!id || seen.has(id)) return;
     seen.add(id);
-    out.push({ id, label: formatClaudeModelLabel(id), isDefault });
+    out.push({
+      id,
+      label: formatClaudeModelLabel(id),
+      isDefault,
+      reasoningLevels: CLAUDE_EFFORT_LEVELS,
+    });
   };
 
   if (settingsDefault) pushModel(settingsDefault, true);
@@ -279,11 +340,12 @@ export class HarnessCatalogService {
         this.fetchAgyProjects(),
       ]);
 
-      const codexDefault = readCodexDefaultModel();
+      const codexCfg = readCodexConfigDefaults();
       const codexModels = fs.existsSync(CODEX_MODELS_CACHE)
-        ? parseCodexModelsCache(fs.readFileSync(CODEX_MODELS_CACHE, 'utf8'), codexDefault)
+        ? parseCodexModelsCache(fs.readFileSync(CODEX_MODELS_CACHE, 'utf8'), codexCfg.model)
         : [];
       const claudeModels = collectClaudeModels(sessions);
+      const claudeEffort = readClaudeDefaultEffort();
 
       const rawProjects: Array<{
         name?: string;
@@ -310,6 +372,11 @@ export class HarnessCatalogService {
           antigravity: agyModels,
           codex: codexModels,
           claude: claudeModels,
+        },
+        defaultReasoningEffort: {
+          codex: codexCfg.reasoningEffort,
+          claude: claudeEffort,
+          antigravity: agyModels[0]?.defaultReasoningLevel || 'high',
         },
         projects: mergeHarnessProjects(rawProjects),
         updatedAt: Date.now(),

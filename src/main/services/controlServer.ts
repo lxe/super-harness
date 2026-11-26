@@ -676,7 +676,20 @@ export class ControlServer {
         }
 
         if (req.method === 'GET' && url.pathname === '/api/media') {
-          const filePath = url.searchParams.get('path') || '';
+          const rawPath = url.searchParams.get('path') || '';
+          const expanded = rawPath.startsWith('~/')
+            ? path.join(os.homedir(), rawPath.slice(2))
+            : rawPath;
+          let filePath = expanded;
+          if (filePath && !fs.existsSync(filePath)) {
+            const base = path.basename(filePath);
+            if (base && base !== '.' && base !== '..') {
+              const localConfigAtt = path.join(os.homedir(), '.config', 'super-harness', 'attachments', base);
+              const localCacheAtt = path.join(os.homedir(), '.cache', 'super-harness', 'attachments', base);
+              if (fs.existsSync(localConfigAtt)) filePath = localConfigAtt;
+              else if (fs.existsSync(localCacheAtt)) filePath = localCacheAtt;
+            }
+          }
           const ext = path.extname(filePath).toLowerCase();
           const contentType = MEDIA_MIME_TYPES[ext];
           if (!filePath || !contentType || !fs.existsSync(filePath)) {

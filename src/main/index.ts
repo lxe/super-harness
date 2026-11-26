@@ -987,13 +987,28 @@ if (!gotSingleInstanceLock) {
   });
 }
 
+function resolveLocalMediaPath(rawPath: string): string | null {
+  if (!rawPath) return null;
+  const expanded = rawPath.startsWith('~/') ? path.join(os.homedir(), rawPath.slice(2)) : rawPath;
+  if (fs.existsSync(expanded)) return expanded;
+  const base = path.basename(expanded);
+  if (base && base !== '.' && base !== '..') {
+    const localConfigAtt = path.join(os.homedir(), '.config', 'super-harness', 'attachments', base);
+    if (fs.existsSync(localConfigAtt)) return localConfigAtt;
+    const localCacheAtt = path.join(os.homedir(), '.cache', 'super-harness', 'attachments', base);
+    if (fs.existsSync(localCacheAtt)) return localCacheAtt;
+  }
+  return null;
+}
+
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return;
   protocol.handle('sh-media', (request) => {
     try {
       const u = new URL(request.url);
-      const filePath = decodeURIComponent(u.searchParams.get('path') || '');
-      if (!filePath || !fs.existsSync(filePath)) {
+      const rawPath = decodeURIComponent(u.searchParams.get('path') || '');
+      const filePath = resolveLocalMediaPath(rawPath);
+      if (!filePath) {
         return new Response('Not found', { status: 404 });
       }
       const ext = path.extname(filePath).toLowerCase();

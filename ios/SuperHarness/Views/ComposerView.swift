@@ -50,6 +50,8 @@ public struct ComposerView: View {
     /// Set when send is tapped while dictation is recording or transcribing: the message goes
     /// out with this mode as soon as the dictated text has landed in the composer.
     @State private var pendingSendMode: SendMode?
+    /// Bumped when dictated text lands, so the text view scrolls to its end.
+    @State private var scrollToEndToken: Int = 0
 
     public init(
         session: UnifiedSession,
@@ -228,6 +230,8 @@ public struct ComposerView: View {
                     placeholder: session.isMaster
                         ? "Ask Master Orchestrator anything, or /status…"
                         : "Message \(HarnessVisual.forKind(session.harness).label)…",
+                    isLocked: dictation.state == .transcribing,
+                    scrollToEndToken: scrollToEndToken,
                     onPasteMedia: { handleClipboardPaste() }
                 )
                 .padding(.horizontal, 15)
@@ -396,10 +400,8 @@ public struct ComposerView: View {
                 triggerHaptic(.medium)
                 Task { await handleDictationTap() }
             } label: {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(SHColor.statusDanger)
-                        .frame(width: 7, height: 7)
+                HStack(spacing: 6) {
+                    SHAudioLevelBars(levels: dictation.levelHistory, tint: SHColor.statusDanger)
                     Text(dictation.formattedDuration)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(SHColor.statusDanger)
@@ -430,6 +432,7 @@ public struct ComposerView: View {
         let spoken = await dictation.toggleRecording(prewarm: onDictationStart, transcribe: transcribe)
         if let spoken, !spoken.isEmpty {
             text = ComposerDictation.appending(spoken, to: text)
+            scrollToEndToken += 1
         }
         guard wasRecording, let mode = pendingSendMode else { return }
         pendingSendMode = nil
@@ -781,30 +784,49 @@ private final class SHPasteInterceptingTextView: UITextView {
 private struct SHPasteableTextInput: View {
     @Binding var text: String
     let placeholder: String
+    /// While a transcription is in flight the text cannot be edited and a dot spinner shows.
+    var isLocked: Bool = false
+    var scrollToEndToken: Int = 0
     let onPasteMedia: () -> Void
     @State private var measuredHeight: CGFloat = 22
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            if text.isEmpty {
-                Text(placeholder)
-                    .font(SHTypography.body)
-                    .foregroundStyle(SHColor.inkFaint)
-                    .allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: SHSpacing.xs) {
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty && !isLocked {
+                    Text(placeholder)
+                        .font(SHTypography.body)
+                        .foregroundStyle(SHColor.inkFaint)
+                        .allowsHitTesting(false)
+                }
+                if !(text.isEmpty && isLocked) {
+                    SHPasteableTextViewRepresentable(
+                        text: $text,
+                        measuredHeight: $measuredHeight,
+                        isLocked: isLocked,
+                        scrollToEndToken: scrollToEndToken,
+                        onPasteMedia: onPasteMedia
+                    )
+                    .frame(height: measuredHeight)
+                    .opacity(isLocked ? 0.6 : 1)
+                }
             }
-            SHPasteableTextViewRepresentable(
-                text: $text,
-                measuredHeight: $measuredHeight,
-                onPasteMedia: onPasteMedia
-            )
-            .frame(height: measuredHeight)
+            if isLocked {
+                SHDotSpinner(tint: SHColor.inkMuted)
+                    .frame(height: text.isEmpty ? 22 : 12, alignment: .leading)
+                    .accessibilityLabel("Transcribing")
+                    .accessibilityIdentifier("composer.transcribing")
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    var isLocked: Bool = false
+    var scrollToEndToken: Int = 0
     let onPasteMedia: () -> Void
 
     private static let minHeight: CGFloat = 22
@@ -834,10 +856,21 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: SHPasteInterceptingTextView, context: Context) {
         uiView.onPasteMedia = onPasteMedia
+        context.coordinator.parent = self
         if uiView.text != text && uiView.markedTextRange == nil {
             uiView.text = text
         }
         recalcHeight(uiView)
+        if context.coordinator.lastScrollToEndToken != scrollToEndToken {
+            context.coordinator.lastScrollToEndToken = scrollToEndToken
+            // After the layout pass that sizes the grown text, put the caret at the end and show it.
+            DispatchQueue.main.async {
+                let end = uiView.endOfDocument
+                uiView.selectedTextRange = uiView.textRange(from: end, to: end)
+                let length = (uiView.text as NSString).length
+                uiView.scrollRangeToVisible(NSRange(location: max(0, length - 1), length: length > 0 ? 1 : 0))
+            }
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: SHPasteInterceptingTextView, context: Context) -> CGSize? {
@@ -864,9 +897,16 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: SHPasteableTextViewRepresentable
+        var lastScrollToEndToken: Int
 
         init(_ parent: SHPasteableTextViewRepresentable) {
             self.parent = parent
+            self.lastScrollToEndToken = parent.scrollToEndToken
+        }
+
+        /// Typing is refused while a transcription is in flight; the keyboard stays up.
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            !parent.isLocked
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -906,5 +946,48 @@ enum ComposerDictation {
     static func shouldSendAfterFinalizing(text: String, hasAttachments: Bool, errorMessage: String?) -> Bool {
         guard errorMessage == nil else { return false }
         return hasAttachments || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+/// Live mic level bars shown while dictation records: thin rounded bars, newest level on the
+/// right, each growing from a short resting height. Same proportions as the YapYap keyboard's
+/// waveform (2pt bars, 2.5pt gaps, 3pt minimum height).
+struct SHAudioLevelBars: View {
+    let levels: [CGFloat]
+    let tint: Color
+    var height: CGFloat = 14
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2.5) {
+            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+                Capsule()
+                    .fill(tint)
+                    .frame(width: 2, height: 3 + max(0, min(1, level)) * (height - 3))
+            }
+        }
+        .frame(height: height)
+        .animation(.linear(duration: 0.07), value: levels)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Three small dots that brighten in turn; the "text is on its way" indicator in the composer.
+struct SHDotSpinner: View {
+    let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: reduceMotion)) { context in
+            let phase = context.date.timeIntervalSinceReferenceDate * 1.6
+            HStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { index in
+                    let wave = reduceMotion ? 0.5 : (sin((phase - Double(index) * 0.22) * 2 * .pi) + 1) / 2
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 5, height: 5)
+                        .opacity(0.3 + 0.7 * wave)
+                }
+            }
+        }
     }
 }

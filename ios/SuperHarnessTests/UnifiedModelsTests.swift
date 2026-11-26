@@ -151,6 +151,31 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertFalse(ComposerDictation.shouldSendAfterFinalizing(text: "  ", hasAttachments: false, errorMessage: nil))
     }
 
+    func testSessionSearchMatchesTitleLastMessageProjectAndBranch() {
+        let session = UnifiedSession(
+            id: "codex:s1", harness: .codex, title: "Fix mobile SSE reconnect",
+            preview: "Added replay buffer", cwd: "/home/lxe/super-harness", projectName: "super-harness",
+            gitBranch: "feat/mobile-api", lastUserText: "please keep the Tailscale bind"
+        )
+        XCTAssertTrue(SessionRowFormatting.matches(session, query: ""))
+        XCTAssertTrue(SessionRowFormatting.matches(session, query: "sse"))
+        XCTAssertTrue(SessionRowFormatting.matches(session, query: "TAILSCALE"))
+        XCTAssertTrue(SessionRowFormatting.matches(session, query: "mobile-api"))
+        XCTAssertTrue(SessionRowFormatting.matches(session, query: "harness reconnect"))
+        XCTAssertFalse(SessionRowFormatting.matches(session, query: "reconnect kubernetes"))
+    }
+
+    func testLevelHistoryRisesFastDecaysSlowlyAndKeepsItsLength() {
+        var history = DictationController.silentHistory
+        history = DictationController.advancing(history, with: 1)
+        XCTAssertEqual(history.count, DictationController.levelBarCount)
+        XCTAssertEqual(history.last ?? 0, 0.78, accuracy: 0.001)
+        let afterDrop = DictationController.advancing(history, with: 0)
+        XCTAssertEqual(afterDrop.last ?? 0, 0.78 * 0.64, accuracy: 0.001)
+        XCTAssertEqual(afterDrop[afterDrop.count - 2], 0.78, accuracy: 0.001)
+        XCTAssertEqual(DictationController.advancing(history, with: 7).last ?? 0, 0.78 + 0.22 * 0.78, accuracy: 0.001)
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

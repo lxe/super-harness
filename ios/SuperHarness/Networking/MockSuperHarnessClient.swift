@@ -745,7 +745,9 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
     }
 
     public func transcribeAudio(wavData: Data, overrideURL: String?, overrideToken: String?) async throws -> String {
-        try? await Task.sleep(nanoseconds: 250_000_000)
+        // SH_MOCK_TRANSCRIBE_DELAY_MS lengthens the demo transcription so UI tests can observe the in-flight state.
+        let delayMs = ProcessInfo.processInfo.environment["SH_MOCK_TRANSCRIBE_DELAY_MS"].flatMap(UInt64.init) ?? 250
+        try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
         return "Run the simulator build and verify all unit tests pass."
     }
 

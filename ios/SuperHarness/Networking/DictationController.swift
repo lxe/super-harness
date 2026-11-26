@@ -100,6 +100,22 @@ public final class DictationController {
     public var state: State = .idle
     public var elapsedSeconds: TimeInterval = 0
     public var normalizedLevel: CGFloat = 0
+    /// The most recent mic levels (0...1), oldest first, smoothed for the live level bars.
+    public var levelHistory: [CGFloat] = DictationController.silentHistory
+
+    public nonisolated static let levelBarCount = 7
+    public nonisolated static let silentHistory = [CGFloat](repeating: 0, count: 7)
+
+    /// Shifts a new mic level into the history. A rising level is followed quickly and a
+    /// falling one decays slowly, the same response the YapYap keyboard's waveform uses.
+    public nonisolated static func advancing(_ history: [CGFloat], with level: CGFloat) -> [CGFloat] {
+        let clamped = max(0, min(1, level))
+        let previous = history.last ?? 0
+        let response: CGFloat = clamped > previous ? 0.78 : 0.36
+        var next = Array(history.dropFirst())
+        next.append(previous + (clamped - previous) * response)
+        return next
+    }
     public var errorMessage: String?
 
     private static var cachedMicPermissionGranted: Bool = false
@@ -172,6 +188,7 @@ public final class DictationController {
         startedAt = Date()
         elapsedSeconds = 0
         normalizedLevel = 0
+        levelHistory = Self.silentHistory
         state = .recording
         startMeterLoop()
 
@@ -350,7 +367,7 @@ public final class DictationController {
         meterTask?.cancel()
         meterTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                try? await Task.sleep(nanoseconds: 70_000_000)
                 guard !Task.isCancelled, let self, self.state == .recording else { break }
                 if let startedAt = self.startedAt {
                     self.elapsedSeconds = Date().timeIntervalSince(startedAt)
@@ -361,6 +378,13 @@ public final class DictationController {
                     let clamped = max(-55.0, min(0.0, db))
                     self.normalizedLevel = CGFloat((clamped + 55.0) / 55.0)
                 }
+                #if DEBUG
+                // The Simulator records silence; SH_DICTATION_FAKE_LEVELS drives the bars for UI checks.
+                if ProcessInfo.processInfo.environment["SH_DICTATION_FAKE_LEVELS"] != nil {
+                    self.normalizedLevel = CGFloat(abs(sin(self.elapsedSeconds * 9.0)) * (0.45 + 0.55 * abs(sin(self.elapsedSeconds * 2.3))))
+                }
+                #endif
+                self.levelHistory = Self.advancing(self.levelHistory, with: self.normalizedLevel)
             }
         }
     }

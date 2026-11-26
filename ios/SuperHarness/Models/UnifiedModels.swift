@@ -518,25 +518,36 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
 
 // MARK: - Attachments & Blocks
 
+public enum SendMode: String, Codable, Sendable, Equatable {
+    case steer
+    case queue
+}
+
 public struct ImageAttachment: Codable, Identifiable, Sendable, Equatable, Hashable {
     public var id: String
     public var name: String
     public var path: String
     public var mimeType: String
     public var previewDataUrl: String?
+    public var sizeBytes: Int?
+
+    public var isImage: Bool { mimeType.lowercased().hasPrefix("image/") }
+    public var isVideo: Bool { mimeType.lowercased().hasPrefix("video/") }
 
     public init(
         id: String = UUID().uuidString,
         name: String,
         path: String = "",
         mimeType: String = "image/jpeg",
-        previewDataUrl: String? = nil
+        previewDataUrl: String? = nil,
+        sizeBytes: Int? = nil
     ) {
         self.id = id
         self.name = name
         self.path = path
         self.mimeType = mimeType
         self.previewDataUrl = previewDataUrl
+        self.sizeBytes = sizeBytes
     }
 }
 
@@ -580,9 +591,9 @@ public enum UnifiedBlock: Codable, Sendable, Equatable, Hashable {
 
     public var isTraceBlock: Bool {
         switch self {
-        case .thinking, .command, .toolCall, .webSearch:
+        case .thinking, .command, .toolCall, .webSearch, .fileChange:
             return true
-        case .text, .image, .video, .fileChange, .question, .notice:
+        case .text, .image, .video, .question, .notice:
             return false
         }
     }
@@ -1827,6 +1838,7 @@ public struct PendingOutgoingMessage: Identifiable, Sendable, Equatable {
     public let text: String
     public let attachments: [ImageAttachment]
     public let createdAt: Double
+    public let mode: SendMode
     public var state: DeliveryState
 
     public init(
@@ -1834,12 +1846,14 @@ public struct PendingOutgoingMessage: Identifiable, Sendable, Equatable {
         text: String,
         attachments: [ImageAttachment] = [],
         createdAt: Double = Date().timeIntervalSince1970 * 1000.0,
+        mode: SendMode = .steer,
         state: DeliveryState = .sending
     ) {
         self.id = id
         self.text = text
         self.attachments = attachments
         self.createdAt = createdAt
+        self.mode = mode
         self.state = state
     }
 

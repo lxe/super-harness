@@ -20,6 +20,7 @@ import { ControlServer } from './services/controlServer';
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';
+import { PushNotifier } from './services/pushNotifier';
 import {
   detectSystemApps,
   openPathWithApp,
@@ -225,32 +226,61 @@ function broadcastToRenderer(channel: string, payload: unknown): void {
   }
 }
 
-function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachment {
+function classifyAttachmentKind(mimeType: string): 'image' | 'video' | 'file' {
+  const lower = mimeType.toLowerCase();
+  if (lower.startsWith('image/')) return 'image';
+  if (lower.startsWith('video/')) return 'video';
+  return 'file';
+}
+
+function saveRawBufferAttachment(
+  buffer: Buffer,
+  mimeType: string,
+  filename?: string
+): ImageAttachment & { sizeBytes: number; kind: 'image' | 'video' | 'file' } {
   const attachDir = path.join(os.homedir(), '.config', 'super-harness', 'attachments');
   fs.mkdirSync(attachDir, { recursive: true });
-  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  const mimeType = match?.[1] || 'image/png';
-  const base64 = match?.[2] || '';
   const extMap: Record<string, string> = {
     'image/png': 'png',
     'image/jpeg': 'jpg',
     'image/jpg': 'jpg',
     'image/webp': 'webp',
     'image/gif': 'gif',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'application/pdf': 'pdf',
+    'text/plain': 'txt',
+    'application/json': 'json',
   };
-  const ext = extMap[mimeType] || 'png';
+  const ext = extMap[mimeType.toLowerCase()] || 'bin';
   const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-  const safeName = (filename || `pasted-${id}.${ext}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (filename || `attachment-${id}.${ext}`).replace(/[^a-zA-Z0-9._-]/g, '_');
   const filePath = path.join(attachDir, `${id}-${safeName}`);
-  fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+  fs.writeFileSync(filePath, buffer);
   return {
     id,
     name: safeName,
     path: filePath,
-    mimeType,
-    previewDataUrl: dataUrl,
+    mimeType: mimeType || 'application/octet-stream',
+    sizeBytes: buffer.length,
+    kind: classifyAttachmentKind(mimeType),
   };
 }
+
+function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachment {
+  const match = dataUrl.match(/^data:([a-zA-Z0-9.+/-]+);base64,(.+)$/);
+  const mimeType = match?.[1] || 'image/png';
+  const base64 = match?.[2] || '';
+  const saved = saveRawBufferAttachment(Buffer.from(base64, 'base64'), mimeType, filename);
+  return {
+    ...saved,
+    previewDataUrl: mimeType.startsWith('image/') ? dataUrl : undefined,
+  };
+}
+
+const pushNotifier = new PushNotifier(() => store.getState().settings.mobileApi?.token ?? '');
+const sessionWorkingSinceMs = new Map<string, number>();
+const sessionNotifiedInputIds = new Set<string>();
 
 let controlServerRef: ControlServer | null = null;
 let masterEngineRef: MasterEngine | null = null;
@@ -409,6 +439,24 @@ const controlServer = new ControlServer(
       return { ok: dispatcher.abort(sessionId) };
     },
     saveAttachment: async (dataUrl, filename) => saveDataUrlAttachment(dataUrl, filename),
+    saveRawAttachment: async (buffer, mimeType, filename) =>
+      saveRawBufferAttachment(buffer, mimeType, filename),
+    queueMessage: async (sessionId, prompt, attachments) => {
+      if (sessionId === 'master:root' && masterEngineRef) {
+        return masterEngineRef.handlePrompt(prompt, attachments);
+      }
+      return dispatcher.queueToSession(sessionId, prompt, attachments);
+    },
+    registerPushDevice: (opts) => pushNotifier.registerDevice(opts),
+    sendTestPush: (opts) =>
+      pushNotifier.notify(
+        {
+          kind: 'test',
+          title: opts?.title || 'Super Harness',
+          body: opts?.body || 'Push notifications are connected and working.',
+        },
+        { bypassCooldown: true }
+      ),
     readFilePreview: async (filePath, startLine, endLine) =>
       readFilePreview(filePath, startLine, endLine),
     watchSession: async (paneId, sessionId, limit) => {
@@ -429,12 +477,56 @@ const liveSync = new LiveSyncService(
   },
   (transcript) => {
     if (typeof transcript.liveActivity?.isWorking === 'boolean') {
+      const wasWorking = liveWorkingSessionIds.has(transcript.sessionId);
       if (transcript.liveActivity.isWorking) {
         liveWorkingSessionIds.add(transcript.sessionId);
+        if (!wasWorking) {
+          sessionWorkingSinceMs.set(transcript.sessionId, Date.now());
+          sessionNotifiedInputIds.delete(transcript.sessionId);
+        }
       } else {
         liveWorkingSessionIds.delete(transcript.sessionId);
+        const startedAt = sessionWorkingSinceMs.get(transcript.sessionId);
+        sessionWorkingSinceMs.delete(transcript.sessionId);
+        if (wasWorking && startedAt && Date.now() - startedAt >= 2000 && !transcript.sessionId.startsWith('master:')) {
+          const sess = registry.getSession(transcript.sessionId);
+          const lastAssistant = [...transcript.messages].reverse().find((m) => m.role === 'assistant');
+          const snippet =
+            lastAssistant?.blocks
+              .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+              .map((b) => b.text.trim())
+              .join(' ')
+              .slice(0, 140) || 'Task completed';
+          void pushNotifier.notify({
+            kind: 'task_completed',
+            sessionId: transcript.sessionId,
+            harness: sess?.harness,
+            title: sess?.title || 'Task completed',
+            body: snippet,
+          });
+        }
       }
       broadcastActivityIfChanged();
+    }
+    const lastMsgForPush = transcript.messages[transcript.messages.length - 1];
+    const hasOpenQuestion = Boolean(
+      lastMsgForPush?.blocks.some((b) => b.type === 'question' && !b.answered)
+    );
+    if (hasOpenQuestion && !sessionNotifiedInputIds.has(transcript.sessionId)) {
+      sessionNotifiedInputIds.add(transcript.sessionId);
+      const sess = registry.getSession(transcript.sessionId);
+      const qBlock = lastMsgForPush?.blocks.find((b) => b.type === 'question' && !b.answered);
+      const qText =
+        qBlock && qBlock.type === 'question' && qBlock.questions?.[0]?.question
+          ? qBlock.questions[0].question.slice(0, 160)
+          : 'Waiting for your response';
+      void pushNotifier.notify({
+        kind: 'input_needed',
+        sessionId: transcript.sessionId,
+        harness: sess?.harness,
+        title: `${sess?.title || 'Agent'} needs input`,
+        body: qText,
+      });
     }
     broadcastToRenderer('sh:transcript-updated', transcript);
     const lastMsg = transcript.messages[transcript.messages.length - 1];

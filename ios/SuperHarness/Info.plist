@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.lxe.superharness.refresh</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -29,6 +33,13 @@
 	<string>Super Harness connects to your desktop host over LAN or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Super Harness records voice dictation for transcription via your configured YapYap server.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Super Harness attaches photos and videos you select to your coding agent conversations.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

@@ -14,6 +14,9 @@ public struct HostConnectionSheet: View {
     @State private var isTesting: Bool = false
     @State private var isSaving: Bool = false
     @State private var testResult: ConnectionTestResult?
+    @State private var isSendingTestPush: Bool = false
+    @State private var testPushFeedback: String?
+    @State private var showDesignCatalog: Bool = false
 
     public init(store: AppStore) {
         self.store = store
@@ -261,9 +264,60 @@ public struct HostConnectionSheet: View {
                     }
                 }
                 .listRowBackground(SHColor.surfaceSubtle)
+
+                Section {
+                    Toggle("Task & Input Push Alerts", isOn: Binding(
+                        get: { store.pushNotificationsEnabled },
+                        set: { store.setPushNotificationsEnabled($0) }
+                    ))
+                    HStack {
+                        Text("Push Relay")
+                            .foregroundStyle(SHColor.inkSecondary)
+                        Spacer()
+                        Text(PushNotificationCoordinator.shared.lastRegistrationStatus)
+                            .font(SHTypography.micro)
+                            .foregroundStyle(SHColor.inkMuted)
+                    }
+                    Button {
+                        Task {
+                            isSendingTestPush = true
+                            let ok = await store.sendTestPushNotification()
+                            isSendingTestPush = false
+                            testPushFeedback = ok ? "Test push sent" : "Push relay not deployed yet"
+                        }
+                    } label: {
+                        HStack {
+                            Label("Send Test Notification", systemImage: "bell.badge")
+                            Spacer()
+                            if isSendingTestPush {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    }
+                    .disabled(isSendingTestPush || store.connectionMode != .live)
+                    if let testPushFeedback {
+                        Text(testPushFeedback)
+                            .font(SHTypography.micro)
+                            .foregroundStyle(SHColor.inkMuted)
+                    }
+                } header: {
+                    Text("Push Notifications & Background Sync")
+                } footer: {
+                    Text("Delivers APNs alerts via Cloudflare Push Relay when an agent finishes a task or asks for input, plus periodic background session refreshes.")
+                }
+
+                Section("Component & Pattern Library") {
+                    Button {
+                        showDesignCatalog = true
+                    } label: {
+                        Label("Open Design System Catalog", systemImage: "square.grid.2x2")
+                    }
+                }
+                .listRowBackground(SHColor.surfaceSubtle)
             }
-            .scrollContentBackground(.hidden)
-            .background(SHColor.surfaceRail)
+            .sheet(isPresented: $showDesignCatalog) {
+                DesignSystemCatalogView()
+            }
             .navigationTitle("Host Connection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

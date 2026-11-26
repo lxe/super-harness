@@ -1,8 +1,11 @@
 import SwiftUI
 
+/// Calm, scrollable inline activity indicator (`Running >`) that expands on tap to inspect
+/// live agent steps or running tasks without ever being pinned above the composer.
 public struct LiveStepsBarView: View {
     public let activity: LiveActivityState
     public let accentColor: Color
+
     @State private var isExpanded: Bool = false
 
     public init(activity: LiveActivityState, accentColor: Color) {
@@ -10,159 +13,88 @@ public struct LiveStepsBarView: View {
         self.accentColor = accentColor
     }
 
-    private var steps: [LiveStepItem] {
-        activity.steps ?? []
-    }
+    private var steps: [LiveStepItem] { activity.steps ?? [] }
+    private var runningTasks: [RunningTaskItem] { activity.runningTasks ?? [] }
 
-    private var runningTasks: [RunningTaskItem] {
-        activity.runningTasks ?? []
-    }
-
-    private var doneCount: Int {
-        steps.filter { $0.status == .done }.count
-    }
-
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: SHSpacing.sm) {
-                    if activity.isWorking {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .tint(accentColor)
-                    } else {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(SHColor.statusSuccess)
-                    }
-
-                    Text(headerText)
-                        .font(SHTypography.caption.weight(.medium))
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 6)
-
-                    if !steps.isEmpty {
-                        Text("\(doneCount)/\(steps.count)")
-                            .font(SHTypography.micro.monospacedDigit().weight(.medium))
-                            .foregroundStyle(SHColor.inkMuted)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.06))
-                            .clipShape(Capsule())
-                    }
-
-                    if !steps.isEmpty || !runningTasks.isEmpty {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if !runningTasks.isEmpty && !isExpanded {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(runningTasks) { task in
-                            taskPill(task)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                }
-            }
-
-            if isExpanded {
-                Divider()
-                    .overlay(SHColor.lineHairline)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(steps) { step in
-                        HStack(spacing: 8) {
-                            stepIcon(step.status)
-                            Text(step.title)
-                                .font(SHTypography.caption)
-                                .foregroundStyle(step.status == .done ? SHColor.inkMuted : SHColor.inkPrimary)
-                                .strikethrough(step.status == .skipped)
-                                .lineLimit(2)
-                        }
-                    }
-
-                    if !runningTasks.isEmpty {
-                        HStack(spacing: 6) {
-                            ForEach(runningTasks) { task in
-                                taskPill(task)
-                            }
-                        }
-                        .padding(.top, steps.isEmpty ? 0 : 4)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-        }
-        .background(SHColor.surfacePopover)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-    }
-
-    private var headerText: String {
+    private var titleText: String {
         if let focus = activity.focus, !focus.isEmpty {
             return focus
         }
-        if let current = steps.first(where: { $0.status == .inProgress }) {
-            return current.title
+        if let active = steps.first(where: { $0.status == .inProgress }) {
+            return active.title
         }
-        return activity.isWorking ? "Agent working…" : "Checklist complete"
+        if let task = runningTasks.first {
+            return task.summary
+        }
+        return activity.isWorking ? "Running" : "Activity"
     }
 
-    @ViewBuilder
-    private func stepIcon(_ status: LiveStepStatus) -> some View {
+    private var progressBadge: String? {
+        guard !steps.isEmpty else { return nil }
+        let done = steps.filter { $0.status == .done }.count
+        return "\(done)/\(steps.count)"
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: SHLayout.itemGap) {
+            SHInlineDisclosureRow(
+                icon: "terminal",
+                title: titleText,
+                trailingBadge: progressBadge,
+                tint: activity.isWorking ? accentColor : SHColor.inkMuted,
+                isSpinning: activity.isWorking,
+                isExpanded: isExpanded
+            ) {
+                isExpanded.toggle()
+            }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: SHLayout.itemGap) {
+                    ForEach(steps) { step in
+                        HStack(spacing: 7) {
+                            Image(systemName: stepIcon(step.status))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(stepColor(step.status))
+                            Text(step.title)
+                                .font(SHTypography.caption)
+                                .foregroundStyle(step.status == .done ? SHColor.inkMuted : SHColor.inkSecondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    ForEach(runningTasks) { task in
+                        HStack(spacing: 7) {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 11))
+                                .foregroundStyle(accentColor)
+                            Text(task.command ?? task.summary)
+                                .font(SHTypography.monoSmall)
+                                .foregroundStyle(SHColor.inkSecondary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .padding(.leading, 21)
+                .padding(.bottom, 4)
+            }
+        }
+    }
+
+    private func stepIcon(_ status: LiveStepStatus) -> String {
         switch status {
-        case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(SHColor.statusSuccess)
-        case .inProgress:
-            ProgressView()
-                .controlSize(.mini)
-                .tint(accentColor)
-        case .pending:
-            Image(systemName: "circle")
-                .font(.system(size: 12))
-                .foregroundStyle(SHColor.inkFaint)
-        case .skipped:
-            Image(systemName: "minus.circle")
-                .font(.system(size: 12))
-                .foregroundStyle(SHColor.inkFaint)
-        case .failed:
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(SHColor.statusDanger)
+        case .done: return "checkmark.circle.fill"
+        case .inProgress: return "circle.dotted"
+        case .pending: return "circle"
+        case .skipped: return "minus.circle"
+        case .failed: return "xmark.circle.fill"
         }
     }
 
-    private func taskPill(_ task: RunningTaskItem) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: task.isDaemon == true ? "dot.radiowaves.left.and.right" : "terminal")
-                .font(.system(size: 10))
-                .foregroundStyle(accentColor)
-            Text(task.summary)
-                .font(SHTypography.micro)
-                .foregroundStyle(SHColor.inkSecondary)
-                .lineLimit(1)
+    private func stepColor(_ status: LiveStepStatus) -> Color {
+        switch status {
+        case .done: return SHColor.statusSuccess
+        case .inProgress: return accentColor
+        case .pending, .skipped: return SHColor.inkFaint
+        case .failed: return SHColor.statusDanger
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(SHColor.surfaceRaised)
-        .clipShape(Capsule())
     }
 }

@@ -1,8 +1,25 @@
+import AVFoundation
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
+
+private struct VideoTransferable: Transferable {
+    let url: URL
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            let dst = FileManager.default.temporaryDirectory
+                .appendingPathComponent("sh-video-\(UUID().uuidString).\(received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension)")
+            try? FileManager.default.removeItem(at: dst)
+            try FileManager.default.copyItem(at: received.file, to: dst)
+            return Self(url: dst)
+        }
+    }
+}
 
 public struct ComposerView: View {
     public let session: UnifiedSession
@@ -15,15 +32,18 @@ public struct ComposerView: View {
     public let isStreaming: Bool
     public let isAgentBusy: Bool
     public let onPickPhotoData: (Data, String) -> Void
+    public let onPickFileData: ((Data, String, String, Data?) -> Void)?
     public let onRemoveAttachment: (String) -> Void
     public let onTapAttachment: (ImageAttachment) -> Void
     public let onSelectModel: ((HarnessModelOption) -> Void)?
     public let onSelectReasoningEffort: ((String) -> Void)?
     public let onTranscribeAudio: ((Data) async throws -> String)?
-    public let onSend: () -> Void
+    public let onSend: (SendMode) -> Void
     public let onAbort: () -> Void
 
-    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var selectedMediaItems: [PhotosPickerItem] = []
+    @State private var isPhotoPickerPresented: Bool = false
+    @State private var isFileImporterPresented: Bool = false
     @State private var dictation = DictationController()
 
     public init(
@@ -37,12 +57,13 @@ public struct ComposerView: View {
         isStreaming: Bool,
         isAgentBusy: Bool,
         onPickPhotoData: @escaping (Data, String) -> Void,
+        onPickFileData: ((Data, String, String, Data?) -> Void)? = nil,
         onRemoveAttachment: @escaping (String) -> Void,
         onTapAttachment: @escaping (ImageAttachment) -> Void,
         onSelectModel: ((HarnessModelOption) -> Void)? = nil,
         onSelectReasoningEffort: ((String) -> Void)? = nil,
         onTranscribeAudio: ((Data) async throws -> String)? = nil,
-        onSend: @escaping () -> Void,
+        onSend: @escaping (SendMode) -> Void,
         onAbort: @escaping () -> Void
     ) {
         self.session = session
@@ -55,6 +76,7 @@ public struct ComposerView: View {
         self.isStreaming = isStreaming
         self.isAgentBusy = isAgentBusy
         self.onPickPhotoData = onPickPhotoData
+        self.onPickFileData = onPickFileData
         self.onRemoveAttachment = onRemoveAttachment
         self.onTapAttachment = onTapAttachment
         self.onSelectModel = onSelectModel
@@ -68,136 +90,127 @@ public struct ComposerView: View {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
-    /// Mirrors desktop SessionComposer: Stop (■) replaces Send (↑) while working/streaming
-    /// unless the user types a follow-up (in which case it smoothly switches to Queue ↑).
     private var showsStopButton: Bool {
-        (isStreaming || isAgentBusy) && (session.isMaster || !hasContent)
-    }
-
-    private var isQueueMode: Bool {
-        isAgentBusy && !session.isMaster && hasContent
+        (isStreaming || isAgentBusy) && !hasContent
     }
 
     private var currentModelLabel: String {
-        if let modelId = session.model,
-           let matched = availableModels.first(where: { $0.id == modelId || $0.label == modelId }) {
-            return matched.label
+        if let raw = session.model, !raw.isEmpty {
+            if let match = availableModels.first(where: { $0.id == raw || $0.label == raw }) {
+                return Self.shortModelName(match.label)
+            }
+            return Self.shortModelName(raw)
         }
-        return session.model ?? HarnessVisual.forKind(session.harness).label
+        if let def = availableModels.first(where: { $0.isDefault == true }) ?? availableModels.first {
+            return Self.shortModelName(def.label)
+        }
+        return HarnessVisual.forKind(session.harness).label
+    }
+
+    private var currentEffortLabel: String? {
+        guard !reasoningLevels.isEmpty else { return nil }
+        return (session.reasoningEffort ?? reasoningLevels.last)?.capitalized
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !attachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(attachments) { att in
-                            attachmentThumbnail(att)
-                        }
-                    }
+        SHComposerSurface {
+            VStack(spacing: 0) {
+                if !attachments.isEmpty {
+                    SHAttachmentThumbStrip(
+                        items: attachments.map { att in
+                            SHAttachmentThumbItem(
+                                id: att.id,
+                                name: att.name,
+                                path: att.path,
+                                mimeType: att.mimeType,
+                                dataUrl: att.previewDataUrl,
+                                sizeBytes: att.sizeBytes,
+                                isUploading: uploadingAttachmentIds.contains(att.id)
+                            )
+                        },
+                        thumbSize: SHLayout.composerThumbSize,
+                        onTap: { item in
+                            if let match = attachments.first(where: { $0.id == item.id }) {
+                                onTapAttachment(match)
+                            }
+                        },
+                        onRemove: onRemoveAttachment
+                    )
                     .padding(.horizontal, 12)
                     .padding(.top, 10)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 2)
                 }
-            }
 
-            if let err = dictation.errorMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: "mic.slash.fill")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(SHColor.statusDanger)
-                    Text(err)
-                        .font(SHTypography.micro)
-                        .foregroundStyle(SHColor.statusDanger)
-                        .lineLimit(1)
-                    Spacer()
-                    Button {
-                        dictation.errorMessage = nil
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-            }
-
-            TextField(
-                session.isMaster
-                    ? "Ask Master Orchestrator anything, or /status…"
-                    : (isAgentBusy ? "Type a follow-up to queue…" : "Ask anything…"),
-                text: $text,
-                axis: .vertical
-            )
-            .lineLimit(1...6)
-            .font(SHTypography.body)
-            .foregroundStyle(SHColor.inkPrimary)
-            .padding(.horizontal, 14)
-            .padding(.top, 11)
-            .padding(.bottom, 8)
-            .accessibilityIdentifier("composer.input")
-
-            HStack(spacing: 8) {
-                PhotosPicker(
-                    selection: $selectedPhotoItems,
-                    maxSelectionCount: 4,
-                    matching: .images
-                ) {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 15.5, weight: .medium))
-                        .foregroundStyle(SHColor.inkMuted)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .onChange(of: selectedPhotoItems) { _, newItems in
-                    guard !newItems.isEmpty else { return }
-                    let items = newItems
-                    selectedPhotoItems = []
-                    Task {
-                        for (index, item) in items.enumerated() {
-                            if let rawData = try? await item.loadTransferable(type: Data.self) {
-                                let jpeg = await Task.detached(priority: .userInitiated) {
-                                    Self.compressedJPEG(from: rawData) ?? rawData
-                                }.value
-                                onPickPhotoData(jpeg, "photo-\(index + 1).jpg")
-                            }
+                if let err = dictation.errorMessage {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mic.slash.fill")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(SHColor.statusDanger)
+                        Text(err)
+                            .font(SHTypography.micro)
+                            .foregroundStyle(SHColor.statusDanger)
+                            .lineLimit(1)
+                        Spacer()
+                        Button {
+                            dictation.errorMessage = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
                         }
+                        .buttonStyle(.plain)
                     }
-                }
-                .accessibilityLabel("Attach image")
-
-                // Interactive Model & Effort menus (for non-Master sessions when catalog is available)
-                modelAndEffortControls
-
-                Spacer(minLength: 4)
-
-                if isQueueMode {
-                    Text("Queue")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(SHColor.statusWarning)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(SHColor.statusWarning.opacity(0.14))
-                        .clipShape(Capsule())
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
                 }
 
-                if onTranscribeAudio != nil {
-                    micButton
-                }
+                TextField(
+                    session.isMaster
+                        ? "Ask Master Orchestrator anything, or /status…"
+                        : "Message \(HarnessVisual.forKind(session.harness).label)…",
+                    text: $text,
+                    axis: .vertical
+                )
+                .lineLimit(1...5)
+                .font(SHTypography.body)
+                .foregroundStyle(SHColor.inkPrimary)
+                .padding(.horizontal, 14)
+                .padding(.top, 11)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("composer.input")
 
-                actionButton
+                HStack(spacing: 8) {
+                    attachMenuButton
+                    combinedModelEffortPill
+                    Spacer(minLength: 4)
+                    if onTranscribeAudio != nil {
+                        micButton
+                    }
+                    actionButton
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 10)
         }
-        .background(SHColor.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous))
-        .animation(.easeInOut(duration: 0.16), value: showsStopButton)
-        .animation(.easeInOut(duration: 0.16), value: isQueueMode)
-        .animation(.easeInOut(duration: 0.16), value: dictation.state)
+        .photosPicker(
+            isPresented: $isPhotoPickerPresented,
+            selection: $selectedMediaItems,
+            maxSelectionCount: 4,
+            matching: .any(of: [.images, .videos])
+        )
+        .onChange(of: selectedMediaItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            let items = newItems
+            selectedMediaItems = []
+            handlePickedMediaItems(items)
+        }
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            handleImportedFiles(result)
+        }
         .onDisappear {
             if dictation.state == .recording {
                 dictation.cancel()
@@ -205,42 +218,49 @@ public struct ComposerView: View {
         }
     }
 
+    private var attachMenuButton: some View {
+        Menu {
+            Button {
+                isPhotoPickerPresented = true
+            } label: {
+                Label("Photos & Videos", systemImage: "photo.on.rectangle.angled")
+            }
+            Button {
+                isFileImporterPresented = true
+            } label: {
+                Label("Choose File", systemImage: "doc")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SHColor.inkSecondary)
+                .frame(width: 30, height: 30)
+                .background(SHColor.surfaceBubble, in: Circle())
+        }
+        .accessibilityLabel("Attach media or file")
+        .accessibilityIdentifier("composer.attach")
+    }
+
     @ViewBuilder
-    private var modelAndEffortControls: some View {
-        if !session.isMaster && !availableModels.isEmpty, let onSelectModel {
-            HStack(spacing: 6) {
-                Menu {
+    private var combinedModelEffortPill: some View {
+        if !availableModels.isEmpty, let onSelectModel {
+            Menu {
+                Section("Model") {
                     ForEach(availableModels) { option in
                         Button {
                             onSelectModel(option)
                         } label: {
-                            if session.model == option.id || session.model == option.label {
+                            let isSelected = (session.model == option.id || session.model == option.label)
+                            if isSelected {
                                 Label(option.label, systemImage: "checkmark")
                             } else {
                                 Text(option.label)
                             }
                         }
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        HarnessLogoView(harness: session.harness, size: 12.5)
-                        Text(currentModelLabel)
-                            .font(SHTypography.micro.weight(.medium))
-                            .foregroundStyle(SHColor.inkSecondary)
-                            .lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 8.5, weight: .semibold))
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(SHColor.surfaceSubtle)
-                    .clipShape(Capsule())
                 }
-                .accessibilityLabel("Switch model")
-
                 if !reasoningLevels.isEmpty, let onSelectReasoningEffort {
-                    Menu {
+                    Section("Thinking Effort") {
                         ForEach(reasoningLevels, id: \.self) { level in
                             Button {
                                 onSelectReasoningEffort(level)
@@ -252,32 +272,38 @@ public struct ComposerView: View {
                                 }
                             }
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 9.5, weight: .semibold))
-                                .foregroundStyle(SHColor.harness(session.harness))
-                            Text((session.reasoningEffort ?? reasoningLevels.last ?? "High").capitalized)
-                                .font(SHTypography.micro.weight(.medium))
-                                .foregroundStyle(SHColor.inkSecondary)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(SHColor.surfaceSubtle)
-                        .clipShape(Capsule())
                     }
-                    .accessibilityLabel("Switch thinking effort")
                 }
+            } label: {
+                HStack(spacing: 5) {
+                    HarnessLogoView(harness: session.harness, size: 12.5)
+                    Text(currentModelLabel)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .lineLimit(1)
+                    if let effort = currentEffortLabel {
+                        Text(effort)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(SHColor.inkMuted)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(SHColor.surfaceBubble, in: Capsule())
             }
+            .accessibilityLabel("Switch model and effort")
         } else {
-            HStack(spacing: 6) {
-                HarnessLogoView(harness: session.harness, size: 13)
+            HStack(spacing: 5) {
+                HarnessLogoView(harness: session.harness, size: 12.5)
                 Text(currentModelLabel)
-                    .font(SHTypography.micro)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
                     .lineLimit(1)
             }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
         }
     }
 
@@ -290,11 +316,10 @@ public struct ComposerView: View {
                 Task { await handleDictationTap() }
             } label: {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 13.5, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
                     .frame(width: 30, height: 30)
-                    .background(SHColor.surfaceSubtle)
-                    .clipShape(Circle())
+                    .background(SHColor.surfaceBubble, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Start voice dictation")
@@ -318,24 +343,20 @@ public struct ComposerView: View {
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
-                .background(SHColor.statusDanger.opacity(0.16))
-                .clipShape(Capsule())
+                .background(SHColor.statusDanger.opacity(0.16), in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop recording and transcribe")
             .accessibilityIdentifier("composer.mic")
 
         case .transcribing:
-            HStack(spacing: 5) {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(SHColor.brandAntigravity)
-            }
-            .frame(width: 30, height: 30)
-            .background(SHColor.surfaceSubtle)
-            .clipShape(Circle())
-            .accessibilityLabel("Transcribing voice dictation")
-            .accessibilityIdentifier("composer.mic")
+            ProgressView()
+                .controlSize(.mini)
+                .tint(SHColor.brandAntigravity)
+                .frame(width: 30, height: 30)
+                .background(SHColor.surfaceBubble, in: Circle())
+                .accessibilityLabel("Transcribing voice dictation")
+                .accessibilityIdentifier("composer.mic")
         }
     }
 
@@ -351,6 +372,7 @@ public struct ComposerView: View {
         }
     }
 
+    /// Default tap immediately steers (`SendMode.steer`). Long-press opens a menu to Steer Now or Queue for Later.
     @ViewBuilder
     private var actionButton: some View {
         if showsStopButton {
@@ -361,9 +383,8 @@ public struct ComposerView: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(SHColor.surfaceRail)
-                    .frame(width: 32, height: 32)
-                    .background(SHColor.inkPrimary)
-                    .clipShape(Circle())
+                    .frame(width: 30, height: 30)
+                    .background(SHColor.inkPrimary, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop agent")
@@ -371,7 +392,7 @@ public struct ComposerView: View {
         } else {
             Button {
                 triggerHaptic(.light)
-                onSend()
+                onSend(.steer)
             } label: {
                 Group {
                     if isSending {
@@ -380,74 +401,127 @@ public struct ComposerView: View {
                             .tint(SHColor.surfaceRail)
                     } else {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 13.5, weight: .bold))
                             .foregroundStyle(SHColor.surfaceRail)
                     }
                 }
-                .frame(width: 32, height: 32)
-                .background(isQueueMode ? SHColor.statusWarning : SHColor.inkPrimary)
-                .opacity(hasContent && !isSending ? 1.0 : 0.25)
-                .clipShape(Circle())
+                .frame(width: 30, height: 30)
+                .background(SHColor.inkPrimary, in: Circle())
+                .opacity(hasContent && !isSending ? 1.0 : 0.28)
             }
             .buttonStyle(.plain)
             .disabled(!hasContent || isSending)
-            .accessibilityLabel(isQueueMode ? "Queue follow-up message" : "Send message")
+            .contextMenu {
+                if hasContent && !isSending {
+                    Button {
+                        triggerHaptic(.light)
+                        onSend(.steer)
+                    } label: {
+                        Label("Steer Now", systemImage: "arrow.up.circle.fill")
+                    }
+                    Button {
+                        triggerHaptic(.light)
+                        onSend(.queue)
+                    } label: {
+                        Label("Queue for Later", systemImage: "text.badge.plus")
+                    }
+                }
+            }
+            .accessibilityLabel("Send message")
             .accessibilityIdentifier("composer.send")
         }
     }
 
-    private func attachmentThumbnail(_ att: ImageAttachment) -> some View {
-        ZStack(alignment: .topTrailing) {
-            Button {
-                onTapAttachment(att)
-            } label: {
-                Group {
-                    if let uiImage = DataURLImageDecoder.decode(att.previewDataUrl) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        ZStack {
-                            SHColor.surfaceRaised
-                            Image(systemName: "photo")
-                                .foregroundStyle(SHColor.inkMuted)
-                        }
-                    }
-                }
-                .frame(width: 54, height: 54)
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-                .overlay {
-                    if uploadingAttachmentIds.contains(att.id) {
-                        ZStack {
-                            Color.black.opacity(0.38)
-                            ProgressView()
-                                .controlSize(.mini)
-                                .tint(.white)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-                    }
-                }
-            }
-            .buttonStyle(.plain)
+    // MARK: - Media & File Picking Helpers
 
-            Button {
-                onRemoveAttachment(att.id)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(SHColor.inkPrimary, SHColor.surfaceRail)
+    private func handlePickedMediaItems(_ items: [PhotosPickerItem]) {
+        Task {
+            for (index, item) in items.enumerated() {
+                let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) })
+                if isVideo, let video = try? await item.loadTransferable(type: VideoTransferable.self) {
+                    let result = await Task.detached(priority: .userInitiated) { () -> (Data, String, String, Data?)? in
+                        defer { try? FileManager.default.removeItem(at: video.url) }
+                        guard let raw = try? Data(contentsOf: video.url), !raw.isEmpty else { return nil }
+                        let ext = video.url.pathExtension.lowercased()
+                        let mime = ext == "mp4" ? "video/mp4" : "video/quicktime"
+                        let thumb = await Self.videoThumbnailJPEG(url: video.url)
+                        return (raw, mime, "video-\(index + 1).\(ext.isEmpty ? "mov" : ext)", thumb)
+                    }.value
+                    if let (data, mime, name, thumb) = result {
+                        if let onPickFileData {
+                            onPickFileData(data, mime, name, thumb)
+                        }
+                    }
+                } else if let rawData = try? await item.loadTransferable(type: Data.self) {
+                    let jpeg = await Task.detached(priority: .userInitiated) {
+                        Self.downscaledJPEG(from: rawData, maxDimension: 1600, quality: 0.75) ?? rawData
+                    }.value
+                    onPickPhotoData(jpeg, "photo-\(index + 1).jpg")
+                }
             }
-            .buttonStyle(.plain)
-            .offset(x: 4, y: -4)
-            .accessibilityLabel("Remove \(att.name)")
         }
+    }
+
+    private func handleImportedFiles(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result else { return }
+        Task {
+            for url in urls.prefix(4) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                let prepared = await Task.detached(priority: .userInitiated) { () -> (Data, String, String, Data?)? in
+                    defer {
+                        if accessed { url.stopAccessingSecurityScopedResource() }
+                    }
+                    guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+                    let name = url.lastPathComponent.isEmpty ? "file.bin" : url.lastPathComponent
+                    let utType = UTType(filenameExtension: url.pathExtension)
+                    let mime = utType?.preferredMIMEType ?? "application/octet-stream"
+                    if mime.hasPrefix("image/") {
+                        let jpeg = Self.downscaledJPEG(from: data, maxDimension: 1600, quality: 0.75) ?? data
+                        return (jpeg, "image/jpeg", name, jpeg)
+                    } else if mime.hasPrefix("video/") {
+                        let thumb = await Self.videoThumbnailJPEG(url: url)
+                        return (data, mime, name, thumb)
+                    }
+                    return (data, mime, name, nil)
+                }.value
+                if let (data, mime, name, thumb) = prepared {
+                    if let onPickFileData {
+                        onPickFileData(data, mime, name, thumb)
+                    } else if mime.hasPrefix("image/") {
+                        onPickPhotoData(data, name)
+                    }
+                }
+            }
+        }
+    }
+
+    nonisolated private static func videoThumbnailJPEG(url: URL) async -> Data? {
+        #if canImport(UIKit)
+        let asset = AVURLAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 320, height: 320)
+        guard let result = try? await gen.image(at: CMTime(seconds: 0.1, preferredTimescale: 600)) else {
+            return nil
+        }
+        return UIImage(cgImage: result.image).jpegData(compressionQuality: 0.72)
+        #else
+        return nil
+        #endif
     }
 
     private func triggerHaptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         #if canImport(UIKit)
         UIImpactFeedbackGenerator(style: style).impactOccurred()
         #endif
+    }
+
+    private static func shortModelName(_ label: String) -> String {
+        // Strip trailing parenthesized effort "(Medium)" when effort is already shown alongside.
+        if let idx = label.range(of: " (") {
+            return String(label[..<idx.lowerBound])
+        }
+        return label
     }
 
     nonisolated public static func downscaledJPEG(from data: Data, maxDimension: CGFloat = 1600, quality: CGFloat = 0.75) -> Data? {
@@ -471,9 +545,5 @@ public struct ComposerView: View {
         #else
         return data
         #endif
-    }
-
-    nonisolated private static func compressedJPEG(from data: Data) -> Data? {
-        downscaledJPEG(from: data, maxDimension: 1600, quality: 0.75)
     }
 }

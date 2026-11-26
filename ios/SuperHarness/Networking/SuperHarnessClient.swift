@@ -57,14 +57,32 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func fetchDictationStatus(overrideURL: String?, overrideToken: String?) async -> DictationStatusResponse?
     func transcribeAudio(wavData: Data, overrideURL: String?, overrideToken: String?) async throws -> String
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment]) async throws -> SendMessageResult
+    func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment], mode: SendMode) async throws -> SendMessageResult
     func abortRun(sessionId: String) async throws -> Bool
     func startSession(_ request: StartSessionRequest) async throws -> StartSessionResponse
     func organize(actions: [OrganizeAction]) async throws -> OrganizeResponse
     func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse
     func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse
     func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment
+    func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment
+    func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool
+    func sendTestPush() async throws -> Bool
     func testConnection() async throws -> ConnectionTestResult
     func eventStream() -> AsyncStream<SuperHarnessServerEvent>
+}
+
+public extension SuperHarnessClientProtocol {
+    func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment], mode: SendMode) async throws -> SendMessageResult {
+        try await sendMessage(sessionId: sessionId, message: message, attachments: attachments)
+    }
+
+    func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment {
+        let dataUrl = "data:\(mimeType);base64,\(data.base64EncodedString())"
+        return try await uploadAttachment(dataUrl: dataUrl, filename: filename)
+    }
+
+    func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool { false }
+    func sendTestPush() async throws -> Bool { false }
 }
 
 private final class LockedEventIdBox: @unchecked Sendable {
@@ -339,10 +357,16 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
     }
 
     public func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment]) async throws -> SendMessageResult {
+        try await sendMessage(sessionId: sessionId, message: message, attachments: attachments, mode: .steer)
+    }
+
+    public func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment], mode: SendMode) async throws -> SendMessageResult {
         struct SendBody: Encodable {
             let sessionId: String
             let message: String
             let attachments: [ImageAttachment]?
+            let mode: String
+            let force: Bool
         }
         // Avoid re-uploading megabytes of base64 previewDataUrl when the attachment is already stored on host.
         let wireAttachments: [ImageAttachment]? = attachments.isEmpty ? nil : attachments.map { att in
@@ -352,13 +376,16 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
                 name: att.name,
                 path: att.path,
                 mimeType: att.mimeType,
-                previewDataUrl: nil
+                previewDataUrl: nil,
+                sizeBytes: att.sizeBytes
             )
         }
         let body = SendBody(
             sessionId: sessionId,
             message: message,
-            attachments: wireAttachments
+            attachments: wireAttachments,
+            mode: mode.rawValue,
+            force: mode == .steer
         )
         return try await request(path: "/api/send", method: "POST", body: body)
     }
@@ -415,6 +442,67 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
                 previewDataUrl: dataUrl
             )
         }
+    }
+
+    /// Raw binary upload (zero base64 overhead) supporting images, videos, and arbitrary files up to 50 MB.
+    public func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment {
+        guard let url = makeURL(path: "/api/attachments") else {
+            throw SuperHarnessAPIError.invalidURL("/api/attachments")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120
+        req.httpBody = data
+        req.setValue(mimeType.isEmpty ? "application/octet-stream" : mimeType, forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let filename, !filename.isEmpty {
+            let encoded = filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename
+            req.setValue(encoded, forHTTPHeaderField: "X-Filename")
+        }
+        if !token.isEmpty {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (respData, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw SuperHarnessAPIError.httpError(0, "Invalid HTTP response")
+        }
+        switch http.statusCode {
+        case 200..<300:
+            return try decoder.decode(ImageAttachment.self, from: respData)
+        case 401:
+            throw SuperHarnessAPIError.unauthorized
+        case 404:
+            throw SuperHarnessAPIError.notFound("/api/attachments")
+        default:
+            let message = String(data: respData, encoding: .utf8) ?? "Attachment upload failed"
+            throw SuperHarnessAPIError.httpError(http.statusCode, message)
+        }
+    }
+
+    public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool {
+        struct PushRegBody: Encodable { let rid: String; let relayUrl: String; let enabled: Bool }
+        struct PushRegResp: Decodable { let ok: Bool }
+        do {
+            let resp: PushRegResp = try await request(
+                path: "/api/push/register",
+                method: "POST",
+                body: PushRegBody(rid: rid, relayUrl: relayUrl, enabled: enabled)
+            )
+            return resp.ok
+        } catch {
+            return false
+        }
+    }
+
+    public func sendTestPush() async throws -> Bool {
+        struct PushTestBody: Encodable { let title: String; let body: String }
+        struct PushTestResp: Decodable { let ok: Bool }
+        let resp: PushTestResp = try await request(
+            path: "/api/push/test",
+            method: "POST",
+            body: PushTestBody(title: "Super Harness", body: "Push notifications are active!")
+        )
+        return resp.ok
     }
 
     public func testConnection() async throws -> ConnectionTestResult {

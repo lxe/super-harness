@@ -8,34 +8,53 @@ import UIKit
 public enum CoalescedSegment: Sendable, Equatable {
     case single(UnifiedBlock)
     case traceGroup([UnifiedBlock])
+    case imageGroup([UnifiedBlock])
 
     public static func coalesce(_ blocks: [UnifiedBlock]) -> [CoalescedSegment] {
         var result: [CoalescedSegment] = []
-        var buffer: [UnifiedBlock] = []
+        var traceBuf: [UnifiedBlock] = []
+        var imageBuf: [UnifiedBlock] = []
 
-        func flush() {
-            if buffer.count >= 2 {
-                result.append(.traceGroup(buffer))
-            } else if let only = buffer.first {
-                result.append(.single(only))
+        func flushTrace() {
+            if !traceBuf.isEmpty {
+                // Coalesce diffs and multi-step traces under one calm disclosure row;
+                // a single standalone diff also folds into a traceGroup so file changes never spam the main view.
+                if traceBuf.count >= 2 || traceBuf.contains(where: { if case .fileChange = $0 { return true }; return false }) {
+                    result.append(.traceGroup(traceBuf))
+                } else if let only = traceBuf.first {
+                    result.append(.single(only))
+                }
+                traceBuf.removeAll(keepingCapacity: true)
             }
-            buffer.removeAll(keepingCapacity: true)
+        }
+
+        func flushImages() {
+            if !imageBuf.isEmpty {
+                result.append(.imageGroup(imageBuf))
+                imageBuf.removeAll(keepingCapacity: true)
+            }
         }
 
         for block in blocks {
             if block.isTraceBlock {
-                buffer.append(block)
+                flushImages()
+                traceBuf.append(block)
+            } else if case .image = block {
+                flushTrace()
+                imageBuf.append(block)
             } else {
-                flush()
+                flushTrace()
+                flushImages()
                 result.append(.single(block))
             }
         }
-        flush()
+        flushTrace()
+        flushImages()
         return result
     }
 }
 
-// MARK: - Collapsed Trace Group
+// MARK: - Collapsed Trace Group (Compact Inline Disclosure Row)
 
 public struct CollapsedTraceGroupView: View, Equatable {
     public let blocks: [UnifiedBlock]
@@ -61,34 +80,17 @@ public struct CollapsedTraceGroupView: View, Equatable {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: SHSpacing.sm) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(SHColor.inkFaint)
-                    Image(systemName: "bolt.horizontal.circle")
-                        .font(.system(size: 13))
-                        .foregroundStyle(SHColor.inkMuted)
-                    Text(summaryText)
-                        .font(SHTypography.caption)
-                        .foregroundStyle(SHColor.inkMuted)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .padding(.horizontal, 13)
-                .padding(.vertical, 10)
-                .background(SHColor.surfaceSubtle)
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        VStack(alignment: .leading, spacing: SHLayout.itemGap) {
+            SHInlineDisclosureRow(
+                icon: summaryIcon,
+                title: summaryText,
+                isExpanded: isExpanded
+            ) {
+                isExpanded.toggle()
             }
-            .buttonStyle(.plain)
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: SHSpacing.sm) {
+                VStack(alignment: .leading, spacing: SHLayout.itemGap) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                         UnifiedBlockView(
                             block: block,
@@ -99,15 +101,23 @@ public struct CollapsedTraceGroupView: View, Equatable {
                         )
                     }
                 }
-                .padding(.leading, 10)
+                .padding(.leading, 12)
                 .overlay(alignment: .leading) {
                     Rectangle()
                         .fill(SHColor.lineSubtle)
-                        .frame(width: 2)
+                        .frame(width: 1.5)
                         .padding(.vertical, 2)
                 }
             }
         }
+    }
+
+    private var summaryIcon: String {
+        let cmdCount = blocks.filter { if case .command = $0 { return true }; return false }.count
+        let thinkCount = blocks.filter { if case .thinking = $0 { return true }; return false }.count
+        if cmdCount > 0 && thinkCount == 0 { return "list.bullet" }
+        if thinkCount > 0 { return "sparkles" }
+        return "list.bullet"
     }
 
     private var summaryText: String {
@@ -116,11 +126,20 @@ public struct CollapsedTraceGroupView: View, Equatable {
         let cmdCount = blocks.filter { if case .command = $0 { return true }; return false }.count
         let toolCount = blocks.filter { if case .toolCall = $0 { return true }; return false }.count
         let searchCount = blocks.filter { if case .webSearch = $0 { return true }; return false }.count
+        let diffFileCount = blocks.reduce(0) { acc, blk in
+            if case .fileChange(let changes, _) = blk { return acc + max(1, changes.count) }
+            return acc
+        }
         if thinkCount > 0 { counts.append(thinkCount == 1 ? "Thought" : "\(thinkCount) thoughts") }
-        if cmdCount > 0 { counts.append(cmdCount == 1 ? "1 command" : "\(cmdCount) commands") }
+        if cmdCount > 0 {
+            counts.append(cmdCount == 1 ? "Ran 1 command" : "Ran \(cmdCount) commands")
+        }
         if toolCount > 0 { counts.append(toolCount == 1 ? "1 tool" : "\(toolCount) tools") }
         if searchCount > 0 { counts.append(searchCount == 1 ? "1 search" : "\(searchCount) searches") }
-        return counts.isEmpty ? "\(blocks.count) trace steps" : counts.joined(separator: " · ")
+        if diffFileCount > 0 {
+            counts.append(diffFileCount == 1 ? "1 file changed" : "\(diffFileCount) files changed")
+        }
+        return counts.isEmpty ? "\(blocks.count) steps" : counts.joined(separator: " · ")
     }
 }
 
@@ -300,15 +319,11 @@ private struct MarkdownTextBlockView: View, Equatable {
 
     var body: some View {
         let chunks = MarkdownRenderCache.chunks(for: text)
-        VStack(alignment: .leading, spacing: SHSpacing.sm) {
+        VStack(alignment: .leading, spacing: SHLayout.blockGap) {
             ForEach(chunks) { chunk in
                 switch chunk {
                 case .prose(_, let content):
-                    proseText(content)
-                        .font(SHTypography.body)
-                        .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    proseView(content)
                 case .code(_, let lang, let code):
                     CopyableCodeCard(language: lang, code: code)
                 }
@@ -316,7 +331,63 @@ private struct MarkdownTextBlockView: View, Equatable {
         }
     }
 
-    private func proseText(_ raw: String) -> Text {
+    @ViewBuilder
+    private func proseView(_ raw: String) -> some View {
+        let paragraphs = raw.components(separatedBy: "\n")
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty {
+                    EmptyView()
+                } else if trimmed.hasPrefix("### ") {
+                    styledText(String(trimmed.dropFirst(4)))
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .padding(.top, 4)
+                } else if trimmed.hasPrefix("## ") {
+                    styledText(String(trimmed.dropFirst(3)))
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .padding(.top, 5)
+                } else if trimmed.hasPrefix("# ") {
+                    styledText(String(trimmed.dropFirst(2)))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .padding(.top, 6)
+                } else if trimmed.hasPrefix("> ") {
+                    styledText(String(trimmed.dropFirst(2)))
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .padding(.leading, 10)
+                        .overlay(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(SHColor.lineStrong)
+                                .frame(width: 2.5)
+                        }
+                } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                    HStack(alignment: .top, spacing: 7) {
+                        Text("•")
+                            .font(SHTypography.body)
+                            .foregroundStyle(SHColor.inkMuted)
+                        styledText(String(trimmed.dropFirst(2)))
+                            .font(SHTypography.body)
+                            .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
+                            .lineSpacing(2.5)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    styledText(line)
+                        .font(SHTypography.body)
+                        .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
+                        .lineSpacing(2.5)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private func styledText(_ raw: String) -> Text {
         if let attr = MarkdownRenderCache.attributedString(for: raw) {
             return Text(attr)
         }
@@ -391,81 +462,24 @@ private struct ImageBlockView: View {
     let onTapImage: (LightboxPayload) -> Void
     let onLoadMedia: ((String) async -> Data?)?
 
-    #if canImport(UIKit)
-    @State private var remoteImage: UIImage?
-    #endif
-    @State private var isLoadingRemote = false
-
     var body: some View {
         let title = name ?? ((path as NSString).lastPathComponent.isEmpty ? "Image" : (path as NSString).lastPathComponent)
-        Button {
-            onTapImage(LightboxPayload(title: title, dataUrl: dataUrl, path: path))
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                #if canImport(UIKit)
-                if let uiImage = DataURLImageDecoder.decode(dataUrl) ?? remoteImage {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 260, maxHeight: 190)
-                        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-                } else if isLoadingRemote {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text(title)
-                            .font(SHTypography.caption)
-                            .foregroundStyle(SHColor.inkMuted)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
-                } else {
-                    imagePlaceholder(title: title)
-                }
-                #else
-                imagePlaceholder(title: title)
-                #endif
-
-                HStack(spacing: 4) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 10))
-                    Text(title)
-                        .font(SHTypography.micro)
-                        .lineLimit(1)
-                }
-                .foregroundStyle(SHColor.inkMuted)
-            }
-            .padding(10)
-            .background(SHColor.surfaceCode)
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .task(id: path) {
-            #if canImport(UIKit)
-            guard DataURLImageDecoder.decode(dataUrl) == nil,
-                  remoteImage == nil,
-                  !path.isEmpty,
-                  let loader = onLoadMedia else {
-                return
-            }
-            isLoadingRemote = true
-            defer { isLoadingRemote = false }
-            if let data = await loader(path), let img = UIImage(data: data) {
-                remoteImage = img
-            }
-            #endif
-        }
-    }
-
-    private func imagePlaceholder(title: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "photo.fill")
-                .foregroundStyle(SHColor.inkMuted)
-            Text(title)
-                .font(SHTypography.caption)
-                .foregroundStyle(SHColor.inkSecondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 16)
+        SHAttachmentThumbStrip(
+            items: [
+                SHAttachmentThumbItem(
+                    id: path.isEmpty ? title : path,
+                    name: title,
+                    path: path,
+                    mimeType: "image/jpeg",
+                    dataUrl: dataUrl
+                )
+            ],
+            thumbSize: SHLayout.thumbSize,
+            onTap: { item in
+                onTapImage(LightboxPayload(title: item.name, dataUrl: item.dataUrl, path: item.path))
+            },
+            onLoadMedia: onLoadMedia
+        )
     }
 }
 

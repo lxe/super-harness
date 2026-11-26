@@ -34,6 +34,18 @@ export interface ControlServerHooks {
   onMessageSent?: (sessionId: string) => void;
   abortRun?: (sessionId: string) => Promise<{ ok: boolean }>;
   saveAttachment?: (dataUrl: string, filename?: string) => Promise<ImageAttachment>;
+  saveRawAttachment?: (
+    buffer: Buffer,
+    mimeType: string,
+    filename?: string
+  ) => Promise<ImageAttachment & { sizeBytes?: number; kind?: 'image' | 'video' | 'file' }>;
+  queueMessage?: (
+    sessionId: string,
+    prompt: string,
+    attachments?: ImageAttachment[]
+  ) => Promise<SendMessageResult>;
+  registerPushDevice?: (opts: { rid?: string; relayUrl?: string; enabled?: boolean }) => unknown;
+  sendTestPush?: (opts?: { title?: string; body?: string }) => Promise<unknown>;
   readFilePreview?: (
     filePath: string,
     startLine?: number,
@@ -241,10 +253,9 @@ export class ControlServer {
       }
 
       const url = new URL(req.url || '/', 'http://127.0.0.1');
-      const readRawBody = async (): Promise<Buffer> => {
+      const readRawBody = async (maxBytes = 55 * 1024 * 1024): Promise<Buffer> => {
         const chunks: Buffer[] = [];
         let total = 0;
-        const maxBytes = 25 * 1024 * 1024;
         for await (const c of req) {
           const buf = c as Buffer;
           total += buf.length;
@@ -584,15 +595,42 @@ export class ControlServer {
         if (req.method === 'POST' && url.pathname === '/api/send') {
           const body = await readBody();
           const sessionId = String(body.sessionId || '');
-          const message = String(body.message ?? body.prompt ?? '');
-          const attachments = Array.isArray(body.attachments)
+          const rawMessage = String(body.message ?? body.prompt ?? '');
+          const rawAttachments = Array.isArray(body.attachments)
             ? (body.attachments as ImageAttachment[])
             : undefined;
-          const opts =
-            typeof body.force === 'boolean' ? { force: body.force } : undefined;
-          const result = this.hooks.sendMessage
-            ? await this.hooks.sendMessage(sessionId, message, attachments, opts)
-            : await this.dispatcher.sendToSession(sessionId, message, attachments, opts);
+          const mode = body.mode === 'queue' ? 'queue' : 'steer';
+
+          // Pass images through native attachment slots and append file/video paths to prompt so all harnesses can access them.
+          const imageAttachments: ImageAttachment[] = [];
+          const fileNotes: string[] = [];
+          for (const att of rawAttachments ?? []) {
+            const mime = String(att.mimeType || '').toLowerCase();
+            if (mime.startsWith('image/')) {
+              imageAttachments.push(att);
+            } else if (att.path) {
+              const label = mime.startsWith('video/') ? 'Attached video' : 'Attached file';
+              fileNotes.push(`[${label}: ${att.path}]`);
+            }
+          }
+          const message =
+            fileNotes.length > 0
+              ? [rawMessage.trim(), ...fileNotes].filter(Boolean).join('\n\n')
+              : rawMessage;
+          const attachments = imageAttachments.length > 0 ? imageAttachments : undefined;
+
+          // Default to immediate steer (force: true); long-press Queue sends mode: 'queue'.
+          const result =
+            mode === 'queue'
+              ? this.hooks.queueMessage
+                ? await this.hooks.queueMessage(sessionId, message, attachments)
+                : await this.dispatcher.queueToSession(sessionId, message, attachments)
+              : await (async () => {
+                  const opts = { force: typeof body.force === 'boolean' ? body.force : true };
+                  return this.hooks.sendMessage
+                    ? this.hooks.sendMessage(sessionId, message, attachments, opts)
+                    : this.dispatcher.sendToSession(sessionId, message, attachments, opts);
+                })();
 
           if (result.ok && sessionId) {
             // Ensure liveSync is actively watching this session and immediately push
@@ -699,20 +737,66 @@ export class ControlServer {
         }
 
         if (req.method === 'POST' && url.pathname === '/api/attachments') {
-          if (!this.hooks.saveAttachment) {
+          if (!this.hooks.saveAttachment && !this.hooks.saveRawAttachment) {
             sendJson({ error: 'Attachments endpoint not configured' }, 404);
+            return;
+          }
+          const reqContentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+          if (reqContentType && reqContentType !== 'application/json' && this.hooks.saveRawAttachment) {
+            const rawBuf = await readRawBody(55 * 1024 * 1024);
+            if (rawBuf.length === 0) {
+              sendJson({ error: 'Empty attachment payload' }, 400);
+              return;
+            }
+            const headerName = String(req.headers['x-filename'] || url.searchParams.get('filename') || '').trim();
+            const decodedName = headerName ? decodeURIComponent(headerName) : undefined;
+            const attachment = await this.hooks.saveRawAttachment(rawBuf, reqContentType, decodedName);
+            sendJson(
+              attachment.path
+                ? { ...attachment, previewDataUrl: undefined }
+                : attachment
+            );
             return;
           }
           const body = await readBody();
           const dataUrl = String(body.dataUrl || '');
           const filename = body.filename ? String(body.filename) : undefined;
-          const attachment = await this.hooks.saveAttachment(dataUrl, filename);
+          const attachment = await this.hooks.saveAttachment!(dataUrl, filename);
           // Avoid echoing multi-MB base64 dataUrl back down cellular/Tailscale links when saved to disk.
           sendJson(
             attachment.path
               ? { ...attachment, previewDataUrl: undefined }
               : attachment
           );
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/push/register') {
+          if (!this.hooks.registerPushDevice) {
+            sendJson({ ok: false, error: 'Push notifications not configured on host' }, 404);
+            return;
+          }
+          const body = await readBody();
+          const record = this.hooks.registerPushDevice({
+            rid: typeof body.rid === 'string' ? body.rid : undefined,
+            relayUrl: typeof body.relayUrl === 'string' ? body.relayUrl : undefined,
+            enabled: typeof body.enabled === 'boolean' ? body.enabled : true,
+          });
+          sendJson({ ok: Boolean(record), device: record });
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/push/test') {
+          if (!this.hooks.sendTestPush) {
+            sendJson({ ok: false, error: 'Push notifications not configured on host' }, 404);
+            return;
+          }
+          const body = await readBody();
+          const result = await this.hooks.sendTestPush({
+            title: typeof body.title === 'string' ? body.title : undefined,
+            body: typeof body.body === 'string' ? body.body : undefined,
+          });
+          sendJson({ ok: true, result });
           return;
         }
 

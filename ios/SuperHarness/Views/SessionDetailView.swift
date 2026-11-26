@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public struct SessionDetailView: View {
     @Bindable var store: AppStore
@@ -12,9 +15,9 @@ public struct SessionDetailView: View {
     @State private var isLoadingEarlier: Bool = false
     @State private var scrollToBottomTrigger: Int = 0
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
-    /// Brief window after our own programmatic scroll (send / Latest) during which momentum
-    /// from a previous fling can never unpin the transcript.
+    @State private var anchoredSessionId: String? = nil
     @State private var suppressUnpinUntil: Date = .distantPast
+    @State private var stableQueuedMessages: [QueuedMessageItem] = []
 
     public init(store: AppStore, session: UnifiedSession) {
         self.store = store
@@ -22,7 +25,6 @@ public struct SessionDetailView: View {
     }
 
     public var body: some View {
-        // Compute currentSession once per body evaluation (never inside per-message loops).
         let currentSession = store.sessions.first(where: { $0.id == session.id }) ?? session
         let transcript = store.transcriptsBySessionId[session.id]
         let messages = store.messages(for: session.id)
@@ -44,299 +46,401 @@ public struct SessionDetailView: View {
         let availableReasoningLevels = currentSession.isMaster ? [] : (currentModelOption?.reasoningLevels ?? [])
         let harnessKind = currentSession.harness
 
-        ZStack(alignment: .bottomTrailing) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    metadataHeaderStrip(for: currentSession)
-
-                    if transcript?.hasMore == true {
-                        loadEarlierButton
-                    }
-
-                    if isLoadingInitialTranscript {
-                        TranscriptSkeletonView()
-                    } else if messages.isEmpty {
-                        emptyTranscriptView(for: currentSession)
-                    } else {
-                        ForEach(messages) { message in
-                            let pendingState = store.pendingDeliveryState(for: session.id, messageId: message.id)
-                            MessageBubbleView(
-                                message: message,
-                                sessionId: session.id,
-                                harness: harnessKind,
-                                pendingDeliveryState: pendingState,
-                                onAnswerQuestion: { answer in
-                                    store.submitMessage(for: session.id, text: answer, attachments: [])
-                                    sendTrigger += 1
-                                },
-                                onTapImage: { payload in
-                                    store.lightboxPayload = payload
-                                },
-                                onLoadMedia: { path in
-                                    await store.loadMediaData(path: path)
-                                },
-                                onRetryPending: {
-                                    store.retryPendingMessage(for: session.id, messageId: message.id)
-                                }
-                            )
-                            .equatable()
-                            .id(message.id)
-                        }
-                    }
-
-                    if let activity = liveActivity,
-                       activity.isWorking || !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true) {
-                        LiveStepsBarView(
-                            activity: activity,
-                            accentColor: SHColor.harness(currentSession.harness)
-                        )
-                    }
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id("transcript-bottom")
+        // Filter out transient queue entries that match an active optimistic message or recent user turn
+        // so sending a steer message never flashes a Queued banner in and out.
+        let filteredQueued: [QueuedMessageItem] = {
+            guard let raw = liveActivity?.queuedMessages, !raw.isEmpty else { return [] }
+            let recentUserTexts: Set<String> = Set(
+                messages.suffix(4).filter { $0.role == .user }.map { msg in
+                    msg.blocks.compactMap { if case .text(let t) = $0 { return t }; return nil }
+                        .joined(separator: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                .padding(.horizontal, SHSpacing.lg)
-                .padding(.top, SHSpacing.md)
-                .padding(.bottom, SHSpacing.lg)
-                .transaction { $0.animation = nil }
-            }
-            .accessibilityIdentifier("transcript.scroll")
-            .scrollPosition($scrollPosition)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
-            .scrollDismissesKeyboard(.never)
-            .background(SHColor.surfaceCanvas)
-            .onScrollPhaseChange { _, newPhase in
-                userIsDragging = (newPhase == .interacting || newPhase == .decelerating)
-            }
-            // Measure exact content distance below the visible viewport using visibleRect
-            // (avoids double-counting safeAreaInset bottom height).
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                max(0, geo.contentSize.height - geo.visibleRect.maxY)
-            } action: { oldDistance, newDistance in
-                distanceFromBottom = newDistance
-                if newDistance <= 80 {
-                    if !isPinnedToBottom { isPinnedToBottom = true }
-                } else if newDistance > 220 && userIsDragging && newDistance > oldDistance + 0.5 && Date() >= suppressUnpinUntil {
-                    // Only a user gesture scrolling meaningfully up into history unpins.
-                    if isPinnedToBottom { isPinnedToBottom = false }
-                }
-            }
-            .onChange(of: messages.count) { oldCount, newCount in
-                guard newCount > oldCount, isPinnedToBottom, !userIsDragging else { return }
-                scrollPosition.scrollTo(edge: .bottom)
-            }
-            .onChange(of: sendTrigger) { _, _ in
-                suppressUnpinUntil = Date().addingTimeInterval(0.8)
-                userIsDragging = false
-                isPinnedToBottom = true
-                distanceFromBottom = 0
-                scrollPosition.scrollTo(edge: .bottom)
-            }
-            .onChange(of: scrollToBottomTrigger) { _, _ in
-                suppressUnpinUntil = Date().addingTimeInterval(0.8)
-                userIsDragging = false
-                isPinnedToBottom = true
-                distanceFromBottom = 0
-                withAnimation(.easeOut(duration: 0.22)) {
-                    scrollPosition.scrollTo(edge: .bottom)
-                }
-            }
-            .task(id: session.id) {
-                isPinnedToBottom = true
-                distanceFromBottom = 0
-                userIsDragging = false
-                if store.transcriptsBySessionId[session.id] == nil {
-                    await store.loadTranscript(for: session.id)
-                }
-            }
-
-            // Floating "↓ Latest" pill — appears only when scrolled >220pt up into history;
-            // automatically hides as soon as the user scrolls within 80pt of the bottom or taps it.
-            let showLatestButton = !isPinnedToBottom && distanceFromBottom > 220 && !messages.isEmpty
-            Group {
-                if showLatestButton {
-                    Button {
-                        scrollToBottomTrigger += 1
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 11, weight: .bold))
-                            Text("Latest")
-                                .font(SHTypography.micro.weight(.semibold))
-                        }
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(SHColor.surfacePopover.opacity(0.95))
-                        .clipShape(Capsule())
-                        .shadow(color: Color.black.opacity(0.4), radius: 8, y: 3)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("transcript.latest")
-                    .padding(.trailing, SHSpacing.lg)
-                    .padding(.bottom, SHSpacing.sm)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                }
-            }
-            .animation(.easeInOut(duration: 0.16), value: showLatestButton)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: SHSpacing.sm) {
-                if let queued = liveActivity?.queuedMessages, !queued.isEmpty {
-                    QueuedMessagesTrayView(items: queued)
-                        .padding(.horizontal, SHSpacing.md)
-                }
-
-                ComposerView(
-                    session: currentSession,
-                    text: Binding(
-                        get: { store.draftInputs[session.id] ?? "" },
-                        set: { store.draftInputs[session.id] = $0 }
-                    ),
-                    attachments: store.draftAttachments[session.id] ?? [],
-                    uploadingAttachmentIds: store.uploadingAttachmentIds,
-                    availableModels: availableModels,
-                    reasoningLevels: availableReasoningLevels,
-                    isSending: false,
-                    isStreaming: isStreaming,
-                    isAgentBusy: isBusy,
-                    onPickPhotoData: { data, filename in
-                        Task { await store.addAttachment(for: session.id, jpegData: data, filename: filename) }
-                    },
-                    onRemoveAttachment: { attId in
-                        store.removeAttachment(for: session.id, attachmentId: attId)
-                    },
-                    onTapAttachment: { att in
-                        store.lightboxPayload = LightboxPayload(
-                            title: att.name,
-                            dataUrl: att.previewDataUrl,
-                            path: att.path
-                        )
-                    },
-                    onSelectModel: { modelOption in
-                        let nextEffort: String?
-                        if let levels = modelOption.reasoningLevels, !levels.isEmpty {
-                            if let cur = currentSession.reasoningEffort, levels.contains(cur) {
-                                nextEffort = cur
-                            } else {
-                                nextEffort = modelOption.defaultReasoningLevel ?? levels.last
-                            }
-                        } else {
-                            nextEffort = nil
-                        }
-                        Task {
-                            await store.setSessionModel(
-                                sessionId: session.id,
-                                model: modelOption.id,
-                                reasoningEffort: nextEffort
-                            )
-                        }
-                    },
-                    onSelectReasoningEffort: { effort in
-                        Task {
-                            await store.setSessionModel(
-                                sessionId: session.id,
-                                model: currentSession.model,
-                                reasoningEffort: effort
-                            )
-                        }
-                    },
-                    onTranscribeAudio: { wavData in
-                        try await store.transcribeDictation(wavData: wavData)
-                    },
-                    onSend: {
-                        if store.submitMessage(for: session.id) != nil {
-                            sendTrigger += 1
-                        }
-                    },
-                    onAbort: {
-                        Task { await store.abortRun(for: session.id) }
-                    }
-                )
-                .padding(.horizontal, SHSpacing.md)
-                .padding(.bottom, SHSpacing.sm)
-                .padding(.top, SHSpacing.xs)
-            }
-            .background(
-                LinearGradient(
-                    colors: [SHColor.surfaceCanvas.opacity(0.0), SHColor.surfaceCanvas.opacity(0.96), SHColor.surfaceCanvas],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
             )
-        }
-        .navigationTitle(currentSession.displayTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    #if canImport(UIKit)
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    #endif
-                }
-                .font(SHTypography.micro.weight(.semibold))
-                .foregroundStyle(SHColor.inkSecondary)
+            return raw.filter { item in
+                let trimmed = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !trimmed.isEmpty && !recentUserTexts.contains(trimmed)
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(SHColor.harness(currentSession.harness))
+        }()
+        let filteredQueuedKey = filteredQueued.map(\.id).joined(separator: "|")
+
+        VStack(spacing: 0) {
+            ZStack(alignment: .top) {
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: SHLayout.messageGap) {
+                            // Top spacer so first message clears the floating Liquid Glass header pills.
+                            Color.clear.frame(height: SHLayout.headerHeight)
+
+                            if transcript?.hasMore == true {
+                                loadEarlierButton
+                            }
+
+                            if isLoadingInitialTranscript {
+                                TranscriptSkeletonView()
+                            } else if messages.isEmpty {
+                                emptyTranscriptView(for: currentSession)
+                            } else {
+                                ForEach(messages) { message in
+                                    let pendingState = store.pendingDeliveryState(for: session.id, messageId: message.id)
+                                    MessageBubbleView(
+                                        message: message,
+                                        sessionId: session.id,
+                                        harness: harnessKind,
+                                        pendingDeliveryState: pendingState,
+                                        onAnswerQuestion: { answer in
+                                            store.submitMessage(for: session.id, text: answer, attachments: [], mode: .steer)
+                                            sendTrigger += 1
+                                        },
+                                        onTapImage: { payload in
+                                            store.lightboxPayload = payload
+                                        },
+                                        onLoadMedia: { path in
+                                            await store.loadMediaData(path: path)
+                                        },
+                                        onRetryPending: {
+                                            store.retryPendingMessage(for: session.id, messageId: message.id)
+                                        }
+                                    )
+                                    .equatable()
+                                    .id(message.id)
+                                }
+                            }
+
+                            // Scrollable inline activity row — never pinned above the composer.
+                            if let activity = liveActivity,
+                               activity.isWorking || !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true) {
+                                LiveStepsBarView(
+                                    activity: activity,
+                                    accentColor: SHColor.harness(currentSession.harness)
+                                )
+                            }
+
+                            // Debounced queued tray inside transcript so it never shoves the composer.
+                            if !stableQueuedMessages.isEmpty {
+                                QueuedMessagesTrayView(items: stableQueuedMessages)
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id("transcript-bottom")
+                        }
+                        .padding(.horizontal, SHLayout.screenPad)
+                        .padding(.bottom, SHSpacing.md)
+                        .transaction { $0.animation = nil }
+                    }
+                    .accessibilityIdentifier("transcript.scroll")
+                    .scrollPosition($scrollPosition)
+                    .defaultScrollAnchor(.bottom, for: .initialOffset)
+                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                    .scrollDismissesKeyboard(.never)
+                    .background(SHColor.surfaceCanvas)
+                    .onScrollPhaseChange { _, newPhase in
+                        userIsDragging = (newPhase == .interacting || newPhase == .decelerating)
+                    }
+                    .onScrollGeometryChange(for: CGFloat.self) { geo in
+                        max(0, geo.contentSize.height - geo.visibleRect.maxY)
+                    } action: { oldDistance, newDistance in
+                        distanceFromBottom = newDistance
+                        if newDistance <= 80 {
+                            if !isPinnedToBottom { isPinnedToBottom = true }
+                        } else if newDistance > 220 && userIsDragging && newDistance > oldDistance + 0.5 && Date() >= suppressUnpinUntil {
+                            if isPinnedToBottom { isPinnedToBottom = false }
+                        }
+                    }
+                    .onAppear {
+                        anchorBottomIfNeeded(sessionId: session.id, hasMessages: !messages.isEmpty)
+                    }
+                    .onChange(of: session.id) { _, newId in
+                        anchoredSessionId = nil
+                        isPinnedToBottom = true
+                        distanceFromBottom = 0
+                        userIsDragging = false
+                        stableQueuedMessages = []
+                        anchorBottomIfNeeded(sessionId: newId, hasMessages: !messages.isEmpty)
+                    }
+                    .onChange(of: messages.isEmpty) { _, isEmpty in
+                        if !isEmpty {
+                            anchorBottomIfNeeded(sessionId: session.id, hasMessages: true)
+                        }
+                    }
+                    .onChange(of: messages.count) { oldCount, newCount in
+                        guard newCount > oldCount, isPinnedToBottom, !userIsDragging else { return }
+                        snapToBottomWithoutAnimation()
+                    }
+                    .onChange(of: sendTrigger) { _, _ in
+                        suppressUnpinUntil = Date().addingTimeInterval(0.8)
+                        userIsDragging = false
+                        isPinnedToBottom = true
+                        distanceFromBottom = 0
+                        snapToBottomWithoutAnimation()
+                    }
+                    .onChange(of: scrollToBottomTrigger) { _, _ in
+                        suppressUnpinUntil = Date().addingTimeInterval(0.8)
+                        userIsDragging = false
+                        isPinnedToBottom = true
+                        distanceFromBottom = 0
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            scrollPosition.scrollTo(edge: .bottom)
+                        }
+                    }
+                    .task(id: session.id) {
+                        isPinnedToBottom = true
+                        distanceFromBottom = 0
+                        userIsDragging = false
+                        if store.transcriptsBySessionId[session.id] == nil {
+                            await store.loadTranscript(for: session.id)
+                        }
+                        anchorBottomIfNeeded(sessionId: session.id, hasMessages: !store.messages(for: session.id).isEmpty)
+                    }
+                    .task(id: filteredQueuedKey) {
+                        if filteredQueued.isEmpty {
+                            stableQueuedMessages = []
+                            return
+                        }
+                        // Wait 1.5s before showing queued tray so brief dispatch handoffs never flash.
+                        try? await Task.sleep(for: .milliseconds(1500))
+                        guard !Task.isCancelled else { return }
+                        stableQueuedMessages = filteredQueued
+                    }
+
+                    // Floating "↓ Latest" pill — only shown when scrolled high up (>220pt).
+                    let showLatestButton = !isPinnedToBottom && distanceFromBottom > 220 && !messages.isEmpty
+                    Group {
+                        if showLatestButton {
+                            Button {
+                                scrollToBottomTrigger += 1
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("Latest")
+                                        .font(SHTypography.micro.weight(.semibold))
+                                }
+                                .foregroundStyle(SHColor.inkPrimary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
+                                .shadow(color: Color.black.opacity(0.4), radius: 8, y: 3)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("transcript.latest")
+                            .padding(.trailing, SHLayout.screenPad)
+                            .padding(.bottom, SHSpacing.sm)
+                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.16), value: showLatestButton)
                 }
-                Menu {
-                    if !currentSession.isMaster {
-                        Button {
-                            Task { await store.togglePin(currentSession) }
-                        } label: {
-                            Label(currentSession.pinned ? "Unpin" : "Pin", systemImage: currentSession.pinned ? "pin.slash" : "pin")
+
+                // Floating Liquid Glass Header Pills over subtle top fade
+                floatingHeader(for: currentSession, isBusy: isBusy)
+            }
+
+            // Grounded Composer — ALWAYS anchored flush at bottom (above keyboard when open),
+            // never floating with transcript bleeding underneath.
+            ComposerView(
+                session: currentSession,
+                text: Binding(
+                    get: { store.draftInputs[session.id] ?? "" },
+                    set: { store.draftInputs[session.id] = $0 }
+                ),
+                attachments: store.draftAttachments[session.id] ?? [],
+                uploadingAttachmentIds: store.uploadingAttachmentIds,
+                availableModels: availableModels,
+                reasoningLevels: availableReasoningLevels,
+                isSending: false,
+                isStreaming: isStreaming,
+                isAgentBusy: isBusy,
+                onPickPhotoData: { data, filename in
+                    Task { await store.addAttachment(for: session.id, jpegData: data, filename: filename) }
+                },
+                onPickFileData: { data, mimeType, filename, previewData in
+                    Task {
+                        await store.addFileAttachment(
+                            for: session.id,
+                            data: data,
+                            mimeType: mimeType,
+                            filename: filename,
+                            previewImageData: previewData
+                        )
+                    }
+                },
+                onRemoveAttachment: { attId in
+                    store.removeAttachment(for: session.id, attachmentId: attId)
+                },
+                onTapAttachment: { att in
+                    store.lightboxPayload = LightboxPayload(
+                        title: att.name,
+                        dataUrl: att.previewDataUrl,
+                        path: att.path
+                    )
+                },
+                onSelectModel: { modelOption in
+                    let nextEffort: String?
+                    if let levels = modelOption.reasoningLevels, !levels.isEmpty {
+                        if let existing = currentSession.reasoningEffort, levels.contains(existing) {
+                            nextEffort = existing
+                        } else {
+                            nextEffort = levels.last
                         }
-                        Button {
-                            Task { await store.togglePinToTop(currentSession) }
-                        } label: {
-                            Label(currentSession.pinnedToTop ? "Unpin from Top" : "Pin to Top", systemImage: "arrow.up.to.line")
-                        }
-                        Divider()
+                    } else {
+                        nextEffort = nil
+                    }
+                    Task {
+                        await store.setSessionModel(
+                            sessionId: session.id,
+                            model: modelOption.id,
+                            reasoningEffort: nextEffort
+                        )
+                    }
+                },
+                onSelectReasoningEffort: { effort in
+                    Task {
+                        await store.setSessionModel(
+                            sessionId: session.id,
+                            model: currentSession.model,
+                            reasoningEffort: effort
+                        )
+                    }
+                },
+                onTranscribeAudio: { wavData in
+                    try await store.transcribeDictation(wavData: wavData)
+                },
+                onSend: { mode in
+                    if store.submitMessage(for: session.id, mode: mode) != nil {
+                        sendTrigger += 1
+                    }
+                },
+                onAbort: {
+                    Task { await store.abortRun(for: session.id) }
+                }
+            )
+            .padding(.horizontal, SHSpacing.md)
+            .padding(.top, SHSpacing.xs)
+            .padding(.bottom, SHSpacing.sm)
+            .background(SHColor.surfaceCanvas)
+        }
+        .background(SHColor.surfaceCanvas)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    // MARK: - Floating Liquid Glass Top Chrome
+
+    private func floatingHeader(for currentSession: UnifiedSession, isBusy: Bool) -> some View {
+        HStack(spacing: 8) {
+            SHGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
+                dismiss()
+            }
+
+            Spacer(minLength: 4)
+
+            SHFloatingTitlePill(
+                title: currentSession.displayTitle,
+                subtitle: SessionRowFormatting.cleanProjectName(for: currentSession) ?? HarnessVisual.forKind(currentSession.harness).label
+            ) {
+                dismissKeyboard()
+            }
+
+            Spacer(minLength: 4)
+
+            SHGlassActionCapsule(
+                isBusy: isBusy,
+                accentColor: SHColor.harness(currentSession.harness)
+            ) {
+                if !currentSession.isMaster {
+                    Button {
+                        Task { await store.togglePin(currentSession) }
+                    } label: {
+                        Label(currentSession.pinned ? "Unpin" : "Pin", systemImage: currentSession.pinned ? "pin.slash" : "pin")
                     }
                     Button {
-                        Task { await store.loadTranscript(for: session.id) }
+                        Task { await store.togglePinToTop(currentSession) }
                     } label: {
-                        Label("Refresh Transcript", systemImage: "arrow.clockwise")
+                        Label(currentSession.pinnedToTop ? "Unpin from Top" : "Pin to Top", systemImage: "arrow.up.to.line")
                     }
-                    if let group = currentSession.harness.harnessGroup {
-                        Button {
-                            store.openUsageSheet(for: group)
-                        } label: {
-                            Label("\(group.title) Usage", systemImage: "chart.bar.xaxis")
-                        }
-                    }
-                    if !currentSession.isMaster {
-                        Divider()
-                        Button {
-                            Task {
-                                await store.toggleHideSession(currentSession)
-                                dismiss()
-                            }
-                        } label: {
-                            Label(currentSession.hidden ? "Unhide Session" : "Hide Session", systemImage: currentSession.hidden ? "eye" : "eye.slash")
-                        }
-                        Button(role: .destructive) {
-                            Task {
-                                await store.archiveSession(currentSession)
-                                dismiss()
-                            }
-                        } label: {
-                            Label("Archive Session", systemImage: "archivebox")
-                        }
-                    }
+                    Divider()
+                }
+                Button {
+                    Task { await store.loadTranscript(for: session.id) }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(SHColor.inkSecondary)
+                    Label("Refresh Transcript", systemImage: "arrow.clockwise")
+                }
+                if let group = currentSession.harness.harnessGroup {
+                    Button {
+                        store.openUsageSheet(for: group)
+                    } label: {
+                        Label("\(group.title) Usage", systemImage: "chart.bar.xaxis")
+                    }
+                }
+                if !currentSession.isMaster {
+                    Divider()
+                    Button {
+                        Task {
+                            await store.toggleHideSession(currentSession)
+                            dismiss()
+                        }
+                    } label: {
+                        Label(currentSession.hidden ? "Unhide Session" : "Hide Session", systemImage: currentSession.hidden ? "eye" : "eye.slash")
+                    }
+                    Button(role: .destructive) {
+                        Task {
+                            await store.archiveSession(currentSession)
+                            dismiss()
+                        }
+                    } label: {
+                        Label("Archive Session", systemImage: "archivebox")
+                    }
                 }
             }
         }
+        .padding(.horizontal, SHLayout.screenPad)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(
+            LinearGradient(
+                colors: [
+                    SHColor.surfaceCanvas.opacity(0.95),
+                    SHColor.surfaceCanvas.opacity(0.72),
+                    SHColor.surfaceCanvas.opacity(0.0),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        )
+    }
+
+    // MARK: - Bottom Anchor Helpers
+
+    private func anchorBottomIfNeeded(sessionId: String, hasMessages: Bool) {
+        guard hasMessages, anchoredSessionId != sessionId else { return }
+        anchoredSessionId = sessionId
+        suppressUnpinUntil = Date().addingTimeInterval(0.6)
+        isPinnedToBottom = true
+        distanceFromBottom = 0
+        snapToBottomWithoutAnimation()
+        Task { @MainActor in
+            await Task.yield()
+            guard isPinnedToBottom, !userIsDragging else { return }
+            snapToBottomWithoutAnimation()
+        }
+    }
+
+    private func snapToBottomWithoutAnimation() {
+        var tx = Transaction()
+        tx.disablesAnimations = true
+        withTransaction(tx) {
+            scrollPosition.scrollTo(edge: .bottom)
+        }
+    }
+
+    private func dismissKeyboard() {
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 
     private var loadEarlierButton: some View {
@@ -352,8 +456,7 @@ public struct SessionDetailView: View {
             } label: {
                 HStack(spacing: 6) {
                     if isLoadingEarlier {
-                        ProgressView()
-                            .controlSize(.mini)
+                        ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: "arrow.up.circle")
                             .font(.system(size: 12))
@@ -361,11 +464,10 @@ public struct SessionDetailView: View {
                     Text(isLoadingEarlier ? "Loading earlier…" : "Load earlier messages")
                         .font(SHTypography.micro.weight(.medium))
                 }
-                .foregroundStyle(SHColor.inkMuted)
+                .foregroundStyle(SHColor.inkSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(SHColor.surfaceSubtle)
-                .clipShape(Capsule())
+                .background(SHColor.surfaceSubtle, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(isLoadingEarlier)
@@ -373,63 +475,13 @@ public struct SessionDetailView: View {
         }
     }
 
-    private func metadataHeaderStrip(for currentSession: UnifiedSession) -> some View {
-        let vis = HarnessVisual.forKind(currentSession.harness)
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: SHSpacing.sm) {
-                HStack(spacing: 6) {
-                    HarnessLogoView(harness: currentSession.harness, size: 13)
-                    Text(vis.label)
-                        .font(SHTypography.micro.weight(.semibold))
-                        .foregroundStyle(vis.color)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(vis.color.opacity(0.12))
-                .clipShape(Capsule())
-
-                if let model = currentSession.model, !model.isEmpty {
-                    metaChip(icon: "cpu", text: model)
-                }
-
-                if let branch = currentSession.gitBranch, !branch.isEmpty {
-                    metaChip(icon: "arrow.triangle.branch", text: branch)
-                }
-
-                if let project = SessionRowFormatting.cleanProjectName(for: currentSession) {
-                    metaChip(icon: "folder", text: project)
-                }
-
-                if let tmux = currentSession.tmuxTarget ?? currentSession.tmuxSessionName, !tmux.isEmpty {
-                    metaChip(icon: "terminal", text: tmux)
-                }
-            }
-        }
-    }
-
-    private func metaChip(icon: String, text: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-                .foregroundStyle(SHColor.inkFaint)
-            Text(text)
-                .font(SHTypography.micro)
-                .foregroundStyle(SHColor.inkMuted)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(SHColor.surfaceSubtle)
-        .clipShape(Capsule())
-    }
-
     private func emptyTranscriptView(for currentSession: UnifiedSession) -> some View {
         VStack(spacing: SHSpacing.md) {
-            HarnessLogoView(harness: currentSession.harness, size: 32)
+            HarnessLogoView(harness: currentSession.harness, size: 30)
             Text("Ready to collaborate")
                 .font(SHTypography.heading)
                 .foregroundStyle(SHColor.inkPrimary)
-            Text("Send a prompt or attach a screenshot below.")
+            Text("Send a message, voice note, or attach media below.")
                 .font(SHTypography.caption)
                 .foregroundStyle(SHColor.inkMuted)
         }
@@ -438,7 +490,7 @@ public struct SessionDetailView: View {
     }
 }
 
-// MARK: - Single Message Renderer with Trace Coalescing
+// MARK: - Single Message Renderer with Trace & Thumbnail Coalescing
 
 private struct MessageBubbleView: View, Equatable {
     let message: UnifiedMessage
@@ -476,25 +528,58 @@ private struct MessageBubbleView: View, Equatable {
     }
 
     private var userMessageView: some View {
-        HStack {
-            Spacer(minLength: 40)
-            VStack(alignment: .trailing, spacing: 5) {
-                VStack(alignment: .trailing, spacing: SHSpacing.sm) {
-                    ForEach(Array(message.blocks.enumerated()), id: \.offset) { _, block in
-                        UnifiedBlockView(
-                            block: block,
-                            isUserBubble: true,
-                            onAnswerQuestion: onAnswerQuestion,
-                            onTapImage: onTapImage,
+        let imageItems: [SHAttachmentThumbItem] = message.blocks.enumerated().compactMap { idx, block in
+            guard case .image(let path, let name, let dataUrl) = block else { return nil }
+            let title = name ?? ((path as NSString).lastPathComponent.isEmpty ? "Image" : (path as NSString).lastPathComponent)
+            return SHAttachmentThumbItem(
+                id: "\(message.id)-img-\(idx)",
+                name: title,
+                path: path,
+                mimeType: "image/jpeg",
+                dataUrl: dataUrl
+            )
+        }
+        let nonImageBlocks = message.blocks.filter {
+            if case .image = $0 { return false }
+            return true
+        }
+
+        return HStack {
+            Spacer(minLength: 42)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !imageItems.isEmpty {
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        SHAttachmentThumbStrip(
+                            items: imageItems,
+                            thumbSize: SHLayout.thumbSize,
+                            onTap: { item in
+                                onTapImage(LightboxPayload(title: item.name, dataUrl: item.dataUrl, path: item.path))
+                            },
                             onLoadMedia: onLoadMedia
                         )
-                        .equatable()
+                        .fixedSize(horizontal: imageItems.count <= 3, vertical: false)
                     }
                 }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 11)
-                .background(SHColor.surfaceBubble)
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous))
+
+                if !nonImageBlocks.isEmpty {
+                    VStack(alignment: .trailing, spacing: SHLayout.blockGap) {
+                        ForEach(Array(nonImageBlocks.enumerated()), id: \.offset) { _, block in
+                            UnifiedBlockView(
+                                block: block,
+                                isUserBubble: true,
+                                onAnswerQuestion: onAnswerQuestion,
+                                onTapImage: onTapImage,
+                                onLoadMedia: onLoadMedia
+                            )
+                            .equatable()
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(SHColor.surfaceBubble)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
 
                 if case .failed = pendingDeliveryState {
                     Button {
@@ -518,13 +603,12 @@ private struct MessageBubbleView: View, Equatable {
 
     private var assistantMessageView: some View {
         let segments = CoalescedSegment.coalesce(message.blocks)
-        return VStack(alignment: .leading, spacing: SHSpacing.md) {
-            // Subtle speaker header
-            HStack(spacing: 7) {
-                HarnessLogoView(harness: harness, size: 14)
+        return VStack(alignment: .leading, spacing: SHLayout.blockGap) {
+            HStack(spacing: 6) {
+                HarnessLogoView(harness: harness, size: 13)
                 Text(message.harnessMeta?.model ?? HarnessVisual.forKind(harness).label)
-                    .font(SHTypography.micro.weight(.semibold))
-                    .foregroundStyle(SHColor.inkSecondary)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(SHColor.inkMuted)
                 if message.streaming == true {
                     ProgressView()
                         .controlSize(.mini)
@@ -533,7 +617,7 @@ private struct MessageBubbleView: View, Equatable {
                 Spacer()
                 if message.timestamp > 0 {
                     Text(UsageMetrics.formatUpdatedAgo(message.timestamp))
-                        .font(SHTypography.micro)
+                        .font(.system(size: 11))
                         .foregroundStyle(SHColor.inkFaint)
                 }
             }
@@ -549,28 +633,37 @@ private struct MessageBubbleView: View, Equatable {
                         onLoadMedia: onLoadMedia
                     )
                     .equatable()
-                case .traceGroup(let blocks):
+
+                case .traceGroup(let traceBlocks):
                     CollapsedTraceGroupView(
-                        blocks: blocks,
+                        blocks: traceBlocks,
                         onAnswerQuestion: onAnswerQuestion,
                         onTapImage: onTapImage,
                         onLoadMedia: onLoadMedia
                     )
                     .equatable()
-                }
-            }
 
-            if let err = message.error, !err.isEmpty {
-                HStack(spacing: 7) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundStyle(SHColor.statusDanger)
-                    Text(err)
-                        .font(SHTypography.caption)
-                        .foregroundStyle(SHColor.statusDanger)
+                case .imageGroup(let imgBlocks):
+                    let items: [SHAttachmentThumbItem] = imgBlocks.enumerated().compactMap { idx, block in
+                        guard case .image(let path, let name, let dataUrl) = block else { return nil }
+                        let title = name ?? ((path as NSString).lastPathComponent.isEmpty ? "Image" : (path as NSString).lastPathComponent)
+                        return SHAttachmentThumbItem(
+                            id: "\(message.id)-aimg-\(idx)",
+                            name: title,
+                            path: path,
+                            mimeType: "image/jpeg",
+                            dataUrl: dataUrl
+                        )
+                    }
+                    SHAttachmentThumbStrip(
+                        items: items,
+                        thumbSize: SHLayout.thumbSize,
+                        onTap: { item in
+                            onTapImage(LightboxPayload(title: item.name, dataUrl: item.dataUrl, path: item.path))
+                        },
+                        onLoadMedia: onLoadMedia
+                    )
                 }
-                .padding(12)
-                .background(SHColor.statusDanger.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
             }
         }
     }

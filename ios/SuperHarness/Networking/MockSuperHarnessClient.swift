@@ -921,6 +921,19 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         )
     }
 
+    public func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment {
+        ImageAttachment(
+            name: filename ?? "file.bin",
+            path: "/tmp/\(filename ?? "file.bin")",
+            mimeType: mimeType,
+            previewDataUrl: nil,
+            sizeBytes: data.count
+        )
+    }
+
+    public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool { true }
+    public func sendTestPush() async throws -> Bool { true }
+
     public func testConnection() async throws -> ConnectionTestResult {
         ConnectionTestResult(ok: true, latencyMs: 4, harnessCount: harnesses.count, message: "Demo Mode active (offline fixtures)")
     }

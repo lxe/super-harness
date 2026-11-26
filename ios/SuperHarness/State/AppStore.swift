@@ -72,6 +72,8 @@ public final class AppStore {
         static let tokenAccount = "desktop-control-server"
         static let dictationURL = "sh.dictationURL"
         static let dictationTokenAccount = "yapyap-dictation-token"
+        static let pushEnabled = "sh.pushEnabled"
+        static let pushRelayURL = "sh.pushRelayURL"
     }
 
     public static let initialTranscriptLimit: Int = 15
@@ -92,6 +94,8 @@ public final class AppStore {
     public var dictationTokenOverride: String = ""
     public var dictationStatus: DictationStatusResponse?
     public var isCheckingDictation: Bool = false
+    public var pushNotificationsEnabled: Bool = true
+    public var pushRelayURL: String = PushNotificationCoordinator.defaultRelayURL
 
     // MARK: - Domain State
     public var harnesses: [HarnessDetection] = []
@@ -218,6 +222,10 @@ public final class AppStore {
         self.bearerToken = savedToken
         self.connectionMode = resolvedMode
         self.dictationURLOverride = defaults.string(forKey: StorageKey.dictationURL) ?? ""
+        if defaults.object(forKey: StorageKey.pushEnabled) != nil {
+            self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
+        }
+        self.pushRelayURL = defaults.string(forKey: StorageKey.pushRelayURL) ?? PushNotificationCoordinator.defaultRelayURL
         self.dictationTokenOverride = keychain.loadToken(for: StorageKey.dictationTokenAccount) ?? ""
 
         if let rawGroup = defaults.string(forKey: StorageKey.groupBy),
@@ -1129,9 +1137,10 @@ public final class AppStore {
     public func submitMessage(
         for sessionId: String,
         text: String? = nil,
-        attachments: [ImageAttachment]? = nil
+        attachments: [ImageAttachment]? = nil,
+        mode: SendMode = .steer
     ) -> PendingOutgoingMessage? {
-        guard let pending = enqueuePendingMessage(for: sessionId, text: text, attachments: attachments) else {
+        guard let pending = enqueuePendingMessage(for: sessionId, text: text, attachments: attachments, mode: mode) else {
             return nil
         }
         Task { [weak self] in
@@ -1142,8 +1151,13 @@ public final class AppStore {
 
     /// Appends the optimistic pending user bubble synchronously before any `await`, clears the draft,
     /// and dispatches the send without blocking on a redundant full transcript reload.
-    public func sendMessage(for sessionId: String, text: String? = nil, attachments: [ImageAttachment]? = nil) async {
-        guard let pending = enqueuePendingMessage(for: sessionId, text: text, attachments: attachments) else {
+    public func sendMessage(
+        for sessionId: String,
+        text: String? = nil,
+        attachments: [ImageAttachment]? = nil,
+        mode: SendMode = .steer
+    ) async {
+        guard let pending = enqueuePendingMessage(for: sessionId, text: text, attachments: attachments, mode: mode) else {
             return
         }
         await dispatchPendingMessage(sessionId: sessionId, pending: pending)
@@ -1165,7 +1179,8 @@ public final class AppStore {
     private func enqueuePendingMessage(
         for sessionId: String,
         text: String?,
-        attachments: [ImageAttachment]?
+        attachments: [ImageAttachment]?,
+        mode: SendMode = .steer
     ) -> PendingOutgoingMessage? {
         let messageText = (text ?? draftInputs[sessionId] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let media = attachments ?? draftAttachments[sessionId] ?? []
@@ -1182,6 +1197,7 @@ public final class AppStore {
             text: messageText,
             attachments: media,
             createdAt: Date().timeIntervalSince1970 * 1000.0,
+            mode: mode,
             state: .sending
         )
         PerfLogger.markSendTapped(sessionId: sessionId)
@@ -1210,7 +1226,8 @@ public final class AppStore {
             let result = try await client.sendMessage(
                 sessionId: sessionId,
                 message: pending.text,
-                attachments: resolvedAttachments
+                attachments: resolvedAttachments,
+                mode: pending.mode
             )
             if result.ok {
                 updatePendingState(sessionId: sessionId, pendingId: pending.id, to: .sent)
@@ -1332,22 +1349,38 @@ public final class AppStore {
     }
 
     public func addAttachment(for sessionId: String, jpegData: Data, filename: String) async {
+        await addFileAttachment(
+            for: sessionId,
+            data: jpegData,
+            mimeType: "image/jpeg",
+            filename: filename,
+            previewImageData: jpegData
+        )
+    }
+
+    /// Immediately attaches any image, video, or file to the composer with an instant local preview
+    /// while uploading raw binary bytes to `/api/attachments` in the background.
+    public func addFileAttachment(
+        for sessionId: String,
+        data: Data,
+        mimeType: String,
+        filename: String,
+        previewImageData: Data? = nil
+    ) async {
         let localId = UUID().uuidString
-        // Generate a tiny local thumbnail for instant composer rendering and base64-encode off main actor.
-        let (thumbDataUrl, uploadDataUrl) = await Task.detached(priority: .userInitiated) {
-            let thumbBytes = ComposerView.downscaledJPEG(from: jpegData, maxDimension: 220, quality: 0.7) ?? jpegData
-            let thumbUrl = "data:image/jpeg;base64,\(thumbBytes.base64EncodedString())"
-            let fullUrl = "data:image/jpeg;base64,\(jpegData.base64EncodedString())"
-            return (thumbUrl, fullUrl)
+        let thumbDataUrl: String? = await Task.detached(priority: .userInitiated) {
+            guard let imgBytes = previewImageData else { return nil }
+            let thumb = ComposerView.downscaledJPEG(from: imgBytes, maxDimension: 220, quality: 0.72) ?? imgBytes
+            return "data:image/jpeg;base64,\(thumb.base64EncodedString())"
         }.value
 
-        // Insert optimistically right away so the user sees the thumbnail immediately.
         let optimistic = ImageAttachment(
             id: localId,
             name: filename,
             path: "",
-            mimeType: "image/jpeg",
-            previewDataUrl: thumbDataUrl
+            mimeType: mimeType,
+            previewDataUrl: thumbDataUrl,
+            sizeBytes: data.count
         )
         var current = draftAttachments[sessionId] ?? []
         current.append(optimistic)
@@ -1363,13 +1396,14 @@ public final class AppStore {
                 }
             }
             do {
-                let uploaded = try await activeClient.uploadAttachment(dataUrl: uploadDataUrl, filename: filename)
+                let uploaded = try await activeClient.uploadAttachmentData(data, mimeType: mimeType, filename: filename)
                 let merged = ImageAttachment(
                     id: uploaded.id,
                     name: uploaded.name,
                     path: uploaded.path,
-                    mimeType: uploaded.mimeType,
-                    previewDataUrl: thumbDataUrl
+                    mimeType: uploaded.mimeType.isEmpty ? mimeType : uploaded.mimeType,
+                    previewDataUrl: thumbDataUrl,
+                    sizeBytes: uploaded.sizeBytes ?? data.count
                 )
                 await MainActor.run {
                     guard let self, var list = self.draftAttachments[sessionId],
@@ -1379,24 +1413,37 @@ public final class AppStore {
                 }
                 return merged
             } catch {
-                // Keep the optimistic attachment with full uploadDataUrl so send still works offline/fallback.
-                let fallback = ImageAttachment(
-                    id: localId,
-                    name: filename,
-                    path: "",
-                    mimeType: "image/jpeg",
-                    previewDataUrl: uploadDataUrl
-                )
                 await MainActor.run {
-                    guard let self, var list = self.draftAttachments[sessionId],
-                          let idx = list.firstIndex(where: { $0.id == localId }) else { return }
-                    list[idx] = fallback
-                    self.draftAttachments[sessionId] = list
+                    self?.reportError(error)
                 }
-                return fallback
+                return optimistic
             }
         }
         attachmentUploadTasks[localId] = uploadTask
+    }
+
+    public func setPushNotificationsEnabled(_ enabled: Bool) {
+        pushNotificationsEnabled = enabled
+        defaults.set(enabled, forKey: StorageKey.pushEnabled)
+        Task {
+            if enabled {
+                _ = await PushNotificationCoordinator.shared.requestAuthorizationAndRegister()
+            }
+            PushNotificationCoordinator.shared.syncCurrentTokenIfAvailable()
+        }
+    }
+
+    public func registerPushDeviceOnHost(rid: String, relayUrl: String, enabled: Bool) async {
+        _ = await client.registerPushDevice(rid: rid, relayUrl: relayUrl, enabled: enabled)
+    }
+
+    public func sendTestPushNotification() async -> Bool {
+        do {
+            return try await client.sendTestPush()
+        } catch {
+            reportError(error)
+            return false
+        }
     }
 
     public func removeAttachment(for sessionId: String, attachmentId: String) {

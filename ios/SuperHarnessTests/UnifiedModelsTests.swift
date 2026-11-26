@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import UIKit
 import XCTest
 @testable import SuperHarness
@@ -885,5 +886,11 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(SessionLinkResolver.resolve("super-harness://session/claude:3d88042c-caee-4c5c-863e-dcccc4b2ff38", in: all)?.id, claude.id)
         XCTAssertEqual(SessionLinkResolver.resolve("sh://session/01a214b8", in: all)?.id, codex.id)
         XCTAssertNil(SessionLinkResolver.resolve("https://example.com/dc969a3b-736f-45e1-b1af-60d2fe972418", in: all))
+    }
+
+    func testScrollInsetKeepsShortContentAndCapsTallContent() {
+        XCTAssertEqual(SHScrollInset<EmptyView>.visibleHeight(contentHeight: 120, maxHeight: 320), 120)
+        XCTAssertEqual(SHScrollInset<EmptyView>.visibleHeight(contentHeight: 2400, maxHeight: 320), 320)
+        XCTAssertEqual(SHScrollInset<EmptyView>.visibleHeight(contentHeight: 0, maxHeight: 320), 1)
     }
 }

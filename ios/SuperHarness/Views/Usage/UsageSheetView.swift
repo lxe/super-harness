@@ -499,7 +499,6 @@ private extension View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(SHSpacing.lg)
-            .background(SHColor.surfacePopover)
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+            .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.xl)
     }
 }

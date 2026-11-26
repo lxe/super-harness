@@ -214,7 +214,7 @@ private struct CompactTraceRowView: View {
                 if isDetailOpen, let output, !output.isEmpty {
                     Divider()
                         .overlay(SHColor.lineHairline)
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    SHScrollInset(maxHeight: 220, axes: [.horizontal, .vertical]) {
                         Text(output)
                             .font(SHTypography.monoSmall)
                             .foregroundStyle(SHColor.inkSecondary)
@@ -222,16 +222,11 @@ private struct CompactTraceRowView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 9)
                     }
-                    .frame(maxHeight: 200)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(SHColor.surfaceCode)
                 }
             }
-            .background(SHColor.surfaceSubtle)
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75)
-            )
+            .shRecessedWell(cornerRadius: SHRadius.md)
 
         case .thinking(let text, let summary):
             let title = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
@@ -263,12 +258,17 @@ private struct CompactTraceRowView: View {
                 .buttonStyle(.plain)
 
                 if isDetailOpen {
-                    Text(text)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(SHColor.inkSecondary)
-                        .textSelection(.enabled)
-                        .padding(.leading, 25)
-                        .padding(.bottom, 4)
+                    SHScrollInset(maxHeight: 240) {
+                        Text(text)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.md, elevation: .tile)
+                    .padding(.leading, 18)
+                    .padding(.bottom, 6)
                 }
             }
 
@@ -311,24 +311,25 @@ private struct CompactTraceRowView: View {
                 .buttonStyle(.plain)
 
                 if isDetailOpen {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let args, !args.isEmpty {
-                            Text(args)
-                                .font(SHTypography.monoSmall)
-                                .foregroundStyle(SHColor.inkMuted)
-                                .lineLimit(8)
+                    SHScrollInset(maxHeight: 240) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let args, !args.isEmpty {
+                                Text(args)
+                                    .font(SHTypography.monoSmall)
+                                    .foregroundStyle(SHColor.inkMuted)
+                                    .textSelection(.enabled)
+                            }
+                            if let output, !output.isEmpty {
+                                Text(output)
+                                    .font(SHTypography.monoSmall)
+                                    .foregroundStyle(SHColor.inkSecondary)
+                                    .textSelection(.enabled)
+                            }
                         }
-                        if let output, !output.isEmpty {
-                            Text(output)
-                                .font(SHTypography.monoSmall)
-                                .foregroundStyle(SHColor.inkSecondary)
-                                .lineLimit(12)
-                        }
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(SHColor.surfaceCode)
-                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
+                    .shRecessedWell(cornerRadius: SHRadius.md)
                     .padding(.leading, 18)
                 }
             }
@@ -692,15 +693,17 @@ private struct ThinkingBlockView: View, Equatable {
 
             if isExpanded {
                 Divider().overlay(SHColor.lineHairline)
-                Text(text)
-                    .font(SHTypography.caption.italic())
-                    .foregroundStyle(SHColor.inkMuted)
-                    .textSelection(.enabled)
-                    .padding(13)
+                SHScrollInset(maxHeight: 280) {
+                    Text(text)
+                        .font(SHTypography.caption.italic())
+                        .foregroundStyle(SHColor.inkMuted)
+                        .textSelection(.enabled)
+                        .padding(13)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
-        .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg)
     }
 }
 
@@ -776,17 +779,17 @@ struct CommandBlockView: View, Equatable {
 
             if isExpanded, let output, !output.isEmpty {
                 Divider().overlay(SHColor.lineHairline)
-                ScrollView(.horizontal, showsIndicators: false) {
+                SHScrollInset(maxHeight: 280, axes: [.horizontal, .vertical]) {
                     Text(output)
                         .font(SHTypography.monoSmall)
                         .foregroundStyle(SHColor.inkSecondary)
                         .textSelection(.enabled)
                         .padding(13)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(SHColor.surfaceCode)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .shRecessedWell(cornerRadius: SHRadius.md)
     }
 
     /// Status words that mean the command finished normally; nothing is shown for these.
@@ -926,14 +929,12 @@ private struct FileChangeBlockView: View, Equatable {
                         ColorizedDiffView(diff: diff)
                     }
                 }
-                .background(SHColor.surfaceCode)
-                .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
+                .shRecessedWell(cornerRadius: SHRadius.sm)
                 .padding(.horizontal, 10)
             }
         }
         .padding(.bottom, 10)
-        .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg)
     }
 
     private func kindPill(_ kind: String) -> some View {
@@ -955,7 +956,7 @@ private struct ColorizedDiffView: View {
     let diff: String
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        SHScrollInset(maxHeight: 320, axes: [.horizontal, .vertical]) {
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(Array(diff.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                     Text(line.isEmpty ? " " : line)
@@ -1072,10 +1073,11 @@ private struct ToolCallBlockView: View, Equatable {
                     }
                 }
                 .padding(13)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(SHScrollInsetModifier(maxHeight: 280))
             }
         }
-        .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg)
     }
 }
 
@@ -1109,8 +1111,7 @@ private struct WebSearchBlockView: View, Equatable {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 10)
-        .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg)
     }
 }
 
@@ -1208,6 +1209,42 @@ private struct NoticeBlockView: View, Equatable {
         .padding(12)
         .background(SHColor.brandAntigravity.opacity(0.09))
         .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+    }
+}
+
+// MARK: - Height-Capped Scrolling Inset for Expanded Content
+
+/// Holds expanded disclosure content (a cross-session message, a thought, tool or command
+/// output, a diff). Short content keeps its natural height. Content taller than `maxHeight`
+/// stops growing there and scrolls inside the inset, so opening one item never stretches the
+/// chat by screens of text.
+struct SHScrollInset<Content: View>: View {
+    var maxHeight: CGFloat = 320
+    var axes: Axis.Set = .vertical
+    @ViewBuilder var content: Content
+    @State private var contentHeight: CGFloat = 0
+
+    nonisolated static func visibleHeight(contentHeight: CGFloat, maxHeight: CGFloat) -> CGFloat {
+        min(max(contentHeight, 1), maxHeight)
+    }
+
+    var body: some View {
+        ScrollView(axes) {
+            content
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: axes)
+        .scrollIndicators(contentHeight > maxHeight ? .visible : .hidden, axes: .vertical)
+        .scrollIndicators(.hidden, axes: .horizontal)
+        .scrollIndicatorsFlash(trigger: contentHeight > maxHeight)
+        .frame(height: Self.visibleHeight(contentHeight: contentHeight, maxHeight: maxHeight))
+    }
+}
+
+struct SHScrollInsetModifier: ViewModifier {
+    var maxHeight: CGFloat = 320
+    func body(content: Content) -> some View {
+        SHScrollInset(maxHeight: maxHeight) { content }
     }
 }
 
@@ -1329,12 +1366,14 @@ struct InjectedMessageView: View {
             }
 
             if isExpanded {
-                MarkdownTextBlockView(text: info.body, isUserBubble: false)
-                    .equatable()
-                    .padding(SHSpacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(SHColor.surfaceSubtle)
-                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                SHScrollInset(maxHeight: 320) {
+                    MarkdownTextBlockView(text: info.body, isUserBubble: false)
+                        .equatable()
+                        .padding(SHSpacing.md)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg)
+                .accessibilityIdentifier("message.injected.body")
             } else if !info.preview.isEmpty {
                 Text(info.preview)
                     .font(SHTypography.caption)

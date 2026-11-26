@@ -887,7 +887,6 @@ private struct ExpandableUserBubbleContent: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(SHColor.surfaceBubble)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shRaisedSurface(SHColor.surfaceBubble, cornerRadius: 20, elevation: .bubble)
     }
 }

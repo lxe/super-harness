@@ -309,3 +309,88 @@ public struct ObsidianProgressBar: View {
         return muted ? tint.opacity(0.60) : tint
     }
 }
+
+// MARK: - Raised and Recessed Surfaces
+
+/// Depth levels shared with the desktop app. A raised surface is borderless: a soft drop
+/// shadow below it and a one-point light edge along its top make it read as lifted. These
+/// are for content inside the scroll area (bubbles, cards, wells); bars and floating
+/// controls keep Liquid Glass.
+public enum SHElevation: Sendable {
+    /// Cards and collapsible blocks.
+    case card
+    /// The user's message bubble, which sits slightly higher than a card.
+    case bubble
+    /// Small tiles and chips.
+    case tile
+
+    var shadowOpacity: Double {
+        switch self {
+        case .card: return 0.34
+        case .bubble: return 0.30
+        case .tile: return 0.32
+        }
+    }
+
+    var shadowRadius: CGFloat {
+        switch self {
+        case .card, .bubble: return 5
+        case .tile: return 3.5
+        }
+    }
+
+    var shadowOffset: CGFloat {
+        switch self {
+        case .card, .bubble: return 4
+        case .tile: return 2
+        }
+    }
+
+    var topHighlightOpacity: Double {
+        switch self {
+        case .card: return 0.05
+        case .bubble: return 0.07
+        case .tile: return 0.04
+        }
+    }
+}
+
+public extension View {
+    /// Clips the view to a rounded shape and draws a raised surface behind it.
+    func shRaisedSurface(
+        _ fill: Color,
+        cornerRadius: CGFloat,
+        elevation: SHElevation = .card
+    ) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .clipShape(shape)
+            .background(
+                shape.fill(
+                    fill
+                        .shadow(.inner(color: .white.opacity(elevation.topHighlightOpacity), radius: 0, y: 1))
+                        .shadow(.drop(color: .black.opacity(elevation.shadowOpacity), radius: elevation.shadowRadius, y: elevation.shadowOffset))
+                )
+            )
+    }
+
+    /// Clips the view to a rounded shape and draws a well that looks pressed into the page:
+    /// a darker fill with a soft shadow under its top edge. Used for terminal, diff and tool
+    /// output.
+    func shRecessedWell(_ fill: Color = SHColor.surfaceCode, cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .clipShape(shape)
+            .background(
+                shape.fill(fill.shadow(.inner(color: .black.opacity(0.42), radius: 1.5, y: 1)))
+            )
+            .overlay(alignment: .bottom) {
+                shape
+                    .strokeBorder(
+                        LinearGradient(colors: [.clear, .white.opacity(0.045)], startPoint: .center, endPoint: .bottom),
+                        lineWidth: 0.75
+                    )
+                    .allowsHitTesting(false)
+            }
+    }
+}

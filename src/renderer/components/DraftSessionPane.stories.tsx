@@ -82,6 +82,15 @@ const MOCK_CATALOG: HarnessCatalog = {
         reasoningLevels: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
       },
     ],
+    pi: [
+      {
+        id: 'ds41/deepseek-v4.1-flash',
+        label: 'DeepSeek V4.1 Flash',
+        group: 'ds41',
+        isDefault: true,
+        reasoningLevels: ['off', 'low', 'high', 'max'],
+      },
+    ],
   },
   projects: [
     {

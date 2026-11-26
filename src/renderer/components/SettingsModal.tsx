@@ -119,6 +119,7 @@ const HARNESS_DISPLAY_NAMES: Record<HarnessGroup, string> = {
   claude: 'Claude',
   antigravity: 'Google Antigravity',
   muse: 'Muse (Meta)',
+  pi: 'Pi',
 };
 
 function formatHarnessVersion(raw?: string | null): string | null {

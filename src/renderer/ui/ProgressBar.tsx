@@ -7,6 +7,7 @@ export type ProgressTone =
   | 'codex'
   | 'claude'
   | 'muse'
+  | 'pi'
   | 'warning'
   | 'danger'
   | 'auto';
@@ -31,7 +32,7 @@ export function resolveProgressFillClass(
   muted = false
 ): string {
   if (value === null) return 'bg-zinc-600/40';
-  if (!estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse')) {
+  if (!estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse' || tone === 'pi')) {
     if (value >= 95) return 'bg-status-danger';
     if (value >= 80) return 'bg-status-warning';
   }
@@ -44,6 +45,8 @@ export function resolveProgressFillClass(
       return muted ? 'bg-brand-antigravity/60' : 'bg-brand-antigravity';
     case 'muse':
       return muted ? 'bg-brand-muse/60' : 'bg-brand-muse';
+    case 'pi':
+      return muted ? 'bg-brand-pi/60' : 'bg-brand-pi';
     case 'warning':
       return 'bg-status-warning';
     case 'danger':

@@ -131,6 +131,24 @@ export const HarnessLogo: React.FC<Props> = ({ harness, size = 15, className = '
     );
   }
 
+  // Pi: a bold lowercase pi glyph (two legs under a bar) in cyan.
+  if (harness === 'pi') {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        className={`shrink-0 ${className}`}
+        aria-label="Pi"
+      >
+        <path d="M3.6 7.4c1-1.5 2.4-2.2 4.2-2.2h12.6" stroke="#22D3EE" strokeWidth="2.6" strokeLinecap="round" />
+        <path d="M9.4 5.6c0 5-0.6 9.8-2.6 13.6" stroke="#22D3EE" strokeWidth="2.6" strokeLinecap="round" />
+        <path d="M15.6 5.6v10.6c0 1.6 0.8 2.6 2.2 2.6 0.8 0 1.5-0.3 2-0.9" stroke="#67E8F9" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
   // Master Orchestrator: crisp violet/indigo four-point star
   const masterGrad = `master-grad-${uid}`;
   return (

@@ -10,12 +10,16 @@ import type { UnifiedSession } from '../src/shared/types';
 describe('harness order', () => {
   it('completes a saved order and ignores junk', () => {
     expect(normalizeHarnessOrder(undefined)).toEqual(DEFAULT_HARNESS_ORDER);
-    expect(normalizeHarnessOrder(['claude', 'bogus', 'claude', 'codex'])).toEqual(['claude', 'codex', 'antigravity', 'muse']);
+    expect(normalizeHarnessOrder(['claude', 'bogus', 'claude', 'codex'])).toEqual(['claude', 'codex', 'antigravity', 'muse', 'pi']);
   });
   it('moves a dragged harness onto the target position', () => {
-    expect(moveHarness([], 'muse', 'antigravity')).toEqual(['muse', 'antigravity', 'codex', 'claude']);
-    expect(moveHarness(['antigravity', 'codex', 'claude', 'muse'], 'antigravity', 'claude')).toEqual(['codex', 'claude', 'antigravity', 'muse']);
-    expect(moveHarness(['codex'], 'codex', 'codex')).toEqual(['codex', 'antigravity', 'claude', 'muse']);
+    expect(moveHarness([], 'muse', 'antigravity')).toEqual(['muse', 'antigravity', 'codex', 'claude', 'pi']);
+    expect(moveHarness(['antigravity', 'codex', 'claude', 'muse'], 'antigravity', 'claude')).toEqual(['codex', 'claude', 'antigravity', 'muse', 'pi']);
+    expect(moveHarness(['codex'], 'codex', 'codex')).toEqual(['codex', 'antigravity', 'claude', 'muse', 'pi']);
+  });
+  it('appends Pi to an order saved before Pi existed, and lets it be dragged', () => {
+    expect(normalizeHarnessOrder(['muse', 'claude', 'codex', 'antigravity'])).toEqual(['muse', 'claude', 'codex', 'antigravity', 'pi']);
+    expect(moveHarness(['muse', 'claude', 'codex', 'antigravity'], 'pi', 'muse')).toEqual(['pi', 'muse', 'claude', 'codex', 'antigravity']);
   });
   it('orders the All view harness sections by the saved order', () => {
     const s = (id: string, g: string) =>

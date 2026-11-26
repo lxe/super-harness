@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { HARNESS_TITLES } from '../utils/harnessMeta';
 import {
   Archive,
   Check,
@@ -284,13 +285,9 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                         }}
                       >
                         Unpin from{' '}
-                        {session.harnessGroup === 'codex'
-                          ? 'Codex'
-                          : session.harnessGroup === 'claude'
-                            ? 'Claude'
-                            : session.harnessGroup === 'muse'
-                              ? 'Muse'
-                              : 'Antigravity'}
+                        {session.harnessGroup === 'master'
+                          ? 'Super Harness'
+                          : HARNESS_TITLES[session.harnessGroup]}
                       </MenuItem>
                     )}
                     {folders.length > 0 && (

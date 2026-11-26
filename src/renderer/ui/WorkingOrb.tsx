@@ -15,7 +15,7 @@ interface OrbPalette {
 /**
  * Monochromatic HSB-derived opaque 3D sphere palettes matching the exact harness & status gauge hues
  * (same hue & near-same saturation across highlight/mid/shadow — no desaturated white/pastel washout):
- * Antigravity #60a5fa, Codex #10a37f, Claude #d97757, Muse #a855f7,
+ * Antigravity #60a5fa, Codex #10a37f, Claude #d97757, Muse #a855f7, Pi #22d3ee,
  * Master #818cf8, All #d4d4d8, Warning #fbbf24, Danger #fb7185.
  */
 const ORB_PALETTES: Record<WorkingOrbTone, OrbPalette> = {
@@ -42,6 +42,12 @@ const ORB_PALETTES: Record<WorkingOrbTone, OrbPalette> = {
     highlight: '#b465ff',
     mid: '#a855f7',
     deep: '#6c32a3',
+  },
+  pi: {
+    glint: '#8bf0ff',
+    highlight: '#4ee3f8',
+    mid: '#22d3ee',
+    deep: '#127f91',
   },
   master: {
     glint: '#afb7ff',

@@ -13,6 +13,11 @@ export interface SegmentedItem<T extends string> {
     value: number | null;
     tone: ProgressTone;
     estimated?: boolean;
+    /**
+     * Gauge variant: a short label shown on the ring instead of a fill (API-key harnesses
+     * show 24h spend, e.g. `$1.2`, because they have no quota to fill toward).
+     */
+    caption?: string;
   };
 }
 
@@ -51,6 +56,11 @@ const GAUGE_COLORS: Record<ProgressTone, { stroke: string; comet: string }> = {
     comet:
       'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(217,119,87,0.16) 195deg, rgba(253,186,116,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
   },
+  pi: {
+    stroke: '#22d3ee',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(34,211,238,0.16) 195deg, rgba(165,243,252,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
   muse: {
     stroke: '#a855f7',
     comet:
@@ -83,7 +93,7 @@ function resolveGaugePalette(
   tone: ProgressTone,
   estimated?: boolean
 ): { stroke: string; comet: string } {
-  if (value !== null && !estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse')) {
+  if (value !== null && !estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse' || tone === 'pi')) {
     if (value >= 95) return GAUGE_COLORS.danger;
     if (value >= 80) return GAUGE_COLORS.warning;
   }
@@ -280,8 +290,27 @@ export function SegmentedControl<T extends string>({
                   />
                 </svg>
 
+                {/* 2a. Spend-mode ring: a thin, quiet full circle in the brand colour (no quota to fill) */}
+                {item.progress?.caption !== undefined && (
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 36 36"
+                    className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                  >
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r={GAUGE_RADIUS}
+                      fill="none"
+                      stroke={palette.stroke}
+                      strokeOpacity={active ? 0.5 : 0.34}
+                      strokeWidth="1.6"
+                    />
+                  </svg>
+                )}
+
                 {/* 2. Colored usage gauge arc */}
-                {displayPct > 0 && (
+                {displayPct > 0 && item.progress?.caption === undefined && (
                   <svg
                     aria-hidden="true"
                     viewBox="0 0 36 36"
@@ -318,6 +347,15 @@ export function SegmentedControl<T extends string>({
                         'radial-gradient(farthest-side, transparent calc(100% - 3.1px), #000 calc(100% - 2.8px))',
                     }}
                   />
+                )}
+
+                {item.progress?.caption !== undefined && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-1/2 -translate-x-1/2 -bottom-[7px] z-20 px-[3px] rounded-[4px] bg-[#181a20] text-[8.5px] leading-[11px] font-semibold tabular-nums tracking-tight text-ink-secondary pointer-events-none whitespace-nowrap"
+                  >
+                    {item.progress.caption}
+                  </span>
                 )}
 
                 {/* Centered icon (or compact 'All' glyph for the unified tab) */}

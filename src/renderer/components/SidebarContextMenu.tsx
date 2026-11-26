@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { HARNESS_TITLES } from '../utils/harnessMeta';
 import {
   Archive,
   Check,
@@ -19,11 +20,7 @@ import type { HarnessSectionOption } from '../utils/sidebarGrouping';
 import { MenuDivider, MenuHeader, MenuItem, PopoverSurface } from '../ui';
 
 function harnessLabelForPin(session: UnifiedSession): string {
-  if (session.harnessGroup === 'codex') return 'Codex';
-  if (session.harnessGroup === 'claude') return 'Claude';
-  if (session.harnessGroup === 'antigravity') return 'Antigravity';
-  if (session.harnessGroup === 'muse') return 'Muse';
-  return 'harness';
+  return session.harnessGroup === 'master' ? 'harness' : HARNESS_TITLES[session.harnessGroup] ?? 'harness';
 }
 
 export interface SidebarContextMenuProps {

@@ -12,7 +12,8 @@ export type SidebarFilterTab =
   | 'claude'
   | 'tmux'
   | 'antigravity'
-  | 'muse';
+  | 'muse'
+  | 'pi';
 
 export interface SubSection {
   id: string;
@@ -126,7 +127,8 @@ export function isSingleHarnessFilter(filter: SidebarFilterTab): filter is Harne
     filter === 'antigravity' ||
     filter === 'codex' ||
     filter === 'claude' ||
-    filter === 'muse'
+    filter === 'muse' ||
+    filter === 'pi'
   );
 }
 
@@ -135,6 +137,7 @@ const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude' },
   { id: 'muse', label: 'Muse' },
+  { id: 'pi', label: 'Pi' },
 ];
 
 /** Default harness order; lxe can rearrange it (settings.harnessOrder). */
@@ -209,6 +212,7 @@ export function filterSidebarSessions(
     if (filter === 'tmux' && s.harness !== 'claude-tmux') return false;
     if (filter === 'antigravity' && s.harness !== 'antigravity') return false;
     if (filter === 'muse' && s.harness !== 'muse') return false;
+    if (filter === 'pi' && s.harnessGroup !== 'pi') return false;
     if (q) {
       const hay =
         `${s.title} ${s.projectName} ${s.nativeSection || ''} ${s.cwd} ${s.harness} ${s.tmuxSessionName || ''}`.toLowerCase();
@@ -288,7 +292,8 @@ export function groupSessionsForSidebar(
       filter === 'antigravity' ||
       filter === 'codex' ||
       filter === 'claude' ||
-      filter === 'muse'
+      filter === 'muse' ||
+      filter === 'pi'
     ) {
       const { pinnedItems, sections } = splitNativePinnedAndSections(filter, rest);
       const out: TopGroup[] = [];

@@ -59,6 +59,7 @@ import {
 import { prefetchSessionTranscript } from '../utils/transcriptCache';
 import type { DraftConversation } from './DraftSessionPane';
 import { HarnessLogo } from './HarnessLogo';
+import { formatSpendCaption } from '../utils/harnessMeta';
 import { HarnessUsageHoverCard } from './HarnessUsageHoverCard';
 import { SidebarContextMenu } from './SidebarContextMenu';
 
@@ -165,7 +166,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const [filter, setFilter] = useState<FilterTab>(() => {
     try {
       const saved = localStorage.getItem('sh:sidebarFilter') as FilterTab | null;
-      if (saved && ['all', 'live', 'codex', 'claude', 'tmux', 'antigravity', 'muse'].includes(saved)) {
+      if (saved && ['all', 'live', 'codex', 'claude', 'tmux', 'antigravity', 'muse', 'pi'].includes(saved)) {
         return saved;
       }
     } catch {
@@ -350,6 +351,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       codex: false,
       claude: false,
       muse: false,
+      pi: false,
     };
     for (const s of sessions) {
       if (s.harnessGroup !== 'master' && s.status === 'running') {
@@ -752,6 +754,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         (filter === 'codex' && target.harnessGroup === 'codex') ||
         (filter === 'claude' && target.harnessGroup === 'claude') ||
         (filter === 'muse' && target.harnessGroup === 'muse') ||
+        (filter === 'pi' && target.harnessGroup === 'pi') ||
         (filter === 'live' && target.isLive) ||
         (filter === 'tmux' && target.harness === 'claude-tmux');
 
@@ -1109,6 +1112,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   ['tmux', 'Claude · tmux'],
                   ['claude', 'All Claude'],
                   ['muse', 'Muse'],
+                  ['pi', 'Pi'],
                 ] as Array<[FilterTab, string]>
               ).map(([k, lbl]) => (
                 <MenuItem
@@ -1188,7 +1192,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
           workingByHarness.antigravity ||
           workingByHarness.codex ||
           workingByHarness.claude ||
-          workingByHarness.muse;
+          workingByHarness.muse ||
+          workingByHarness.pi;
         return (
           <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-gradient-to-t before:from-black/22 before:to-transparent after:pointer-events-none after:content-[''] after:absolute after:inset-x-0 after:-bottom-2.5 after:h-2.5 after:bg-gradient-to-b after:from-black/26 after:to-transparent">
             <SegmentedControl<FilterTab>
@@ -1202,7 +1207,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
               onItemMouseEnter={(id, el) => {
                 if (!usage) return;
                 const target: HarnessGroup | 'all' =
-                  id === 'antigravity' || id === 'codex' || id === 'claude' || id === 'muse'
+                  id === 'antigravity' || id === 'codex' || id === 'claude' || id === 'muse' || id === 'pi'
                     ? id
                     : 'all';
                 openUsageHover(target, el);
@@ -1270,6 +1275,18 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     value: usage?.muse?.barPercent ?? null,
                     tone: 'muse',
                     estimated: usage?.muse?.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'pi',
+                  label: 'Pi',
+                  icon: <HarnessLogo harness="pi" size={tabLogoSize} />,
+                  working: workingByHarness.pi,
+                  progress: {
+                    // API keys: no quota to fill, so the ring carries 24h spend instead.
+                    value: null,
+                    tone: 'pi',
+                    caption: usage?.pi ? formatSpendCaption(usage.pi.spend24hUsd) : undefined,
                   },
                 },
               ], harnessOrder)}

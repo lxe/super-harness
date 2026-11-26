@@ -9,6 +9,7 @@ import type {
 } from '../../shared/types';
 import { PopoverSurface, ProgressBar } from '../ui';
 import { HarnessLogo } from './HarnessLogo';
+import { HARNESS_TITLES } from '../utils/harnessMeta';
 
 interface HarnessLink {
   label: string;
@@ -29,14 +30,9 @@ const HARNESS_ACCOUNT_LINKS: Record<HarnessGroup, HarnessLink[]> = {
     { label: 'Plans', url: 'https://one.google.com/about/google-ai-plans/' },
   ],
   muse: [],
+  pi: [],
 };
 
-const HARNESS_TITLES: Record<HarnessGroup, string> = {
-  antigravity: 'Antigravity',
-  codex: 'Codex',
-  claude: 'Claude',
-  muse: 'Muse',
-};
 
 function formatUsd(n: number): string {
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
@@ -192,6 +188,8 @@ interface SpendChartProps {
   spend24h: number;
   spend5h: number;
   tokens7d: number;
+  /** False when the harness reports real spend (API keys) rather than an API-equivalent estimate. */
+  estimated?: boolean;
 }
 
 const SpendTrendSection: React.FC<SpendChartProps> = ({
@@ -201,6 +199,7 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
   spend24h,
   spend5h,
   tokens7d,
+  estimated = true,
 }) => {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const maxVal = Math.max(...points.map((p) => p.spendUsd), 0.01);
@@ -216,13 +215,21 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
           ? 'bg-brand-antigravity'
           : harness === 'muse'
             ? 'bg-brand-muse'
-            : 'bg-ink-primary';
+            : harness === 'pi'
+              ? 'bg-brand-pi'
+              : 'bg-ink-primary';
 
   return (
     <div className="rounded-xl bg-black/[0.16] shadow-[inset_0_1px_1px_rgba(0,0,0,0.22)] px-3.5 py-3 space-y-2.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-caption font-medium text-ink-secondary">
-          API-equivalent value <span className="text-ink-faint font-normal">(est.)</span>
+          {estimated ? (
+            <>
+              API-equivalent value <span className="text-ink-faint font-normal">(est.)</span>
+            </>
+          ) : (
+            'Spend'
+          )}
         </span>
         <span className="text-micro tabular-nums text-ink-faint truncate">
           {active
@@ -315,6 +322,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
       usage.codex,
       usage.claude,
       usage.muse,
+      usage.pi,
     ].filter((x): x is HarnessUsageSummary => Boolean(x));
     const total5h = list.reduce((a, x) => a + x.spend5hUsd, 0);
     const total24h = list.reduce((a, x) => a + x.spend24hUsd, 0);
@@ -329,14 +337,16 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
           ((usage.antigravity?.dailySpend7d[idx]?.spendUsd ?? 0) +
             (usage.codex?.dailySpend7d[idx]?.spendUsd ?? 0) +
             (usage.claude?.dailySpend7d[idx]?.spendUsd ?? 0) +
-            (usage.muse?.dailySpend7d[idx]?.spendUsd ?? 0)) *
+            (usage.muse?.dailySpend7d[idx]?.spendUsd ?? 0) +
+            (usage.pi?.dailySpend7d[idx]?.spendUsd ?? 0)) *
             100
         ) / 100,
       tokens:
         (usage.antigravity?.dailySpend7d[idx]?.tokens ?? 0) +
         (usage.codex?.dailySpend7d[idx]?.tokens ?? 0) +
         (usage.claude?.dailySpend7d[idx]?.tokens ?? 0) +
-        (usage.muse?.dailySpend7d[idx]?.tokens ?? 0),
+        (usage.muse?.dailySpend7d[idx]?.tokens ?? 0) +
+        (usage.pi?.dailySpend7d[idx]?.tokens ?? 0),
     }));
 
     return (
@@ -578,6 +588,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
           spend24h={info.spend24hUsd}
           spend5h={info.spend5hUsd}
           tokens7d={info.tokens7d}
+          estimated={info.spendIsEstimated}
         />
       )}
 

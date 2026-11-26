@@ -170,7 +170,9 @@ export function resolveSessionModelControls(
                   ? ['low', 'medium', 'high', 'xhigh', 'max']
                   : harnessGroup === 'muse'
                     ? ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
-                    : suffixMatch
+                    : harnessGroup === 'pi'
+                      ? ['off', 'minimal', 'low', 'medium', 'high']
+                      : suffixMatch
                       ? ['low', 'medium', 'high', 'xhigh']
                       : undefined,
           },
@@ -192,6 +194,8 @@ export function resolveSessionModelControls(
     thinkingLevels = ['low', 'medium', 'high', 'xhigh', 'max'];
   } else if (harnessGroup === 'muse') {
     thinkingLevels = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+  } else if (harnessGroup === 'pi') {
+    thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high'];
   } else {
     thinkingLevels = !trimmedModel ? ['low', 'medium', 'high', 'xhigh'] : [];
   }

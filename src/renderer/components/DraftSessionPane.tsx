@@ -71,6 +71,7 @@ function groupForDraftHarness(h: StartSessionRequest['harness'] | null): Harness
   if (h === 'antigravity') return 'antigravity';
   if (h === 'codex') return 'codex';
   if (h === 'muse') return 'muse';
+  if (h === 'pi') return 'pi';
   return 'claude';
 }
 
@@ -391,7 +392,9 @@ export const DraftSessionPane: React.FC<Props> = ({
         ? 'Codex'
         : selectedGroup === 'muse'
           ? 'Muse'
-          : selectedGroup === 'claude'
+          : selectedGroup === 'pi'
+            ? 'Pi'
+            : selectedGroup === 'claude'
             ? draft.harness === 'claude-cli'
               ? 'Claude CLI'
               : 'Claude'
@@ -441,7 +444,7 @@ export const DraftSessionPane: React.FC<Props> = ({
 
           {/* 3-Card Harness Selector (Claude has split dropdown for tmux vs Headless CLI) */}
           <div
-            className={`grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 p-1 rounded-2xl transition-all ${
+            className={`grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 p-1 rounded-2xl transition-all ${
               highlightPicker ? 'ring-2 ring-amber-400/60 bg-amber-400/[0.04]' : ''
             }`}
           >
@@ -499,6 +502,25 @@ export const DraftSessionPane: React.FC<Props> = ({
               </div>
               <div className="text-caption text-ink-faint mt-1 leading-snug">
                 Headless exec, resumable
+              </div>
+            </button>
+
+            {/* Pi */}
+            <button
+              type="button"
+              onClick={() => handleSelectHarness('pi')}
+              className={`text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
+                selectedGroup === 'pi'
+                  ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                  : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-label font-semibold">
+                <HarnessLogo harness="pi" size={16} />
+                <span className="truncate">Pi</span>
+              </div>
+              <div className="text-caption text-ink-faint mt-1 leading-snug">
+                Pi RPC session, steerable
               </div>
             </button>
 

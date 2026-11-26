@@ -976,7 +976,9 @@ export const App: React.FC = () => {
                         ? 'agy-resume'
                         : launchedDraft.harness === 'muse'
                           ? 'muse-msp'
-                          : launchedDraft.harness === 'claude-tmux'
+                          : launchedDraft.harness === 'pi'
+                            ? 'pi-rpc'
+                            : launchedDraft.harness === 'claude-tmux'
                             ? 'tmux-send'
                             : 'claude-resume',
                 };

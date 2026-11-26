@@ -141,6 +141,30 @@ const MOCK_USAGE: UsageSnapshot = {
     dailySpend7d: [],
     spendIsEstimated: true,
   },
+  pi: {
+    harness: 'pi',
+    updatedAt: now - 30_000,
+    planLabel: 'API keys',
+    barPercent: null,
+    barIsEstimated: false,
+    windows: [],
+    spend5hUsd: 0.42,
+    spend24hUsd: 1.18,
+    spend7dUsd: 6.4,
+    spend14dUsd: 9.9,
+    tokens7d: 4_200_000,
+    dailySpend7d: [
+      { date: '2026-11-20', dayLabel: 'Fri', spendUsd: 0.6, tokens: 400_000 },
+      { date: '2026-11-21', dayLabel: 'Sat', spendUsd: 0, tokens: 0 },
+      { date: '2026-11-22', dayLabel: 'Sun', spendUsd: 1.1, tokens: 700_000 },
+      { date: '2026-11-23', dayLabel: 'Mon', spendUsd: 2.2, tokens: 1_300_000 },
+      { date: '2026-11-24', dayLabel: 'Tue', spendUsd: 0.9, tokens: 600_000 },
+      { date: '2026-11-25', dayLabel: 'Wed', spendUsd: 0.42, tokens: 400_000 },
+      { date: '2026-11-26', dayLabel: 'Thu', spendUsd: 1.18, tokens: 800_000 },
+    ],
+    spendIsEstimated: false,
+    note: 'Spend as recorded by Pi for each model call (API keys, no quota)',
+  },
 };
 
 const meta: Meta = {

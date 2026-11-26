@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HARNESS_TITLES } from '../utils/harnessMeta';
 import { ArrowDown, ChevronDown, ChevronRight, FileText, Terminal } from 'lucide-react';
 import type {
   HarnessCatalog,
@@ -1185,17 +1186,7 @@ export const SessionPane: React.FC<Props> = ({
           <QueuedMessagesTray
             items={combinedQueue}
             isAgentBusy={isAgentBusy}
-            harnessLabel={
-              session.harnessGroup === 'antigravity'
-                ? 'Antigravity'
-                : session.harnessGroup === 'codex'
-                  ? 'Codex'
-                  : session.harnessGroup === 'claude'
-                    ? 'Claude'
-                    : session.harnessGroup === 'muse'
-                      ? 'Muse'
-                      : undefined
-            }
+            harnessLabel={session.harnessGroup === 'master' ? undefined : HARNESS_TITLES[session.harnessGroup]}
             onSendNow={handleQueueSendNow}
             onEdit={handleQueueEdit}
             onRemove={handleQueueRemove}

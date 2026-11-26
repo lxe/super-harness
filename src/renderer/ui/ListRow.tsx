@@ -1,9 +1,10 @@
 import React from 'react';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { cn } from './cn';
+import type { HarnessGroup } from '../../shared/types';
 import type { WorkingOrbTone } from './WorkingOrb';
 
-export type SectionHeaderAccent = 'antigravity' | 'codex' | 'claude' | 'muse';
+export type SectionHeaderAccent = HarnessGroup;
 
 export interface SectionHeaderProps {
   level?: 1 | 2;

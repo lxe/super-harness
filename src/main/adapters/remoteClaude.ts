@@ -195,6 +195,8 @@ export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
     remoteId: e.bridgeSessionId || undefined,
     tmuxTarget: e.tmux || undefined,
     tmuxSessionName,
+    hostAddress: e.host,
+    hostLabel: e.label,
     createdAt: e.startedAt ?? updatedAt,
     updatedAt,
     pinned: false,

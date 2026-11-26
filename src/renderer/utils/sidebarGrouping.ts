@@ -413,3 +413,15 @@ export function sortSidebarGroups(groups: TopGroup[], sortBy: SidebarSortBy): To
   const rest = sorted.filter((g) => !g.headless).sort((a, b) => groupNewest(b) - groupNewest(a));
   return [...headless, ...rest];
 }
+
+/**
+ * Short badge for the machine a session runs on: the last octet of an IPv4 address
+ * (`192.168.0.3` -> `.3`), otherwise the first label of the host name.
+ */
+export function hostBadgeLabel(address: string | undefined): string | undefined {
+  if (!address) return undefined;
+  const host = address.replace(/^.*@/, '');
+  const v4 = host.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.(\d{1,3})$/);
+  if (v4) return `.${v4[1]}`;
+  return host.split('.')[0].slice(0, 8);
+}

@@ -35,3 +35,13 @@ describe('remote Claude mirror', () => {
     });
   });
 });
+
+import { hostBadgeLabel } from '../src/renderer/utils/sidebarGrouping';
+describe('host badge', () => {
+  it('shows the last IPv4 octet, else the short host name', () => {
+    expect(hostBadgeLabel('192.168.0.3')).toBe('.3');
+    expect(hostBadgeLabel('lxe@10.0.0.42')).toBe('.42');
+    expect(hostBadgeLabel('lxebook-2021.local')).toBe('lxebook-');
+    expect(hostBadgeLabel(undefined)).toBeUndefined();
+  });
+});

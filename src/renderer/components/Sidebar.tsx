@@ -49,6 +49,7 @@ import {
   isSingleHarnessFilter,
   SIDEBAR_SORT_OPTIONS,
   sortSidebarGroups,
+  hostBadgeLabel,
   type SidebarSortBy,
   type DragSectionTarget,
   type SidebarFilterTab,
@@ -782,7 +783,14 @@ export const Sidebar: React.FC<Props> = React.memo(({
           };
         }}
         meta={
-          s.harness === 'claude-tmux' ? (
+          s.hostAddress ? (
+            <span
+              title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
+              className="rounded px-1 py-px text-[10px] font-medium leading-none tabular-nums text-ink-secondary bg-surface-subtle border border-line-hairline"
+            >
+              {hostBadgeLabel(s.hostAddress)}
+            </span>
+          ) : s.harness === 'claude-tmux' ? (
             <span
               title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'remote'}`}
               className="text-ink-muted"

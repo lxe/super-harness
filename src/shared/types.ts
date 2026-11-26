@@ -57,6 +57,10 @@ export interface UnifiedSession {
   remoteId?: string;
   tmuxTarget?: string;
   tmuxSessionName?: string;
+  /** Address of the machine running this session when it is not the Super Harness host (e.g. `192.168.0.3`). */
+  hostAddress?: string;
+  /** Friendly name of that machine (e.g. `lxebook-2021`). */
+  hostLabel?: string;
   pid?: number;
   transcriptPath?: string;
   createdAt: number;

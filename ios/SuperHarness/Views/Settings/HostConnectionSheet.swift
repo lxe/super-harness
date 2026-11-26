@@ -54,6 +54,7 @@ public struct HostConnectionSheet: View {
                         showDesignCatalog = true
                     } label: {
                         Label("Design System Catalog", systemImage: "square.grid.2x2")
+                            .font(SHTypography.label)
                     }
                 }
                 .listRowBackground(SHColor.surfaceSubtle)
@@ -110,8 +111,8 @@ public struct HostConnectionSheet: View {
                         Image(systemName: "bolt.horizontal.circle")
                     }
                     Text(isTesting ? "Testing…" : "Test Connection")
-                        .fontWeight(.medium)
                 }
+                .font(SHTypography.label)
                 .foregroundStyle(SHColor.brandAntigravity)
             }
             .disabled(isTesting || hostURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -291,7 +292,10 @@ public struct HostConnectionSheet: View {
 
     private func harnessDetail(_ h: HarnessDetection) -> String {
         var parts: [String] = []
-        if let ver = h.version, !ver.isEmpty { parts.append("v\(ver)") }
+        if let ver = h.version, !ver.isEmpty {
+            // Hosts report either a bare number ("1.5.18") or a full banner ("codex-cli 0.172.0").
+            parts.append(ver.first?.isNumber == true ? "v\(ver)" : ver)
+        }
         parts.append(h.daemonRunning ? "daemon on" : "daemon off")
         if !h.capabilities.canControlDaemon { parts.append("no remote toggle") }
         return parts.joined(separator: " · ")
@@ -319,6 +323,7 @@ public struct HostConnectionSheet: View {
             } label: {
                 HStack {
                     Label("Send Test", systemImage: "bell.badge")
+                        .font(SHTypography.label)
                     Spacer()
                     if isSendingTestPush {
                         ProgressView().controlSize(.small)

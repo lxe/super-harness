@@ -400,7 +400,15 @@ export class ControlServer {
         }
 
         if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
-          const { harnesses, sessions: rawSessions } = await this.registry.discover();
+          // Serve the cached discovery snapshot instantly when available (cold discover() can take
+          // ~1s); a background refresh then pushes any changes to the client as sessions_delta.
+          const cached =
+            typeof this.registry.getCached === 'function'
+              ? this.registry.getCached()
+              : { harnesses: [], sessions: [] };
+          const useCached = cached.sessions.length > 0;
+          const { harnesses, sessions: rawSessions } = useCached ? cached : await this.registry.discover();
+          if (useCached) void this.triggerRefresh();
           const activeSet = new Set(this.hooks.getActiveWorkingSessionIds?.() ?? []);
           const sessions = rawSessions.map((s) =>
             !s.id.startsWith('master:') && activeSet.has(s.id) ? { ...s, status: 'running' as const } : s

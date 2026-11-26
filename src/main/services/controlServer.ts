@@ -528,7 +528,8 @@ export class ControlServer {
           } catch {
             // plain text response
           }
-          sendJson({ ok: true, text });
+          // `timing` lets clients separate YapYap time from network/proxy overhead.
+          sendJson({ ok: true, text, timing: { readMs, yapyapMs } });
           return;
         }
 
@@ -1037,6 +1038,10 @@ export class ControlServer {
 
     return new Promise((resolve) => {
       const srv = http.createServer(this.createRequestHandler(cfg.token));
+      // Keep phone connections open between requests. Node's 5s default closes the connection
+      // between a mic tap and the audio upload, so every dictation paid for a new handshake.
+      srv.keepAliveTimeout = 75_000;
+      srv.headersTimeout = 80_000;
       srv.on('error', (err) => {
         console.error('[ControlServer] Mobile API listener failed:', err);
         this.mobileServer = null;

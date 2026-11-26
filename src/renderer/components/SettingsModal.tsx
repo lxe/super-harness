@@ -289,7 +289,7 @@ export const SettingsModal: React.FC<Props> = ({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-5"
+      className="sh-no-drag fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-5"
     >
       <div
         role="dialog"

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { IconButton } from './Button';
 import { cn } from './cn';
@@ -46,10 +47,10 @@ export const Modal: React.FC<ModalProps> = ({
 
   if (!open) return null;
 
-  return (
+  const node = (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4"
+      className="sh-no-drag fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-4"
     >
       <div
         role="dialog"
@@ -62,7 +63,7 @@ export const Modal: React.FC<ModalProps> = ({
           className
         )}
       >
-        <div className="px-5 py-3.5 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0">
+        <div className="px-6 py-4 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             {icon && <span className="shrink-0 text-ink-secondary">{icon}</span>}
             <div className="min-w-0">
@@ -80,16 +81,17 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
 
         {footer && (
-          <div className="px-5 py-3 border-t border-line-hairline bg-surface-rail/40 flex items-center justify-end gap-2 shrink-0">
+          <div className="px-6 py-3.5 border-t border-line-hairline bg-surface-rail/40 flex items-center justify-end gap-2 shrink-0">
             {footer}
           </div>
         )}
       </div>
     </div>
   );
+  return typeof document !== 'undefined' && document.body ? createPortal(node, document.body) : node;
 };
 
 export interface DrawerProps {
@@ -124,10 +126,10 @@ export const Drawer: React.FC<DrawerProps> = ({
 
   if (!open) return null;
 
-  return (
+  const node = (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex justify-end"
+      className="sh-no-drag fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex justify-end"
     >
       <div
         role="dialog"
@@ -139,7 +141,7 @@ export const Drawer: React.FC<DrawerProps> = ({
           className
         )}
       >
-        <div className="px-4 py-3 border-b border-line-hairline bg-surface-rail/90 flex items-center justify-between gap-3 shrink-0">
+        <div className="h-12 px-5 border-b border-line-hairline bg-surface-rail/90 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             {icon && <span className="shrink-0 text-ink-muted">{icon}</span>}
             <div className="min-w-0">
@@ -163,4 +165,5 @@ export const Drawer: React.FC<DrawerProps> = ({
       </div>
     </div>
   );
+  return typeof document !== 'undefined' && document.body ? createPortal(node, document.body) : node;
 };

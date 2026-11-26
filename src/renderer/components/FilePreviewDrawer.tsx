@@ -103,7 +103,7 @@ export const FilePreviewDrawer: React.FC<Props> = ({
 
   return (
     <aside className="w-[520px] max-w-[50vw] shrink-0 h-full flex flex-col border-l border-line-subtle bg-surface-rail">
-      <div className="sh-drag-region h-11 px-3.5 border-b border-line-hairline flex items-center justify-between gap-2 shrink-0">
+      <div className="sh-drag-region h-12 px-4 border-b border-line-hairline flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           {data?.isDirectory ? (
             <Folder className="w-4 h-4 text-ink-secondary shrink-0" />

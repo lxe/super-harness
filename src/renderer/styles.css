@@ -32,6 +32,8 @@ body,
   app-region: drag;
 }
 .sh-no-drag,
+[role="dialog"],
+[role="menu"],
 .sh-drag-region button,
 .sh-drag-region input,
 .sh-drag-region select,

@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from './cn';
 
 const BASE_CONTROL =
-  'w-full bg-surface-subtle border border-line-subtle rounded-lg text-ink-primary placeholder:text-ink-faint transition-colors focus:outline-none focus:border-line-strong disabled:opacity-45';
+  'w-full bg-surface-subtle border border-line-subtle rounded-lg text-ink-primary placeholder:text-ink-faint transition-colors focus:outline-none focus-visible:shadow-none focus:border-line-strong disabled:opacity-45';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   inputSize?: 'sm' | 'md';

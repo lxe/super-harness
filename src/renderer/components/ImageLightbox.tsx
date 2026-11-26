@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { IconButton } from '../ui';
 
 export interface PreviewImageItem {
   src: string;
@@ -15,8 +15,9 @@ export interface ImageLightboxProps {
 }
 
 /**
- * Full-screen obsidian image preview lightbox with keyboard navigation
- * (Escape / ArrowLeft / ArrowRight) and multi-image switcher.
+ * Full-screen obsidian image preview lightbox rendered in a document.body portal
+ * with explicit `sh-no-drag` so Electron's top window drag region can never steal
+ * clicks on the close button or controls.
  */
 export const ImageLightbox: React.FC<ImageLightboxProps> = ({
   images,
@@ -26,6 +27,10 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
   const [index, setIndex] = useState(
     Math.max(0, Math.min(initialIndex, Math.max(0, images.length - 1)))
   );
+
+  useEffect(() => {
+    setIndex(Math.max(0, Math.min(initialIndex, Math.max(0, images.length - 1))));
+  }, [initialIndex, images.length]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -47,45 +52,54 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
   const current = images[index];
   if (!current) return null;
 
-  return (
+  const overlay = (
     <div
-      className="fixed inset-0 z-50 bg-black/82 backdrop-blur-sm flex flex-col items-center justify-center p-6"
+      className="sh-no-drag fixed inset-0 z-[100] bg-black/82 backdrop-blur-sm flex flex-col items-center justify-center p-6"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={current.name || 'Image preview'}
     >
       {/* Top bar */}
-      <div
-        className="w-full max-w-5xl flex items-center justify-between gap-3 pb-3 text-caption text-ink-secondary"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="w-full max-w-5xl flex items-center justify-between gap-4 pb-4 text-caption text-ink-secondary shrink-0">
+        <div
+          className="flex items-center gap-2 min-w-0"
+          onClick={(e) => e.stopPropagation()}
+        >
           <span className="truncate font-medium text-ink-primary">
             {current.name || 'Image'}
           </span>
           {images.length > 1 && (
-            <span className="text-micro font-mono text-ink-faint shrink-0">
+            <span className="text-micro tabular-nums text-ink-faint shrink-0">
               {index + 1} / {images.length}
             </span>
           )}
         </div>
-        <IconButton size="md" label="Close preview (Esc)" onClick={onClose}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          title="Close preview (Esc)"
+          aria-label="Close preview (Esc)"
+          className="sh-no-drag w-9 h-9 rounded-full bg-surface-popover/90 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-raised hover:border-line-strong flex items-center justify-center transition-colors cursor-pointer shrink-0 focus:outline-none focus-visible:shadow-none"
+        >
           <X className="w-4 h-4" />
-        </IconButton>
+        </button>
       </div>
 
-      {/* Main image canvas */}
-      <div
-        className="relative flex-1 w-full max-w-5xl flex items-center justify-center min-h-0"
-        onClick={(e) => e.stopPropagation()}
-      >
+      {/* Main image canvas — clicking empty space around the image closes cleanly */}
+      <div className="relative flex-1 w-full max-w-5xl flex items-center justify-center min-h-0">
         {images.length > 1 && (
           <button
             type="button"
-            onClick={() => setIndex((i) => (i - 1 + images.length) % images.length)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIndex((i) => (i - 1 + images.length) % images.length);
+            }}
             aria-label="Previous image"
-            className="absolute left-2 z-10 w-9 h-9 rounded-full bg-surface-popover/90 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-raised flex items-center justify-center transition-colors cursor-pointer"
+            className="sh-no-drag absolute left-2 z-10 w-9 h-9 rounded-full bg-surface-popover/90 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-raised flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -94,15 +108,19 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
         <img
           src={current.src}
           alt={current.name || 'Preview'}
+          onClick={(e) => e.stopPropagation()}
           className="max-w-full max-h-[78vh] rounded-xl border border-line-subtle bg-black/50 object-contain shadow-2xl select-none"
         />
 
         {images.length > 1 && (
           <button
             type="button"
-            onClick={() => setIndex((i) => (i + 1) % images.length)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIndex((i) => (i + 1) % images.length);
+            }}
             aria-label="Next image"
-            className="absolute right-2 z-10 w-9 h-9 rounded-full bg-surface-popover/90 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-raised flex items-center justify-center transition-colors cursor-pointer"
+            className="sh-no-drag absolute right-2 z-10 w-9 h-9 rounded-full bg-surface-popover/90 border border-line-subtle text-ink-secondary hover:text-ink-primary hover:bg-surface-raised flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -112,7 +130,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
       {/* Thumbnail strip when multiple images */}
       {images.length > 1 && (
         <div
-          className="pt-3 flex items-center gap-2 overflow-x-auto max-w-full"
+          className="pt-4 flex items-center gap-2 overflow-x-auto max-w-full shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
           {images.map((img, i) => (
@@ -120,7 +138,8 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
               key={`${img.src}-${i}`}
               type="button"
               onClick={() => setIndex(i)}
-              className={`w-12 h-12 rounded-lg overflow-hidden border transition-all shrink-0 cursor-pointer ${
+              aria-label={`View image ${i + 1}`}
+              className={`w-12 h-12 rounded-lg overflow-hidden border transition-all shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none ${
                 i === index
                   ? 'border-ink-primary ring-1 ring-ink-primary/40 opacity-100'
                   : 'border-line-subtle opacity-55 hover:opacity-90'
@@ -137,4 +156,9 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
       )}
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(overlay, document.body);
+  }
+  return overlay;
 };

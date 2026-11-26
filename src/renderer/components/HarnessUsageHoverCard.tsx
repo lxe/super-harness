@@ -119,14 +119,25 @@ export function computeWindowPace(
 
 /**
  * Selects the single most constrained primary limit to headline the popover.
+ * Prefers the harness's canonical primary windows (`five_hour`, `weekly`, `primary`)
+ * so third-party/extra pools (e.g. Antigravity's `3p-weekly` Claude & GPT pool)
+ * stay in the secondary list rather than hijacking the headline from Gemini.
  */
 export function pickHeroWindow(windows: UsageQuotaWindow[]): {
   hero: UsageQuotaWindow | null;
   secondary: UsageQuotaWindow[];
 } {
   if (windows.length === 0) return { hero: null, secondary: [] };
-  const primaryPool = windows.filter((w) => w.id !== 'extra');
-  const candidates = primaryPool.length > 0 ? primaryPool : windows;
+  const canonicalPool = windows.filter(
+    (w) => w.id === 'five_hour' || w.id === 'weekly' || w.id === 'primary'
+  );
+  const nonExtraPool = windows.filter((w) => w.id !== 'extra');
+  const candidates =
+    canonicalPool.length > 0
+      ? canonicalPool
+      : nonExtraPool.length > 0
+        ? nonExtraPool
+        : windows;
 
   let hero = candidates[0];
   for (const w of candidates) {

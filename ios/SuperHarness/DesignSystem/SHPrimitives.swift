@@ -666,63 +666,60 @@ public struct SHRadialGauge<Center: View>: View {
         if isWorking && !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 2.4))
                 let sweepDeg = (t / 2.6).truncatingRemainder(dividingBy: 1.0) * 360.0
-                gaugeContent(pulse: wave, sweepDeg: sweepDeg)
+                gaugeContent(sweepDeg: sweepDeg)
             }
         } else {
-            gaugeContent(pulse: isWorking ? 0.78 : 0.0, sweepDeg: 0)
+            gaugeContent(sweepDeg: 0)
         }
     }
 
     @ViewBuilder
-    private func gaugeContent(pulse: Double, sweepDeg: Double) -> some View {
-        let strokeHSB = SHActivityPulse.hsbComponents(of: stroke)
-        let sweepPeak = Color(
-            hue: strokeHSB.hue,
-            saturation: strokeHSB.sat * 0.94,
-            brightness: min(1.0, strokeHSB.bright * 1.18)
-        )
+    private func gaugeContent(sweepDeg: Double) -> some View {
         ZStack {
-            if isWorking {
-                // One quiet cue in the exact gauge hue: a brighter highlight travelling around the track.
-                let sweepGradient = AngularGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: .clear, location: 0.0),
-                        .init(color: stroke.opacity(0.28), location: 0.16),
-                        .init(color: sweepPeak.opacity(0.62), location: 0.26),
-                        .init(color: stroke.opacity(0.28), location: 0.36),
-                        .init(color: .clear, location: 0.52),
-                        .init(color: .clear, location: 1.0),
-                    ]),
-                    center: .center
-                )
-
+            // Isolated ring stack so `.colorDodge` only brightens the track & colored arc,
+            // matching Desktop's `isolation: isolate` + `mix-blend-mode: color-dodge` shimmer wave.
+            ZStack {
+                // 1. Recessed circular track
                 Circle()
                     .inset(by: ringInset)
-                    .stroke(sweepGradient, lineWidth: lineWidth)
-                    .rotationEffect(.degrees(sweepDeg))
-            }
+                    .stroke(Color.white.opacity(isActive ? 0.15 : 0.09), lineWidth: lineWidth)
 
-            Circle()
-                .inset(by: ringInset)
-                .stroke(Color.white.opacity(isActive ? 0.15 : 0.09), lineWidth: lineWidth)
+                // 2. Colored usage gauge arc
+                if displayFraction > 0 {
+                    Circle()
+                        .inset(by: ringInset)
+                        .trim(from: 0, to: displayFraction)
+                        .stroke(
+                            stroke.opacity(estimated ? 0.92 : 1.0),
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeOut(duration: 0.3), value: displayFraction)
+                }
 
-            if displayFraction > 0 {
-                Circle()
-                    .inset(by: ringInset)
-                    .trim(from: 0, to: displayFraction)
-                    .stroke(
-                        stroke.opacity(estimated ? (0.86 + 0.14 * pulse) : 1.0),
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                // 3. Long color-dodge shimmer wave: lifts grey toward white & boosts chroma on colored arcs
+                if isWorking {
+                    let shimmerGradient = AngularGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: Color.white.opacity(0.12), location: 45.0 / 360.0),
+                            .init(color: Color.white.opacity(0.52), location: 115.0 / 360.0),
+                            .init(color: Color.white.opacity(0.12), location: 185.0 / 360.0),
+                            .init(color: .clear, location: 230.0 / 360.0),
+                            .init(color: .clear, location: 1.0),
+                        ]),
+                        center: .center
                     )
-                    .rotationEffect(.degrees(-90))
-                    .shadow(
-                        color: isWorking ? stroke.opacity(0.18 + 0.14 * pulse) : .clear,
-                        radius: isWorking ? (1.5 + 1.0 * pulse) : 0
-                    )
-                    .animation(.easeOut(duration: 0.3), value: displayFraction)
+
+                    Circle()
+                        .inset(by: ringInset)
+                        .stroke(shimmerGradient, lineWidth: lineWidth)
+                        .rotationEffect(.degrees(sweepDeg))
+                        .blendMode(.colorDodge)
+                }
             }
+            .compositingGroup()
 
             center
         }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, RotateCcw } from 'lucide-react';
 import type {
   DailySpendPoint,
   HarnessGroup,
@@ -68,19 +68,33 @@ function formatResetLabel(resetsAt?: number): string | null {
   if (!resetsAt) return null;
   const now = Date.now();
   const diff = resetsAt - now;
-  if (diff <= 0) return 'resets soon';
+  if (diff <= 0) return 'soon';
   const totalMin = Math.round(diff / 60_000);
-  if (totalMin < 60) return `resets in ${totalMin}m`;
+  if (totalMin < 60) return `${totalMin}m`;
   if (totalMin < 24 * 60) {
     const hrs = Math.floor(totalMin / 60);
     const mins = totalMin % 60;
-    return mins > 0 ? `resets in ${hrs}h ${mins}m` : `resets in ${hrs}h`;
+    return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
   }
   const d = new Date(resetsAt);
   const weekday = d.toLocaleDateString(undefined, { weekday: 'short' });
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return `resets ${weekday} ${time}`;
+  return `${weekday} ${time}`;
 }
+
+const ResetBadge: React.FC<{ text: string; title?: string; className?: string }> = ({
+  text,
+  title,
+  className,
+}) => (
+  <span
+    title={title || `Resets ${text}`}
+    className={`inline-flex items-center justify-end gap-1 text-micro text-ink-faint tabular-nums leading-none min-w-0 ${className || ''}`}
+  >
+    <RotateCcw className="w-2.5 h-2.5 shrink-0 opacity-75" strokeWidth={2} />
+    <span className="truncate">{text}</span>
+  </span>
+);
 
 export interface WindowPaceInfo {
   elapsedPercent: number;
@@ -368,9 +382,13 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
                   )}
                   {pct !== null ? (
                     <>
-                      <span className="text-micro text-ink-faint text-right truncate max-w-[130px]">
-                        {resetStr || hero?.label}
-                      </span>
+                      {resetStr ? (
+                        <ResetBadge text={resetStr} className="max-w-[130px]" />
+                      ) : (
+                        <span className="text-micro text-ink-faint text-right truncate max-w-[130px]">
+                          {hero?.label}
+                        </span>
+                      )}
                       <span className={`text-caption font-semibold tabular-nums text-right ${pctToneClass(pct)}`}>
                         {pct}%
                       </span>
@@ -449,22 +467,27 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
       onMouseLeave={onMouseLeave}
       className="fixed z-50 w-[336px] p-4 space-y-4"
     >
-      {/* Header: Harness identity + hero reset time */}
-      <div className="flex items-baseline justify-between gap-2.5">
+      {/* Header: Harness identity + hero reset time (center-aligned) */}
+      <div className="flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2 shrink-0">
           <HarnessLogo harness={target} size={15} />
-          <span className="text-heading font-semibold text-ink-primary whitespace-nowrap">
+          <span className="text-heading font-semibold text-ink-primary leading-none whitespace-nowrap">
             {harnessTitle}
           </span>
         </div>
-        {(heroReset || (heroPct === 0 && hero) || planShort) && (
+        {heroReset ? (
+          <ResetBadge
+            text={heroReset}
+            title={`Resets ${heroReset} · Updated ${formatUpdatedAgo(info.updatedAt)}`}
+          />
+        ) : (heroPct === 0 && hero) || planShort ? (
           <span
             title={`Updated ${formatUpdatedAgo(info.updatedAt)}`}
-            className="text-micro text-ink-faint min-w-0 truncate text-right"
+            className="text-micro text-ink-faint leading-none min-w-0 truncate text-right"
           >
-            {heroReset || (heroPct === 0 ? 'fresh window' : planShort)}
+            {heroPct === 0 && hero ? 'fresh window' : planShort}
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* Hero Limit: the single most important answer ("am I close to cutoff?") */}
@@ -505,14 +528,19 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
             <div className="space-y-2.5 pt-0.5">
               {secondary.map((w) => {
                 const pct = Math.round(w.usedPercent);
-                const ctx = secondaryContextLabel(w);
+                const resetStr = formatResetLabel(w.resetsAt);
+                const ctx = !resetStr ? secondaryContextLabel(w) : null;
                 return (
                   <div key={w.id} className="space-y-1.5">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-x-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_2.75rem] items-center gap-x-2">
                       <span className="text-caption text-ink-secondary truncate">{w.label}</span>
-                      <span className="text-micro text-ink-faint text-right truncate">
-                        {ctx || ''}
-                      </span>
+                      {resetStr ? (
+                        <ResetBadge text={resetStr} />
+                      ) : (
+                        <span className="text-micro text-ink-faint text-right truncate">
+                          {ctx || ''}
+                        </span>
+                      )}
                       <span
                         className={`text-caption font-semibold tabular-nums text-right ${pctToneClass(pct)}`}
                       >

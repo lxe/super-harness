@@ -249,6 +249,15 @@ export const SessionPane: React.FC<Props> = ({
       if (!silent && !hasCached) setLoading(true);
       try {
         const res = await window.superHarness.getTranscript(reqId, reqLimit);
+        // Preserve a freshly seeded optimistic launch prompt until the harness flushes its first turn
+        const prevOpt = lastResultRef.current;
+        const preserveLaunchSeed =
+          res.messages.length === 0 &&
+          prevOpt?.sessionId === reqId &&
+          prevOpt.messages.some((m) => m.id.startsWith('optimistic-launch-')) &&
+          Date.now() - prevOpt.sourceMtimeMs < 25_000;
+        if (preserveLaunchSeed) return;
+
         rendererTranscriptCache.set(reqId, res, reqLimit);
         // Guard against out-of-order async responses after switching sessions
         if (currentSessionRef.current !== reqId) return;

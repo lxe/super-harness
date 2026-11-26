@@ -304,7 +304,9 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('sh:start-session', async (_ev, req: StartSessionRequest) => {
     const res = await dispatcher.startNewSession(req);
-    void refreshAndBroadcast();
+    if (res.ok) {
+      await refreshAndBroadcast();
+    }
     return res;
   });
 

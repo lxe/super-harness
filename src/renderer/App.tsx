@@ -16,7 +16,11 @@ import { FilePreviewDrawer, type PreviewTarget } from './components/FilePreviewD
 import { SessionPane, type ComposerDraft } from './components/SessionPane';
 import { SettingsModal } from './components/SettingsModal';
 import { Sidebar, type SidebarFilterTab } from './components/Sidebar';
-import { prefetchSessionTranscript } from './utils/transcriptCache';
+import {
+  DEFAULT_TRANSCRIPT_LIMIT,
+  prefetchSessionTranscript,
+  rendererTranscriptCache,
+} from './utils/transcriptCache';
 
 const EMPTY_DRAFT: ComposerDraft = { text: '', attachments: [] };
 const EMPTY_QUEUE: QueuedMessageItem[] = [];
@@ -34,6 +38,7 @@ export const App: React.FC = () => {
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
   const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessageItem[]>>({});
   const [draftConversations, setDraftConversations] = useState<DraftConversation[]>([]);
+  const [pendingSessions, setPendingSessions] = useState<Record<string, UnifiedSession>>({});
   const [toast, setToast] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [streamingIds, setStreamingIds] = useState<Set<string>>(() => new Set());
@@ -389,23 +394,56 @@ export const App: React.FC = () => {
     [showToast]
   );
 
-  const effectiveSessions = useMemo(
-    () =>
-      sessions.map((s) => {
-        if (streamingIds.has(s.id)) {
-          return s.status === 'running' ? s : { ...s, status: 'running' as const, isLive: true };
+  // Prune optimistic pending sessions as soon as real discovery picks them up
+  useEffect(() => {
+    setPendingSessions((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      let changed = false;
+      const next: Record<string, UnifiedSession> = {};
+      const now = Date.now();
+      for (const id of keys) {
+        const p = prev[id];
+        const discovered = sessions.some(
+          (s) => s.id === p.id || (p.nativeId && s.nativeId === p.nativeId)
+        );
+        if (discovered || now - p.createdAt > 90_000) {
+          changed = true;
+        } else {
+          next[id] = p;
         }
-        const liveOverride = liveWorkingMap[s.id];
-        if (liveOverride === true && s.status !== 'running') {
-          return { ...s, status: 'running' as const, isLive: true };
-        }
-        if (liveOverride === false && s.status === 'running') {
-          return { ...s, status: 'idle' as const };
-        }
-        return s;
-      }),
-    [sessions, streamingIds, liveWorkingMap]
-  );
+      }
+      return changed ? next : prev;
+    });
+  }, [sessions]);
+
+  const effectiveSessions = useMemo(() => {
+    const merged: UnifiedSession[] = [];
+    for (const p of Object.values(pendingSessions)) {
+      if (!sessions.some((s) => s.id === p.id || (p.nativeId && s.nativeId === p.nativeId))) {
+        merged.push(p);
+      }
+    }
+    for (const s of sessions) {
+      if (streamingIds.has(s.id)) {
+        merged.push(
+          s.status === 'running' ? s : { ...s, status: 'running' as const, isLive: true }
+        );
+        continue;
+      }
+      const liveOverride = liveWorkingMap[s.id];
+      if (liveOverride === true && s.status !== 'running') {
+        merged.push({ ...s, status: 'running' as const, isLive: true });
+        continue;
+      }
+      if (liveOverride === false && s.status === 'running') {
+        merged.push({ ...s, status: 'idle' as const });
+        continue;
+      }
+      merged.push(s);
+    }
+    return merged;
+  }, [sessions, pendingSessions, streamingIds, liveWorkingMap]);
 
   const findSessionResilient = useCallback(
     (list: UnifiedSession[], id: string | null): UnifiedSession | undefined => {
@@ -540,11 +578,79 @@ export const App: React.FC = () => {
             onUpdateDraft={(patch) => handleUpdateDraftConversation(activeDraft.id, patch)}
             onDiscard={() => handleDiscardDraftConversation(activeDraft.id)}
             onLaunched={(newSid) => {
-              setDraftConversations((prev) => prev.filter((d) => d.id !== activeDraft.id));
-              void handleRefresh().then(() => {
-                if (newSid) setActiveSessionId(newSid);
-              });
-              if (newSid) setActiveSessionId(newSid);
+              const launchedDraft = activeDraft;
+              setDraftConversations((prev) => prev.filter((d) => d.id !== launchedDraft.id));
+              if (newSid && launchedDraft.harness) {
+                const now = Date.now();
+                const nativeId = newSid.includes(':') ? newSid.slice(newSid.indexOf(':') + 1) : newSid;
+                const harnessGroup =
+                  launchedDraft.harness === 'codex'
+                    ? 'codex'
+                    : launchedDraft.harness === 'antigravity'
+                      ? 'antigravity'
+                      : 'claude';
+                const cwdParts = launchedDraft.cwd.split('/').filter(Boolean);
+                const projectName = cwdParts[cwdParts.length - 1] || launchedDraft.cwd || 'Project';
+                const titleText =
+                  launchedDraft.prompt.trim().slice(0, 80) || `New ${projectName} session`;
+
+                const optimisticSession: UnifiedSession = {
+                  id: newSid,
+                  nativeId,
+                  harness: launchedDraft.harness,
+                  harnessGroup,
+                  title: titleText,
+                  preview: launchedDraft.prompt.trim().slice(0, 140) || 'Starting session…',
+                  cwd: launchedDraft.cwd,
+                  projectName,
+                  model: launchedDraft.model || undefined,
+                  status: 'running',
+                  isLive: true,
+                  isRemote: launchedDraft.harness === 'claude-tmux' && launchedDraft.remoteControl,
+                  createdAt: now,
+                  updatedAt: now,
+                  pinned: false,
+                  folderId: null,
+                  tags: ['launching'],
+                  hidden: false,
+                  dispatchMode:
+                    launchedDraft.harness === 'codex'
+                      ? 'codex-resume'
+                      : launchedDraft.harness === 'antigravity'
+                        ? 'agy-resume'
+                        : launchedDraft.harness === 'claude-tmux'
+                          ? 'tmux-send'
+                          : 'claude-resume',
+                };
+
+                setPendingSessions((prev) => ({ ...prev, [newSid]: optimisticSession }));
+
+                if (launchedDraft.prompt.trim()) {
+                  rendererTranscriptCache.set(
+                    newSid,
+                    {
+                      sessionId: newSid,
+                      messages: [
+                        {
+                          id: `optimistic-launch-${now}`,
+                          role: 'user',
+                          timestamp: now,
+                          blocks: [{ type: 'text', text: launchedDraft.prompt.trim() }],
+                        },
+                      ],
+                      totalCount: 1,
+                      hasMore: false,
+                      sourceMtimeMs: now,
+                      liveActivity: { isWorking: true, lastEventAt: now },
+                    },
+                    DEFAULT_TRANSCRIPT_LIMIT
+                  );
+                }
+
+                setActiveSessionId(newSid);
+              }
+              void handleRefresh();
+              window.setTimeout(() => void handleRefresh(), 1500);
             }}
           />
         ) : (

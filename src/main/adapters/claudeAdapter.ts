@@ -1269,6 +1269,9 @@ export function createClaudeDriver(): HarnessDriver {
   ): Promise<{ ok: boolean; sessionId?: string; error?: string }> => {
     const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
 
+    const nativeId = crypto.randomUUID();
+    const sessionId = `claude:${nativeId}`;
+
     if (req.harness === 'claude-tmux') {
       const claudeBin = await whichBinary('claude');
       const tmuxBin = await whichBinary('tmux');
@@ -1282,7 +1285,7 @@ export function createClaudeDriver(): HarnessDriver {
           .replace(/^-+|-+$/g, '')
           .slice(0, 32) || `sh-${Date.now().toString(36)}`;
 
-      const flags: string[] = [];
+      const flags: string[] = ['--session-id', nativeId];
       if (req.remoteControl !== false) flags.push('--remote-control');
       if (req.model) flags.push('--model', req.model);
       if (req.reasoningEffort) flags.push('--effort', req.reasoningEffort);
@@ -1303,8 +1306,10 @@ export function createClaudeDriver(): HarnessDriver {
             });
           }, 2500);
         }
-        ctx.triggerRefresh(1500);
-        return { ok: true, sessionId: `tmux:${rawName}` };
+        ctx.triggerRefresh(1000);
+        ctx.triggerRefresh(2800);
+        ctx.triggerRefresh(5000);
+        return { ok: true, sessionId };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
@@ -1312,7 +1317,10 @@ export function createClaudeDriver(): HarnessDriver {
 
     const bin = await whichBinary('claude');
     if (!bin) return { ok: false, error: 'claude CLI not found' };
+    const runId = crypto.randomBytes(6).toString('hex');
     const args = [
+      '--session-id',
+      nativeId,
       '-p',
       req.prompt || 'Hello! Summarize the workspace briefly.',
       '--output-format',
@@ -1321,10 +1329,18 @@ export function createClaudeDriver(): HarnessDriver {
     ];
     if (req.model) args.push('--model', req.model);
     if (req.reasoningEffort) args.push('--effort', req.reasoningEffort);
-    const child = spawn(bin, args, { cwd, stdio: 'ignore', detached: true });
-    child.unref();
-    ctx.triggerRefresh(2000);
-    return { ok: true };
+    ctx.spawnStreaming({
+      sessionId,
+      runId,
+      bin,
+      args,
+      cwd,
+      parseLine: (line, gotAnyDelta) =>
+        parseClaudeStreamLine(sessionId, runId, line, gotAnyDelta, ctx.emitStream),
+    });
+    ctx.triggerRefresh(800);
+    ctx.triggerRefresh(2500);
+    return { ok: true, sessionId };
   };
 
   return {

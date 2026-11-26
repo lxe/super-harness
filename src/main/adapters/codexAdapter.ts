@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1007,6 +1007,8 @@ function parseCodexStreamLine(
  * (SQLite state/history/queue stores, rollouts, app-server daemon, CLI).
  */
 export function createCodexDriver(): HarnessDriver {
+  const startedRuns = new Map<string, ChildProcess>();
+
   return {
     id: 'codex',
     displayName: 'OpenAI Codex',
@@ -1133,10 +1135,137 @@ export function createCodexDriver(): HarnessDriver {
         args.push('-c', `model_reasoning_effort="${req.reasoningEffort}"`);
       }
       args.push(req.prompt || 'Inspect this directory and wait for further instructions.');
-      const child = spawn(bin, args, { cwd, stdio: 'ignore', detached: true });
-      child.unref();
-      ctx.triggerRefresh(2000);
-      return { ok: true };
+
+      const runId = crypto.randomBytes(6).toString('hex');
+      const child = spawn(bin, args, {
+        cwd,
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let sessionId: string | null = null;
+        let stdoutBuf = '';
+        let stderrBuf = '';
+        let gotAnyDelta = false;
+        const bufferedLines: string[] = [];
+
+        const finishResolve = (res: { ok: boolean; sessionId?: string; error?: string }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(res);
+        };
+
+        const timeout = setTimeout(() => {
+          finishResolve({
+            ok: true,
+            sessionId: sessionId ?? undefined,
+          });
+        }, 8000);
+
+        const handleLine = (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          if (!sessionId) {
+            try {
+              const obj = JSON.parse(trimmed) as { type?: string; thread_id?: string };
+              if (obj.type === 'thread.started' && typeof obj.thread_id === 'string' && obj.thread_id) {
+                sessionId = `codex:${obj.thread_id}`;
+                startedRuns.set(sessionId, child);
+                ctx.emitStream({ sessionId, runId, kind: 'start' });
+                for (const pending of bufferedLines) {
+                  if (parseCodexStreamLine(sessionId, runId, pending, ctx.emitStream)) {
+                    gotAnyDelta = true;
+                  }
+                }
+                bufferedLines.length = 0;
+                ctx.triggerRefresh(400);
+                ctx.triggerRefresh(2000);
+                finishResolve({ ok: true, sessionId });
+                return;
+              }
+            } catch {
+              // Not JSON yet; buffer until thread.started arrives
+            }
+            bufferedLines.push(trimmed);
+            return;
+          }
+          if (parseCodexStreamLine(sessionId, runId, trimmed, ctx.emitStream)) {
+            gotAnyDelta = true;
+          }
+        };
+
+        child.stdout?.on('data', (chunk: Buffer) => {
+          stdoutBuf += chunk.toString('utf8');
+          const lines = stdoutBuf.split('\n');
+          stdoutBuf = lines.pop() ?? '';
+          for (const line of lines) handleLine(line);
+        });
+
+        child.stderr?.on('data', (chunk: Buffer) => {
+          stderrBuf = (stderrBuf + chunk.toString('utf8')).slice(-4000);
+        });
+
+        child.on('error', (err) => {
+          if (sessionId) {
+            startedRuns.delete(sessionId);
+            ctx.emitStream({ sessionId, runId, kind: 'error', error: err.message });
+            ctx.emitStream({ sessionId, runId, kind: 'done' });
+          }
+          finishResolve({ ok: false, error: err.message });
+        });
+
+        child.on('close', (code) => {
+          if (stdoutBuf.trim()) handleLine(stdoutBuf);
+          if (sessionId) {
+            startedRuns.delete(sessionId);
+            if (code !== 0 && !gotAnyDelta && stderrBuf.trim()) {
+              ctx.emitStream({
+                sessionId,
+                runId,
+                kind: 'error',
+                error: stderrBuf.trim().slice(-1000),
+              });
+            }
+            ctx.emitStream({ sessionId, runId, kind: 'done' });
+            ctx.triggerRefresh(300);
+            ctx.triggerRefresh(1500);
+            finishResolve({ ok: true, sessionId });
+          } else {
+            const errMsg =
+              stderrBuf.trim() ||
+              bufferedLines.join('\n').trim() ||
+              `codex exec exited with code ${code ?? 'unknown'}`;
+            finishResolve({ ok: false, error: errMsg.slice(0, 500) });
+          }
+        });
+      });
+    },
+
+    abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
+      const proc = startedRuns.get(sessionId);
+      if (!proc) return false;
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      startedRuns.delete(sessionId);
+      emitStream({ sessionId, runId: 'abort', kind: 'done' });
+      return true;
+    },
+
+    shutdown(): void {
+      for (const proc of startedRuns.values()) {
+        try {
+          proc.kill('SIGTERM');
+        } catch {
+          // ignore
+        }
+      }
+      startedRuns.clear();
     },
 
     async controlDaemon(

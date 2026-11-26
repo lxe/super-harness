@@ -647,12 +647,19 @@ public struct SHRadialGauge<Center: View>: View {
         return max(clamped, 4) / 100
     }
 
-    private var stroke: Color {
-        if let clamped, !estimated {
-            if clamped >= 95 { return SHColor.statusDanger }
-            if clamped >= 80 { return SHColor.statusWarning }
+    /// Shared gauge color resolution (warning >= 80%, danger >= 95%, else harness tint).
+    /// Used by both `SHRadialGauge` and `AppStore.gaugeTint(for:)` so orbs always match the gauge.
+    public static func resolvedTint(base: Color, value: Double?, estimated: Bool = false) -> Color {
+        if let value, value.isFinite, !estimated {
+            let c = min(100, max(0, value))
+            if c >= 95 { return SHColor.statusDanger }
+            if c >= 80 { return SHColor.statusWarning }
         }
-        return tint
+        return base
+    }
+
+    private var stroke: Color {
+        Self.resolvedTint(base: tint, value: clamped, estimated: estimated)
     }
 
     public var body: some View {
@@ -670,16 +677,21 @@ public struct SHRadialGauge<Center: View>: View {
 
     @ViewBuilder
     private func gaugeContent(pulse: Double, sweepDeg: Double) -> some View {
+        let strokeHSB = SHActivityPulse.hsbComponents(of: stroke)
+        let sweepPeak = Color(
+            hue: strokeHSB.hue,
+            saturation: strokeHSB.sat * 0.94,
+            brightness: min(1.0, strokeHSB.bright * 1.18)
+        )
         ZStack {
             if isWorking {
-                // A working harness gets one quiet cue: a soft highlight travelling around the track.
-                // No bloom outside the ring and no blur, so neighbouring gauges stay calm.
+                // One quiet cue in the exact gauge hue: a brighter highlight travelling around the track.
                 let sweepGradient = AngularGradient(
                     gradient: Gradient(stops: [
                         .init(color: .clear, location: 0.0),
-                        .init(color: stroke.opacity(0.30), location: 0.16),
-                        .init(color: Color.white.opacity(0.34), location: 0.26),
-                        .init(color: stroke.opacity(0.30), location: 0.36),
+                        .init(color: stroke.opacity(0.28), location: 0.16),
+                        .init(color: sweepPeak.opacity(0.62), location: 0.26),
+                        .init(color: stroke.opacity(0.28), location: 0.36),
                         .init(color: .clear, location: 0.52),
                         .init(color: .clear, location: 1.0),
                     ]),
@@ -749,7 +761,7 @@ public struct SHActivityPulse: View {
         }
     }
 
-    private func hsbComponents(of color: Color) -> (hue: Double, sat: Double, bright: Double) {
+    public static func hsbComponents(of color: Color) -> (hue: Double, sat: Double, bright: Double) {
         #if canImport(UIKit)
         var h: CGFloat = 0
         var s: CGFloat = 0
@@ -768,7 +780,7 @@ public struct SHActivityPulse: View {
 
     private func spheresCanvas(phase: Double) -> some View {
         let box = renderSize
-        let hsb = hsbComponents(of: tint)
+        let hsb = Self.hsbComponents(of: tint)
         return Canvas { ctx, sz in
             let cx = sz.width * 0.5
             let cy = sz.height * 0.5
@@ -800,27 +812,27 @@ public struct SHActivityPulse: View {
 
             for s in samples {
                 let r = s.radius
-                // Depth is expressed purely via scale & HSB brightness — fully opaque, no muddiness, no glow.
-                let depthBright = 0.74 + 0.26 * s.depth
+                // Monochromatic HSB shading in the exact gauge hue & near-same saturation (no white pastel washout, no glow).
+                let depthBright = 0.78 + 0.22 * s.depth
                 let hiColor = Color(
                     hue: hsb.hue,
-                    saturation: hsb.sat * 0.36,
-                    brightness: min(1.0, max(hsb.bright * 1.32, 0.90) * depthBright)
+                    saturation: hsb.sat * 0.92,
+                    brightness: min(1.0, hsb.bright * 1.14 * depthBright)
                 )
                 let midColor = Color(
                     hue: hsb.hue,
-                    saturation: min(1.0, hsb.sat * 1.04),
-                    brightness: min(1.0, hsb.bright * 1.06 * depthBright)
+                    saturation: hsb.sat,
+                    brightness: min(1.0, hsb.bright * depthBright)
                 )
                 let deepColor = Color(
                     hue: hsb.hue,
-                    saturation: min(1.0, hsb.sat * 1.18),
-                    brightness: hsb.bright * 0.56 * depthBright
+                    saturation: min(1.0, hsb.sat * 1.06),
+                    brightness: hsb.bright * 0.66 * depthBright
                 )
                 let glintColor = Color(
                     hue: hsb.hue,
-                    saturation: hsb.sat * 0.12,
-                    brightness: 1.0
+                    saturation: hsb.sat * 0.65,
+                    brightness: min(1.0, hsb.bright * 1.24)
                 )
 
                 let sphereRect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)
@@ -830,7 +842,7 @@ public struct SHActivityPulse: View {
                     with: .radialGradient(
                         Gradient(stops: [
                             .init(color: hiColor, location: 0.0),
-                            .init(color: midColor, location: 0.38),
+                            .init(color: midColor, location: 0.40),
                             .init(color: deepColor, location: 1.0),
                         ]),
                         center: lightPoint,
@@ -839,8 +851,8 @@ public struct SHActivityPulse: View {
                     )
                 )
 
-                // Crisp small specular glint
-                let glintR = max(0.7, r * 0.22)
+                // Small, subtle same-hue specular glint
+                let glintR = max(0.6, r * 0.17)
                 let glintCenter = CGPoint(x: s.x - r * 0.28, y: s.y - r * 0.30)
                 let glintRect = CGRect(
                     x: glintCenter.x - glintR,
@@ -850,7 +862,7 @@ public struct SHActivityPulse: View {
                 )
                 ctx.fill(
                     Path(ellipseIn: glintRect),
-                    with: .color(glintColor.opacity(0.68 + 0.28 * s.depth))
+                    with: .color(glintColor.opacity(0.55 + 0.25 * s.depth))
                 )
             }
         }

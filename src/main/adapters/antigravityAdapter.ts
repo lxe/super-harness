@@ -54,6 +54,63 @@ const headerInfoCache = new Map<
   string,
   { mtimeMs: number; info: { title?: string; preview?: string; isSubagent: boolean } }
 >();
+const terminalTailCache = new Map<string, { mtimeMs: number; isTerminal: boolean }>();
+
+/**
+ * Returns true when the last recorded step in an Antigravity `transcript.jsonl` is a
+ * completed text-only `PLANNER_RESPONSE` (no pending tool calls) and the file has been
+ * quiet for >4s. Guards against Antigravity Desktop's `conversation_summaries.db` and
+ * hub LS occasionally staying stuck at `CASCADE_RUN_STATUS_RUNNING` (`not_fully_idle=1`)
+ * long after a turn has finished.
+ */
+export function isAntigravityTranscriptTerminal(
+  trPath: string | undefined,
+  mtimeMs: number,
+  nowMs: number = Date.now()
+): boolean {
+  if (!trPath || nowMs - mtimeMs <= 4_000) return false;
+  const cached = terminalTailCache.get(trPath);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.isTerminal;
+  let isTerminal = false;
+  try {
+    const st = fs.statSync(trPath);
+    const readBytes = Math.min(st.size, 32_768);
+    if (readBytes > 0) {
+      const fd = fs.openSync(trPath, 'r');
+      let tail = '';
+      try {
+        const buf = Buffer.allocUnsafe(readBytes);
+        const n = fs.readSync(fd, buf, 0, readBytes, Math.max(0, st.size - readBytes));
+        tail = buf.subarray(0, n).toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+      const lines = tail.split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const trimmed = lines[i].trim();
+        if (!trimmed) continue;
+        try {
+          const obj = JSON.parse(trimmed) as Record<string, unknown>;
+          const stepType = typeof obj.type === 'string' ? obj.type : '';
+          const status = typeof obj.status === 'string' ? obj.status : '';
+          if (!stepType && !status) continue;
+          const toolCalls = Array.isArray(obj.tool_calls) ? obj.tool_calls : [];
+          isTerminal =
+            stepType === 'PLANNER_RESPONSE' &&
+            status === 'DONE' &&
+            toolCalls.length === 0;
+          break;
+        } catch {
+          continue;
+        }
+      }
+    }
+  } catch {
+    isTerminal = false;
+  }
+  terminalTailCache.set(trPath, { mtimeMs, isTerminal });
+  return isTerminal;
+}
 
 export function invalidateAgyRemoteStatusCache(): void {
   cachedRemoteStatus = null;
@@ -270,9 +327,11 @@ export async function detectAntigravity(
       `Antigravity ${d.id.slice(0, 8)}`;
     const preview =
       cleanTextPreview(summary?.preview || header.preview, 140) || 'Antigravity conversation';
+    const terminalReply = isAntigravityTranscriptTerminal(d.transcriptPath, d.mtime);
     const isRunning =
-      summary?.status === 'CASCADE_RUN_STATUS_RUNNING' ||
-      (summary?.status !== 'CASCADE_RUN_STATUS_IDLE' && Date.now() - d.mtime < 20_000);
+      !terminalReply &&
+      (summary?.status === 'CASCADE_RUN_STATUS_RUNNING' ||
+        (summary?.status !== 'CASCADE_RUN_STATUS_IDLE' && Date.now() - d.mtime < 20_000));
     const isLive = Boolean(isRunning) || Date.now() - d.mtime < 10 * 60 * 1000;
 
     const hasWorkspaceProject = cwd !== os.homedir();
@@ -1180,7 +1239,11 @@ export function createAntigravityDriver(): HarnessDriver {
         ensureLsSubscription(session.nativeId);
         const status = lsClient.getObservedStatus(session.nativeId);
         if (status) {
-          const isWorking = status !== 'CASCADE_RUN_STATUS_IDLE';
+          const hubSaysWorking = status !== 'CASCADE_RUN_STATUS_IDLE';
+          const terminalReply = resolved
+            ? isAntigravityTranscriptTerminal(resolved, res.sourceMtimeMs)
+            : false;
+          const isWorking = hubSaysWorking && !terminalReply;
           res.liveActivity = { ...(res.liveActivity ?? { isWorking }), isWorking, lastEventAt: Date.now() };
         }
       }

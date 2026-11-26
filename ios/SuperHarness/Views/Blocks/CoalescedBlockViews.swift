@@ -94,7 +94,7 @@ public struct CollapsedTraceGroupView: View, Equatable {
             }
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                         CompactTraceRowView(
                             block: block,
@@ -104,6 +104,7 @@ public struct CollapsedTraceGroupView: View, Equatable {
                         )
                     }
                 }
+                .padding(.top, 2)
                 .padding(.leading, 10)
                 .overlay(alignment: .leading) {
                     Rectangle()
@@ -173,38 +174,36 @@ private struct CompactTraceRowView: View {
             let failed = (exitCode ?? 0) != 0 || status?.lowercased() == "failed"
             let hasOutput = !(output ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-            VStack(alignment: .leading, spacing: 4) {
-                let canExpand = hasOutput || ScrollingCommandText.isMultiLine(cleanCmd)
-                Group {
-                    HStack(alignment: .top, spacing: 7) {
-                        if isRunning {
-                            SHActivityPulse(tint: SHColor.brandAntigravity, size: 9)
-                                .frame(width: 12, height: ScrollingCommandText.lineHeight)
-                        } else {
-                            Image(systemName: failed ? "xmark.circle.fill" : "terminal")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(failed ? SHColor.statusDanger : SHColor.inkFaint)
-                                .frame(width: 12, height: ScrollingCommandText.lineHeight)
-                        }
-                        ScrollingCommandText(text: cleanCmd, color: SHColor.inkSecondary, showsAllLines: isDetailOpen)
-                        if let durationMs, durationMs >= 1000 {
-                            Text(String(format: "%.1fs", durationMs / 1000.0))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(SHColor.inkFaint)
-                                .frame(height: ScrollingCommandText.lineHeight)
-                        }
-                        if canExpand {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(SHColor.inkFaint)
-                                .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
-                                .frame(height: ScrollingCommandText.lineHeight)
-                        }
+            let canExpand = hasOutput || ScrollingCommandText.isMultiLine(cleanCmd)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 8) {
+                    if isRunning {
+                        SHActivityPulse(tint: SHColor.brandAntigravity, size: 10)
+                            .frame(width: 14, height: ScrollingCommandText.lineHeight)
+                    } else {
+                        Image(systemName: failed ? "xmark.circle.fill" : "terminal")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(failed ? SHColor.statusDanger : SHColor.inkFaint)
+                            .frame(width: 14, height: ScrollingCommandText.lineHeight)
                     }
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 6)
-                    .contentShape(Rectangle())
+                    ScrollingCommandText(text: cleanCmd, color: SHColor.inkSecondary, showsAllLines: isDetailOpen)
+                    if let durationMs, durationMs >= 1000 {
+                        Text(String(format: "%.1fs", durationMs / 1000.0))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(SHColor.inkFaint)
+                            .frame(height: ScrollingCommandText.lineHeight)
+                    }
+                    if canExpand {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(SHColor.inkFaint)
+                            .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
+                            .frame(height: ScrollingCommandText.lineHeight)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
                 .onTapGesture {
                     if canExpand {
                         withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
@@ -213,19 +212,26 @@ private struct CompactTraceRowView: View {
                 .accessibilityAddTraits(canExpand ? .isButton : [])
 
                 if isDetailOpen, let output, !output.isEmpty {
+                    Divider()
+                        .overlay(SHColor.lineHairline)
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(output)
                             .font(SHTypography.monoSmall)
                             .foregroundStyle(SHColor.inkSecondary)
                             .textSelection(.enabled)
-                            .padding(9)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 9)
                     }
                     .frame(maxHeight: 200)
                     .background(SHColor.surfaceCode)
-                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
-                    .padding(.leading, 18)
                 }
             }
+            .background(SHColor.surfaceSubtle)
+            .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75)
+            )
 
         case .thinking(let text, let summary):
             let title = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }

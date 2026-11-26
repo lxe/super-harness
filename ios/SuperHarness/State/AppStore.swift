@@ -1688,6 +1688,25 @@ public final class AppStore {
         transcriptsBySessionId[sessionId]?.liveActivity
     }
 
+    /// Returns the exact active tint shown by the harness's radial gauge, including
+    /// warning (>=80%) and danger (>=95%) overrides, so activity orbs always match the gauge.
+    public func gaugeTint(for group: HarnessGroup) -> Color {
+        let summary = usage?[group]
+        let barPct = summary?.barPercent ?? UsageMetrics.pickHeroWindow(summary?.windows ?? []).hero?.usedPercent
+        return SHRadialGauge<EmptyView>.resolvedTint(
+            base: SHColor.harness(group),
+            value: barPct,
+            estimated: summary?.barIsEstimated ?? false
+        )
+    }
+
+    public func gaugeTint(for harness: HarnessKind) -> Color {
+        guard let group = harness.harnessGroup else {
+            return SHColor.harness(harness)
+        }
+        return gaugeTint(for: group)
+    }
+
     public func isSessionBusy(_ sessionId: String) -> Bool {
         if streamingMessagesBySessionId[sessionId] != nil { return true }
         if pendingOutgoingBySessionId[sessionId]?.contains(where: { $0.state == .sending }) == true { return true }

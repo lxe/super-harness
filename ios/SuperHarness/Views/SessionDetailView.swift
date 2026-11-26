@@ -398,7 +398,7 @@ public struct SessionDetailView: View {
                     sessionActionMenuItems(for: currentSession)
                 } label: {
                     if isBusy {
-                        SHActivityPulse(tint: SHColor.harness(currentSession.harness), size: 11)
+                        SHActivityPulse(tint: store.gaugeTint(for: currentSession.harness), size: 11)
                             .frame(width: 22, height: 22)
                     } else {
                         Image(systemName: "ellipsis")
@@ -674,22 +674,12 @@ private struct MessageBubbleView: View, Equatable {
                 }
 
                 if !nonImageBlocks.isEmpty {
-                    VStack(alignment: .trailing, spacing: SHLayout.blockGap) {
-                        ForEach(Array(nonImageBlocks.enumerated()), id: \.offset) { _, block in
-                            UnifiedBlockView(
-                                block: block,
-                                isUserBubble: true,
-                                onAnswerQuestion: onAnswerQuestion,
-                                onTapImage: onTapImage,
-                                onLoadMedia: onLoadMedia
-                            )
-                            .equatable()
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(SHColor.surfaceBubble)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    ExpandableUserBubbleContent(
+                        blocks: nonImageBlocks,
+                        onAnswerQuestion: onAnswerQuestion,
+                        onTapImage: onTapImage,
+                        onLoadMedia: onLoadMedia
+                    )
                 }
 
                 if case .failed = pendingDeliveryState {
@@ -788,5 +778,106 @@ private struct SHClearTopScrollEdgeModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Renders a user/steering bubble cleanly, collapsing very long messages to 6 lines with
+/// a crisp "Show more" / "Show less" toggle so massive prompts don't hijack the screen.
+private struct ExpandableUserBubbleContent: View {
+    let blocks: [UnifiedBlock]
+    let onAnswerQuestion: (String) -> Void
+    let onTapImage: (LightboxPayload) -> Void
+    let onLoadMedia: ((String) async -> Data?)?
+
+    @State private var isExpanded: Bool = false
+
+    private static let collapseCharThreshold = 320
+    private static let collapseLineThreshold = 6
+    private static let collapsedPreviewLines = 6
+
+    private var combinedPlainText: String {
+        blocks.compactMap { block in
+            if case .text(let t) = block { return t }
+            return nil
+        }.joined(separator: "\n")
+    }
+
+    private var isCollapsible: Bool {
+        let trimmed = combinedPlainText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if trimmed.count > Self.collapseCharThreshold { return true }
+        let lineCount = trimmed.components(separatedBy: .newlines).count
+        return lineCount > Self.collapseLineThreshold
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            if isCollapsible && !isExpanded {
+                Text(combinedPlainText.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(SHTypography.body)
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .lineSpacing(3)
+                    .lineLimit(Self.collapsedPreviewLines)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            isExpanded = true
+                        }
+                    }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isExpanded = true
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Show more")
+                            .font(SHTypography.micro.weight(.semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(SHColor.accentPrimary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("message.expand")
+            } else {
+                VStack(alignment: .trailing, spacing: SHLayout.blockGap) {
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                        UnifiedBlockView(
+                            block: block,
+                            isUserBubble: true,
+                            onAnswerQuestion: onAnswerQuestion,
+                            onTapImage: onTapImage,
+                            onLoadMedia: onLoadMedia
+                        )
+                        .equatable()
+                    }
+                }
+
+                if isCollapsible {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            isExpanded = false
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Show less")
+                                .font(SHTypography.micro.weight(.semibold))
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(SHColor.inkMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("message.collapse")
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(SHColor.surfaceBubble)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }

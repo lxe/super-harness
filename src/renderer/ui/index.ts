@@ -26,7 +26,7 @@ export { SectionHeader, NavRow } from './ListRow';
 export type { SectionHeaderProps, NavRowProps } from './ListRow';
 export { RecencyClock, computeRecencyVisual } from './RecencyClock';
 export type { RecencyClockProps, RecencyTier, RecencyVisual } from './RecencyClock';
-export { WorkingOrb, WorkingIndicator } from './WorkingOrb';
+export { WorkingOrb, WorkingIndicator, resolveHarnessOrbTone } from './WorkingOrb';
 export type { WorkingOrbProps, WorkingIndicatorProps, WorkingOrbTone } from './WorkingOrb';
 export {
   Switch,

@@ -38,6 +38,7 @@ import {
   PopoverSurface,
   SectionHeader,
   SegmentedControl,
+  resolveHarnessOrbTone,
 } from '../ui';
 import {
   canDropSessionIntoSection,
@@ -763,7 +764,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         secondaryActive={isSplit}
         selected={isMultiSelected}
         working={s.status === 'running'}
-        workingTone={s.harnessGroup}
+        workingTone={resolveHarnessOrbTone(s.harnessGroup, usage)}
         className={isBeingDragged ? 'opacity-45' : undefined}
         onPointerDown={(e) => {
           if (e.button !== 0 || s.harnessGroup === 'master') return;

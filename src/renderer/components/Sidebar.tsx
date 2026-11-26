@@ -1189,10 +1189,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
           workingByHarness.claude ||
           workingByHarness.muse;
         return (
-          <div className="bg-[#181a20] px-2.5 py-2">
+          <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.26),0_4px_12px_-4px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.04)]">
             <SegmentedControl<FilterTab>
               variant="gauge"
-              className="bg-transparent shadow-none rounded-none p-0"
+              className="bg-transparent shadow-none rounded-none !p-0"
               value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
               onChange={(tab) => {
                 setFilter(tab);

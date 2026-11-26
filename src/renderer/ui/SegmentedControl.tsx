@@ -255,7 +255,7 @@ export function SegmentedControl<T extends string>({
                 };
               }}
               className={cn(
-                'relative h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+                'relative h-11 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
                 dragId === item.id && 'opacity-40',
                 overId === item.id && dragId !== item.id && 'ring-1 ring-white/25',
                 active

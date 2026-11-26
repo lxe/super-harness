@@ -24,6 +24,18 @@ import {
 
 const EMPTY_DRAFT: ComposerDraft = { text: '', attachments: [] };
 const EMPTY_QUEUE: QueuedMessageItem[] = [];
+const ACTIVE_SESSION_STORAGE_KEY = 'sh:activeSessionId';
+const SPLIT_SESSION_STORAGE_KEY = 'sh:splitSessionId';
+
+function readStoredSessionId(key: string): string | null {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved && !saved.startsWith('draft:')) return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
 
 export const App: React.FC = () => {
   const [harnesses, setHarnesses] = useState<HarnessDetection[]>([]);
@@ -33,8 +45,37 @@ export const App: React.FC = () => {
   const [state, setState] = useState<SuperHarnessState | null>(null);
   const [controlPort, setControlPort] = useState(0);
 
-  const [activeSessionId, setActiveSessionId] = useState<string>('master:root');
-  const [splitSessionId, setSplitSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    () => readStoredSessionId(ACTIVE_SESSION_STORAGE_KEY) || 'master:root'
+  );
+  const [splitSessionId, setSplitSessionId] = useState<string | null>(
+    () => readStoredSessionId(SPLIT_SESSION_STORAGE_KEY)
+  );
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const splitSessionIdRef = useRef(splitSessionId);
+  splitSessionIdRef.current = splitSessionId;
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionId.startsWith('draft:')) return;
+    try {
+      localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, activeSessionId);
+    } catch {
+      // ignore
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    try {
+      if (splitSessionId && !splitSessionId.startsWith('draft:')) {
+        localStorage.setItem(SPLIT_SESSION_STORAGE_KEY, splitSessionId);
+      } else {
+        localStorage.removeItem(SPLIT_SESSION_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [splitSessionId]);
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
   const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessageItem[]>>({});
   const [draftConversations, setDraftConversations] = useState<DraftConversation[]>([]);
@@ -94,15 +135,40 @@ export const App: React.FC = () => {
       setSessions(boot.sessions);
       setState(boot.state);
       setControlPort(boot.controlPort);
-      // Auto-select first live non-master session in split if user has active harnesses, keep Master primary
+
+      // Preserve the user's last selected chat across restarts; only fall back if it no longer exists.
+      const savedActive = activeSessionIdRef.current;
+      const savedExists =
+        savedActive === 'master:root'
+          ? Boolean(readStoredSessionId(ACTIVE_SESSION_STORAGE_KEY))
+          : boot.sessions.some((s) => s.id === savedActive);
       const firstLive = boot.sessions.find((s) => s.harness !== 'master' && !s.isSubagent && s.isLive);
-      if (firstLive) {
-        setActiveSessionId(firstLive.id);
+      const firstWorker = boot.sessions.find((s) => s.harness !== 'master' && !s.isSubagent);
+      const resolvedActive = savedExists
+        ? savedActive
+        : firstLive?.id || firstWorker?.id || 'master:root';
+      if (resolvedActive !== savedActive) {
+        setActiveSessionId(resolvedActive);
+      }
+
+      const savedSplit = splitSessionIdRef.current;
+      const splitValid =
+        Boolean(savedSplit) &&
+        savedSplit !== resolvedActive &&
+        (savedSplit === 'master:root' || boot.sessions.some((s) => s.id === savedSplit));
+      if (!splitValid && savedSplit !== null) {
+        setSplitSessionId(null);
       }
 
       // Gently warm top pinned/live conversations in the background after initial paint
       const warmCandidates = boot.sessions
-        .filter((s) => s.harness !== 'master' && !s.isSubagent && s.id !== firstLive?.id)
+        .filter(
+          (s) =>
+            s.harness !== 'master' &&
+            !s.isSubagent &&
+            s.id !== resolvedActive &&
+            s.id !== (splitValid ? savedSplit : null)
+        )
         .sort((a, b) => {
           if (Boolean(a.pinnedToTop) !== Boolean(b.pinnedToTop)) return a.pinnedToTop ? -1 : 1;
           if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;

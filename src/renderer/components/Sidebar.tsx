@@ -180,6 +180,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const hoverCloseTimerRef = useRef<number | null>(null);
   const prefetchTimerRef = useRef<number | null>(null);
   const filterTriggerRef = useRef<HTMLSpanElement | null>(null);
+  const asideRef = useRef<HTMLElement | null>(null);
+  const didRevealInitialRef = useRef(false);
 
   const scheduleHoverPrefetch = (sessionId: string) => {
     if (prefetchTimerRef.current !== null) {
@@ -307,6 +309,71 @@ export const Sidebar: React.FC<Props> = React.memo(({
     () => flattenVisibleSessions(topGroups, collapsed, globalPinnedSessions),
     [topGroups, collapsed, globalPinnedSessions]
   );
+
+  // On initial startup restore, ensure the preserved active chat is visible (not hidden by a mismatched
+  // harness filter or collapsed section) and scrolled cleanly into view in the sidebar.
+  useEffect(() => {
+    if (didRevealInitialRef.current) return;
+    if (!activeSessionId || activeSessionId === 'master:root' || activeSessionId.startsWith('draft:')) {
+      if (sessions.length > 0) didRevealInitialRef.current = true;
+      return;
+    }
+    const target = workerSessions.find((s) => s.id === activeSessionId);
+    if (!target) return;
+
+    const inGlobalPins = globalPinnedSessions.some((s) => s.id === target.id);
+    if (!inGlobalPins) {
+      const matchesFilter =
+        filter === 'all' ||
+        (filter === 'antigravity' && target.harnessGroup === 'antigravity') ||
+        (filter === 'codex' && target.harnessGroup === 'codex') ||
+        (filter === 'claude' && target.harnessGroup === 'claude') ||
+        (filter === 'live' && target.isLive) ||
+        (filter === 'tmux' && target.harness === 'claude-tmux');
+
+      if (!matchesFilter) {
+        setFilter('all');
+        return; // Next effect pass will expand & scroll once topGroups updates
+      }
+
+      // Auto-expand the containing group / subsection if it was collapsed
+      const keysToExpand: string[] = [];
+      for (const grp of topGroups) {
+        if (grp.pinnedItems?.some((s) => s.id === target.id)) {
+          if (collapsed[grp.id]) keysToExpand.push(grp.id);
+          break;
+        }
+        if (grp.sections) {
+          const sec = grp.sections.find((s) => s.items.some((it) => it.id === target.id));
+          if (sec) {
+            if (collapsed[grp.id]) keysToExpand.push(grp.id);
+            if (collapsed[sec.id]) keysToExpand.push(sec.id);
+            break;
+          }
+        } else if (grp.items?.some((s) => s.id === target.id)) {
+          if (collapsed[grp.id]) keysToExpand.push(grp.id);
+          break;
+        }
+      }
+      if (keysToExpand.length > 0) {
+        setCollapsed((prev) => {
+          const next = { ...prev };
+          for (const k of keysToExpand) next[k] = false;
+          return next;
+        });
+        return;
+      }
+    }
+
+    didRevealInitialRef.current = true;
+    requestAnimationFrame(() => {
+      const root = asideRef.current;
+      if (!root) return;
+      const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(activeSessionId) : activeSessionId;
+      const row = root.querySelector<HTMLElement>(`[data-session-id="${escaped}"]`);
+      row?.scrollIntoView({ block: 'nearest' });
+    });
+  }, [activeSessionId, sessions.length, workerSessions, globalPinnedSessions, filter, topGroups, collapsed]);
 
   const handleRowClick = (e: React.MouseEvent, s: UnifiedSession) => {
     if (e.shiftKey) {
@@ -437,6 +504,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
     return (
       <NavRow
         key={s.id}
+        data-session-id={s.id}
+        aria-current={isPrimary ? 'page' : undefined}
         icon={leadingIcon}
         title={s.title}
         active={isPrimary}
@@ -486,6 +555,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
   return (
     <aside
+      ref={asideRef}
       style={{ width }}
       className="shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail select-none"
     >
@@ -599,6 +669,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
         {masterSession && (
           <NavRow
+            data-session-id={masterSession.id}
+            aria-current={activeSessionId === masterSession.id ? 'page' : undefined}
             icon={<HarnessLogo harness="master" size={16} />}
             title="Master Orchestrator"
             active={activeSessionId === masterSession.id}

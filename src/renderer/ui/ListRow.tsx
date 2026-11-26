@@ -204,7 +204,7 @@ export const NavRow: React.FC<NavRowProps> = ({
           </span>
         )}
         {hoverActions && (
-          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 absolute right-1.5 top-1/2 -translate-y-1/2 bg-surface-raised/95 rounded-md p-0.5 transition-opacity">
+          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 absolute right-2 top-1/2 -translate-y-1/2 transition-opacity">
             {hoverActions}
           </div>
         )}

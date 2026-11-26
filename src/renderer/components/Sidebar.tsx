@@ -990,10 +990,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
           ) : undefined
         }
         hoverActions={
-          <IconButton
-            size="xs"
-            label="Conversation actions"
-            className="focus-visible:shadow-none"
+          <button
+            type="button"
+            aria-label="Conversation actions"
+            title="Conversation actions"
+            className="w-6 h-6 inline-flex items-center justify-center text-ink-muted hover:text-ink-primary transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
             onClick={(e) => {
               e.stopPropagation();
               const rect = e.currentTarget.getBoundingClientRect();
@@ -1001,7 +1002,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             }}
           >
             <MoreHorizontal className="w-3.5 h-3.5" />
-          </IconButton>
+          </button>
         }
         onClick={(e) => handleRowClick(e, s)}
         onMouseEnter={() => {

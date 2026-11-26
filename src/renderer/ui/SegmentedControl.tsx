@@ -110,25 +110,12 @@ export function SegmentedControl<T extends string>({
               )}
             >
               <span className="relative inline-flex items-center justify-center w-8 h-8">
-                {/* Radial gauge track + underneath popping shimmer arc + progress arc on top */}
+                {/* Radial gauge track + underneath comet chaser + progress arc on top */}
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 36 36"
                   className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none overflow-visible"
                 >
-                  <defs>
-                    <linearGradient
-                      id={`sh-gauge-grad-${item.id}`}
-                      x1="0%"
-                      y1="0%"
-                      x2="100%"
-                      y2="100%"
-                    >
-                      <stop offset="0%" stopColor={palette.shimmer} stopOpacity="0.05" />
-                      <stop offset="55%" stopColor={palette.shimmer} stopOpacity="0.55" />
-                      <stop offset="100%" stopColor="#ffffff" stopOpacity="0.92" />
-                    </linearGradient>
-                  </defs>
                   <circle
                     cx="18"
                     cy="18"
@@ -140,20 +127,57 @@ export function SegmentedControl<T extends string>({
                   {item.working && (
                     <g
                       className="sh-gauge-shimmer"
-                      style={{
-                        transformOrigin: '18px 18px',
-                        filter: `drop-shadow(0 0 3px ${palette.stroke})`,
-                      }}
+                      style={{ transformOrigin: '18px 18px' }}
                     >
+                      {/* Smooth 4-stage clockwise comet: faded tail -> bright luminous head */}
                       <circle
                         cx="18"
                         cy="18"
                         r={GAUGE_RADIUS}
                         fill="none"
-                        stroke={`url(#sh-gauge-grad-${item.id})`}
+                        stroke={palette.shimmer}
+                        strokeOpacity="0.18"
                         strokeWidth="2.3"
                         strokeLinecap="round"
-                        strokeDasharray={`26 ${GAUGE_CIRCUMFERENCE}`}
+                        strokeDasharray={`34 ${GAUGE_CIRCUMFERENCE}`}
+                        strokeDashoffset="0"
+                      />
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r={GAUGE_RADIUS}
+                        fill="none"
+                        stroke={palette.shimmer}
+                        strokeOpacity="0.38"
+                        strokeWidth="2.3"
+                        strokeLinecap="round"
+                        strokeDasharray={`22 ${GAUGE_CIRCUMFERENCE}`}
+                        strokeDashoffset="-12"
+                      />
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r={GAUGE_RADIUS}
+                        fill="none"
+                        stroke={palette.shimmer}
+                        strokeOpacity="0.72"
+                        strokeWidth="2.3"
+                        strokeLinecap="round"
+                        strokeDasharray={`11 ${GAUGE_CIRCUMFERENCE}`}
+                        strokeDashoffset="-23"
+                      />
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r={GAUGE_RADIUS}
+                        fill="none"
+                        stroke="#ffffff"
+                        strokeOpacity="0.96"
+                        strokeWidth="2.3"
+                        strokeLinecap="round"
+                        strokeDasharray={`4 ${GAUGE_CIRCUMFERENCE}`}
+                        strokeDashoffset="-30"
+                        style={{ filter: `drop-shadow(0 0 2.5px ${palette.stroke})` }}
                       />
                     </g>
                   )}
@@ -174,12 +198,12 @@ export function SegmentedControl<T extends string>({
                   )}
                 </svg>
 
-                {/* Centered icon (or compact 'All' glyph shifted 1px left for optical balance) */}
+                {/* Centered icon (or compact 'All' glyph for the unified tab) */}
                 <span className="relative z-10 inline-flex items-center justify-center">
                   {item.icon ? (
                     item.icon
                   ) : (
-                    <span className="text-[10.5px] font-semibold tracking-tight leading-none -translate-x-[1px]">
+                    <span className="text-[10.5px] font-semibold tracking-tight leading-none">
                       {item.label}
                     </span>
                   )}

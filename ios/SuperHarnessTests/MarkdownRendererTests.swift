@@ -126,11 +126,21 @@ final class MarkdownRendererTests: XCTestCase {
             "Bare conversation:// URL must be auto-linked without trailing period; got \(links)"
         )
 
-        // Inline code spans must NOT be auto-linked
+        // A code span that is nothing but a URL is a link: agents often write links that way,
+        // and inline code styling looks tappable.
         let codeOnly = SHMarkdownCache.inlineAttributedString(
-            for: "Run `https://not-a-link.example.com` in shell",
+            for: "Install from `https://example.ts.net:8451/` on the phone",
             isUserBubble: false
         )
-        XCTAssertTrue(codeOnly.runs.compactMap(\.link).isEmpty, "URLs inside inline code must not be auto-linked")
+        XCTAssertEqual(codeOnly.runs.compactMap { $0.link?.absoluteString }, ["https://example.ts.net:8451/"])
+        let linkedRun = codeOnly.runs.first { $0.link != nil }
+        XCTAssertEqual(linkedRun?.inlinePresentationIntent?.contains(.code), true, "the link keeps its code styling")
+
+        // A URL inside a longer code span is part of a command and stays plain.
+        let command = SHMarkdownCache.inlineAttributedString(
+            for: "Run `curl -s https://not-a-link.example.com | jq .` in shell",
+            isUserBubble: false
+        )
+        XCTAssertTrue(command.runs.compactMap(\.link).isEmpty, "URLs inside a longer code span must not be auto-linked")
     }
 }

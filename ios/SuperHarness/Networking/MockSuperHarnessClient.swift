@@ -357,7 +357,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                         id: "th-4",
                         role: .assistant,
                         timestamp: now - 25 * hour,
-                        blocks: [.text(text: "Re-running the organizer tests against the staging snapshot now.")],
+                        blocks: [.text(text: "Re-running the organizer tests against the staging snapshot now.\n\nInstall page: https://example.com/install/\n\nCode-styled: `https://example.com/code/`\n\nSee the [release notes](https://example.com/notes) too.\n\n- Dashboard: https://example.com/dash\n\n| Item | Link |\n| --- | --- |\n| Docs | [docs](https://example.com/docs) |")],
                         harnessMeta: MessageHarnessMeta(model: "gpt-5.3-codex", sourceKind: .agent)
                     ),
                 ],

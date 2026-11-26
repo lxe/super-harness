@@ -553,12 +553,24 @@ public enum SHMarkdownCache {
                 continue
             }
             let attrRange = attrStart..<attrEnd
-            // Do not linkify inside inline code spans or overwrite an existing markdown link.
+            // Never overwrite an existing markdown link. Inside inline code, linkify only when the
+            // URL is the whole code span (`https://host/`): agents often write a link that way and
+            // code styling looks tappable. A URL inside a longer code span is part of a command and
+            // stays plain.
             var skip = false
             for run in attr[attrRange].runs {
-                if run.link != nil || run.inlinePresentationIntent?.contains(.code) == true {
+                if run.link != nil {
                     skip = true
                     break
+                }
+                if run.inlinePresentationIntent?.contains(.code) == true {
+                    // `run` is clipped to the URL; look up the full code span it belongs to.
+                    let fullSpan = attr.runs.first { $0.range.lowerBound <= attrStart && attrStart < $0.range.upperBound }
+                    let spanText = fullSpan.map { String(attr[$0.range].characters) } ?? ""
+                    if spanText.trimmingCharacters(in: .whitespaces) != rawSlice {
+                        skip = true
+                        break
+                    }
                 }
             }
             if !skip {

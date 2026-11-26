@@ -489,12 +489,28 @@ export const SessionPane: React.FC<Props> = ({
     });
   }, [sessionId, loadTranscript]);
 
-  // Smooth sticky bottom scroll
+  // Smooth sticky bottom scroll (re-runs whenever messages, streaming, or Working indicator height changes)
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !stickyBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamingText, tmuxOutput, viewMode, liveActivity?.isWorking]);
+    const raf = window.requestAnimationFrame(() => {
+      if (scrollRef.current && stickyBottomRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [
+    messages,
+    streamingText,
+    streamingBlocks.length,
+    isStreaming,
+    isStreamingGlobal,
+    tmuxOutput,
+    viewMode,
+    liveActivity?.isWorking,
+    liveActivity?.focus,
+  ]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -934,7 +950,7 @@ export const SessionPane: React.FC<Props> = ({
             </pre>
           </div>
         ) : (
-          <div className="max-w-[740px] mx-auto space-y-6 pb-4">
+          <div className="max-w-[740px] mx-auto space-y-6 pb-8">
             {totalCount > messages.length && (
               <div className="flex justify-center">
                 <Button size="xs" variant="ghost" onClick={() => setLimit((prev) => prev + 60)}>
@@ -1079,7 +1095,7 @@ export const SessionPane: React.FC<Props> = ({
       </div>
 
       {/* Bottom Composer Dock */}
-      <div className="px-6 pb-4 pt-1 shrink-0">
+      <div className="px-6 pb-4 pt-2 shrink-0">
         <div className="max-w-[740px] mx-auto space-y-2">
           {!isMaster && <LiveStepsBar key={session.id} steps={liveActivity?.steps} />}
 

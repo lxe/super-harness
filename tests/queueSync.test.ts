@@ -158,4 +158,25 @@ describe('Persistent Super Harness queue storage', () => {
     expect(isBusyDispatchError('thread already has an active writer')).toBe(true);
     expect(isBusyDispatchError('Session not found')).toBe(false);
   });
+
+  it('guards against stale ACP child exit races and keeps toast/WorkingIndicator clear of the composer', () => {
+    const acpSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/services/agyAcpClient.ts'),
+      'utf8'
+    );
+    const appSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/App.tsx'),
+      'utf8'
+    );
+    const paneSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/components/SessionPane.tsx'),
+      'utf8'
+    );
+
+    expect(acpSrc).toContain('if (this.proc !== child) return;');
+    expect(appSrc).toContain('fixed top-14 right-5 z-50');
+    expect(appSrc).not.toContain('fixed bottom-5 right-5 z-50');
+    expect(paneSrc).toContain('isStreamingGlobal');
+    expect(paneSrc).toContain('requestAnimationFrame');
+  });
 });

@@ -148,6 +148,7 @@ class AcpConnection {
       this.stderrTail = '';
 
       child.stdout?.on('data', (chunk: Buffer) => {
+        if (this.proc !== child) return;
         this.stdoutBuf += chunk.toString('utf8');
         const lines = this.stdoutBuf.split('\n');
         this.stdoutBuf = lines.pop() ?? '';
@@ -155,10 +156,13 @@ class AcpConnection {
       });
 
       child.stderr?.on('data', (chunk: Buffer) => {
+        if (this.proc !== child) return;
         this.stderrTail = (this.stderrTail + chunk.toString('utf8')).slice(-2000);
       });
 
       child.on('exit', (code) => {
+        // Ignore stale exit events from a previously recycled ACP child process
+        if (this.proc !== child) return;
         this.proc = null;
         this.initialized = false;
         this.initPromise = null;
@@ -360,11 +364,27 @@ class AcpConnection {
     const safeCwd = fs.existsSync(cwd) ? cwd : os.homedir();
 
     if (!this.resumedSessions.has(nativeSessionId)) {
-      await this.request('session/resume', {
-        sessionId: nativeSessionId,
-        cwd: safeCwd,
-        mcpServers: [],
-      });
+      try {
+        await this.request('session/resume', {
+          sessionId: nativeSessionId,
+          cwd: safeCwd,
+          mcpServers: [],
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/exited|not writable|closed/i.test(msg)) {
+          // Idle ACP worker exited right before resume — respawn once cleanly and retry
+          this.close();
+          await this.ensureConnected();
+          await this.request('session/resume', {
+            sessionId: nativeSessionId,
+            cwd: safeCwd,
+            mcpServers: [],
+          });
+        } else {
+          throw err;
+        }
+      }
       this.resumedSessions.add(nativeSessionId);
     }
 
@@ -448,16 +468,23 @@ class AcpConnection {
   }
 
   close(): void {
-    try {
-      this.proc?.kill('SIGTERM');
-    } catch {
-      // ignore
-    }
+    const oldProc = this.proc;
     this.proc = null;
     this.initialized = false;
+    this.initPromise = null;
     this.resumedSessions.clear();
     this.lastAppliedModel.clear();
     this.activeRuns.clear();
+    if (oldProc) {
+      try {
+        oldProc.stdout?.removeAllListeners();
+        oldProc.stderr?.removeAllListeners();
+        oldProc.removeAllListeners();
+        oldProc.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 

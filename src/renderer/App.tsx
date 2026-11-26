@@ -405,7 +405,11 @@ export const App: React.FC = () => {
                   },
                 };
               });
-              setToast(`Queued message not sent: ${res.error || 'Dispatch failed'}`);
+              const failMsg = `Queued message not sent: ${res.error || 'Dispatch failed'}`;
+              setToast(failMsg);
+              window.setTimeout(() => {
+                setToast((cur) => (cur === failMsg ? null : cur));
+              }, 4500);
               drainingQueuesRef.current.delete(sid);
               return;
             }
@@ -419,9 +423,11 @@ export const App: React.FC = () => {
             handleQueueChange(sid, (prev) =>
               prev.some((q) => q.id === nextItem.id) ? prev : [nextItem, ...prev]
             );
-            setToast(
-              `Queued message error: ${err instanceof Error ? err.message : String(err)}`
-            );
+            const errMsg = `Queued message error: ${err instanceof Error ? err.message : String(err)}`;
+            setToast(errMsg);
+            window.setTimeout(() => {
+              setToast((cur) => (cur === errMsg ? null : cur));
+            }, 4500);
             window.setTimeout(() => {
               drainingQueuesRef.current.delete(sid);
               setQueueDrainTick((t) => t + 1);
@@ -999,8 +1005,16 @@ export const App: React.FC = () => {
         )}
 
         {toast && (
-          <div className="fixed bottom-5 right-5 z-50 px-3.5 py-2 rounded-xl border border-line-subtle bg-surface-popover text-caption text-ink-primary shadow-2xl">
-            {toast}
+          <div className="fixed top-14 right-5 z-50 max-w-md flex items-center gap-2.5 px-3.5 py-2 rounded-xl border border-line-subtle bg-surface-popover text-caption text-ink-primary shadow-2xl">
+            <span className="truncate">{toast}</span>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              aria-label="Dismiss notification"
+              className="text-ink-faint hover:text-ink-primary transition-colors cursor-pointer shrink-0 leading-none px-0.5"
+            >
+              ×
+            </button>
           </div>
         )}
       </main>

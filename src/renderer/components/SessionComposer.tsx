@@ -252,15 +252,15 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
         />
 
         <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="flex items-center gap-1 min-w-0 h-7">
             <IconButton label="Attach image (or Ctrl+V to paste)" onClick={onPickImages}>
-              <ImagePlus className="w-4 h-4" />
+              <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
             </IconButton>
 
             {canSwitchModel && modelControls ? (
               <>
                 {/* Model Selector */}
-                <div className="relative min-w-0">
+                <div className="relative flex items-center min-w-0">
                   <button
                     ref={modelTriggerRef}
                     type="button"
@@ -271,15 +271,19 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                     title="Switch model"
                     aria-label="Switch model"
                     aria-expanded={modelMenuOpen}
-                    className={`h-7 px-2 rounded-lg flex items-center gap-1.5 text-caption transition-colors cursor-pointer max-w-[230px] focus:outline-none focus-visible:shadow-none ${
+                    className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-caption leading-none transition-colors cursor-pointer max-w-[230px] focus:outline-none focus-visible:shadow-none ${
                       modelMenuOpen
                         ? 'bg-white/[0.09] text-ink-primary'
                         : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.06]'
                     }`}
                   >
-                    <HarnessLogo harness={session.harness} size={14} />
-                    <span className="truncate">{modelControls.displayModelLabel}</span>
-                    <ChevronDown className="w-3 h-3 text-ink-faint shrink-0" />
+                    <span className="inline-flex items-center justify-center shrink-0">
+                      <HarnessLogo harness={session.harness} size={14} />
+                    </span>
+                    <span className="truncate leading-none translate-y-[0.5px]">
+                      {modelControls.displayModelLabel}
+                    </span>
+                    <ChevronDown className="w-3 h-3 text-ink-faint shrink-0 translate-y-[0.5px]" />
                   </button>
 
                   {modelMenuOpen && (
@@ -372,7 +376,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
 
                 {/* Thinking / Reasoning Effort Selector */}
                 {modelControls.thinkingLevels.length > 0 && (
-                  <div className="relative shrink-0">
+                  <div className="relative flex items-center shrink-0">
                     <button
                       ref={thinkingTriggerRef}
                       type="button"
@@ -383,19 +387,19 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                       title="Switch thinking / reasoning level"
                       aria-label="Switch thinking level"
                       aria-expanded={thinkingMenuOpen}
-                      className={`h-7 px-2 rounded-lg flex items-center gap-1.5 text-caption transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none ${
+                      className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-caption leading-none transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none ${
                         thinkingMenuOpen
                           ? 'bg-white/[0.09] text-ink-primary'
                           : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.06]'
                       }`}
                     >
-                      <Brain className="w-3.5 h-3.5 text-ink-faint shrink-0" />
-                      <span>
+                      <Brain className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
+                      <span className="leading-none translate-y-[0.5px]">
                         {modelControls.activeEffort
                           ? formatEffortLabel(modelControls.activeEffort)
                           : 'Thinking'}
                       </span>
-                      <ChevronDown className="w-3 h-3 text-ink-faint shrink-0" />
+                      <ChevronDown className="w-3 h-3 text-ink-faint shrink-0 translate-y-[0.5px]" />
                     </button>
 
                     {thinkingMenuOpen && (
@@ -445,26 +449,11 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                   </div>
                 )}
 
-                {dispatchNote ? (
-                  <span className="text-micro text-ink-faint truncate pl-1">
+                {dispatchNote && (
+                  <span className="text-micro text-ink-faint leading-none translate-y-[0.5px] truncate pl-1">
                     · {dispatchNote}
                   </span>
-                ) : session.liveOwner === 'desktop' ? (
-                  <span
-                    title={
-                      session.harnessGroup === 'claude'
-                        ? 'This tab is currently open in Claude Desktop. Sending from Super Harness works via Claude stream-json; reopen the tab in Claude Desktop to refresh its view.'
-                        : 'Antigravity Desktop is currently running a turn on this conversation.'
-                    }
-                    className="text-micro text-amber-300/75 truncate pl-1"
-                  >
-                    · Open in Desktop
-                  </span>
-                ) : session.liveOwner === 'tmux' ? (
-                  <span className="text-micro text-emerald-300/75 truncate pl-1">
-                    · Live tmux
-                  </span>
-                ) : null}
+                )}
               </>
             ) : (
               <div className="flex items-center gap-2 min-w-0 pl-1">

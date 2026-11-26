@@ -1803,17 +1803,12 @@ export function createClaudeDriver(): HarnessDriver {
             ctx.triggerRefresh(1800);
           },
         });
-        const desktopOpenNote = liveOwners.some((o) => o.entrypoint === 'claude-desktop')
-          ? ' (reopen tab in Claude Desktop to sync)'
-          : '';
         return {
           ok: true,
           runId,
-          dispatchedVia: `${
-            hasImages
-              ? `Claude stream-json (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
-              : 'Claude stream-json'
-          }${desktopOpenNote}`,
+          dispatchedVia: hasImages
+            ? `Claude stream-json (${attachments!.length} image${attachments!.length === 1 ? '' : 's'})`
+            : 'Claude stream-json',
         };
       } catch (err) {
         return {

@@ -334,6 +334,7 @@ export interface OrganizeAction {
     | 'create_folder'
     | 'delete_folder'
     | 'rename_folder'
+    | 'reorder_folders'
     | 'assign_folder'
     | 'pin'
     | 'unpin'
@@ -346,6 +347,7 @@ export interface OrganizeAction {
   folderId?: string | null;
   folderName?: string;
   folderColor?: string;
+  folderIds?: string[];
   sessionId?: string;
   title?: string;
   tags?: string[];

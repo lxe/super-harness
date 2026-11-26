@@ -105,8 +105,12 @@ store.subscribe((state) => {
 });
 
 function schedulePolling(intervalMs: number): void {
-  if (pollTimer) clearInterval(pollTimer);
-  const safeMs = Math.max(2000, Math.min(intervalMs || 5000, 60000));
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (intervalMs === 0) return;
+  const safeMs = Math.max(1000, Math.min(intervalMs || 5000, 60000));
   pollTimer = setInterval(() => {
     void refreshAndBroadcast();
   }, safeMs);

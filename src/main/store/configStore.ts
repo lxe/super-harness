@@ -203,6 +203,24 @@ export class ConfigStore {
           if (f) f.name = act.folderName.trim();
           break;
         }
+        case 'reorder_folders': {
+          if (!Array.isArray(act.folderIds) || act.folderIds.length === 0) break;
+          const byId = new Map(this.state.folders.map((f) => [f.id, f]));
+          const reordered: typeof this.state.folders = [];
+          for (const fid of act.folderIds) {
+            const found = byId.get(fid);
+            if (found) {
+              reordered.push(found);
+              byId.delete(fid);
+            }
+          }
+          for (const rest of byId.values()) reordered.push(rest);
+          reordered.forEach((f, idx) => {
+            f.order = idx;
+          });
+          this.state.folders = reordered;
+          break;
+        }
         case 'assign_folder': {
           if (!act.sessionId) break;
           let targetFolderId = act.folderId ?? null;

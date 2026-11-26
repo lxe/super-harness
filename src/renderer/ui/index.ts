@@ -24,5 +24,20 @@ export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentedItem } from './SegmentedControl';
 export { SectionHeader, NavRow } from './ListRow';
 export type { SectionHeaderProps, NavRowProps } from './ListRow';
-export { Switch, SettingsGroup, SettingsRow } from './Switch';
-export type { SwitchProps, SettingsGroupProps, SettingsRowProps } from './Switch';
+export {
+  Switch,
+  Checkbox,
+  ChoicePills,
+  UnitNumberInput,
+  SettingsGroup,
+  SettingsRow,
+} from './Switch';
+export type {
+  SwitchProps,
+  CheckboxProps,
+  ChoiceOption,
+  ChoicePillsProps,
+  UnitNumberInputProps,
+  SettingsGroupProps,
+  SettingsRowProps,
+} from './Switch';

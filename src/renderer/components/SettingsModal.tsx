@@ -1,17 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppWindow,
   Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Cpu,
   FolderOpen,
-  Play,
+  GripVertical,
+  Pencil,
   Plus,
-  Radio,
   RefreshCw,
+  Search,
   Sliders,
   Sparkles,
-  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -26,74 +28,177 @@ import type {
   SuperHarnessState,
 } from '../../shared/types';
 import {
-  Badge,
   Button,
+  Checkbox,
+  ChoicePills,
   IconButton,
   Input,
   Select,
   SettingsGroup,
   SettingsRow,
-  StatTile,
   Switch,
+  UnitNumberInput,
 } from '../ui';
 import { HarnessLogo } from './HarnessLogo';
 
-type SettingsTab = 'harnesses' | 'apps' | 'master' | 'workspace';
+export type SettingsTab = 'workspace' | 'apps' | 'harnesses' | 'master';
 
 interface Props {
   harnesses: HarnessDetection[];
   state: SuperHarnessState;
   controlPort: number;
+  initialTab?: SettingsTab;
   onClose: () => void;
   onRefresh: () => void;
   onUpdateSettings: (patch: Partial<SuperHarnessSettings>) => void;
   onOrganize: (actions: OrganizeAction[]) => void;
 }
 
-const NAV_ITEMS: Array<{
+interface NavItem {
   id: SettingsTab;
   label: string;
-  subtitle: string;
+  section: 'General' | 'Agents';
+  keywords: string;
   Icon: React.FC<{ className?: string }>;
-}> = [
-  { id: 'harnesses', label: 'Harnesses', subtitle: 'Detection, PIDs & daemons', Icon: Cpu },
-  { id: 'apps', label: 'Apps & Preview', subtitle: 'Editor, folder & terminal', Icon: AppWindow },
-  { id: 'master', label: 'Master & MCP', subtitle: 'Orchestrator engine & API', Icon: Sparkles },
-  { id: 'workspace', label: 'Workspace', subtitle: 'Discovery, layout & folders', Icon: Sliders },
+}
+
+const NAV_ITEMS: NavItem[] = [
+  {
+    id: 'workspace',
+    label: 'Workspace',
+    section: 'General',
+    keywords: 'sidebar group conversations archived hidden folders directory poll refresh',
+    Icon: Sliders,
+  },
+  {
+    id: 'apps',
+    label: 'Apps and preview',
+    section: 'General',
+    keywords: 'editor terminal file manager links click previewer',
+    Icon: AppWindow,
+  },
+  {
+    id: 'harnesses',
+    label: 'Harnesses',
+    section: 'Agents',
+    keywords: 'codex claude antigravity remote control daemon binary version',
+    Icon: Cpu,
+  },
+  {
+    id: 'master',
+    label: 'Master agent',
+    section: 'Agents',
+    keywords: 'orchestrator model mcp api control plane working directory',
+    Icon: Sparkles,
+  },
 ];
+
+const POLL_OPTIONS = [
+  { value: 1000, label: '1s' },
+  { value: 5000, label: '5s' },
+  { value: 30000, label: '30s' },
+  { value: 0, label: 'Off' },
+];
+
+function normalizePollChoice(ms: number): number {
+  if (ms === 0) return 0;
+  if (ms <= 2000) return 1000;
+  if (ms <= 12000) return 5000;
+  return 30000;
+}
+
+function formatScannedAgo(ts: number): string {
+  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (sec < 5) return 'just now';
+  if (sec < 60) return `${sec}s ago`;
+  return `${Math.floor(sec / 60)}m ago`;
+}
+
+function shortenHome(p: string): string {
+  return p.replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
+}
 
 export const SettingsModal: React.FC<Props> = ({
   harnesses,
   state,
   controlPort,
+  initialTab = 'workspace',
   onClose,
   onRefresh,
   onUpdateSettings,
   onOrganize,
 }) => {
-  const [tab, setTab] = useState<SettingsTab>('harnesses');
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const [navSearch, setNavSearch] = useState('');
   const [systemApps, setSystemApps] = useState<DetectedSystemApps | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [busyHarness, setBusyHarness] = useState<string | null>(null);
   const [copiedBin, setCopiedBin] = useState<string | null>(null);
+  const [expandedHarness, setExpandedHarness] = useState<Record<string, boolean>>({});
+  const [scannedAt, setScannedAt] = useState<number>(() => Date.now());
+
+  // Folder inline creation, rename & drag reorder
+  const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renameFolderDraft, setRenameFolderDraft] = useState('');
+  const [dragFolderId, setDragFolderId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    void window.superHarness.getSystemApps().then(setSystemApps);
+    if (typeof window !== 'undefined' && window.superHarness?.getSystemApps) {
+      void window.superHarness.getSystemApps().then(setSystemApps);
+    }
   }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (renamingFolderId) {
+          setRenamingFolderId(null);
+        } else if (addingFolder) {
+          setAddingFolder(false);
+        } else {
+          onClose();
+        }
+      } else if (
+        e.key === '/' &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, renamingFolderId, addingFolder]);
 
-  const { settings, folders } = state;
+  const { settings, folders, overrides } = state;
   const updateApps = (patch: Partial<ExternalAppsSettings>) => {
     onUpdateSettings({ apps: { ...settings.apps, ...patch } });
   };
+
+  // Count conversations assigned to each custom folder
+  const folderCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const ov of Object.values(overrides || {})) {
+      if (ov.folderId) {
+        map.set(ov.folderId, (map.get(ov.folderId) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [overrides]);
+
+  const filteredNavItems = useMemo(() => {
+    const q = navSearch.trim().toLowerCase();
+    if (!q) return NAV_ITEMS;
+    return NAV_ITEMS.filter(
+      (n) => n.label.toLowerCase().includes(q) || n.keywords.toLowerCase().includes(q)
+    );
+  }, [navSearch]);
 
   const handleControl = async (
     harness: HarnessGroup,
@@ -122,16 +227,46 @@ export const SettingsModal: React.FC<Props> = ({
 
   const handlePickMasterCwd = async () => {
     const dir = await window.superHarness.pickDirectory();
-    if (dir) {
-      onUpdateSettings({ master: { ...settings.master, cwd: dir } });
-    }
+    if (dir) onUpdateSettings({ master: { ...settings.master, cwd: dir } });
   };
 
   const handlePickDefaultCwd = async () => {
     const dir = await window.superHarness.pickDirectory();
-    if (dir) {
-      onUpdateSettings({ defaultNewSessionCwd: dir });
+    if (dir) onUpdateSettings({ defaultNewSessionCwd: dir });
+  };
+
+  const handleCreateFolder = () => {
+    const trimmed = newFolderName.trim();
+    if (!trimmed) return;
+    onOrganize([{ type: 'create_folder', folderName: trimmed }]);
+    setNewFolderName('');
+    setAddingFolder(false);
+  };
+
+  const handleCommitRenameFolder = (folderId: string) => {
+    const trimmed = renameFolderDraft.trim();
+    if (trimmed) {
+      onOrganize([{ type: 'rename_folder', folderId, folderName: trimmed }]);
     }
+    setRenamingFolderId(null);
+  };
+
+  const handleDropFolder = (targetId: string) => {
+    if (!dragFolderId || dragFolderId === targetId) {
+      setDragFolderId(null);
+      setDragOverFolderId(null);
+      return;
+    }
+    const orderedIds = folders.map((f) => f.id);
+    const fromIdx = orderedIds.indexOf(dragFolderId);
+    const toIdx = orderedIds.indexOf(targetId);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      orderedIds.splice(fromIdx, 1);
+      orderedIds.splice(toIdx, 0, dragFolderId);
+      onOrganize([{ type: 'reorder_folders', folderIds: orderedIds }]);
+    }
+    setDragFolderId(null);
+    setDragOverFolderId(null);
   };
 
   const installedCount = harnesses.filter((h) => h.installed).length;
@@ -151,49 +286,80 @@ export const SettingsModal: React.FC<Props> = ({
       >
         {/* Left Navigation Rail */}
         <aside className="w-56 shrink-0 bg-surface-rail border-r border-line-hairline flex flex-col">
-          <div className="px-4 pt-4 pb-3 border-b border-line-hairline">
-            <h2 className="text-heading font-semibold text-ink-primary tracking-tight">Settings</h2>
-            <p className="text-micro text-ink-faint mt-0.5">Super Harness preferences</p>
+          <div className="p-3">
+            <div className="h-8 px-2.5 rounded-lg bg-surface-subtle border border-line-hairline focus-within:border-line-subtle flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+              <input
+                ref={searchInputRef}
+                value={navSearch}
+                onChange={(e) => setNavSearch(e.target.value)}
+                placeholder="Search settings"
+                className="flex-1 min-w-0 bg-transparent text-caption text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+              />
+              {navSearch ? (
+                <button
+                  type="button"
+                  onClick={() => setNavSearch('')}
+                  className="text-ink-faint hover:text-ink-primary cursor-pointer"
+                  aria-label="Clear search"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              ) : (
+                <kbd className="text-[11px] font-mono text-ink-faint">/</kbd>
+              )}
+            </div>
           </div>
 
-          <nav className="flex-1 p-2.5 space-y-1">
-            {NAV_ITEMS.map(({ id, label, Icon }) => {
-              const active = tab === id;
+          <nav className="flex-1 px-2.5 pb-3 space-y-4 overflow-y-auto">
+            {(['General', 'Agents'] as const).map((section) => {
+              const items = filteredNavItems.filter((n) => n.section === section);
+              if (items.length === 0) return null;
               return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setTab(id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-label transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-white/[0.1] text-ink-primary font-medium'
-                      : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.05]'
-                  }`}
-                >
-                  <Icon
-                    className={`w-4 h-4 shrink-0 ${
-                      active ? 'text-ink-primary' : 'text-ink-faint'
-                    }`}
-                  />
-                  <span className="truncate flex-1 text-left">{label}</span>
-                  {id === 'harnesses' && (
-                    <span className="text-micro font-mono text-ink-faint">
-                      {installedCount}/{harnesses.length}
-                    </span>
-                  )}
-                </button>
+                <div key={section} className="space-y-0.5">
+                  <div className="px-2.5 pb-1 text-micro font-medium text-ink-faint">
+                    {section}
+                  </div>
+                  {items.map(({ id, label, Icon }) => {
+                    const active = tab === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setTab(id)}
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-label transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-white/[0.1] text-ink-primary font-medium'
+                            : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.05]'
+                        }`}
+                      >
+                        <Icon
+                          className={`w-4 h-4 shrink-0 ${
+                            active ? 'text-ink-primary' : 'text-ink-faint'
+                          }`}
+                        />
+                        <span className="truncate flex-1 text-left">{label}</span>
+                        {id === 'harnesses' && (
+                          <span className="text-micro tabular-nums text-ink-faint">
+                            {installedCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </nav>
 
-          <div className="p-3 border-t border-line-hairline text-micro font-mono text-ink-faint space-y-0.5">
+          <div className="px-4 py-3 border-t border-line-hairline text-micro text-ink-faint space-y-1">
             <div className="flex items-center justify-between">
-              <span>Control API</span>
-              <span className="text-ink-muted">:{controlPort}</span>
+              <span>API</span>
+              <span className="font-mono text-ink-muted">:{controlPort}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Shortcut</span>
-              <span className="text-ink-muted">Ctrl + ,</span>
+              <span>Settings</span>
+              <span className="font-mono text-ink-muted">Ctrl ,</span>
             </div>
           </div>
         </aside>
@@ -201,18 +367,27 @@ export const SettingsModal: React.FC<Props> = ({
         {/* Right Content Pane */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Pane Header */}
-          <div className="h-14 px-6 border-b border-line-hairline flex items-center justify-between gap-4 shrink-0">
+          <div className="h-14 px-7 flex items-center justify-between gap-4 shrink-0">
             <div className="min-w-0">
-              <h3 className="text-heading font-semibold text-ink-primary">{activeMeta.label}</h3>
-              <p className="text-micro text-ink-muted">{activeMeta.subtitle}</p>
+              <h3 className="text-[18px] font-semibold text-ink-primary tracking-tight leading-tight">
+                {activeMeta.label}
+              </h3>
+              {tab === 'harnesses' && (
+                <p className="text-micro text-ink-faint mt-0.5">
+                  {installedCount} detected · scanned {formatScannedAgo(scannedAt)}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {tab === 'harnesses' && (
                 <Button
-                  size="xs"
-                  variant="subtle"
-                  onClick={onRefresh}
-                  iconLeft={<RefreshCw className="w-3 h-3" />}
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setScannedAt(Date.now());
+                    onRefresh();
+                  }}
+                  iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
                 >
                   Rescan
                 </Button>
@@ -224,9 +399,9 @@ export const SettingsModal: React.FC<Props> = ({
           </div>
 
           {/* Scrollable Body */}
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          <div className="flex-1 overflow-y-auto px-7 pb-8 pt-2 space-y-7">
             {actionMsg && (
-              <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/[0.08] px-3.5 py-2.5 text-caption text-indigo-200 font-mono flex items-center justify-between gap-2">
+              <div className="rounded-xl border border-line-subtle bg-surface-subtle px-3.5 py-2.5 text-caption text-ink-secondary font-mono flex items-center justify-between gap-2">
                 <span className="truncate">{actionMsg}</span>
                 <IconButton size="xs" label="Dismiss" onClick={() => setActionMsg(null)}>
                   <X className="w-3 h-3" />
@@ -234,83 +409,403 @@ export const SettingsModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* HARNESSES */}
+            {/* WORKSPACE */}
+            {tab === 'workspace' && (
+              <div className="space-y-7">
+                <SettingsGroup title="Sidebar">
+                  <SettingsRow
+                    label="Group conversations by"
+                    description="How the left rail is organized"
+                    control={
+                      <Select
+                        inputSize="sm"
+                        className="w-48"
+                        value={settings.sidebarGroupBy}
+                        onChange={(e) =>
+                          onUpdateSettings({ sidebarGroupBy: e.target.value as SidebarGroupBy })
+                        }
+                      >
+                        <option value="native">Harness</option>
+                        <option value="harness">Harness (flat)</option>
+                        <option value="project">Project</option>
+                        <option value="folders">Custom folders</option>
+                        <option value="recent">Recent</option>
+                      </Select>
+                    }
+                  />
+
+                  <SettingsRow
+                    label="Also show"
+                    description="Hidden here means hidden in Super Harness"
+                    control={
+                      <div className="flex items-center gap-5">
+                        <Checkbox
+                          checked={settings.showArchived}
+                          label="Archived"
+                          onChange={(v) => onUpdateSettings({ showArchived: v })}
+                        />
+                        <Checkbox
+                          checked={settings.showHidden}
+                          label="Hidden"
+                          onChange={(v) => onUpdateSettings({ showHidden: v })}
+                        />
+                      </div>
+                    }
+                  />
+
+                  <SettingsRow
+                    label="Sessions per harness"
+                    description="Older ones load on scroll"
+                    control={
+                      <UnitNumberInput
+                        ariaLabel="Sessions per harness"
+                        value={settings.maxSessionsPerHarness}
+                        unit="max"
+                        min={10}
+                        max={300}
+                        step={10}
+                        onChange={(v) =>
+                          onUpdateSettings({
+                            maxSessionsPerHarness: Math.min(300, Math.max(10, v || 80)),
+                          })
+                        }
+                      />
+                    }
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup title="New conversations">
+                  <SettingsRow
+                    label="Start in"
+                    description={
+                      <span className="font-mono text-ink-muted">
+                        {shortenHome(settings.defaultNewSessionCwd || '~')}
+                      </span>
+                    }
+                    control={
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        iconLeft={<FolderOpen className="w-3.5 h-3.5" />}
+                        onClick={() => void handlePickDefaultCwd()}
+                      >
+                        Change
+                      </Button>
+                    }
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup
+                  title="Folders"
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setAddingFolder(true)}
+                      className="inline-flex items-center gap-1 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>New folder</span>
+                    </button>
+                  }
+                >
+                  {addingFolder && (
+                    <div className="py-2.5 flex items-center gap-2">
+                      <Input
+                        autoFocus
+                        inputSize="sm"
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleCreateFolder();
+                          if (e.key === 'Escape') {
+                            setAddingFolder(false);
+                            setNewFolderName('');
+                          }
+                        }}
+                        placeholder="Folder name…"
+                      />
+                      <Button size="sm" variant="primary" onClick={handleCreateFolder}>
+                        Add
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setAddingFolder(false);
+                          setNewFolderName('');
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+
+                  {folders.length === 0 && !addingFolder ? (
+                    <div className="py-3 text-caption text-ink-faint">
+                      No custom folders yet.
+                    </div>
+                  ) : (
+                    folders.map((f) => {
+                      const count = folderCounts.get(f.id) ?? 0;
+                      const isRenaming = renamingFolderId === f.id;
+                      const isDragTarget = dragOverFolderId === f.id && dragFolderId !== f.id;
+                      return (
+                        <div
+                          key={f.id}
+                          draggable={!isRenaming}
+                          onDragStart={() => setDragFolderId(f.id)}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragOverFolderId(f.id);
+                          }}
+                          onDragLeave={() =>
+                            setDragOverFolderId((cur) => (cur === f.id ? null : cur))
+                          }
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            handleDropFolder(f.id);
+                          }}
+                          onDragEnd={() => {
+                            setDragFolderId(null);
+                            setDragOverFolderId(null);
+                          }}
+                          className={`group -mx-2 px-2 py-2.5 rounded-lg flex items-center justify-between gap-3 transition-colors ${
+                            isDragTarget
+                              ? 'bg-white/[0.08] ring-1 ring-line-strong'
+                              : 'hover:bg-white/[0.04]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <GripVertical
+                              className="w-3.5 h-3.5 text-ink-faint/60 group-hover:text-ink-muted cursor-grab shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ background: f.color }}
+                            />
+                            {isRenaming ? (
+                              <Input
+                                autoFocus
+                                inputSize="sm"
+                                className="max-w-xs"
+                                value={renameFolderDraft}
+                                onChange={(e) => setRenameFolderDraft(e.target.value)}
+                                onBlur={() => handleCommitRenameFolder(f.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleCommitRenameFolder(f.id);
+                                  if (e.key === 'Escape') setRenamingFolderId(null);
+                                }}
+                              />
+                            ) : (
+                              <span className="text-body font-medium text-ink-primary truncate">
+                                {f.name}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-caption tabular-nums text-ink-faint group-hover:hidden">
+                              {count}
+                            </span>
+                            <div className="hidden group-hover:flex items-center gap-0.5">
+                              <IconButton
+                                size="xs"
+                                label={`Rename ${f.name}`}
+                                onClick={() => {
+                                  setRenamingFolderId(f.id);
+                                  setRenameFolderDraft(f.name);
+                                }}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </IconButton>
+                              <IconButton
+                                size="xs"
+                                tone="danger"
+                                label={`Delete ${f.name}`}
+                                onClick={() =>
+                                  onOrganize([{ type: 'delete_folder', folderId: f.id }])
+                                }
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </IconButton>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </SettingsGroup>
+
+                <SettingsGroup title="Advanced" collapsible defaultOpen={false}>
+                  <SettingsRow
+                    label="Fallback refresh"
+                    description="File watching is instant; this is the backup poll"
+                    control={
+                      <ChoicePills
+                        value={normalizePollChoice(settings.pollIntervalMs)}
+                        options={POLL_OPTIONS}
+                        onChange={(ms) => onUpdateSettings({ pollIntervalMs: ms })}
+                      />
+                    }
+                  />
+                </SettingsGroup>
+              </div>
+            )}
+
+            {/* HARNESSES — Flat hairline-divided rows, expandable inline details, zero nested cards */}
             {tab === 'harnesses' && (
-              <div className="space-y-3.5">
+              <div className="divide-y divide-line-hairline border-t border-line-hairline">
                 {harnesses.map((h) => {
                   const enabled = settings.enabledHarnesses[h.id];
+                  const isExpanded = Boolean(expandedHarness[h.id]);
+                  const shortVer = h.version?.split(' ')[0];
+                  const runtimeBits = [
+                    shortVer,
+                    h.desktopAppRunning
+                      ? h.id === 'claude'
+                        ? 'desktop + tmux'
+                        : 'desktop'
+                      : h.installed
+                        ? 'cli'
+                        : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+
+                  const summaryLine = !h.installed
+                    ? 'Not found on PATH'
+                    : `${h.activeSessionCount} active · ${h.totalSessionCount} threads`;
+
                   return (
                     <div
                       key={h.id}
-                      className={`rounded-xl border transition-colors overflow-hidden ${
-                        enabled
-                          ? 'border-line-hairline bg-surface-subtle'
-                          : 'border-line-hairline/60 bg-surface-subtle/40 opacity-70'
-                      }`}
+                      className={`transition-opacity ${enabled ? '' : 'opacity-60'}`}
                     >
-                      {/* Top Header Row */}
-                      <div className="px-4 py-3.5 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-surface-raised border border-line-hairline flex items-center justify-center shrink-0">
-                            <HarnessLogo harness={h.id} size={17} />
+                      <div className="py-4 flex items-center justify-between gap-4">
+                        {/* Clickable identity & summary toggles inline details */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            h.installed &&
+                            setExpandedHarness((prev) => ({ ...prev, [h.id]: !prev[h.id] }))
+                          }
+                          className={`flex items-center gap-3.5 min-w-0 flex-1 text-left focus:outline-none focus-visible:shadow-none ${
+                            h.installed ? 'cursor-pointer group' : 'cursor-default'
+                          }`}
+                        >
+                          <div className="w-9 h-9 rounded-lg bg-surface-subtle border border-line-hairline flex items-center justify-center shrink-0">
+                            <HarnessLogo harness={h.id} size={18} />
                           </div>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-heading font-semibold text-ink-primary">
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <span className="text-body font-semibold text-ink-primary group-hover:text-white transition-colors">
                                 {h.name}
                               </span>
-                              {h.desktopAppRunning && <Badge tone="success">Desktop</Badge>}
-                              {h.remoteControlEnabled && (
-                                <Badge tone="accent" icon={<Radio className="w-2.5 h-2.5" />}>
-                                  Remote
-                                </Badge>
+                              {runtimeBits && (
+                                <span className="text-micro text-ink-faint">{runtimeBits}</span>
                               )}
-                              {!h.installed && <Badge tone="neutral">Not installed</Badge>}
+                              {h.installed &&
+                                (isExpanded ? (
+                                  <ChevronDown className="w-3.5 h-3.5 text-ink-faint self-center" />
+                                ) : (
+                                  <ChevronRight className="w-3.5 h-3.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity self-center" />
+                                ))}
                             </div>
-                            <p className="text-micro text-ink-muted truncate mt-0.5">
-                              {h.notes || (h.installed ? 'Detected locally' : 'Binary not found')}
-                            </p>
+                            <div className="text-caption text-ink-muted mt-0.5 truncate">
+                              {summaryLine}
+                            </div>
                           </div>
-                        </div>
+                        </button>
 
-                        <Switch
-                          checked={enabled}
-                          label={`Enable ${h.name}`}
-                          onChange={(next) =>
-                            onUpdateSettings({
-                              enabledHarnesses: {
-                                ...settings.enabledHarnesses,
-                                [h.id]: next,
-                              },
-                            })
-                          }
-                        />
+                        {/* Compact inline right controls: remote state + single action + switch */}
+                        <div className="flex items-center gap-3 shrink-0">
+                          {h.installed && (
+                            <>
+                              <span className="inline-flex items-center gap-1.5 text-caption text-ink-muted">
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    h.remoteControlEnabled ? 'bg-emerald-400' : 'bg-zinc-600'
+                                  }`}
+                                />
+                                <span>
+                                  {h.remoteControlEnabled ? 'Remote on' : 'Remote off'}
+                                </span>
+                              </span>
+
+                              {h.id === 'claude' ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  loading={busyHarness === 'claude:start_remote'}
+                                  disabled={busyHarness !== null}
+                                  onClick={() => void handleControl(h.id, 'start_remote')}
+                                >
+                                  New session
+                                </Button>
+                              ) : h.remoteControlEnabled ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  loading={busyHarness === `${h.id}:stop_remote`}
+                                  disabled={busyHarness !== null}
+                                  onClick={() => void handleControl(h.id, 'stop_remote')}
+                                >
+                                  Stop
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  loading={busyHarness === `${h.id}:start_remote`}
+                                  disabled={busyHarness !== null}
+                                  onClick={() => void handleControl(h.id, 'start_remote')}
+                                >
+                                  Start
+                                </Button>
+                              )}
+                            </>
+                          )}
+
+                          <Switch
+                            checked={enabled}
+                            disabled={!h.installed}
+                            label={`Enable ${h.name}`}
+                            onChange={(next) =>
+                              onUpdateSettings({
+                                enabledHarnesses: {
+                                  ...settings.enabledHarnesses,
+                                  [h.id]: next,
+                                },
+                              })
+                            }
+                          />
+                        </div>
                       </div>
 
-                      {/* Structured Metrics + Binary Path */}
-                      {h.installed && (
-                        <div className="px-4 pb-3.5 space-y-2.5">
-                          <div className="grid grid-cols-4 gap-2">
-                            <StatTile label="Version" value={h.version?.split(' ')[0] || '—'} />
-                            <StatTile label="Processes" value={h.runningProcesses} />
-                            <StatTile
-                              label="Active"
-                              value={h.activeSessionCount}
-                              emphasize={h.activeSessionCount > 0}
-                            />
-                            <StatTile label="Total Threads" value={h.totalSessionCount} />
+                      {/* Progressive disclosure: clean key-value details without nested cards */}
+                      {h.installed && isExpanded && (
+                        <div className="pl-[50px] pb-4 space-y-2 text-caption">
+                          {h.notes && (
+                            <div className="grid grid-cols-[96px_1fr] gap-3 items-baseline">
+                              <span className="text-ink-faint">Sessions</span>
+                              <span className="text-ink-secondary">{h.notes}</span>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-[96px_1fr] gap-3 items-baseline">
+                            <span className="text-ink-faint">Processes</span>
+                            <span className="tabular-nums text-ink-secondary">
+                              {h.runningProcesses}
+                            </span>
                           </div>
-
-                          <div className="flex items-center justify-between gap-2 pt-1">
-                            <div className="flex items-center gap-1.5 min-w-0 bg-surface-code border border-line-hairline rounded-lg px-2.5 py-1 flex-1">
-                              <span className="text-micro uppercase tracking-wider text-ink-faint shrink-0">
-                                bin
-                              </span>
+                          <div className="grid grid-cols-[96px_1fr] gap-3 items-center">
+                            <span className="text-ink-faint">Binary</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
                               <span
                                 title={h.binaryPath || 'none'}
-                                className="text-micro font-mono text-ink-muted truncate flex-1"
+                                className="font-mono text-micro text-ink-secondary truncate"
                               >
-                                {h.binaryPath || 'none'}
+                                {h.binaryPath ? shortenHome(h.binaryPath) : 'none'}
                               </span>
                               {h.binaryPath && (
                                 <IconButton
@@ -326,43 +821,6 @@ export const SettingsModal: React.FC<Props> = ({
                                 </IconButton>
                               )}
                             </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {h.id === 'claude' ? (
-                                <Button
-                                  size="xs"
-                                  variant="secondary"
-                                  loading={busyHarness === 'claude:start_remote'}
-                                  disabled={busyHarness !== null}
-                                  iconLeft={<Play className="w-3 h-3" />}
-                                  onClick={() => void handleControl(h.id, 'start_remote')}
-                                >
-                                  New tmux + Remote
-                                </Button>
-                              ) : h.remoteControlEnabled ? (
-                                <Button
-                                  size="xs"
-                                  variant="subtle"
-                                  loading={busyHarness === `${h.id}:stop_remote`}
-                                  disabled={busyHarness !== null}
-                                  iconLeft={<Square className="w-3 h-3" />}
-                                  onClick={() => void handleControl(h.id, 'stop_remote')}
-                                >
-                                  Stop Remote
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="xs"
-                                  variant="secondary"
-                                  loading={busyHarness === `${h.id}:start_remote`}
-                                  disabled={busyHarness !== null}
-                                  iconLeft={<Play className="w-3 h-3" />}
-                                  onClick={() => void handleControl(h.id, 'start_remote')}
-                                >
-                                  Start Remote
-                                </Button>
-                              )}
-                            </div>
                           </div>
                         </div>
                       )}
@@ -372,16 +830,13 @@ export const SettingsModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* APPS & PREVIEW */}
+            {/* APPS AND PREVIEW */}
             {tab === 'apps' && (
-              <div className="space-y-5">
-                <SettingsGroup
-                  title="Link Click Behavior"
-                  description="Choose where clicked file and folder links open."
-                >
+              <div className="space-y-7">
+                <SettingsGroup title="Link behavior">
                   <SettingsRow
-                    label="File links"
-                    description="Action when clicking a file path inside any transcript"
+                    label="Open file links in"
+                    description="When clicking a file path inside a conversation"
                     control={
                       <Select
                         inputSize="sm"
@@ -394,15 +849,15 @@ export const SettingsModal: React.FC<Props> = ({
                           })
                         }
                       >
-                        <option value="internal">Internal File Previewer</option>
-                        <option value="editor">Default Editor</option>
-                        <option value="system">System Default (xdg-open)</option>
+                        <option value="internal">Built-in previewer</option>
+                        <option value="editor">Editor</option>
+                        <option value="system">System default</option>
                       </Select>
                     }
                   />
                   <SettingsRow
-                    label="Folder links"
-                    description="Action when opening a workspace or directory link"
+                    label="Open folder links in"
+                    description="When opening a workspace or directory link"
                     control={
                       <Select
                         inputSize="sm"
@@ -415,30 +870,29 @@ export const SettingsModal: React.FC<Props> = ({
                           })
                         }
                       >
-                        <option value="file-manager">Default File Viewer</option>
-                        <option value="internal">Internal Folder Previewer</option>
-                        <option value="editor">Default Editor</option>
-                        <option value="terminal">Default Terminal</option>
+                        <option value="file-manager">File manager</option>
+                        <option value="internal">Built-in previewer</option>
+                        <option value="editor">Editor</option>
+                        <option value="terminal">Terminal</option>
                       </Select>
                     }
                   />
                 </SettingsGroup>
 
                 <SettingsGroup
-                  title="External Applications"
-                  description="Leave blank to automatically use the first detected app on your system."
+                  title="External apps"
+                  description="Leave blank to use the first detected app on your system."
                 >
                   <SettingsRow
-                    stacked
-                    label="Default Editor"
+                    label="Editor"
                     description={
                       <>
-                        Placeholders: <code className="font-mono text-ink-secondary">{'{path}'}</code>,{' '}
+                        Uses <code className="font-mono text-ink-secondary">{'{path}'}</code> and{' '}
                         <code className="font-mono text-ink-secondary">{'{line}'}</code>
                       </>
                     }
                     control={
-                      <div className="space-y-2">
+                      <div className="w-64 space-y-1.5">
                         <Input
                           inputSize="sm"
                           mono
@@ -449,20 +903,20 @@ export const SettingsModal: React.FC<Props> = ({
                           }
                         />
                         {systemApps && systemApps.editors.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap gap-1 justify-end">
                             {systemApps.editors.map((ed) => (
-                              <Button
+                              <button
                                 key={ed.id}
-                                size="xs"
-                                variant={
-                                  settings.apps.editorCommand === ed.command
-                                    ? 'secondary'
-                                    : 'subtle'
-                                }
+                                type="button"
                                 onClick={() => updateApps({ editorCommand: ed.command })}
+                                className={`px-2 py-0.5 rounded-md text-micro transition-colors cursor-pointer ${
+                                  settings.apps.editorCommand === ed.command
+                                    ? 'bg-white/[0.12] text-ink-primary'
+                                    : 'text-ink-faint hover:text-ink-secondary hover:bg-white/[0.05]'
+                                }`}
                               >
                                 {ed.label}
-                              </Button>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -471,15 +925,14 @@ export const SettingsModal: React.FC<Props> = ({
                   />
 
                   <SettingsRow
-                    stacked
-                    label="Default File Viewer"
+                    label="File manager"
                     description={
                       <>
-                        Placeholder: <code className="font-mono text-ink-secondary">{'{path}'}</code>
+                        Uses <code className="font-mono text-ink-secondary">{'{path}'}</code>
                       </>
                     }
                     control={
-                      <div className="space-y-2">
+                      <div className="w-64 space-y-1.5">
                         <Input
                           inputSize="sm"
                           mono
@@ -488,20 +941,20 @@ export const SettingsModal: React.FC<Props> = ({
                           placeholder={systemApps?.fileManagers[0]?.command || 'dolphin {path}'}
                         />
                         {systemApps && systemApps.fileManagers.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap gap-1 justify-end">
                             {systemApps.fileManagers.map((fm) => (
-                              <Button
+                              <button
                                 key={fm.id}
-                                size="xs"
-                                variant={
-                                  settings.apps.fileManagerCommand === fm.command
-                                    ? 'secondary'
-                                    : 'subtle'
-                                }
+                                type="button"
                                 onClick={() => updateApps({ fileManagerCommand: fm.command })}
+                                className={`px-2 py-0.5 rounded-md text-micro transition-colors cursor-pointer ${
+                                  settings.apps.fileManagerCommand === fm.command
+                                    ? 'bg-white/[0.12] text-ink-primary'
+                                    : 'text-ink-faint hover:text-ink-secondary hover:bg-white/[0.05]'
+                                }`}
                               >
                                 {fm.label}
-                              </Button>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -510,15 +963,14 @@ export const SettingsModal: React.FC<Props> = ({
                   />
 
                   <SettingsRow
-                    stacked
-                    label="Default Terminal"
+                    label="Terminal"
                     description={
                       <>
-                        Placeholder: <code className="font-mono text-ink-secondary">{'{cwd}'}</code>
+                        Uses <code className="font-mono text-ink-secondary">{'{cwd}'}</code>
                       </>
                     }
                     control={
-                      <div className="space-y-2">
+                      <div className="w-64 space-y-1.5">
                         <Input
                           inputSize="sm"
                           mono
@@ -529,20 +981,20 @@ export const SettingsModal: React.FC<Props> = ({
                           }
                         />
                         {systemApps && systemApps.terminals.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap gap-1 justify-end">
                             {systemApps.terminals.map((tm) => (
-                              <Button
+                              <button
                                 key={tm.id}
-                                size="xs"
-                                variant={
-                                  settings.apps.terminalCommand === tm.command
-                                    ? 'secondary'
-                                    : 'subtle'
-                                }
+                                type="button"
                                 onClick={() => updateApps({ terminalCommand: tm.command })}
+                                className={`px-2 py-0.5 rounded-md text-micro transition-colors cursor-pointer ${
+                                  settings.apps.terminalCommand === tm.command
+                                    ? 'bg-white/[0.12] text-ink-primary'
+                                    : 'text-ink-faint hover:text-ink-secondary hover:bg-white/[0.05]'
+                                }`}
                               >
                                 {tm.label}
-                              </Button>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -553,67 +1005,47 @@ export const SettingsModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* MASTER & MCP */}
+            {/* MASTER AGENT */}
             {tab === 'master' && (
-              <div className="space-y-5">
-                <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/[0.06] px-4 py-3.5 flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-label font-semibold text-indigo-100">
-                        Control Plane & MCP Server
-                      </span>
-                      <Badge tone="success">Active</Badge>
-                    </div>
-                    <p className="text-micro text-indigo-200/75 leading-relaxed">
-                      Loopback API on{' '}
-                      <code className="font-mono text-indigo-100">127.0.0.1:{controlPort}</code>{' '}
-                      with per-session bearer auth. Automatically wired to{' '}
-                      <code className="font-mono text-indigo-100">super-harness-mcp</code> so Master
-                      Orchestrator can inspect, organize, launch, and dispatch across every harness.
-                    </p>
-                  </div>
-                </div>
-
-                <SettingsGroup title="Master Orchestrator Engine">
+              <div className="space-y-7">
+                <SettingsGroup title="Orchestrator">
                   <SettingsRow
-                    stacked
-                    label="Backing Harness"
-                    description="Which installed harness executes Master Orchestrator turns"
+                    label="Run with"
+                    description="Which harness executes Master Orchestrator turns"
                     control={
-                      <div className="grid grid-cols-3 gap-2">
-                        {(['claude', 'codex', 'antigravity'] as HarnessGroup[]).map((eng) => {
-                          const active = settings.master.harness === eng;
-                          return (
-                            <button
-                              key={eng}
-                              type="button"
-                              onClick={() =>
-                                onUpdateSettings({
-                                  master: { ...settings.master, harness: eng },
-                                })
-                              }
-                              className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-caption font-medium capitalize transition-colors cursor-pointer ${
-                                active
-                                  ? 'bg-white/[0.1] border-line-strong text-ink-primary'
-                                  : 'bg-surface-canvas border-line-hairline text-ink-muted hover:text-ink-secondary hover:border-line-subtle'
-                              }`}
-                            >
-                              <HarnessLogo harness={eng} size={14} />
-                              <span>{eng === 'antigravity' ? 'Antigravity' : eng}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <ChoicePills<HarnessGroup>
+                        value={settings.master.harness}
+                        onChange={(eng) =>
+                          onUpdateSettings({ master: { ...settings.master, harness: eng } })
+                        }
+                        options={[
+                          {
+                            value: 'claude',
+                            label: 'Claude',
+                            icon: <HarnessLogo harness="claude" size={13} />,
+                          },
+                          {
+                            value: 'codex',
+                            label: 'Codex',
+                            icon: <HarnessLogo harness="codex" size={13} />,
+                          },
+                          {
+                            value: 'antigravity',
+                            label: 'AGY',
+                            icon: <HarnessLogo harness="antigravity" size={13} />,
+                          },
+                        ]}
+                      />
                     }
                   />
 
                   <SettingsRow
-                    label="Model Override"
-                    description="Leave blank to use the selected harness default"
+                    label="Model"
+                    description="Leave blank to use the harness default"
                     control={
                       <Input
                         inputSize="sm"
-                        className="w-60"
+                        className="w-56"
                         value={settings.master.model}
                         onChange={(e) =>
                           onUpdateSettings({
@@ -626,208 +1058,45 @@ export const SettingsModal: React.FC<Props> = ({
                   />
 
                   <SettingsRow
-                    stacked
-                    label="Master Working Directory"
-                    control={
-                      <div className="flex gap-2">
-                        <Input
-                          inputSize="sm"
-                          mono
-                          value={settings.master.cwd}
-                          onChange={(e) =>
-                            onUpdateSettings({
-                              master: { ...settings.master, cwd: e.target.value },
-                            })
-                          }
-                        />
-                        <IconButton
-                          size="sm"
-                          label="Browse folder"
-                          onClick={() => void handlePickMasterCwd()}
-                          className="border border-line-subtle bg-surface-canvas w-8 h-8"
-                        >
-                          <FolderOpen className="w-3.5 h-3.5" />
-                        </IconButton>
-                      </div>
+                    label="Working directory"
+                    description={
+                      <span className="font-mono text-ink-muted">
+                        {shortenHome(settings.master.cwd || '~')}
+                      </span>
                     }
-                  />
-                </SettingsGroup>
-              </div>
-            )}
-
-            {/* WORKSPACE */}
-            {tab === 'workspace' && (
-              <div className="space-y-5">
-                <SettingsGroup title="Discovery & Sidebar">
-                  <SettingsRow
-                    label="Default Sidebar Grouping"
-                    description="How conversations are organized in the left rail"
                     control={
-                      <Select
-                        inputSize="sm"
-                        className="w-52"
-                        value={settings.sidebarGroupBy}
-                        onChange={(e) =>
-                          onUpdateSettings({ sidebarGroupBy: e.target.value as SidebarGroupBy })
-                        }
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        iconLeft={<FolderOpen className="w-3.5 h-3.5" />}
+                        onClick={() => void handlePickMasterCwd()}
                       >
-                        <option value="native">Harness & Native Sections</option>
-                        <option value="harness">Harness (Flat)</option>
-                        <option value="project">Unified Projects</option>
-                        <option value="folders">Custom Folders</option>
-                        <option value="recent">Recent Flat List</option>
-                      </Select>
-                    }
-                  />
-
-                  <SettingsRow
-                    label="Auto-Refresh Interval"
-                    description="Fallback discovery poll in milliseconds (inotify pushes instantly)"
-                    control={
-                      <Input
-                        inputSize="sm"
-                        type="number"
-                        min={2000}
-                        max={60000}
-                        step={1000}
-                        className="w-28 font-mono text-right"
-                        value={settings.pollIntervalMs}
-                        onChange={(e) =>
-                          onUpdateSettings({ pollIntervalMs: Number(e.target.value) || 5000 })
-                        }
-                      />
-                    }
-                  />
-
-                  <SettingsRow
-                    label="Max Sessions per Harness"
-                    description="Upper limit loaded into the sidebar per harness"
-                    control={
-                      <Input
-                        inputSize="sm"
-                        type="number"
-                        min={10}
-                        max={300}
-                        step={10}
-                        className="w-28 font-mono text-right"
-                        value={settings.maxSessionsPerHarness}
-                        onChange={(e) =>
-                          onUpdateSettings({
-                            maxSessionsPerHarness: Number(e.target.value) || 80,
-                          })
-                        }
-                      />
-                    }
-                  />
-
-                  <SettingsRow
-                    label="Show Archived Sessions"
-                    description="Include archived Codex and Claude Desktop threads"
-                    control={
-                      <Switch
-                        checked={settings.showArchived}
-                        label="Show Archived Sessions"
-                        onChange={(v) => onUpdateSettings({ showArchived: v })}
-                      />
-                    }
-                  />
-
-                  <SettingsRow
-                    label="Show Hidden Sessions"
-                    description="Include threads manually hidden in Super Harness"
-                    control={
-                      <Switch
-                        checked={settings.showHidden}
-                        label="Show Hidden Sessions"
-                        onChange={(v) => onUpdateSettings({ showHidden: v })}
-                      />
-                    }
-                  />
-
-                  <SettingsRow
-                    stacked
-                    label="Default Directory for New Conversations"
-                    control={
-                      <div className="flex gap-2">
-                        <Input
-                          inputSize="sm"
-                          mono
-                          value={settings.defaultNewSessionCwd}
-                          onChange={(e) =>
-                            onUpdateSettings({ defaultNewSessionCwd: e.target.value })
-                          }
-                        />
-                        <IconButton
-                          size="sm"
-                          label="Browse folder"
-                          onClick={() => void handlePickDefaultCwd()}
-                          className="border border-line-subtle bg-surface-canvas w-8 h-8"
-                        >
-                          <FolderOpen className="w-3.5 h-3.5" />
-                        </IconButton>
-                      </div>
+                        Change
+                      </Button>
                     }
                   />
                 </SettingsGroup>
 
-                <SettingsGroup
-                  title="Custom Sidebar Folders"
-                  description="Organize conversations across harnesses into shared folders."
-                >
-                  {folders.length === 0 ? (
-                    <div className="px-4 py-3 text-micro text-ink-faint">
-                      No custom folders yet.
-                    </div>
-                  ) : (
-                    folders.map((f) => (
-                      <div
-                        key={f.id}
-                        className="px-4 py-2.5 flex items-center justify-between gap-3 text-caption"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ background: f.color }}
-                          />
-                          <span className="text-ink-primary font-medium">{f.name}</span>
-                        </div>
-                        <IconButton
-                          size="xs"
-                          tone="danger"
-                          label={`Delete ${f.name}`}
-                          onClick={() => onOrganize([{ type: 'delete_folder', folderId: f.id }])}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </IconButton>
-                      </div>
-                    ))
-                  )}
-                  <div className="px-4 py-3 flex gap-2 bg-surface-rail/40">
-                    <Input
-                      inputSize="sm"
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newFolderName.trim()) {
-                          onOrganize([{ type: 'create_folder', folderName: newFolderName.trim() }]);
-                          setNewFolderName('');
-                        }
-                      }}
-                      placeholder="New folder name…"
-                    />
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      iconLeft={<Plus className="w-3.5 h-3.5" />}
-                      onClick={() => {
-                        if (!newFolderName.trim()) return;
-                        onOrganize([{ type: 'create_folder', folderName: newFolderName.trim() }]);
-                        setNewFolderName('');
-                      }}
-                    >
-                      Add
-                    </Button>
-                  </div>
+                <SettingsGroup title="Control API and MCP">
+                  <SettingsRow
+                    label="Loopback endpoint"
+                    description="Per-session bearer auth for local tool calls"
+                    control={
+                      <span className="font-mono text-caption text-ink-secondary">
+                        127.0.0.1:{controlPort}
+                      </span>
+                    }
+                  />
+                  <SettingsRow
+                    label="MCP server"
+                    description="Wired into Master Orchestrator for cross-harness dispatch"
+                    control={
+                      <span className="inline-flex items-center gap-1.5 text-caption text-ink-secondary">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span className="font-mono">super-harness-mcp</span>
+                      </span>
+                    }
+                  />
                 </SettingsGroup>
               </div>
             )}

@@ -420,7 +420,7 @@ export const DraftSessionPane: React.FC<Props> = ({
       <div className="flex-1 overflow-y-auto px-6 py-8 flex flex-col items-center justify-center">
         <div className="w-full max-w-[720px] space-y-6">
           <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-surface-subtle border border-line-subtle mb-1">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#1c1e24] shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.06)] mb-1">
               {selectedGroup ? (
                 <HarnessLogo harness={selectedGroup} size={22} />
               ) : (
@@ -449,10 +449,10 @@ export const DraftSessionPane: React.FC<Props> = ({
             <button
               type="button"
               onClick={() => handleSelectHarness('antigravity')}
-              className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+              className={`text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
                 selectedGroup === 'antigravity'
-                  ? 'bg-white/[0.09] border-line-strong text-ink-primary'
-                  : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+                  ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                  : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
               }`}
             >
               <div className="flex items-center gap-2 text-label font-semibold">
@@ -468,10 +468,10 @@ export const DraftSessionPane: React.FC<Props> = ({
             <button
               type="button"
               onClick={() => handleSelectHarness('codex')}
-              className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+              className={`text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
                 selectedGroup === 'codex'
-                  ? 'bg-white/[0.09] border-line-strong text-ink-primary'
-                  : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+                  ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                  : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
               }`}
             >
               <div className="flex items-center gap-2 text-label font-semibold">
@@ -487,10 +487,10 @@ export const DraftSessionPane: React.FC<Props> = ({
             <button
               type="button"
               onClick={() => handleSelectHarness('muse')}
-              className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+              className={`text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
                 selectedGroup === 'muse'
-                  ? 'bg-white/[0.09] border-line-strong text-ink-primary'
-                  : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+                  ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                  : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
               }`}
             >
               <div className="flex items-center gap-2 text-label font-semibold">
@@ -514,10 +514,10 @@ export const DraftSessionPane: React.FC<Props> = ({
                     handleSelectHarness(claudeMode);
                   }
                 }}
-                className={`h-full text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+                className={`h-full text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
                   selectedGroup === 'claude'
-                    ? 'bg-white/[0.09] border-line-strong text-ink-primary'
-                    : 'bg-surface-subtle border-line-hairline text-ink-muted hover:text-ink-primary hover:border-line-subtle'
+                    ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                    : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1.5">
@@ -631,10 +631,10 @@ export const DraftSessionPane: React.FC<Props> = ({
                 void ingestFiles(e.dataTransfer.files);
               }
             }}
-            className={`rounded-2xl border bg-surface-subtle transition-colors ${
+            className={`rounded-2xl transition-all ${
               dragOver
-                ? 'border-line-strong bg-surface-raised'
-                : 'border-line-subtle focus-within:border-line-strong'
+                ? 'bg-surface-raised ring-1 ring-inset ring-white/15 shadow-[0_8px_22px_-6px_rgba(0,0,0,0.46)]'
+                : 'bg-[#1c1e24] shadow-[0_6px_18px_-6px_rgba(0,0,0,0.38),0_1px_4px_-1px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.06)] focus-within:bg-[#1e2027] focus-within:shadow-[0_8px_22px_-6px_rgba(0,0,0,0.45),0_2px_6px_-2px_rgba(0,0,0,0.26),inset_0_1px_0_rgba(255,255,255,0.09)]'
             }`}
           >
             {attachments.length > 0 && (
@@ -724,7 +724,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                       setNewProjectError(null);
                     }}
                     title={draft.cwd}
-                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.05] border border-line-hairline hover:border-line-subtle hover:bg-white/[0.08] text-caption text-ink-secondary hover:text-ink-primary transition-colors cursor-pointer max-w-[220px]"
+                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-caption text-ink-secondary hover:text-ink-primary transition-colors cursor-pointer max-w-[220px]"
                   >
                     <FolderOpen className="w-3.5 h-3.5 text-ink-muted shrink-0" />
                     <span className="truncate font-medium">{selectedProjectLabel}</span>
@@ -738,7 +738,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                       ignoreRef={projectTriggerRef}
                       className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-80 p-2 space-y-2"
                     >
-                      <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code border border-line-hairline focus-within:border-line-subtle">
+                      <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-[#14161b] shadow-[inset_0_1px_2px_rgba(0,0,0,0.32)] focus-within:ring-1 focus-within:ring-white/15">
                         <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
                         <input
                           autoFocus
@@ -853,7 +853,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                     }}
                     disabled={!selectedGroup}
                     title={draft.model || defaultModelOption?.label || 'Select model'}
-                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.05] border border-line-hairline hover:border-line-subtle hover:bg-white/[0.08] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer max-w-[230px]"
+                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer max-w-[230px]"
                   >
                     <Cpu className="w-3.5 h-3.5 text-ink-muted shrink-0" />
                     <span className="truncate font-medium">
@@ -871,7 +871,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                       ignoreRef={modelTriggerRef}
                       className="absolute left-0 bottom-[calc(100%+8px)] z-40 w-80 p-2 space-y-2"
                     >
-                      <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code border border-line-hairline focus-within:border-line-subtle">
+                      <div className="flex items-center gap-2 px-2.5 h-8 rounded-lg bg-[#14161b] shadow-[inset_0_1px_2px_rgba(0,0,0,0.32)] focus-within:ring-1 focus-within:ring-white/15">
                         <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
                         <input
                           autoFocus
@@ -970,7 +970,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                     }}
                     disabled={!selectedGroup || availableThinkingLevels.length === 0}
                     title="Model thinking mode"
-                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.05] border border-line-hairline hover:border-line-subtle hover:bg-white/[0.08] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
                   >
                     <Brain className="w-3.5 h-3.5 text-ink-muted shrink-0" />
                     <span className="font-medium">

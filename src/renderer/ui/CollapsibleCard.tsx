@@ -17,9 +17,11 @@ export interface CollapsibleCardProps {
 }
 
 const VARIANT_CLASSES = {
-  default: 'rounded-xl border border-line-hairline bg-surface-subtle/90',
-  recessed: 'rounded-lg border border-line-hairline bg-surface-code',
-  subtle: 'rounded-lg border border-line-hairline bg-white/[0.02]',
+  default:
+    'rounded-[16px] bg-[#1a1c22] shadow-[0_4px_14px_-5px_rgba(0,0,0,0.34),0_1px_3px_-1px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.05)]',
+  recessed: 'rounded-[12px] bg-surface-code shadow-[inset_0_1px_2px_rgba(0,0,0,0.32)]',
+  subtle:
+    'rounded-[14px] bg-[#181a20] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)]',
   plain: 'rounded-lg bg-transparent',
 };
 
@@ -79,7 +81,7 @@ export const CollapsibleCard: React.FC<CollapsibleCardProps> = ({
           className={cn(
             variant === 'plain'
               ? 'pl-6 pr-2 py-1.5'
-              : 'border-t border-line-hairline px-3.5 py-2.5',
+              : 'border-t border-white/[0.04] px-3.5 py-2.5',
             bodyClassName
           )}
         >

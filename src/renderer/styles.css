@@ -300,30 +300,6 @@ body,
   will-change: transform, opacity;
 }
 
-/* Compositor-only text shimmer using a translated pseudo-element (zero background-position paint) */
-.sh-working-shimmer {
-  position: relative;
-  display: inline-block;
-  overflow: hidden;
-  color: rgba(196, 200, 212, 0.88);
-}
-
-.sh-working-shimmer::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 48%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.24) 50%,
-    transparent 100%
-  );
-  pointer-events: none;
-  animation: sh-working-sweep-translate 2.4s ease-in-out infinite;
-  will-change: transform;
-}
-
 @keyframes sh-nav-shimmer-sweep {
   0% {
     background-position: 200% 0;
@@ -333,6 +309,7 @@ body,
   }
 }
 
+.sh-working-shimmer,
 .sh-nav-title-shimmer {
   background: linear-gradient(
     90deg,

@@ -1,4 +1,4 @@
-import type { SessionTranscriptResult } from '../../shared/types';
+import type { SessionTranscriptResult, UnifiedBlock, UnifiedMessage } from '../../shared/types';
 
 export const DEFAULT_TRANSCRIPT_LIMIT = 40;
 
@@ -131,6 +131,72 @@ export function isTranscriptEquivalent(
     if (aLast.id !== bLast.id || aLast.blocks.length !== bLast.blocks.length) return false;
   }
   return true;
+}
+
+export interface StreamTurnBaseline {
+  lastAssistantId: string | null;
+  lastAssistantBlockCount: number;
+}
+
+export function captureStreamTurnBaseline(messages: UnifiedMessage[]): StreamTurnBaseline {
+  let lastAssistantId: string | null = null;
+  let lastAssistantBlockCount = 0;
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      lastAssistantId = m.id;
+      lastAssistantBlockCount = m.blocks.length;
+    }
+  }
+  return { lastAssistantId, lastAssistantBlockCount };
+}
+
+/**
+ * Prevents live IPC stream previews from doubling up with persisted transcript
+ * messages that LiveSyncService has already pushed for the active turn.
+ */
+export function resolveVisibleStreamingOverlay(
+  messages: UnifiedMessage[],
+  baseline: StreamTurnBaseline | null,
+  streamingBlocks: UnifiedBlock[],
+  streamingText: string
+): { showBlocks: UnifiedBlock[]; showText: string } {
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const persistedActiveAssistant =
+    lastMsg?.role === 'assistant' &&
+    (!baseline ||
+      lastMsg.id !== baseline.lastAssistantId ||
+      lastMsg.blocks.length > baseline.lastAssistantBlockCount);
+
+  if (!persistedActiveAssistant || !lastMsg) {
+    return { showBlocks: streamingBlocks, showText: streamingText.trim() };
+  }
+
+  const normalizeWs = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const persistedNorm = normalizeWs(
+    lastMsg.blocks
+      .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n\n')
+  );
+
+  const trimmedStream = streamingText.trim();
+  if (!trimmedStream) {
+    return { showBlocks: [], showText: '' };
+  }
+
+  const remainingChunks = trimmedStream
+    .split(/\n{2,}/)
+    .map((c) => c.trim())
+    .filter((chunk) => {
+      if (!chunk) return false;
+      const norm = normalizeWs(chunk);
+      return norm.length > 0 && !persistedNorm.includes(norm);
+    });
+
+  return {
+    showBlocks: [],
+    showText: remainingChunks.join('\n\n'),
+  };
 }
 
 export const rendererTranscriptCache = new RendererTranscriptCache(32);

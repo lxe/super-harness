@@ -13,9 +13,12 @@ import type {
 } from '../../shared/types';
 import { Badge, Button } from '../ui';
 import {
+  captureStreamTurnBaseline,
   DEFAULT_TRANSCRIPT_LIMIT,
   isTranscriptEquivalent,
   rendererTranscriptCache,
+  resolveVisibleStreamingOverlay,
+  type StreamTurnBaseline,
 } from '../utils/transcriptCache';
 import {
   AssistantMessageView,
@@ -131,6 +134,9 @@ export const SessionPane: React.FC<Props> = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyBottomRef = useRef(true);
   const lastResultRef = useRef<SessionTranscriptResult | null>(null);
+  const messagesRef = useRef<UnifiedMessage[]>([]);
+  messagesRef.current = messages;
+  const streamBaselineRef = useRef<StreamTurnBaseline | null>(null);
   const pendingOptimisticRef = useRef<{
     sessionId: string;
     msg: UnifiedMessage;
@@ -244,6 +250,7 @@ export const SessionPane: React.FC<Props> = ({
     setStreamingText('');
     setStreamingBlocks([]);
     setIsStreaming(false);
+    streamBaselineRef.current = null;
     setTasksExpanded(false);
     setLightbox(null);
     stickyBottomRef.current = true;
@@ -380,14 +387,21 @@ export const SessionPane: React.FC<Props> = ({
     return window.superHarness.onStreamEvent((ev) => {
       if (ev.sessionId !== sessionId) return;
       if (ev.kind === 'start') {
+        streamBaselineRef.current = captureStreamTurnBaseline(messagesRef.current);
         setIsStreaming(true);
         setStreamError(null);
         setStreamingText('');
         setStreamingBlocks([]);
       } else if (ev.kind === 'delta' && ev.text) {
+        if (!streamBaselineRef.current) {
+          streamBaselineRef.current = captureStreamTurnBaseline(messagesRef.current);
+        }
         setIsStreaming(true);
         setStreamingText((prev) => prev + ev.text);
       } else if (ev.kind === 'block' && ev.block) {
+        if (!streamBaselineRef.current) {
+          streamBaselineRef.current = captureStreamTurnBaseline(messagesRef.current);
+        }
         setIsStreaming(true);
         setStreamingBlocks((prev) => [...prev, ev.block!]);
       } else if (ev.kind === 'error' && ev.error) {
@@ -397,6 +411,7 @@ export const SessionPane: React.FC<Props> = ({
           setStreamError(ev.error);
         }
       } else if (ev.kind === 'done') {
+        streamBaselineRef.current = null;
         setIsStreaming(false);
         setStreamingText('');
         setStreamingBlocks([]);
@@ -683,6 +698,19 @@ export const SessionPane: React.FC<Props> = ({
     return [...nativeItems, ...queuedMessages];
   }, [liveActivity?.queuedMessages, queuedMessages]);
 
+  const visibleStreaming = useMemo(
+    () =>
+      isStreaming
+        ? resolveVisibleStreamingOverlay(
+            messages,
+            streamBaselineRef.current,
+            streamingBlocks,
+            streamingText
+          )
+        : { showBlocks: [], showText: '' },
+    [isStreaming, messages, streamingBlocks, streamingText]
+  );
+
   const handleAbort = useCallback(async () => {
     if (!session) return;
     await window.superHarness.abortRun(session.id);
@@ -828,14 +856,14 @@ export const SessionPane: React.FC<Props> = ({
               })
             )}
 
-            {/* Live streaming assistant reply */}
+            {/* Live streaming assistant reply (deduped against live-synced persisted turns) */}
             {!isMaster && isStreaming && (
               <div className="space-y-2.5">
-                {streamingBlocks.length > 0 && (
-                  <CollapsedTraceGroup blocks={streamingBlocks.filter(isTraceBlock)} />
+                {visibleStreaming.showBlocks.length > 0 && (
+                  <CollapsedTraceGroup blocks={visibleStreaming.showBlocks.filter(isTraceBlock)} />
                 )}
-                {streamingText && (
-                  <CoalescedBlockView block={{ type: 'text', text: streamingText }} />
+                {visibleStreaming.showText && (
+                  <CoalescedBlockView block={{ type: 'text', text: visibleStreaming.showText }} />
                 )}
                 <div className="flex items-center gap-2 text-caption text-ink-muted pt-1">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />

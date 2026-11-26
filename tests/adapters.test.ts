@@ -19,9 +19,14 @@ import {
   isCodexActiveWriterError,
   loadCodexTranscriptFromPaths,
   parseCodexQueuedPayload,
+  parseCodexStreamLine,
 } from '../src/main/adapters/codexAdapter';
 import { extractAttachedImagesFromText } from '../src/main/adapters/types';
-import { isTranscriptEquivalent } from '../src/renderer/utils/transcriptCache';
+import {
+  captureStreamTurnBaseline,
+  isTranscriptEquivalent,
+  resolveVisibleStreamingOverlay,
+} from '../src/renderer/utils/transcriptCache';
 import { closeSqlitePool } from '../src/main/utils/sqlite';
 import {
   inferWeeklyResetFromSamples,
@@ -1027,5 +1032,91 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       { type: 'image', path: '/tmp/from-super-harness.png', name: 'from-super-harness.png' },
       { type: 'text', text: 'Second check' },
     ]);
+  });
+
+  it('ignores Codex item.started / item.updated stream lines so commands and messages are not doubled', () => {
+    const events: Array<{ kind: string; text?: string; blockType?: string }> = [];
+    const emit = (ev: { kind: string; text?: string; block?: { type: string } }) =>
+      events.push({ kind: ev.kind, text: ev.text, blockType: ev.block?.type });
+
+    parseCodexStreamLine(
+      'codex:1',
+      'r1',
+      JSON.stringify({
+        type: 'item.started',
+        item: { type: 'command_execution', command: 'ls -la', status: 'in_progress' },
+      }),
+      emit as never
+    );
+    parseCodexStreamLine(
+      'codex:1',
+      'r1',
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'command_execution', command: 'ls -la', status: 'completed', exit_code: 0 },
+      }),
+      emit as never
+    );
+    parseCodexStreamLine(
+      'codex:1',
+      'r1',
+      JSON.stringify({
+        type: 'item.updated',
+        item: { type: 'agent_message', text: 'Checking files...' },
+      }),
+      emit as never
+    );
+    parseCodexStreamLine(
+      'codex:1',
+      'r1',
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Checking files...' },
+      }),
+      emit as never
+    );
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ kind: 'block', text: undefined, blockType: 'command' });
+    expect(events[1]).toEqual({ kind: 'delta', text: 'Checking files...\n\n', blockType: undefined });
+  });
+
+  it('suppresses duplicate streaming overlay once LiveSync persists the active assistant turn', () => {
+    const before = [
+      { id: 'u1', role: 'user' as const, timestamp: 1000, blocks: [{ type: 'text' as const, text: 'Hi' }] },
+    ];
+    const baseline = captureStreamTurnBaseline(before);
+
+    // Before disk flushes: show streaming trace + text
+    const preFlush = resolveVisibleStreamingOverlay(
+      before,
+      baseline,
+      [{ type: 'command', command: 'ls' }],
+      "I'll check the screenshot."
+    );
+    expect(preFlush.showBlocks).toHaveLength(1);
+    expect(preFlush.showText).toBe("I'll check the screenshot.");
+
+    // After LiveSync pushes the persisted assistant turn with the same text & commands
+    const afterPersist = [
+      ...before,
+      {
+        id: 'a1',
+        role: 'assistant' as const,
+        timestamp: 1001,
+        blocks: [
+          { type: 'text' as const, text: "I'll check the screenshot." },
+          { type: 'command' as const, command: 'ls' },
+        ],
+      },
+    ];
+    const postFlush = resolveVisibleStreamingOverlay(
+      afterPersist,
+      baseline,
+      [{ type: 'command', command: 'ls' }],
+      "I'll check the screenshot.\n\n"
+    );
+    expect(postFlush.showBlocks).toEqual([]);
+    expect(postFlush.showText).toBe('');
   });
 });

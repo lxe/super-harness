@@ -1110,8 +1110,10 @@ export async function loadCodexTranscript(
 
 /**
  * Parses one JSONL stdout line emitted by `codex exec --json`.
+ * Only emits completed items (ignoring `item.started` / `item.updated`) so
+ * commands, reasoning, and agent messages are never double-counted.
  */
-function parseCodexStreamLine(
+export function parseCodexStreamLine(
   sessionId: string,
   runId: string,
   line: string,
@@ -1130,7 +1132,8 @@ function parseCodexStreamLine(
     return false;
   }
 
-  if (obj.type === 'error' || obj.type === 'turn.failed') {
+  const eventType = typeof obj.type === 'string' ? obj.type : '';
+  if (eventType === 'error' || eventType === 'turn.failed') {
     const errMsg =
       typeof obj.message === 'string'
         ? obj.message
@@ -1141,10 +1144,16 @@ function parseCodexStreamLine(
     return false;
   }
 
+  // Codex emits item.started -> item.updated -> item.completed for each item;
+  // skip intermediate lifecycle events so commands and messages never duplicate.
+  if (eventType === 'item.started' || eventType === 'item.updated') {
+    return false;
+  }
+
   const item = obj.item as Record<string, unknown> | undefined;
   if (item) {
     if (item.type === 'agent_message' && typeof item.text === 'string' && item.text) {
-      emitStream({ sessionId, runId, kind: 'delta', text: item.text });
+      emitStream({ sessionId, runId, kind: 'delta', text: `${item.text}\n\n` });
       return true;
     }
     if (item.type === 'reasoning' && typeof item.text === 'string' && item.text) {

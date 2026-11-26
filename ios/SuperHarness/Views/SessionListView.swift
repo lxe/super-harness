@@ -992,7 +992,7 @@ private struct HarnessSwitcherStrip: View {
         var x: CGFloat
     }
 
-    @GestureState private var drag: DragState?
+    @State private var drag: DragState?
     @State private var stripWidth: CGFloat = 0
     /// Lifting the finger at the end of a drag also ends a touch on the gauge's button; taps
     /// are ignored until this time so a reorder does not change the selected harness.
@@ -1004,6 +1004,8 @@ private struct HarnessSwitcherStrip: View {
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
     private static let scrollableCellWidth: CGFloat = 62
+    /// "All" plus five harnesses still fit side by side on a phone; beyond that the dock scrolls.
+    private static let maxFittedSlots = 6
     private static let stripSpace = "harnessStrip"
 
     private var totalSlots: Int {
@@ -1011,7 +1013,7 @@ private struct HarnessSwitcherStrip: View {
     }
 
     private var needsHorizontalScroll: Bool {
-        totalSlots > 5
+        totalSlots > Self.maxFittedSlots
     }
 
     private var cellWidth: CGFloat {
@@ -1037,7 +1039,17 @@ private struct HarnessSwitcherStrip: View {
                     .shadow(color: .black.opacity(isDragged ? 0.45 : 0), radius: 8, y: 3)
                     .offset(x: isDragged ? (drag?.x ?? 0) - cellCenter(slot: index + 1) : 0)
                     .zIndex(isDragged ? 1 : 0)
-                    .simultaneousGesture(reorderGesture(for: group))
+                    .gesture(
+                        HarnessHoldDragGesture(
+                            spaceName: Self.stripSpace,
+                            onChange: { x in drag = DragState(harness: group, x: x) },
+                            onEnd: { moved in
+                                drag = nil
+                                // Held and let go in place: offer the gauge's shortcuts.
+                                if moved < 10 { shortcutsHarness = group }
+                            }
+                        )
+                    )
             }
         }
         .animation(.easeInOut(duration: 0.18), value: store.harnessOrder)
@@ -1096,27 +1108,6 @@ private struct HarnessSwitcherStrip: View {
         }
     }
 
-    /// Hold for a moment, then drag. Holding still for longer opens the gauge's menu as before;
-    /// a plain tap still selects the harness.
-    private func reorderGesture(for group: HarnessGroup) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.28)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.stripSpace)))
-            .updating($drag) { value, state, _ in
-                if case .second(true, let dragValue) = value, let dragValue {
-                    state = DragState(harness: group, x: dragValue.location.x)
-                }
-            }
-            .onEnded { value in
-                // Held and let go in place: offer the gauge's shortcuts (this replaces the
-                // long-press context menu, which cannot share the press with dragging).
-                guard case .second(true, let dragValue) = value else { return }
-                let moved = dragValue.map { abs($0.translation.width) + abs($0.translation.height) } ?? 0
-                if moved < 10 {
-                    shortcutsHarness = group
-                }
-            }
-    }
-
     private func triggerSelectionHaptic() {
         #if canImport(UIKit)
         UISelectionFeedbackGenerator().selectionChanged()
@@ -1170,12 +1161,9 @@ private struct HarnessSwitcherStrip: View {
         let barPct = summary?.barPercent ?? UsageMetrics.pickHeroWindow(summary?.windows ?? []).hero?.usedPercent
         let working = store.isAnyWorking(for: group)
 
-        return Button {
-            guard Date() >= ignoreTapsUntil else { return }
-            withAnimation(.easeInOut(duration: 0.16)) {
-                store.selectedHarnessFilter = isSelected ? nil : group
-            }
-        } label: {
+        // A plain tappable view, not a Button: a Button keeps the whole touch to itself, so the
+        // hold-to-drag recognizer attached around it would never see the press.
+        return Group {
             chipCell(isSelected: isSelected) {
                 SHRadialGauge(
                     value: barPct,
@@ -1189,7 +1177,15 @@ private struct HarnessSwitcherStrip: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard Date() >= ignoreTapsUntil else { return }
+            withAnimation(.easeInOut(duration: 0.16)) {
+                store.selectedHarnessFilter = isSelected ? nil : group
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(group.title)
         .accessibilityValue(gaugeAccessibilityValue(percent: barPct, working: working))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -1590,6 +1586,51 @@ struct SHShimmerText: View {
             .font(font)
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+}
+
+/// Hold a gauge for a moment, then drag it. This is a UIKit long press rather than a SwiftUI
+/// long-press-then-drag sequence because the SwiftUI sequence, attached to a view inside a
+/// horizontal ScrollView, stops the ScrollView from scrolling at all. A UIKit long press lets
+/// a quick swipe scroll the dock and only claims the touch once the hold has lasted.
+private struct HarnessHoldDragGesture: UIGestureRecognizerRepresentable {
+    let spaceName: String
+    /// Finger position along the dock row while the gauge is held.
+    let onChange: (CGFloat) -> Void
+    /// Called when the finger lifts, with the farthest horizontal distance it travelled.
+    let onEnd: (CGFloat) -> Void
+
+    final class Coordinator {
+        var startX: CGFloat = 0
+        var farthest: CGFloat = 0
+    }
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.28
+        recognizer.allowableMovement = 12
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let x = context.converter.location(in: .named(spaceName)).x
+        switch recognizer.state {
+        case .began:
+            context.coordinator.startX = x
+            context.coordinator.farthest = 0
+            onChange(x)
+        case .changed:
+            context.coordinator.farthest = max(context.coordinator.farthest, abs(x - context.coordinator.startX))
+            onChange(x)
+        case .ended:
+            onEnd(context.coordinator.farthest)
+        case .cancelled, .failed:
+            onEnd(.infinity)
+        default:
+            break
+        }
     }
 }
 

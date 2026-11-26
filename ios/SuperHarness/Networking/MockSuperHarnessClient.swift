@@ -98,6 +98,21 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 capabilities: HarnessCapabilities(canStartNew: true, canResume: true, canTmuxMirror: false, canControlDaemon: false),
                 notes: "Local muse-exec runner"
             ),
+            HarnessDetection(
+                id: .pi,
+                name: "Pi",
+                installed: true,
+                binaryPath: "/usr/local/bin/pi",
+                version: "0.9.0",
+                runningProcesses: 0,
+                desktopAppRunning: false,
+                daemonRunning: false,
+                remoteControlEnabled: false,
+                activeSessionCount: 0,
+                totalSessionCount: 1,
+                capabilities: HarnessCapabilities(canStartNew: true, canResume: true, canTmuxMirror: false, canControlDaemon: false),
+                notes: "Local pi RPC runner"
+            ),
         ]
 
         self.sessions = [
@@ -299,6 +314,29 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 nativeSection: "super-harness",
                 nativeSectionOrder: 0,
                 hostAddress: "100.64.0.12"
+            ),
+            UnifiedSession(
+                id: "pi:pi-adapter-notes",
+                nativeId: "pi-adapter-notes",
+                harness: .pi,
+                harnessGroup: .pi,
+                title: "Pi adapter spend tracking",
+                preview: "Summed the last 24 hours of API spend for the gauge caption",
+                cwd: "/Users/lxe/Developer/super-harness",
+                projectName: "super-harness",
+                gitBranch: "feat/pi",
+                model: "pi-default",
+                status: .idle,
+                isLive: true,
+                createdAt: now - 5 * hour,
+                updatedAt: now - 33 * minute,
+                tokenCount: 18_400,
+                pinned: false,
+                tags: ["pi"],
+                dispatchMode: .piRpc,
+                nativeSection: "super-harness",
+                nativeSectionOrder: 0,
+                lastUserText: "show spend on the gauge instead of a quota"
             ),
         ]
 
@@ -618,6 +656,24 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 liveActivity: LiveActivityState(isWorking: false)
             ),
 
+            "pi:pi-adapter-notes": SessionTranscriptResult(
+                sessionId: "pi:pi-adapter-notes",
+                messages: [
+                    UnifiedMessage(
+                        id: "pi-1",
+                        role: .user,
+                        timestamp: now - 34 * minute,
+                        blocks: [.text(text: "show spend on the gauge instead of a quota")]
+                    ),
+                    UnifiedMessage(
+                        id: "pi-2",
+                        role: .assistant,
+                        timestamp: now - 33 * minute,
+                        blocks: [.text(text: "Pi runs on API keys, so the gauge now shows the last 24 hours of spend.")],
+                        harnessMeta: MessageHarnessMeta(model: "pi-default", sourceKind: .agent)
+                    ),
+                ]
+            ),
             "muse:muse-orb-review": SessionTranscriptResult(
                 sessionId: "muse:muse-orb-review",
                 messages: [
@@ -1404,7 +1460,23 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
             spendIsEstimated: true
         )
 
-        return UsageSnapshot(antigravity: agy, codex: codex, claude: claude, muse: muse)
+        let pi = HarnessUsageSummary(
+            harness: .pi,
+            updatedAt: now - 60_000,
+            planLabel: "API key",
+            spend5hUsd: 0.4,
+            spend24hUsd: 1.2,
+            spend7dUsd: 6.9,
+            spend14dUsd: 11.3,
+            tokens7d: 2_100_000,
+            dailySpend7d: makePoints([
+                (0.6, 180_000), (1.1, 330_000), (0.9, 270_000),
+                (0.8, 240_000), (1.4, 420_000), (0.9, 300_000), (1.2, 360_000),
+            ]),
+            spendIsEstimated: false
+        )
+
+        return UsageSnapshot(antigravity: agy, codex: codex, claude: claude, muse: muse, pi: pi)
     }
 
     /// Extra demo models so the model menu is long enough to scroll (UI checks set SH_MOCK_MANY_MODELS).
@@ -1481,6 +1553,16 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                         defaultReasoningLevel: "medium"
                     ),
                 ],
+                .pi: [
+                    HarnessModelOption(
+                        id: "pi-default",
+                        label: "Pi Default",
+                        description: "Uses the model configured for pi",
+                        isDefault: true,
+                        reasoningLevels: ["low", "medium", "high"],
+                        defaultReasoningLevel: "medium"
+                    ),
+                ],
                 .muse: [
                     HarnessModelOption(
                         id: "muse-wonder-full-1.0",
@@ -1500,6 +1582,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 ],
             ],
             defaultReasoningEffort: [
+                .pi: "medium",
                 .antigravity: "high",
                 .codex: "high",
                 .claude: "high",

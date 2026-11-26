@@ -69,10 +69,12 @@ final class AppStoreTests: XCTestCase {
         defer { store.stopEventStream() }
 
         XCTAssertNotNil(store.masterSession)
-        XCTAssertEqual(store.harnesses.count, 4)
+        XCTAssertEqual(store.harnesses.count, 5)
         XCTAssertTrue(store.harnesses.contains(where: { $0.id == .muse }))
+        XCTAssertTrue(store.harnesses.contains(where: { $0.id == .pi }))
         XCTAssertNotNil(store.usage)
         XCTAssertNotNil(store.usage?.muse)
+        XCTAssertEqual(store.usage?.pi?.spend24hUsd, 1.2)
         XCTAssertNotNil(store.catalog)
         XCTAssertFalse(store.pinnedToTopSessions.isEmpty)
 

@@ -531,44 +531,69 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
   }
 
   if (block.type === 'file_change') {
+    const cleanFilePath = (p: string) => p.replace(/^"|"$/g, '');
+    const formatDiffLines = (diff: string): string[] => {
+      const out: string[] = [];
+      for (const rawLine of diff.split('\n')) {
+        const m = rawLine.match(/^([+-]\s*)"([\s\S]*)"$/);
+        if (m) {
+          try {
+            const unescaped = JSON.parse(`"${m[2]}"`) as string;
+            const prefix = m[1].trim() === '+' ? '+ ' : '- ';
+            for (const sub of unescaped.split('\n')) {
+              out.push(`${prefix}${sub}`);
+            }
+            continue;
+          } catch {
+            // fall through
+          }
+        }
+        out.push(rawLine);
+      }
+      return out;
+    };
+
     const label =
       block.changes.length === 1
-        ? block.changes[0].path
+        ? cleanFilePath(block.changes[0].path)
         : `${block.changes.length} files modified`;
     return (
       <CollapsibleCard
         variant="plain"
         icon={<FileCode2 className="w-3 h-3 text-ink-faint" />}
         title={<span className="font-mono font-normal text-ink-secondary">{label}</span>}
-        bodyClassName="space-y-2 max-h-72 overflow-y-auto"
+        bodyClassName="space-y-2 max-h-72 overflow-y-auto overflow-x-hidden"
       >
-        {block.changes.map((ch, idx) => (
-          <div key={idx} className="space-y-1">
-            <button
-              type="button"
-              onClick={() => onOpenPath?.(ch.path)}
-              className="text-micro font-mono text-ink-secondary hover:text-brand-antigravity hover:underline truncate block text-left cursor-pointer"
-            >
-              {ch.path}
-            </button>
-            {ch.diff && (
-              <pre className="text-micro font-mono rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] p-3 overflow-x-auto leading-relaxed">
-                {ch.diff.split('\n').map((line, i) => {
-                  const cls = line.startsWith('+')
-                    ? 'text-emerald-300/90 block'
-                    : line.startsWith('-')
-                      ? 'text-rose-300/90 block'
-                      : 'text-ink-faint block';
-                  return (
-                    <span key={i} className={cls}>
-                      {line}
-                    </span>
-                  );
-                })}
-              </pre>
-            )}
-          </div>
-        ))}
+        {block.changes.map((ch, idx) => {
+          const pathClean = cleanFilePath(ch.path);
+          return (
+            <div key={idx} className="space-y-1 min-w-0">
+              <button
+                type="button"
+                onClick={() => onOpenPath?.(pathClean)}
+                className="text-micro font-mono text-ink-secondary hover:text-brand-antigravity hover:underline truncate block max-w-full text-left cursor-pointer"
+              >
+                {pathClean}
+              </button>
+              {ch.diff && (
+                <pre className="text-micro font-mono rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] p-3 whitespace-pre-wrap break-words overflow-x-hidden leading-relaxed">
+                  {formatDiffLines(ch.diff).map((line, i) => {
+                    const cls = line.startsWith('+')
+                      ? 'text-emerald-300/90 block'
+                      : line.startsWith('-')
+                        ? 'text-rose-300/90 block'
+                        : 'text-ink-faint block';
+                    return (
+                      <span key={i} className={cls}>
+                        {line}
+                      </span>
+                    );
+                  })}
+                </pre>
+              )}
+            </div>
+          );
+        })}
       </CollapsibleCard>
     );
   }
@@ -584,7 +609,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
             {block.name}
           </span>
         }
-        bodyClassName="space-y-2 max-h-64 overflow-y-auto"
+        bodyClassName="space-y-2 max-h-64 overflow-y-auto overflow-x-hidden"
       >
         {(block.args || block.output) && (
           <div className="rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] px-3.5 py-2.5 space-y-2">

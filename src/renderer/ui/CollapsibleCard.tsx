@@ -66,7 +66,12 @@ export const CollapsibleCard: React.FC<CollapsibleCardProps> = ({
           <ChevronRight className="w-3.5 h-3.5 text-ink-faint shrink-0" />
         )}
         {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-        <span className="text-caption font-medium text-ink-secondary shrink-0 min-w-0 truncate">
+        <span
+          className={cn(
+            'text-caption font-medium text-ink-secondary min-w-0 truncate',
+            !isOpen && preview ? 'shrink-0 max-w-[45%]' : 'flex-1'
+          )}
+        >
           {title}
         </span>
         {!isOpen && preview && (

@@ -1237,6 +1237,21 @@ export function isCodexActiveWriterError(text: string): boolean {
 }
 
 /**
+ * Builds `codex exec` arguments for starting a brand-new Codex thread.
+ * Intentionally omits `--remote` because `codex exec --remote` rejects `-C`,
+ * `-m`, and `-c model_reasoning_effort=...` (new threads have no active writer).
+ */
+export function buildCodexStartArgs(req: StartSessionRequest, cwd: string): string[] {
+  const args = ['exec', '--skip-git-repo-check', '--json', '-C', cwd];
+  if (req.model) args.push('-m', req.model);
+  if (req.reasoningEffort) {
+    args.push('-c', `model_reasoning_effort="${req.reasoningEffort}"`);
+  }
+  args.push(req.prompt || 'Inspect this directory and wait for further instructions.');
+  return args;
+}
+
+/**
  * Cohesive HarnessDriver encapsulating all OpenAI Codex integration
  * (SQLite state/history/queue stores, rollouts, app-server daemon, CLI).
  */
@@ -1462,14 +1477,7 @@ export function createCodexDriver(): HarnessDriver {
       const bin = await resolveCodexBinary();
       if (!bin) return { ok: false, error: 'codex CLI not found' };
       const cwd = fs.existsSync(req.cwd) ? req.cwd : os.homedir();
-      const args = ['exec'];
-      if (hasCodexDaemonSocket()) args.push('--remote', 'unix://');
-      args.push('--skip-git-repo-check', '--json', '-C', cwd);
-      if (req.model) args.push('-m', req.model);
-      if (req.reasoningEffort) {
-        args.push('-c', `model_reasoning_effort="${req.reasoningEffort}"`);
-      }
-      args.push(req.prompt || 'Inspect this directory and wait for further instructions.');
+      const args = buildCodexStartArgs(req, cwd);
 
       const runId = crypto.randomBytes(6).toString('hex');
       const child = spawn(bin, args, {

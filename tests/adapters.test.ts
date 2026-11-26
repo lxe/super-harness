@@ -16,6 +16,7 @@ import {
   resolveClaudeDispatchGuard,
 } from '../src/main/adapters/claudeAdapter';
 import {
+  buildCodexStartArgs,
   coalesceCodexItemRows,
   getCodexTranscriptFingerprint,
   isCodexActiveWriterError,
@@ -1240,5 +1241,31 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     const parsed = parseClaudeJsonlLines(lines, 'claude:side-test', Date.now(), 40);
     expect(parsed.messages).toHaveLength(2);
     expect(parsed.messages[1].blocks).toEqual([{ type: 'text', text: 'Main reply' }]);
+  });
+
+  it('builds new Codex thread args without --remote so -C, -m, and reasoning effort are accepted', () => {
+    const args = buildCodexStartArgs(
+      {
+        harness: 'codex',
+        cwd: '/tmp/proj',
+        model: 'gpt-6.2-sol',
+        reasoningEffort: 'high',
+        prompt: 'Testing one, two, three.',
+      },
+      '/tmp/proj'
+    );
+    expect(args).not.toContain('--remote');
+    expect(args).toEqual([
+      'exec',
+      '--skip-git-repo-check',
+      '--json',
+      '-C',
+      '/tmp/proj',
+      '-m',
+      'gpt-6.2-sol',
+      '-c',
+      'model_reasoning_effort="high"',
+      'Testing one, two, three.',
+    ]);
   });
 });

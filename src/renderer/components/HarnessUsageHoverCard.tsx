@@ -411,10 +411,24 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
       : null;
   const paceIsOver = Boolean(heroPace?.projectedPercent && heroPace.projectedPercent >= 100);
 
+  const rawPlan = info.planLabel?.trim() || '';
+  const harnessTitle = HARNESS_TITLES[target];
+  const strippedPlan = rawPlan
+    .replace(new RegExp(`^${harnessTitle}\\s+`, 'i'), '')
+    .trim();
   const planShort =
-    info.planLabel && info.planLabel.toLowerCase() !== HARNESS_TITLES[target].toLowerCase()
-      ? info.planLabel
+    strippedPlan && strippedPlan.toLowerCase() !== harnessTitle.toLowerCase()
+      ? strippedPlan
       : null;
+
+  const hasSpendData =
+    info.tokens7d > 0 ||
+    info.spend7dUsd > 0 ||
+    info.spend24hUsd > 0 ||
+    info.spend5hUsd > 0 ||
+    info.dailySpend7d.some((d) => d.spendUsd > 0 || d.tokens > 0);
+
+  const accountLinks = HARNESS_ACCOUNT_LINKS[target] || [];
 
   return (
     <PopoverSurface
@@ -425,14 +439,21 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
       className="fixed z-50 w-[336px] p-4 space-y-4"
     >
       {/* Header: Harness identity + quiet metadata */}
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-baseline justify-between gap-2.5">
+        <div className="flex items-center gap-2 shrink-0">
           <HarnessLogo harness={target} size={15} />
-          <span className="text-heading font-semibold text-ink-primary truncate">
-            {HARNESS_TITLES[target]}
+          <span className="text-heading font-semibold text-ink-primary whitespace-nowrap">
+            {harnessTitle}
           </span>
         </div>
-        <span className="text-micro text-ink-faint shrink-0">
+        <span
+          title={
+            planShort
+              ? `${planShort} · updated ${formatUpdatedAgo(info.updatedAt)}`
+              : `updated ${formatUpdatedAgo(info.updatedAt)}`
+          }
+          className="text-micro text-ink-faint min-w-0 truncate text-right"
+        >
           {planShort ? `${planShort} · ` : ''}
           updated {formatUpdatedAgo(info.updatedAt)}
         </span>
@@ -520,29 +541,33 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
       )}
 
       {/* Secondary section: API-equivalent value + unambiguous 7-day trend */}
-      <SpendTrendSection
-        points={info.dailySpend7d}
-        harness={target}
-        spend7d={info.spend7dUsd}
-        spend24h={info.spend24hUsd}
-        spend5h={info.spend5hUsd}
-        tokens7d={info.tokens7d}
-      />
+      {hasSpendData && (
+        <SpendTrendSection
+          points={info.dailySpend7d}
+          harness={target}
+          spend7d={info.spend7dUsd}
+          spend24h={info.spend24hUsd}
+          spend5h={info.spend5hUsd}
+          tokens7d={info.tokens7d}
+        />
+      )}
 
       {/* Quiet footer text links instead of heavy full-width buttons */}
-      <div className="pt-3 border-t border-line-hairline flex items-center justify-between gap-3">
-        {HARNESS_ACCOUNT_LINKS[target].map((link) => (
-          <button
-            key={link.url}
-            type="button"
-            onClick={() => void window.superHarness.openExternalUrl(link.url)}
-            className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer"
-          >
-            <span>{link.label}</span>
-            <ExternalLink className="w-3 h-3 text-ink-faint" />
-          </button>
-        ))}
-      </div>
+      {accountLinks.length > 0 && (
+        <div className="pt-3 border-t border-line-hairline flex items-center justify-between gap-3">
+          {accountLinks.map((link) => (
+            <button
+              key={link.url}
+              type="button"
+              onClick={() => void window.superHarness.openExternalUrl(link.url)}
+              className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer"
+            >
+              <span>{link.label}</span>
+              <ExternalLink className="w-3 h-3 text-ink-faint" />
+            </button>
+          ))}
+        </div>
+      )}
     </PopoverSurface>
   );
 };

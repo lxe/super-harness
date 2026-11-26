@@ -55,7 +55,7 @@ export function SegmentedControl<T extends string>({
             role="tab"
             aria-selected={active}
             aria-label={logoOnly ? item.label : undefined}
-            title={logoOnly ? item.label : undefined}
+            title={logoOnly && !onItemMouseEnter ? item.label : undefined}
             type="button"
             onClick={() => onChange(item.id)}
             onMouseEnter={(e) => onItemMouseEnter?.(item.id, e.currentTarget)}

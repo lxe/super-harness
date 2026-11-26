@@ -6,6 +6,7 @@ import path from 'node:path';
 import type {
   HarnessGroup,
   ImageAttachment,
+  MasterSegment,
   OrganizeAction,
   SendMessageResult,
   StreamEvent,
@@ -17,9 +18,19 @@ import type { ConfigStore } from '../store/configStore';
 import { resolveCodexBinary, whichBinary } from '../utils/system';
 import type { ControlServer } from './controlServer';
 import type { HarnessDispatcher } from './dispatcher';
+import { ORCHESTRATOR_MEMORY_PATH, readOrchestratorMemory } from './orchestratorMemory';
+
+const ENGINE_NAMES: Partial<Record<HarnessGroup, string>> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  muse: 'Muse',
+  antigravity: 'Antigravity',
+};
 
 export class MasterEngine {
   private activeChild: ChildProcess | null = null;
+  /** Orchestrator turns (and compactions) run one at a time, in order. */
+  private turnChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly store: ConfigStore,
@@ -28,7 +39,43 @@ export class MasterEngine {
     private readonly controlServer: ControlServer,
     private readonly emitStream: (ev: StreamEvent) => void,
     private readonly triggerRefresh: () => Promise<void>
-  ) {}
+  ) {
+    setTimeout(() => this.hideLegacyOrchestratorSessions(), 2000).unref?.();
+  }
+
+  /**
+   * One-time cleanup: before the orchestrator kept one persistent session, every turn ran
+   * as a fresh `claude -p` in the orchestrator's cwd and showed up as its own sidebar entry.
+   * Those are SDK-launched sessions (entrypoint sdk-cli) that called the super_harness MCP
+   * tools; hide them behind the pinned thread.
+   */
+  private hideLegacyOrchestratorSessions(): void {
+    if (this.store.getMasterThread().legacyScanDone) return;
+    const found: string[] = [];
+    try {
+      const cwd = this.store.getState().settings.master.cwd || os.homedir();
+      const dir = path.join(os.homedir(), '.claude', 'projects', path.resolve(cwd.replace(/^~/, os.homedir())).replace(/[^a-zA-Z0-9]/g, '-'));
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const full = path.join(dir, f);
+        const fd = fs.openSync(full, 'r');
+        const head = Buffer.alloc(65536);
+        const n = fs.readSync(fd, head, 0, head.length, 0);
+        fs.closeSync(fd);
+        if (!head.subarray(0, n).toString('utf8').includes('"entrypoint":"sdk-cli"')) continue;
+        if (!fs.readFileSync(full, 'utf8').includes('mcp__super_harness__')) continue;
+        found.push(f.slice(0, -'.jsonl'.length));
+      }
+    } catch {
+      // no project dir: nothing to hide
+    }
+    this.store.updateMasterThread((t) => ({
+      ...t,
+      legacyNativeIds: Array.from(new Set([...(t.legacyNativeIds ?? []), ...found])),
+      legacyScanDone: true,
+    }));
+    if (found.length) void this.triggerRefresh();
+  }
 
   abort(): boolean {
     if (!this.activeChild) return false;
@@ -85,57 +132,155 @@ export class MasterEngine {
       }
     }
 
-    // 2. Delegate to the configured Master harness (Claude, Codex, or Antigravity)
-    //    with the live `super-harness-mcp` server wired in!
+    // 2. Run the turn on the orchestrator's persistent native session (queued behind any
+    //    turn or compaction already in flight, so the thread stays one ordered conversation).
+    this.turnChain = this.turnChain
+      .catch(() => {})
+      .then(() => this.runOrchestratorTurn(effectivePrompt, attachments));
+    const engine = this.store.getState().settings.master.harness;
+    return { ok: true, dispatchedVia: `Master → ${engine} (persistent orchestrator thread)` };
+  }
+
+  /** Current segment, starting (and, on a harness switch, compacting into) a new one when needed. */
+  private async ensureSegment(engine: HarnessGroup, model: string, cwd: string): Promise<{ seg: MasterSegment; firstTurn: boolean; switchedFrom?: HarnessGroup }> {
+    const thread = this.store.getMasterThread();
+    const current = thread.segments[thread.segments.length - 1];
+    if (current && current.engine === engine) {
+      if (model && current.model !== model) {
+        this.store.updateMasterThread((t) => ({
+          ...t,
+          segments: t.segments.map((sg, i) => (i === t.segments.length - 1 ? { ...sg, model } : sg)),
+        }));
+      }
+      return { seg: { ...current, model: model || current.model }, firstTurn: !current.nativeId || !current.turns };
+    }
+    if (current?.nativeId) {
+      await this.compactSegment(current, engine, cwd);
+    }
+    const seg: MasterSegment = {
+      engine,
+      model: model || undefined,
+      startedAt: Date.now(),
+      // Claude and Muse accept an id we choose; Codex/Antigravity report theirs on the first turn.
+      nativeId: engine === 'claude' || engine === 'muse' ? crypto.randomUUID() : undefined,
+    };
+    this.store.updateMasterThread((t) => ({ ...t, segments: [...t.segments, seg] }));
+    if (current) {
+      this.store.appendMasterMessage({
+        id: `m-s-${crypto.randomBytes(4).toString('hex')}`,
+        role: 'system',
+        timestamp: Date.now(),
+        blocks: [
+          {
+            type: 'notice',
+            title: `Orchestrator switched from ${ENGINE_NAMES[current.engine] ?? current.engine} to ${ENGINE_NAMES[engine] ?? engine}`,
+            detail: `${ENGINE_NAMES[current.engine] ?? current.engine} compacted this conversation into the orchestrator memory; ${ENGINE_NAMES[engine] ?? engine} continues from it.`,
+          },
+        ],
+      });
+    }
+    return { seg, firstTurn: true, switchedFrom: current?.engine };
+  }
+
+  private async runOrchestratorTurn(effectivePrompt: string, attachments?: ImageAttachment[]): Promise<void> {
     const state = this.store.getState();
     const engine = state.settings.master.harness;
     const model = state.settings.master.model;
-    const cwd = fs.existsSync(state.settings.master.cwd)
-      ? state.settings.master.cwd
-      : os.homedir();
+    const cwd = fs.existsSync(state.settings.master.cwd) ? state.settings.master.cwd : os.homedir();
+    const { seg, firstTurn, switchedFrom } = await this.ensureSegment(engine, model, cwd);
 
+    const memorySeed = firstTurn ? this.buildMemorySeed(switchedFrom) : '';
+    const prompt = `${memorySeed}${effectivePrompt}`;
+    await this.runSegmentTurn(seg, prompt, firstTurn, cwd, attachments, { label: model || `${engine} (default)` });
+  }
+
+  /** Ask the outgoing harness to fold the conversation into MEMORY.md before a switch. */
+  private async compactSegment(seg: MasterSegment, nextEngine: HarnessGroup, cwd: string): Promise<void> {
+    const prompt = [
+      `Super Harness is moving this orchestrator conversation from ${ENGINE_NAMES[seg.engine] ?? seg.engine} to ${ENGINE_NAMES[nextEngine] ?? nextEngine}.`,
+      'Before the switch: call sh_read_memory, then call sh_write_memory with a compact but complete markdown summary that lets the next orchestrator continue this conversation without losing context:',
+      "what's going on, open threads and which sessions own them (with session ids), lxe's decisions and preferences, next steps, and a brief note on the last few exchanges.",
+      'Keep the existing headings. Then reply with one line: "Memory compacted for the switch."',
+    ].join('\n');
+    await this.runSegmentTurn(seg, prompt, false, cwd, undefined, { label: `${ENGINE_NAMES[seg.engine] ?? seg.engine} (compacting)` });
+  }
+
+  private buildMemorySeed(switchedFrom?: HarnessGroup): string {
+    const memory = readOrchestratorMemory().trim();
+    const lead = switchedFrom
+      ? `You are continuing the Master Orchestrator conversation after it moved here from ${ENGINE_NAMES[switchedFrom] ?? switchedFrom}. The orchestrator memory below is the hand-off; treat it as what you already know.`
+      : 'This is the start of the Master Orchestrator conversation. The orchestrator memory below is what earlier orchestrator conversations recorded.';
+    return `${lead}\n\n<orchestrator-memory path="${ORCHESTRATOR_MEMORY_PATH}">\n${memory}\n</orchestrator-memory>\n\nlxe's message:\n`;
+  }
+
+  /** Runs one turn on a segment's native session, resuming it after the first turn. */
+  private async runSegmentTurn(
+    seg: MasterSegment,
+    prompt: string,
+    firstTurn: boolean,
+    cwd: string,
+    attachments: ImageAttachment[] | undefined,
+    meta: { label: string }
+  ): Promise<void> {
     const assistantId = `m-a-${crypto.randomBytes(4).toString('hex')}`;
     const runId = crypto.randomBytes(6).toString('hex');
-    const assistantMsg: UnifiedMessage = {
+    this.store.appendMasterMessage({
       id: assistantId,
       role: 'assistant',
       timestamp: Date.now(),
       blocks: [],
       streaming: true,
-      harnessMeta: { model: model || `${engine} (default)` },
-    };
-    this.store.appendMasterMessage(assistantMsg);
+      harnessMeta: { model: meta.label },
+    });
 
     const mcpServerPath = path.resolve(__dirname, '../../mcp/server.js');
     const systemPreamble = this.buildMasterPreamble();
+    const controlUrl = `http://127.0.0.1:${this.controlServer.port}`;
+    const httpNote = `Note: If sh_* MCP tools are not directly mounted, you have full live control via HTTP using \`$SUPER_HARNESS_URL\` and \`Authorization: Bearer $SUPER_HARNESS_TOKEN\` (\`GET /api/sessions\`, \`GET /api/transcript?sessionId=...\`, \`POST /api/organize\`, \`POST /api/send\`, \`POST /api/session-config\`, \`GET|POST /api/orchestrator/memory\`).`;
+    // Harnesses without a system-prompt flag get the preamble in the first message of a segment.
+    const inlinePrompt = firstTurn ? `${systemPreamble}\n\n${httpNote}\n\n${prompt}` : prompt;
+    const remember = (nativeId: string) => {
+      if (!nativeId || seg.nativeId === nativeId) return;
+      seg.nativeId = nativeId;
+      this.store.updateMasterThread((t) => ({
+        ...t,
+        segments: t.segments.map((sg) => (sg.startedAt === seg.startedAt && sg.engine === seg.engine ? { ...sg, nativeId } : sg)),
+      }));
+    };
+    const done = (): void => {
+      this.store.updateMasterThread((t) => ({
+        ...t,
+        segments: t.segments.map((sg) =>
+          sg.startedAt === seg.startedAt && sg.engine === seg.engine ? { ...sg, turns: (sg.turns ?? 0) + 1 } : sg
+        ),
+      }));
+    };
 
-    if (engine === 'claude') {
+    if (seg.engine === 'claude') {
       const bin = await whichBinary('claude');
-      if (!bin) {
-        this.failMasterMsg(assistantId, 'claude binary not found. Switch Master engine in Settings.');
-        return { ok: false, error: 'claude binary not found' };
-      }
-
-      // Write ephemeral MCP config pointing to our live Control HTTP Server
+      if (!bin) return this.failMasterMsg(assistantId, 'claude binary not found. Switch the Master engine in Settings.');
       const mcpConfigPath = path.join(os.tmpdir(), `super-harness-mcp-${process.pid}.json`);
-      const mcpConfig = {
-        mcpServers: {
-          super_harness: {
-            command: process.execPath,
-            args: [mcpServerPath],
-            env: {
-              ELECTRON_RUN_AS_NODE: '1',
-              SUPER_HARNESS_URL: `http://127.0.0.1:${this.controlServer.port}`,
-              SUPER_HARNESS_TOKEN: this.controlServer.token,
+      fs.writeFileSync(
+        mcpConfigPath,
+        JSON.stringify(
+          {
+            mcpServers: {
+              super_harness: {
+                command: process.execPath,
+                args: [mcpServerPath],
+                env: { ELECTRON_RUN_AS_NODE: '1', SUPER_HARNESS_URL: controlUrl, SUPER_HARNESS_TOKEN: this.controlServer.token },
+              },
             },
           },
-        },
-      };
-      fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), { mode: 0o600 });
-
+          null,
+          2
+        ),
+        { mode: 0o600 }
+      );
       const args = [
+        ...(firstTurn ? ['--session-id', seg.nativeId!] : ['--resume', seg.nativeId!]),
         '-p',
-        effectivePrompt,
+        prompt,
         '--output-format',
         'stream-json',
         '--verbose',
@@ -146,80 +291,52 @@ export class MasterEngine {
         '--allowedTools',
         'mcp__super_harness__*',
       ];
-      if (model) args.push('--model', model);
-
-      this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'claude');
-      return { ok: true, runId, dispatchedVia: `Master → Claude + super-harness-mcp` };
+      if (seg.model) args.push('--model', seg.model);
+      await this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'claude');
+      return done();
     }
 
-    if (engine === 'codex') {
+    if (seg.engine === 'codex') {
       const bin = await resolveCodexBinary();
-      if (!bin) {
-        this.failMasterMsg(assistantId, 'codex binary not found. Switch Master engine in Settings.');
-        return { ok: false, error: 'codex binary not found' };
-      }
-
-      const fullPrompt = `${systemPreamble}\n\nUser request:\n${trimmed || 'Inspect the attached image(s).'}`;
-      const args = [
-        'exec',
-        '--skip-git-repo-check',
-        '--ephemeral',
-        '--json',
-        '-C',
-        cwd,
-        '-c',
-        `mcp_servers.super_harness.command=${JSON.stringify(process.execPath)}`,
-        '-c',
-        `mcp_servers.super_harness.args=${JSON.stringify([mcpServerPath])}`,
-        '-c',
-        `mcp_servers.super_harness.env.ELECTRON_RUN_AS_NODE="1"`,
-        '-c',
-        `mcp_servers.super_harness.env.SUPER_HARNESS_URL=${JSON.stringify(`http://127.0.0.1:${this.controlServer.port}`)}`,
-        '-c',
-        `mcp_servers.super_harness.env.SUPER_HARNESS_TOKEN=${JSON.stringify(this.controlServer.token)}`,
+      if (!bin) return this.failMasterMsg(assistantId, 'codex binary not found. Switch the Master engine in Settings.');
+      const mcp = [
+        '-c', `mcp_servers.super_harness.command=${JSON.stringify(process.execPath)}`,
+        '-c', `mcp_servers.super_harness.args=${JSON.stringify([mcpServerPath])}`,
+        '-c', `mcp_servers.super_harness.env.ELECTRON_RUN_AS_NODE="1"`,
+        '-c', `mcp_servers.super_harness.env.SUPER_HARNESS_URL=${JSON.stringify(controlUrl)}`,
+        '-c', `mcp_servers.super_harness.env.SUPER_HARNESS_TOKEN=${JSON.stringify(this.controlServer.token)}`,
       ];
-      if (attachments && attachments.length > 0) {
-        for (const att of attachments) {
-          args.push('-i', att.path);
-        }
-      }
-      if (model) args.push('-m', model);
-      args.push(fullPrompt);
-
-      this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'codex');
-      return { ok: true, runId, dispatchedVia: `Master → Codex + super-harness-mcp` };
+      const resume = !firstTurn && seg.nativeId;
+      const args = resume
+        ? ['exec', 'resume', seg.nativeId!, '--skip-git-repo-check', '--json', ...mcp]
+        : ['exec', '--skip-git-repo-check', '--json', '-C', cwd, ...mcp];
+      for (const att of attachments ?? []) args.push(resume ? '--image' : '-i', att.path);
+      if (seg.model) args.push(resume ? '--model' : '-m', seg.model);
+      args.push(resume ? prompt : inlinePrompt);
+      await this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'codex', remember);
+      return done();
     }
 
-    if (engine === 'muse') {
+    if (seg.engine === 'muse') {
       const bin = await whichBinary('muse');
-      if (!bin) {
-        this.failMasterMsg(assistantId, 'muse binary not found. Switch Master engine in Settings.');
-        return { ok: false, error: 'muse binary not found' };
-      }
-      const fullPrompt = `${systemPreamble}\n\nNote: If sh_* MCP tools are not directly mounted, you have full live control via HTTP using \`$SUPER_HARNESS_URL\` and \`Authorization: Bearer $SUPER_HARNESS_TOKEN\` (\`GET /api/sessions\`, \`GET /api/folders\`, \`GET /api/transcript?sessionId=...\`, \`POST /api/organize\`, \`POST /api/settings\`, \`POST /api/send\`). Use curl/python/node as needed to carry out folder organization or session actions.\n\nUser request:\n${effectivePrompt}`;
-      const args = ['exec', '--json', '--workspace', cwd, '--yolo'];
-      if (model) args.push('--model', model);
-      if (attachments && attachments.length > 0) {
-        for (const att of attachments) args.push('--image', att.path);
-      }
-      args.push(fullPrompt);
-      this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'muse');
-      return { ok: true, runId, dispatchedVia: 'Master → Muse + Control API' };
+      if (!bin) return this.failMasterMsg(assistantId, 'muse binary not found. Switch the Master engine in Settings.');
+      const args = ['exec', '--json', '--workspace', cwd, '--yolo', '--session-id', seg.nativeId!];
+      if (seg.model) args.push('--model', seg.model);
+      for (const att of attachments ?? []) args.push('--image', att.path);
+      args.push(inlinePrompt);
+      await this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'muse');
+      return done();
     }
 
-    // Antigravity engine
+    // Antigravity (`agy --print`): resumes the conversation id reported by its first turn.
     const bin = await whichBinary('agy');
-    if (!bin) {
-      this.failMasterMsg(assistantId, 'agy binary not found. Switch Master engine in Settings.');
-      return { ok: false, error: 'agy binary not found' };
-    }
-    const fullPrompt = `${systemPreamble}\n\nNote: If sh_* MCP tools are not directly mounted, you have full live control via HTTP using \`$SUPER_HARNESS_URL\` and \`Authorization: Bearer $SUPER_HARNESS_TOKEN\` (\`GET /api/sessions\`, \`GET /api/folders\`, \`GET /api/transcript?sessionId=...\`, \`POST /api/organize\`, \`POST /api/settings\`, \`POST /api/send\`).\n\nUser request:\n${effectivePrompt}`;
+    if (!bin) return this.failMasterMsg(assistantId, 'agy binary not found. Switch the Master engine in Settings.');
     const args = ['--output-format', 'stream-json'];
-    if (model) args.push('--model', model);
-    args.push('--print', fullPrompt);
-
-    this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'antigravity');
-    return { ok: true, runId, dispatchedVia: `Master → Antigravity + Control API` };
+    if (seg.model) args.push('--model', seg.model);
+    if (!firstTurn && seg.nativeId) args.push('--conversation', seg.nativeId);
+    args.push('--print', firstTurn || !seg.nativeId ? inlinePrompt : prompt);
+    await this.runMasterSubprocess(assistantId, runId, bin, args, cwd, 'antigravity', remember);
+    return done();
   }
 
   private buildMasterPreamble(): string {
@@ -235,6 +352,8 @@ export class MasterEngine {
       'You are the Master Orchestrator inside Super Harness — a unified desktop & mobile multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, Antigravity, and Muse.',
       'You have MCP tools (`sh_list_harnesses`, `sh_list_folders`, `sh_list_sessions`, `sh_read_session`, `sh_send_message`, `sh_start_session`, `sh_organize`, `sh_update_settings`, `sh_control_harness`, `sh_restart_app`) — and equivalent local Control API endpoints at `$SUPER_HARNESS_URL` (Bearer `$SUPER_HARNESS_TOKEN`) — to inspect, organize, configure, and drive Super Harness live across both Desktop and Mobile.',
       'Use these tools proactively whenever the user asks to organize sessions into folders, inspect/search sessions, send instructions to another harness, launch new sessions, or update Super Harness settings.',
+      'This is one continuous conversation with lxe, pinned at the top of Super Harness. Your memory lives in ~/.config/super-harness/orchestrator/MEMORY.md: read it with `sh_read_memory` when you need context, and keep it current with `sh_write_memory` (a compact summary, not a log) whenever work starts or finishes, lxe decides something, or a task changes owner.',
+      'To change another session\'s model, reasoning effort or permission mode, use `sh_update_session` and report its per-field status honestly (applied / next message / needs restart / unsupported).',
       'When asked to put sessions working on a topic/project into a new or existing folder:',
       '  1. Call `sh_list_folders` and `sh_list_sessions` (without overly narrow filters first if titles may be generic) — and call `sh_read_session` on any ambiguous session to confirm what it is working on.',
       '  2. Call `sh_organize` with `create_folder` (if creating a new folder) and `assign_folder` (`sessionId` + `folderName` or `folderId`) for every matching session in one batch. Changes automatically sync to both Desktop and Mobile.',
@@ -255,9 +374,12 @@ export class MasterEngine {
     bin: string,
     args: string[],
     cwd: string,
-    flavor: HarnessGroup
-  ): void {
+    flavor: HarnessGroup,
+    onNativeId?: (nativeId: string) => void
+  ): Promise<void> {
     this.abort();
+    let resolveDone: () => void = () => {};
+    const finished = new Promise<void>((r) => (resolveDone = r));
     const child = spawn(bin, args, {
       cwd,
       env: {
@@ -324,6 +446,7 @@ export class MasterEngine {
           flushToStore(true);
         }
       } else if (flavor === 'codex') {
+        if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') onNativeId?.(obj.thread_id);
         const item = obj.item as Record<string, unknown> | undefined;
         if (item?.type === 'agent_message' && typeof item.text === 'string') {
           textAccum = item.text;
@@ -365,6 +488,7 @@ export class MasterEngine {
           }
         } else if (obj.event === 'result') {
           const res = (obj.result ?? {}) as Record<string, unknown>;
+          if (typeof res.conversation_id === 'string' && res.conversation_id) onNativeId?.(res.conversation_id);
           if (!textAccum.trim() && typeof res.response === 'string') {
             textAccum = res.response;
             flushToStore(true);
@@ -388,6 +512,7 @@ export class MasterEngine {
       this.activeChild = null;
       this.failMasterMsg(assistantId, err.message);
       this.emitStream({ sessionId: 'master:root', runId, kind: 'done' });
+      resolveDone();
     });
 
     child.on('close', (code) => {
@@ -403,7 +528,9 @@ export class MasterEngine {
       flushToStore(false, errMsg);
       this.emitStream({ sessionId: 'master:root', runId, kind: 'done' });
       void this.triggerRefresh();
+      resolveDone();
     });
+    return finished;
   }
 
   private failMasterMsg(assistantId: string, error: string): void {

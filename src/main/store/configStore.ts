@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {
+  MasterThreadState,
   OrganizeAction,
   SuperHarnessSettings,
   SuperHarnessState,
@@ -137,6 +138,7 @@ export class ConfigStore {
         folders: Array.isArray(raw.folders) ? raw.folders : def.folders,
         overrides: migratedOverrides,
         linkedCliSessions: raw.linkedCliSessions ?? {},
+        masterThread: raw.masterThread && Array.isArray(raw.masterThread.segments) ? raw.masterThread : { segments: [] },
         masterMessages:
           Array.isArray(raw.masterMessages) && raw.masterMessages.length > 0
             ? raw.masterMessages
@@ -395,7 +397,38 @@ export class ConfigStore {
     this.emit();
   }
 
+  getMasterThread(): MasterThreadState {
+    if (!this.state.masterThread) this.state.masterThread = { segments: [] };
+    return this.state.masterThread;
+  }
+
+  updateMasterThread(updater: (t: MasterThreadState) => MasterThreadState): MasterThreadState {
+    this.state.masterThread = updater(this.getMasterThread());
+    this.save();
+    this.emit();
+    return this.state.masterThread;
+  }
+
+  /** Native session ids that belong to the orchestrator (all segments plus legacy one-turn sessions). */
+  getMasterNativeIds(): Set<string> {
+    const t = this.getMasterThread();
+    return new Set([
+      ...t.segments.map((s) => s.nativeId).filter((x): x is string => Boolean(x)),
+      ...(t.legacyNativeIds ?? []),
+    ]);
+  }
+
   clearMasterMessages(): SuperHarnessState {
+    // A cleared orchestrator thread starts a fresh native session; legacy hiding stays.
+    const prev = this.getMasterThread();
+    this.state.masterThread = {
+      segments: [],
+      legacyNativeIds: [
+        ...(prev.legacyNativeIds ?? []),
+        ...prev.segments.map((s) => s.nativeId).filter((x): x is string => Boolean(x)),
+      ],
+      legacyScanDone: prev.legacyScanDone,
+    };
     this.state.masterMessages = createDefaultState().masterMessages;
     this.save();
     this.emit();

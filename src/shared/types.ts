@@ -372,11 +372,35 @@ export interface SuperHarnessSettings {
   mobileApi?: MobileApiSettings;
 }
 
+/**
+ * One stint of the Master Orchestrator on one harness. Every orchestrator turn resumes
+ * `nativeId`; switching harness ends the segment (after compacting into the memory file)
+ * and starts a new one seeded from that file.
+ */
+export interface MasterSegment {
+  engine: HarnessGroup;
+  /** Harness-native session id (Claude/Muse: chosen up front; Codex/Antigravity: captured from the first turn). */
+  nativeId?: string;
+  model?: string;
+  startedAt: number;
+  /** Completed turns; 0 means the native session has not been created yet. */
+  turns?: number;
+}
+
+export interface MasterThreadState {
+  segments: MasterSegment[];
+  /** Native ids of one-turn orchestrator sessions created before persistent threads (hidden from the sidebar). */
+  legacyNativeIds?: string[];
+  legacyScanDone?: boolean;
+}
+
 export interface SuperHarnessState {
   settings: SuperHarnessSettings;
   folders: SessionFolder[];
   overrides: Record<string, SessionOverride>;
   masterMessages: UnifiedMessage[];
+  /** The Master Orchestrator's native sessions, one per harness stint (see MasterThreadState). */
+  masterThread?: MasterThreadState;
   /** Maps read-only desktop conversation IDs (e.g. Antigravity App) to linked resumable CLI IDs */
   linkedCliSessions?: Record<string, string>;
 }

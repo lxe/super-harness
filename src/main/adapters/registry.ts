@@ -85,7 +85,10 @@ export class HarnessRegistry {
       dispatchMode: 'master',
     };
 
+    // The orchestrator's own native sessions live behind the pinned master thread.
+    const masterNativeIds = this.store.getMasterNativeIds();
     const decorated = mergedRaw
+      .filter((raw) => !masterNativeIds.has(raw.nativeId))
       .map((raw) => {
         const lastUserText = raw.lastUserText ?? readLastUserText(raw.transcriptPath, raw.harnessGroup);
         const s = lastUserText ? { ...raw, lastUserText } : raw;

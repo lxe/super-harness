@@ -147,8 +147,8 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
           )}
 
           {subagents.length > 0 && (
-            <div className="relative">
-              <span ref={subagentsTriggerRef} className="inline-flex">
+            <div className="relative flex items-center">
+              <span ref={subagentsTriggerRef} className="flex items-center">
                 <Button
                   size="xs"
                   variant={subagentsOpen ? 'secondary' : 'ghost'}
@@ -213,24 +213,24 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                 session.pinnedToTop ? 'bg-amber-400/10 hover:bg-amber-400/15' : undefined
               }
             >
-              <Pin className="w-3.5 h-3.5" />
+              <Pin className="w-4 h-4 translate-y-[0.5px]" strokeWidth={1.75} />
             </IconButton>
           )}
 
           {isSplitPane ? (
             <IconButton label="Close split" onClick={onCloseSplit}>
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
           ) : (
             <IconButton label="Split view (Ctrl+\)" active={hasSplitOpen} onClick={onToggleSplit}>
-              <Columns2 className="w-3.5 h-3.5" />
+              <Columns2 className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
           )}
 
-          <div className="relative">
-            <span ref={menuTriggerRef} className="inline-flex">
+          <div className="relative flex items-center">
+            <span ref={menuTriggerRef} className="flex items-center">
               <IconButton label="More options" active={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
-                <MoreHorizontal className="w-4 h-4" />
+                <MoreHorizontal className="w-4 h-4" strokeWidth={1.75} />
               </IconButton>
             </span>
 

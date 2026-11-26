@@ -576,15 +576,15 @@ export const Sidebar: React.FC<Props> = React.memo(({
               setTimeout(() => searchInputRef.current?.focus(), 30);
             }}
           >
-            <Search className="w-3.5 h-3.5" />
+            <Search className="w-4 h-4" strokeWidth={1.75} />
           </IconButton>
-          <span ref={filterTriggerRef} className="inline-flex">
+          <span ref={filterTriggerRef} className="flex items-center">
             <IconButton
               label="Group & Filter"
               active={showFilterMenu || filter !== 'all'}
               onClick={() => setShowFilterMenu((v) => !v)}
             >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <SlidersHorizontal className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
           </span>
 

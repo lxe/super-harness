@@ -129,12 +129,24 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         ) : (
           <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
         )}
-        {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
+        {working ? (
+          <span className="shrink-0 inline-flex items-center justify-center">
+            <Loader2
+              className={cn(
+                level === 1 ? 'w-4 h-4' : 'w-3.5 h-3.5',
+                'animate-spin text-ink-secondary shrink-0'
+              )}
+            />
+          </span>
+        ) : (
+          icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
+        )}
         <span className="leading-none translate-y-[1px] truncate">{label}</span>
-        <span className="ml-auto flex items-center gap-1.5 text-caption leading-none tabular-nums font-normal text-ink-faint shrink-0">
-          {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
-          {count !== undefined && <span className="translate-y-[0.5px]">{count}</span>}
-        </span>
+        {count !== undefined && (
+          <span className="ml-auto flex items-center gap-1.5 text-caption leading-none tabular-nums font-normal text-ink-faint shrink-0">
+            <span className="translate-y-[0.5px]">{count}</span>
+          </span>
+        )}
       </button>
       {onAdd && (
         <button

@@ -52,7 +52,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
       className={cn(
         'group w-full flex items-center gap-1 rounded-lg transition-colors select-none',
         isTopLevel
-          ? 'h-8 px-2.5 rounded-lg bg-[#191b21] hover:bg-[#1f2129] shadow-[0_2px_8px_-3px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.05)] text-[13px] font-semibold tracking-[-0.01em] text-ink-primary'
+          ? 'h-8 px-2.5 rounded-lg bg-[#191b21] hover:bg-[#1f2129] shadow-[0_1px_2px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.045)] text-[13px] font-semibold tracking-[-0.01em] text-ink-primary'
           : 'h-7 px-2 rounded-lg bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary',
         !isTopLevel && sticky && 'sticky top-10 z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',

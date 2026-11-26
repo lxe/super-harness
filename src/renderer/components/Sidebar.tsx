@@ -1023,7 +1023,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
     <aside
       ref={asideRef}
       style={{ width }}
-      className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail shadow-[8px_0_24px_-12px_rgba(0,0,0,0.5)] select-none"
+      className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail shadow-[4px_0_12px_rgba(0,0,0,0.18)] select-none"
     >
       {/* Top Bar (draggable window region) */}
       <div className="sh-drag-region h-12 px-3.5 flex items-center justify-between">

@@ -658,8 +658,8 @@ public struct SHRadialGauge<Center: View>: View {
         if isWorking && !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 1.6))
-                let sweepDeg = (t / 1.7).truncatingRemainder(dividingBy: 1.0) * 360.0
+                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 2.4))
+                let sweepDeg = (t / 2.6).truncatingRemainder(dividingBy: 1.0) * 360.0
                 gaugeContent(pulse: wave, sweepDeg: sweepDeg)
             }
         } else {
@@ -671,31 +671,15 @@ public struct SHRadialGauge<Center: View>: View {
     private func gaugeContent(pulse: Double, sweepDeg: Double) -> some View {
         ZStack {
             if isWorking {
-                // Vivid breathing outer energy bloom so active harnesses stand out unmistakably
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                stroke.opacity(0.36 + 0.34 * pulse),
-                                stroke.opacity(0.16 + 0.18 * pulse),
-                                stroke.opacity(0.0),
-                            ],
-                            center: .center,
-                            startRadius: 2,
-                            endRadius: size * 0.66
-                        )
-                    )
-                    .frame(width: size + 8, height: size + 8)
-                    .scaleEffect(0.92 + 0.12 * pulse)
-
-                // Softly blurred liquid-light aurora sheen sweeping smoothly around the ring
-                let auroraGradient = AngularGradient(
+                // A working harness gets one quiet cue: a soft highlight travelling around the track.
+                // No bloom outside the ring and no blur, so neighbouring gauges stay calm.
+                let sweepGradient = AngularGradient(
                     gradient: Gradient(stops: [
                         .init(color: .clear, location: 0.0),
-                        .init(color: stroke.opacity(0.68), location: 0.18),
-                        .init(color: Color.white.opacity(0.96), location: 0.32),
-                        .init(color: stroke.opacity(0.78), location: 0.46),
-                        .init(color: .clear, location: 0.64),
+                        .init(color: stroke.opacity(0.30), location: 0.16),
+                        .init(color: Color.white.opacity(0.34), location: 0.26),
+                        .init(color: stroke.opacity(0.30), location: 0.36),
+                        .init(color: .clear, location: 0.52),
                         .init(color: .clear, location: 1.0),
                     ]),
                     center: .center
@@ -703,13 +687,7 @@ public struct SHRadialGauge<Center: View>: View {
 
                 Circle()
                     .inset(by: ringInset)
-                    .stroke(auroraGradient, lineWidth: lineWidth + 2.2)
-                    .blur(radius: 2.8)
-                    .rotationEffect(.degrees(sweepDeg))
-
-                Circle()
-                    .inset(by: ringInset)
-                    .stroke(auroraGradient, lineWidth: lineWidth + 0.4)
+                    .stroke(sweepGradient, lineWidth: lineWidth)
                     .rotationEffect(.degrees(sweepDeg))
             }
 
@@ -727,8 +705,8 @@ public struct SHRadialGauge<Center: View>: View {
                     )
                     .rotationEffect(.degrees(-90))
                     .shadow(
-                        color: isWorking ? stroke.opacity(0.55 + 0.40 * pulse) : .clear,
-                        radius: isWorking ? (3.5 + 3.0 * pulse) : 0
+                        color: isWorking ? stroke.opacity(0.18 + 0.14 * pulse) : .clear,
+                        radius: isWorking ? (1.5 + 1.0 * pulse) : 0
                     )
                     .animation(.easeOut(duration: 0.3), value: displayFraction)
             }
@@ -816,23 +794,6 @@ public struct SHActivityPulse: View {
 
             for s in samples {
                 let r = s.radius
-                let center = CGPoint(x: s.x, y: s.y)
-
-                // Soft luminous rim glow for nearer spheres
-                if s.z > -0.15 {
-                    let glowR = r * 1.75
-                    let glowAlpha = 0.18 + 0.22 * ((s.z + 1.0) * 0.5)
-                    let glowRect = CGRect(x: s.x - glowR, y: s.y - glowR, width: glowR * 2, height: glowR * 2)
-                    ctx.fill(
-                        Path(ellipseIn: glowRect),
-                        with: .radialGradient(
-                            Gradient(colors: [tint.opacity(glowAlpha), tint.opacity(0.0)]),
-                            center: center,
-                            startRadius: r * 0.3,
-                            endRadius: glowR
-                        )
-                    )
-                }
 
                 // 3D lit sphere with top-left specular highlight and deep underside shading
                 let sphereRect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)

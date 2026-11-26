@@ -99,6 +99,22 @@ public enum SessionRowFormatting {
         return words.allSatisfy { hay.contains($0) }
     }
 
+    /// Compact 1-token label for a collapsed pinned-session pill (5 per row).
+    /// Strips a leading "Super Harness " prefix when followed by more text so multiple
+    /// Super Harness threads stay distinguishable inside narrow pills.
+    public static func compactPillLabel(for session: UnifiedSession) -> String {
+        let raw = normalizeWhitespace(session.displayTitle)
+        guard !raw.isEmpty else { return session.harness.rawValue.capitalized }
+        let lower = raw.lowercased()
+        let stripped: String
+        if lower.hasPrefix("super harness ") && raw.count > "super harness ".count {
+            stripped = String(raw.dropFirst("super harness ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            stripped = raw
+        }
+        return stripped.isEmpty ? raw : stripped
+    }
+
     private static func normalizeWhitespace(_ value: String) -> String {
         value
             .components(separatedBy: .whitespacesAndNewlines)
@@ -375,7 +391,7 @@ public struct SessionListView: View {
         .padding(.leading, SHSpacing.lg)
         .padding(.trailing, SHSpacing.sm)
         .frame(height: 44)
-        .modifier(SearchGlassModifier(shape: Capsule()))
+        .modifier(SHGlassSurfaceModifier(shape: Capsule()))
         .padding(.horizontal, SHSpacing.lg)
         .padding(.top, SHSpacing.xs)
         .padding(.bottom, SHSpacing.sm)
@@ -438,53 +454,76 @@ public struct SessionListView: View {
 
 
 
-            // Harness switcher: icon-only chips with radial quota gauges
-            Section {
-                HarnessSwitcherStrip(store: store)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
-            // Globally Pinned-to-Top section (collapsible)
+            // Globally Pinned-to-Top section (icon + chevron header; collapses into 5-per-row pill grid)
             let topPinned = store.pinnedToTopSessions
             if !topPinned.isEmpty {
                 let pinnedSectionId = "__pinned_to_top__"
                 let isPinnedCollapsed = collapsedSectionIds.contains(pinnedSectionId)
                 Section {
                     Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
                             toggleCollapsed(pinnedSectionId)
                         }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "pin.fill")
-                                .font(.system(size: 10))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(SHColor.brandMaster)
-                            Text("Super Harness Pins")
-                                .font(SHTypography.micro.weight(.semibold))
-                                .foregroundStyle(SHColor.inkMuted)
-                            if isPinnedCollapsed && topPinned.contains(where: { store.isSessionBusy($0.id) }) {
-                                SHActivityPulse(tint: SHColor.brandMaster, size: 11)
-                            }
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(SHColor.inkFaint)
                                 .rotationEffect(.degrees(isPinnedCollapsed ? 0 : 90))
                         }
+                        .padding(.vertical, 2)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Pinned sessions")
                     .accessibilityIdentifier("section.header.pinned-to-top")
                     .accessibilityValue(isPinnedCollapsed ? "collapsed" : "expanded")
-                    .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 4, trailing: 20))
+                    .listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 4, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                    if !isPinnedCollapsed {
+                    if isPinnedCollapsed {
+                        PinnedSessionsPillGrid(
+                            sessions: topPinned,
+                            selectedSessionId: store.selectedSessionId,
+                            isBusy: { store.isSessionBusy($0) },
+                            onSelect: onSelectSession,
+                            onToggleUnread: { session in
+                                Task { await store.setUnread(sessionId: session.id, unread: !session.isUnread) }
+                            },
+                            onRename: { session in
+                                renameDraft = session.displayTitle
+                                renamingSession = session
+                            },
+                            onUnpinTop: { session in
+                                Task { await store.togglePinToTop(session) }
+                            },
+                            onArchive: { session in
+                                Task { await store.archiveSession(session) }
+                            }
+                        )
+                        .transition(
+                            .asymmetric(
+                                insertion: .scale(scale: 0.94, anchor: .top).combined(with: .opacity),
+                                removal: .opacity
+                            )
+                        )
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    } else {
                         ForEach(topPinned) { session in
                             sessionRowButton(session)
+                                .transition(
+                                    .asymmetric(
+                                        insertion: .move(edge: .top).combined(with: .opacity),
+                                        removal: .opacity
+                                    )
+                                )
                         }
                     }
                 }
@@ -614,6 +653,12 @@ public struct SessionListView: View {
                 inlineSearchField
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HarnessSwitcherStrip(store: store)
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
         }
         .contentMargins(.top, 4, for: .scrollContent)
         .scrollContentBackground(.hidden)
@@ -797,7 +842,128 @@ private struct MasterSessionRow: View {
     }
 }
 
-// MARK: - Harness Switcher (icon-only radial gauges, matches desktop sidebar)
+// MARK: - Compact Pinned Sessions Pill Grid (5 per row)
+
+private struct PinnedSessionsPillGrid: View {
+    let sessions: [UnifiedSession]
+    let selectedSessionId: String?
+    let isBusy: (String) -> Bool
+    let onSelect: (String) -> Void
+    let onToggleUnread: (UnifiedSession) -> Void
+    let onRename: (UnifiedSession) -> Void
+    let onUnpinTop: (UnifiedSession) -> Void
+    let onArchive: (UnifiedSession) -> Void
+
+    private static let columns: [GridItem] = Array(
+        repeating: GridItem(.flexible(), spacing: 6),
+        count: 5
+    )
+
+    var body: some View {
+        LazyVGrid(columns: Self.columns, spacing: 6) {
+            ForEach(sessions) { session in
+                PinnedSessionPill(
+                    session: session,
+                    isSelected: selectedSessionId == session.id,
+                    isBusy: isBusy(session.id),
+                    onSelect: { onSelect(session.id) }
+                )
+                .contextMenu {
+                    Button {
+                        onToggleUnread(session)
+                    } label: {
+                        if session.isUnread {
+                            Label("Mark as Read", systemImage: "envelope.open")
+                        } else {
+                            Label("Mark as Unread", systemImage: "envelope.badge")
+                        }
+                    }
+                    Button {
+                        onRename(session)
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button {
+                        onUnpinTop(session)
+                    } label: {
+                        Label("Remove from Top", systemImage: "pin.slash")
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        onArchive(session)
+                    } label: {
+                        Label("Archive Session", systemImage: "archivebox")
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("pinned.pillGrid")
+    }
+}
+
+private struct PinnedSessionPill: View {
+    let session: UnifiedSession
+    let isSelected: Bool
+    let isBusy: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        let vis = HarnessVisual.forKind(session.harness)
+        let label = SessionRowFormatting.compactPillLabel(for: session)
+
+        Button(action: onSelect) {
+            HStack(spacing: 4) {
+                ZStack {
+                    if isBusy {
+                        SHActivityPulse(tint: vis.color, size: 13)
+                    } else if session.status == .waitingInput {
+                        Image(systemName: "questionmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(SHColor.statusWarning)
+                    } else {
+                        HarnessLogoView(harness: session.harness, size: 13)
+                    }
+                }
+                .frame(width: 14, height: 14)
+
+                Text(label)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(isSelected || session.isUnread ? SHColor.inkPrimary : SHColor.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
+            .background(
+                Capsule()
+                    .fill(isSelected ? SHColor.surfaceRaised : SHColor.surfaceSubtle)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        isBusy
+                            ? vis.color.opacity(0.42)
+                            : (session.isUnread ? SHColor.brandMaster.opacity(0.45) : SHColor.lineHairline),
+                        lineWidth: isBusy || session.isUnread ? 1 : 0.75
+                    )
+            )
+            .overlay(alignment: .topTrailing) {
+                if session.isUnread {
+                    Circle()
+                        .fill(SHColor.brandMaster)
+                        .frame(width: 6, height: 6)
+                        .offset(x: -1, y: 1)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(session.displayTitle)
+        .accessibilityValue(isBusy ? "working" : (session.isUnread ? "unread" : ""))
+    }
+}
+
+// MARK: - Harness Switcher (fixed bottom Liquid Glass dock, matches desktop sidebar)
 
 private struct HarnessSwitcherStrip: View {
     @Bindable var store: AppStore
@@ -819,20 +985,31 @@ private struct HarnessSwitcherStrip: View {
 
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
+    private static let scrollableCellWidth: CGFloat = 62
     private static let stripSpace = "harnessStrip"
 
-    private var cellWidth: CGFloat {
-        max(1, (stripWidth - Self.stripPadding * 2 - Self.cellSpacing * 4) / 5)
+    private var totalSlots: Int {
+        max(1, 1 + store.harnessOrder.count)
     }
 
-    /// Centre of the cell at `slot` (0 is "All", 1...4 are the harnesses), in strip coordinates.
+    private var needsHorizontalScroll: Bool {
+        totalSlots > 5
+    }
+
+    private var cellWidth: CGFloat {
+        if needsHorizontalScroll {
+            return Self.scrollableCellWidth
+        }
+        let gaps = CGFloat(max(0, totalSlots - 1)) * Self.cellSpacing
+        return max(1, (stripWidth - Self.stripPadding * 2 - gaps) / CGFloat(totalSlots))
+    }
+
+    /// Centre of the cell at `slot` (0 is "All", 1...N are the harnesses), in strip coordinates.
     private func cellCenter(slot: Int) -> CGFloat {
         Self.stripPadding + cellWidth / 2 + CGFloat(slot) * (cellWidth + Self.cellSpacing)
     }
 
-    var body: some View {
-        // Five equal cells that always fit the row width; no horizontal scrolling.
-        // Hold a harness gauge briefly, then drag it sideways to reorder; "All" stays first.
+    private var chipsRow: some View {
         HStack(spacing: Self.cellSpacing) {
             allChip
             ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
@@ -847,6 +1024,28 @@ private struct HarnessSwitcherStrip: View {
         }
         .animation(.easeInOut(duration: 0.18), value: store.harnessOrder)
         .animation(.easeOut(duration: 0.15), value: drag?.harness)
+    }
+
+    var body: some View {
+        // Full-width Liquid Glass bottom dock. Distributes evenly up to 5 slots and scrolls
+        // horizontally automatically as more harnesses are added.
+        Group {
+            if needsHorizontalScroll {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    chipsRow
+                        .padding(.horizontal, Self.stripPadding)
+                        .padding(.vertical, 5)
+                }
+            } else {
+                chipsRow
+                    .padding(.horizontal, Self.stripPadding)
+                    .padding(.vertical, 5)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+        .coordinateSpace(name: Self.stripSpace)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         .onChange(of: drag) { _, state in
             ignoreTapsUntil = Date().addingTimeInterval(0.5)
             guard let state else { return }
@@ -862,15 +1061,6 @@ private struct HarnessSwitcherStrip: View {
         .onChange(of: drag?.harness) { old, new in
             if old == nil, new != nil { triggerSelectionHaptic() }
         }
-        .padding(6)
-        .background(SHColor.surfaceSubtle)
-        .overlay(
-            RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous)
-                .stroke(SHColor.lineHairline, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous))
-        .coordinateSpace(name: Self.stripSpace)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         .confirmationDialog(
             shortcutsHarness?.title ?? "",
             isPresented: Binding(get: { shortcutsHarness != nil }, set: { if !$0 { shortcutsHarness = nil } }),
@@ -882,7 +1072,6 @@ private struct HarnessSwitcherStrip: View {
         } message: { _ in
             Text("Hold and drag a gauge to reorder the harnesses.")
         }
-        .padding(.vertical, 2)
     }
 
     /// Hold for a moment, then drag. Holding still for longer opens the gauge's menu as before;
@@ -986,11 +1175,14 @@ private struct HarnessSwitcherStrip: View {
 
     private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {
         content()
-            .frame(maxWidth: .infinity)
+            .frame(
+                minWidth: needsHorizontalScroll ? Self.scrollableCellWidth : nil,
+                maxWidth: needsHorizontalScroll ? Self.scrollableCellWidth : .infinity
+            )
             .frame(height: 44)
-            .background(isSelected ? Color.white.opacity(0.11) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+            .background(isSelected ? Color.white.opacity(0.14) : Color.clear)
+            .clipShape(Capsule())
+            .contentShape(Capsule())
     }
 
     private func gaugeAccessibilityValue(percent: Double?, working: Bool) -> String {
@@ -1262,9 +1454,9 @@ private struct ManageFoldersSheet: View {
     }
 }
 
-// MARK: - Search Field Glass
+// MARK: - Liquid Glass Surface
 
-private struct SearchGlassModifier<S: Shape>: ViewModifier {
+private struct SHGlassSurfaceModifier<S: Shape>: ViewModifier {
     let shape: S
 
     func body(content: Content) -> some View {

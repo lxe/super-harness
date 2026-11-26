@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Plus } from 'lucide-react';
 import { cn } from './cn';
 
 export interface SectionHeaderProps {
@@ -8,6 +8,9 @@ export interface SectionHeaderProps {
   variant?: 'tree' | 'separator';
   collapsed?: boolean;
   onToggle: () => void;
+  /** Optional quick-add action button rendered on the right (used on harness separators to start a new chat). */
+  onAdd?: () => void;
+  addLabel?: string;
   icon?: React.ReactNode;
   label: string;
   count?: number;
@@ -21,6 +24,8 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   variant = 'tree',
   collapsed = false,
   onToggle,
+  onAdd,
+  addLabel,
   icon,
   label,
   count,
@@ -30,31 +35,49 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 }) => {
   if (variant === 'separator') {
     return (
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={!collapsed}
+      <div
         className={cn(
-          'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-8 flex items-center gap-2 bg-surface-rail/95 backdrop-blur-md border-y border-line-hairline/75 hover:bg-white/[0.035] transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+          'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-8 flex items-center gap-1 bg-surface-rail/95 backdrop-blur-md border-y border-line-hairline/75 hover:bg-white/[0.035] transition-colors select-none',
           sticky && 'sticky top-0 z-20',
           className
         )}
       >
-        {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-        <span className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-secondary group-hover:text-ink-primary transition-colors truncate">
-          {label}
-        </span>
-        <span className="flex-1 h-px bg-line-hairline/70 mx-1" aria-hidden="true" />
-        <span className="flex items-center gap-1.5 text-micro tabular-nums font-normal text-ink-faint shrink-0">
-          {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
-          {count !== undefined && <span>{count}</span>}
-          {collapsed ? (
-            <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
-          ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
-          )}
-        </span>
-      </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          className="flex-1 min-w-0 h-full flex items-center gap-2 cursor-pointer focus:outline-none focus-visible:shadow-none"
+        >
+          {icon && <span className="shrink-0 inline-flex">{icon}</span>}
+          <span className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-secondary group-hover:text-ink-primary transition-colors truncate">
+            {label}
+          </span>
+          <span className="flex-1 h-px bg-line-hairline/70 mx-1" aria-hidden="true" />
+          <span className="flex items-center gap-1.5 text-micro tabular-nums font-normal text-ink-faint shrink-0">
+            {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
+            {count !== undefined && <span>{count}</span>}
+            {collapsed ? (
+              <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
+            )}
+          </span>
+        </button>
+        {onAdd && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd();
+            }}
+            title={addLabel || `New ${label} conversation`}
+            aria-label={addLabel || `New ${label} conversation`}
+            className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.1] transition-colors shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
     );
   }
 

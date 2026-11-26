@@ -856,6 +856,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     variant={isHarnessDivider ? 'separator' : 'tree'}
                     collapsed={isTopClosed}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
+                    onAdd={grp.harnessLogo ? () => onNewSession(grp.harnessLogo!) : undefined}
+                    addLabel={grp.harnessLogo ? `New ${grp.label} conversation` : undefined}
                     icon={topIcon}
                     label={grp.label}
                     count={totalInGroup}

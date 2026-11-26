@@ -1150,6 +1150,7 @@ export function createAntigravityDriver(): HarnessDriver {
       const runId = crypto.randomBytes(6).toString('hex');
       const originApp =
         session.originApp === 'antigravity-cli' ? 'antigravity-cli' : 'antigravity-app';
+
       try {
         await acpPool.sendPrompt(
           originApp,
@@ -1191,18 +1192,21 @@ export function createAntigravityDriver(): HarnessDriver {
       try {
         const nativeId = await acpPool.createSession('antigravity-app', cwd, req.model);
         const shId = `antigravity:${nativeId}`;
-        if (req.prompt?.trim()) {
+        const promptText = req.prompt?.trim() || '';
+        const hasAttachments = Boolean(req.attachments && req.attachments.length > 0);
+        if (promptText || hasAttachments) {
           const runId = crypto.randomBytes(6).toString('hex');
           await acpPool.sendPrompt(
             'antigravity-app',
             shId,
             nativeId,
             cwd,
-            req.prompt.trim(),
-            undefined,
+            promptText,
+            req.attachments,
             runId,
             ctx.emitStream,
-            () => ctx.triggerRefresh()
+            () => ctx.triggerRefresh(),
+            req.model
           );
         }
         ctx.triggerRefresh(800);

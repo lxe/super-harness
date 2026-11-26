@@ -186,6 +186,14 @@ export class LiveSyncService {
     this.paneWatches.set(paneId, pw);
   }
 
+  /** Native push activity for a session (e.g. Codex daemon notifications). */
+  notifyExternalActivity(sessionId: string): void {
+    this.scheduleGlobalRefresh();
+    for (const pw of this.paneWatches.values()) {
+      if (pw.sessionId === sessionId) this.schedulePanePush(pw, 150);
+    }
+  }
+
   unwatchPane(paneId: string): void {
     const existing = this.paneWatches.get(paneId);
     if (!existing) return;

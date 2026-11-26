@@ -36,7 +36,7 @@ public struct NewSessionSheet: View {
     }
 
     private var reasoningLevels: [String] {
-        currentModel?.reasoningLevels ?? ["low", "medium", "high"]
+        ReasoningEffortPolicy.offered(currentModel?.reasoningLevels ?? ["low", "medium", "high"], allowExtreme: store.allowExtremeReasoning)
     }
 
     public var body: some View {
@@ -238,11 +238,9 @@ public struct NewSessionSheet: View {
         let preferred = currentModel?.defaultReasoningLevel
             ?? store.catalog?.defaultReasoning(for: selectedHarness.harnessGroup)
             ?? "high"
-        if levels.contains(preferred) {
-            selectedReasoning = preferred
-        } else {
-            selectedReasoning = levels.last ?? "medium"
-        }
+        selectedReasoning = ReasoningEffortPolicy.defaultLevel(
+            from: levels, preferred: preferred, allowExtreme: store.allowExtremeReasoning
+        ) ?? "medium"
     }
 
     private func createSession() async {

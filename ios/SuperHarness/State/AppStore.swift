@@ -141,6 +141,7 @@ public final class AppStore {
         static let dictationURL = "sh.dictationURL"
         static let dictationTokenAccount = "yapyap-dictation-token"
         static let pushEnabled = "sh.pushEnabled"
+        static let allowExtremeReasoning = "sh.allowExtremeReasoning"
         static let pushRelayURL = "sh.pushRelayURL"
     }
 
@@ -169,6 +170,10 @@ public final class AppStore {
     public var dictationStatus: DictationStatusResponse?
     public var isCheckingDictation: Bool = false
     public var pushNotificationsEnabled: Bool = true
+    /// Off by default: "max" and "ultra" thinking effort are offered only after the person enables them.
+    public var allowExtremeReasoning: Bool = false {
+        didSet { defaults.set(allowExtremeReasoning, forKey: StorageKey.allowExtremeReasoning) }
+    }
     public var pushRelayURL: String = PushNotificationCoordinator.defaultRelayURL
 
     // MARK: - Domain State
@@ -321,6 +326,7 @@ public final class AppStore {
         if defaults.object(forKey: StorageKey.pushEnabled) != nil {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
+        self.allowExtremeReasoning = defaults.bool(forKey: StorageKey.allowExtremeReasoning)
         let savedRelay = defaults.string(forKey: StorageKey.pushRelayURL)
         if savedRelay == "https://super-harness-push.lxe.workers.dev" || savedRelay?.isEmpty == true {
             self.pushRelayURL = PushNotificationCoordinator.defaultRelayURL

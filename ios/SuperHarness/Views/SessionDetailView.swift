@@ -48,7 +48,11 @@ public struct SessionDetailView: View {
             }
             return availableModels.first(where: { $0.id == currentId || $0.label == currentId })
         }()
-        let availableReasoningLevels = currentSession.isMaster ? [] : (currentModelOption?.reasoningLevels ?? [])
+        let availableReasoningLevels = currentSession.isMaster ? [] : ReasoningEffortPolicy.offered(
+            currentModelOption?.reasoningLevels ?? [],
+            allowExtreme: store.allowExtremeReasoning,
+            keeping: currentSession.reasoningEffort
+        )
         let harnessKind = currentSession.harness
 
         // Strict invariant: never show harness-internal transient steering handoffs (source == "native")
@@ -291,10 +295,16 @@ public struct SessionDetailView: View {
                 onSelectModel: { modelOption in
                     let nextEffort: String?
                     if let levels = modelOption.reasoningLevels, !levels.isEmpty {
+                        // Keep the current effort when the new model has it; otherwise use the
+                        // model's default, never "max"/"ultra" unless those are enabled in Settings.
                         if let existing = currentSession.reasoningEffort, levels.contains(existing) {
                             nextEffort = existing
                         } else {
-                            nextEffort = levels.last
+                            nextEffort = ReasoningEffortPolicy.defaultLevel(
+                                from: levels,
+                                preferred: modelOption.defaultReasoningLevel,
+                                allowExtreme: store.allowExtremeReasoning
+                            )
                         }
                     } else {
                         nextEffort = nil

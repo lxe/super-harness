@@ -70,7 +70,7 @@ public struct DraftChatView: View {
     }
 
     private var reasoningLevels: [String] {
-        currentModel?.reasoningLevels ?? []
+        ReasoningEffortPolicy.offered(currentModel?.reasoningLevels ?? [], allowExtreme: store.allowExtremeReasoning)
     }
 
     private var projectDisplayName: String {
@@ -379,59 +379,27 @@ public struct DraftChatView: View {
     @ViewBuilder
     private var modelEffortPill: some View {
         if !availableModels.isEmpty {
-            Menu {
-                Section("Model") {
-                    ForEach(availableModels) { model in
-                        Button {
-                            store.newThreadConfig.modelId = model.id
-                            syncReasoningForCurrentModel()
-                        } label: {
-                            if currentModel?.id == model.id {
-                                Label(model.label, systemImage: "checkmark")
-                            } else {
-                                Text(model.label)
-                            }
-                        }
-                    }
+            SHModelEffortMenu(
+                models: availableModels.map { model in
+                    SHModelEffortMenu.ModelItem(id: model.id, label: model.label, isSelected: currentModel?.id == model.id)
+                },
+                efforts: reasoningLevels.map { level in
+                    SHModelEffortMenu.EffortItem(level: level, isSelected: selectedReasoning == level)
+                },
+                harness: selectedHarness.kind,
+                title: currentModel?.label ?? selectedHarness.label,
+                effortLabel: reasoningLevels.isEmpty ? nil : selectedReasoning.capitalized,
+                accessibilityText: "Select model and effort",
+                identifier: "draft.model",
+                onSelectModel: { modelId in
+                    store.newThreadConfig.modelId = modelId
+                    syncReasoningForCurrentModel()
+                },
+                onSelectEffort: { level in
+                    store.newThreadConfig.reasoning = level
                 }
-                if !reasoningLevels.isEmpty {
-                    Section("Thinking Effort") {
-                        ForEach(reasoningLevels, id: \.self) { level in
-                            Button {
-                                store.newThreadConfig.reasoning = level
-                            } label: {
-                                if selectedReasoning == level {
-                                    Label(level.capitalized, systemImage: "checkmark")
-                                } else {
-                                    Text(level.capitalized)
-                                }
-                            }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 5) {
-                    HarnessLogoView(harness: selectedHarness.kind, size: 12.5)
-                    Text(currentModel?.label ?? selectedHarness.label)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .lineLimit(1)
-                    if !selectedReasoning.isEmpty, !reasoningLevels.isEmpty {
-                        Text(selectedReasoning.capitalized)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(SHColor.inkMuted)
-                            .lineLimit(1)
-                    }
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(SHColor.inkFaint)
-                }
-                .padding(.horizontal, 11)
-                .frame(height: 32)
-                .background(SHColor.surfaceBubble, in: Capsule())
-            }
-            .accessibilityLabel("Select model and effort")
-            .accessibilityIdentifier("draft.model")
+            )
+            .equatable()
         } else {
             HStack(spacing: 5) {
                 HarnessLogoView(harness: selectedHarness.kind, size: 12.5)
@@ -587,7 +555,9 @@ public struct DraftChatView: View {
         let preferred = currentModel?.defaultReasoningLevel
             ?? store.catalog?.defaultReasoning(for: selectedHarness.harnessGroup)
             ?? "high"
-        store.newThreadConfig.reasoning = levels.contains(preferred) ? preferred : (levels.last ?? "")
+        store.newThreadConfig.reasoning = ReasoningEffortPolicy.defaultLevel(
+            from: levels, preferred: preferred, allowExtreme: store.allowExtremeReasoning
+        ) ?? ""
     }
 
     private func handlePickedPhotos(_ items: [PhotosPickerItem]) {

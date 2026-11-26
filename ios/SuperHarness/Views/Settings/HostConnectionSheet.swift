@@ -47,6 +47,7 @@ public struct HostConnectionSheet: View {
                 hostSection
                 dictationSection
                 harnessSection
+                reasoningSection
                 notificationSection
 
                 Section("Developer") {
@@ -299,6 +300,20 @@ public struct HostConnectionSheet: View {
         parts.append(h.daemonRunning ? "daemon on" : "daemon off")
         if !h.capabilities.canControlDaemon { parts.append("no remote toggle") }
         return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Thinking Effort
+
+    private var reasoningSection: some View {
+        Section {
+            Toggle(isOn: $store.allowExtremeReasoning) {
+                rowLabel("Max and Ultra Effort", detail: store.allowExtremeReasoning ? "Offered in the effort menu" : "Hidden; nothing starts at Max or Ultra")
+            }
+            .tint(SHColor.accentPrimary)
+            .accessibilityIdentifier("settings.extremeReasoning")
+        } header: {
+            Text("Thinking Effort")
+        }
     }
 
     // MARK: - Notifications

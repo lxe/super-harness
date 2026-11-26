@@ -309,60 +309,33 @@ public struct ComposerView: View {
     @ViewBuilder
     private var combinedModelEffortPill: some View {
         if !availableModels.isEmpty, let onSelectModel {
-            Menu {
-                Section("Model") {
-                    let currentStem = session.model.map(Self.baseModelStem)
-                    ForEach(menuModelOptions, id: \.stem) { item in
-                        Button {
-                            onSelectModel(item.representative)
-                        } label: {
-                            let isSelected = (currentStem == item.stem || session.model == item.representative.id || session.model == item.representative.label)
-                            if isSelected {
-                                Label(item.displayLabel, systemImage: "checkmark")
-                            } else {
-                                Text(item.displayLabel)
-                            }
-                        }
+            let currentStem = session.model.map(Self.baseModelStem)
+            let activeEffort = Self.embeddedEffort(from: session.model) ?? session.reasoningEffort ?? reasoningLevels.last
+            let options = menuModelOptions
+            SHModelEffortMenu(
+                models: options.map { item in
+                    SHModelEffortMenu.ModelItem(
+                        id: item.stem,
+                        label: item.displayLabel,
+                        isSelected: currentStem == item.stem || session.model == item.representative.id || session.model == item.representative.label
+                    )
+                },
+                efforts: onSelectReasoningEffort == nil ? [] : reasoningLevels.map { level in
+                    SHModelEffortMenu.EffortItem(level: level, isSelected: activeEffort?.lowercased() == level.lowercased())
+                },
+                harness: session.harness,
+                title: currentModelLabel,
+                effortLabel: currentEffortLabel,
+                accessibilityText: "Switch model and effort",
+                identifier: "composer.model",
+                onSelectModel: { stem in
+                    if let match = options.first(where: { $0.stem == stem }) {
+                        onSelectModel(match.representative)
                     }
-                }
-                if !reasoningLevels.isEmpty, let onSelectReasoningEffort {
-                    let activeEffort = Self.embeddedEffort(from: session.model) ?? session.reasoningEffort ?? reasoningLevels.last
-                    Section("Thinking Effort") {
-                        ForEach(reasoningLevels, id: \.self) { level in
-                            Button {
-                                onSelectReasoningEffort(level)
-                            } label: {
-                                if activeEffort?.lowercased() == level.lowercased() {
-                                    Label(level.capitalized, systemImage: "checkmark")
-                                } else {
-                                    Text(level.capitalized)
-                                }
-                            }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 5) {
-                    HarnessLogoView(harness: session.harness, size: 12.5)
-                    Text(currentModelLabel)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .lineLimit(1)
-                    if let effort = currentEffortLabel {
-                        Text(effort)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(SHColor.inkMuted)
-                            .lineLimit(1)
-                    }
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(SHColor.inkFaint)
-                }
-                .padding(.horizontal, 11)
-                .frame(height: 32)
-                .background(SHColor.surfaceBubble, in: Capsule())
-            }
-            .accessibilityLabel("Switch model and effort")
+                },
+                onSelectEffort: { level in onSelectReasoningEffort?(level) }
+            )
+            .equatable()
         } else {
             HStack(spacing: 5) {
                 HarnessLogoView(harness: session.harness, size: 12.5)
@@ -1003,5 +976,99 @@ struct SHDotSpinner: View {
                 }
             }
         }
+    }
+}
+
+/// The model and thinking-effort menu shared by the chat composer and the new-thread composer.
+///
+/// It is `Equatable` on its data only and used with `.equatable()`. The screens around it
+/// re-render every time the host pushes an update, and rebuilding an open `Menu` makes iOS
+/// reload it and throw its scroll position back to the anchor, so a long model list could
+/// not be scrolled. With this, the menu is rebuilt only when its own contents change.
+struct SHModelEffortMenu: View, Equatable {
+    struct ModelItem: Equatable, Identifiable {
+        let id: String
+        let label: String
+        let isSelected: Bool
+    }
+
+    struct EffortItem: Equatable {
+        let level: String
+        let isSelected: Bool
+    }
+
+    let models: [ModelItem]
+    let efforts: [EffortItem]
+    let harness: HarnessKind
+    let title: String
+    let effortLabel: String?
+    let accessibilityText: String
+    let identifier: String
+    let onSelectModel: (String) -> Void
+    let onSelectEffort: (String) -> Void
+
+    nonisolated static func == (lhs: SHModelEffortMenu, rhs: SHModelEffortMenu) -> Bool {
+        lhs.models == rhs.models
+            && lhs.efforts == rhs.efforts
+            && lhs.harness == rhs.harness
+            && lhs.title == rhs.title
+            && lhs.effortLabel == rhs.effortLabel
+            && lhs.accessibilityText == rhs.accessibilityText
+            && lhs.identifier == rhs.identifier
+    }
+
+    var body: some View {
+        Menu {
+            Section("Model") {
+                ForEach(models) { item in
+                    Button {
+                        onSelectModel(item.id)
+                    } label: {
+                        if item.isSelected {
+                            Label(item.label, systemImage: "checkmark")
+                        } else {
+                            Text(item.label)
+                        }
+                    }
+                }
+            }
+            if !efforts.isEmpty {
+                Section("Thinking Effort") {
+                    ForEach(efforts, id: \.level) { item in
+                        Button {
+                            onSelectEffort(item.level)
+                        } label: {
+                            if item.isSelected {
+                                Label(item.level.capitalized, systemImage: "checkmark")
+                            } else {
+                                Text(item.level.capitalized)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                HarnessLogoView(harness: harness, size: 12.5)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .lineLimit(1)
+                if let effortLabel, !effortLabel.isEmpty {
+                    Text(effortLabel)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundStyle(SHColor.inkFaint)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 32)
+            .background(SHColor.surfaceBubble, in: Capsule())
+        }
+        .accessibilityLabel(accessibilityText)
+        .accessibilityIdentifier(identifier)
     }
 }

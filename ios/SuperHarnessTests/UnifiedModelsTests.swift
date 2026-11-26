@@ -300,6 +300,37 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(fourth, third, "the good result is cached")
     }
 
+    func testExtremeReasoningLevelsAreOptIn() {
+        let levels = ["low", "medium", "high", "xhigh", "max", "ultra"]
+        XCTAssertEqual(ReasoningEffortPolicy.offered(levels, allowExtreme: false), ["low", "medium", "high", "xhigh"])
+        XCTAssertEqual(ReasoningEffortPolicy.offered(levels, allowExtreme: true), levels)
+        // A session already at Max still shows Max, so the menu tells the truth.
+        XCTAssertEqual(ReasoningEffortPolicy.offered(levels, allowExtreme: false, keeping: "Max"), ["low", "medium", "high", "xhigh", "max"])
+
+        // A host default of "ultra" does not start a session at ultra unless enabled.
+        XCTAssertEqual(ReasoningEffortPolicy.defaultLevel(from: levels, preferred: "ultra", allowExtreme: false), "xhigh")
+        XCTAssertEqual(ReasoningEffortPolicy.defaultLevel(from: levels, preferred: "ultra", allowExtreme: true), "ultra")
+        XCTAssertEqual(ReasoningEffortPolicy.defaultLevel(from: levels, preferred: "medium", allowExtreme: false), "medium")
+        XCTAssertEqual(ReasoningEffortPolicy.defaultLevel(from: ["low", "medium", "high", "max"], preferred: nil, allowExtreme: false), "high")
+        XCTAssertNil(ReasoningEffortPolicy.defaultLevel(from: [], preferred: "high", allowExtreme: false))
+        XCTAssertTrue(ReasoningEffortPolicy.isExtreme("Ultrathink"))
+        XCTAssertFalse(ReasoningEffortPolicy.isExtreme("xhigh"))
+    }
+
+    func testModelEffortMenuIgnoresClosureChangesWhenItsDataIsTheSame() {
+        func menu(selected: String) -> SHModelEffortMenu {
+            SHModelEffortMenu(
+                models: [.init(id: "a", label: "A", isSelected: selected == "a"), .init(id: "b", label: "B", isSelected: selected == "b")],
+                efforts: [.init(level: "high", isSelected: true)],
+                harness: .codex, title: "A", effortLabel: "High",
+                accessibilityText: "Switch model and effort", identifier: "composer.model",
+                onSelectModel: { _ in }, onSelectEffort: { _ in }
+            )
+        }
+        XCTAssertTrue(menu(selected: "a") == menu(selected: "a"), "a parent re-render with the same data must not rebuild the open menu")
+        XCTAssertFalse(menu(selected: "a") == menu(selected: "b"))
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

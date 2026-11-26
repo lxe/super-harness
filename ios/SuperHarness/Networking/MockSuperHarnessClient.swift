@@ -1392,7 +1392,27 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         return UsageSnapshot(antigravity: agy, codex: codex, claude: claude, muse: muse)
     }
 
+    /// Extra demo models so the model menu is long enough to scroll (UI checks set SH_MOCK_MANY_MODELS).
+    private static func manyModelsIfRequested(_ models: [HarnessModelOption]) -> [HarnessModelOption] {
+        guard ProcessInfo.processInfo.environment["SH_MOCK_MANY_MODELS"] != nil else { return models }
+        let extra = (1...16).map { n in
+            HarnessModelOption(
+                id: "demo-model-\(n)",
+                label: "Demo Model \(n)",
+                reasoningLevels: ["low", "medium", "high", "max", "ultra"],
+                defaultReasoningLevel: "ultra"
+            )
+        }
+        return models + extra
+    }
+
     private static func makeDemoCatalog(now: Double) -> HarnessCatalog {
+        var catalog = makeBaseDemoCatalog(now: now)
+        catalog.models = catalog.models.mapValues(manyModelsIfRequested)
+        return catalog
+    }
+
+    private static func makeBaseDemoCatalog(now: Double) -> HarnessCatalog {
         HarnessCatalog(
             models: [
                 .antigravity: [

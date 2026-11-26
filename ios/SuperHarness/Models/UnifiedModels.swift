@@ -2074,3 +2074,32 @@ public enum SessionLinkResolver {
         return nil
     }
 }
+
+// MARK: - Reasoning Effort Policy
+
+/// Which thinking-effort levels the app offers and which one it picks by default. The most
+/// expensive levels ("max", "ultra") are opt-in: unless the person enables them in Settings
+/// they are neither offered nor chosen as a default, even when the host suggests one.
+public enum ReasoningEffortPolicy {
+    public static func isExtreme(_ level: String) -> Bool {
+        let l = level.lowercased()
+        return l == "max" || l == "maximum" || l.hasPrefix("ultra")
+    }
+
+    /// Levels to show in a picker. `current` stays listed even when it is extreme, so a
+    /// session already running at that level shows its real setting.
+    public static func offered(_ levels: [String], allowExtreme: Bool, keeping current: String? = nil) -> [String] {
+        guard !allowExtreme else { return levels }
+        return levels.filter { !isExtreme($0) || $0.lowercased() == current?.lowercased() }
+    }
+
+    /// The level a new session or a model switch starts with: the preferred level when it is
+    /// allowed, otherwise the highest allowed one.
+    public static func defaultLevel(from levels: [String], preferred: String?, allowExtreme: Bool) -> String? {
+        let allowed = offered(levels, allowExtreme: allowExtreme)
+        if let preferred, let match = allowed.first(where: { $0.lowercased() == preferred.lowercased() }) {
+            return match
+        }
+        return allowed.last ?? levels.first
+    }
+}

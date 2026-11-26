@@ -179,4 +179,36 @@ describe('Persistent Super Harness queue storage', () => {
     expect(paneSrc).toContain('isStreamingGlobal');
     expect(paneSrc).toContain('requestAnimationFrame');
   });
+
+  it('supports immediate force-send ("Send now") on queued messages across all harnesses', () => {
+    const paneSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/components/SessionPane.tsx'),
+      'utf8'
+    );
+    const acpSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/services/agyAcpClient.ts'),
+      'utf8'
+    );
+    const codexClientSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/services/codexAppServerClient.ts'),
+      'utf8'
+    );
+    const codexAdapterSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/adapters/codexAdapter.ts'),
+      'utf8'
+    );
+    const claudeAdapterSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/adapters/claudeAdapter.ts'),
+      'utf8'
+    );
+
+    expect(paneSrc).toContain(
+      'void dispatchMessageNow(item.text, item.attachments ?? [], { force: true });'
+    );
+    expect(paneSrc).toContain('if (!opts?.force && isBusyDispatchError(errText))');
+    expect(acpSrc).toContain('if (!force && isExternalAntigravityTurnActive(transcriptPath))');
+    expect(codexClientSrc).toContain("'turn/steer'");
+    expect(codexAdapterSrc).toContain('appServer.steerTurn(session.nativeId, prompt, attachments)');
+    expect(claudeAdapterSrc).toContain("if (decision.action === 'block' && !opts?.force)");
+  });
 });

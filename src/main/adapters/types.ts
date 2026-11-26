@@ -81,7 +81,8 @@ export interface HarnessDriver {
     session: UnifiedSession,
     prompt: string,
     attachments: ImageAttachment[] | undefined,
-    ctx: DispatchContext
+    ctx: DispatchContext,
+    opts?: { force?: boolean }
   ): Promise<SendMessageResult>;
 
   /**

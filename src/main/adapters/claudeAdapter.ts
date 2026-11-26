@@ -1762,7 +1762,8 @@ export function createClaudeDriver(): HarnessDriver {
       session: UnifiedSession,
       prompt: string,
       attachments: ImageAttachment[] | undefined,
-      ctx: DispatchContext
+      ctx: DispatchContext,
+      opts?: { force?: boolean }
     ): Promise<SendMessageResult> {
       const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
 
@@ -1803,8 +1804,11 @@ export function createClaudeDriver(): HarnessDriver {
       if (decision.action === 'tmux') {
         return sendViaTmux(decision.tmuxTarget);
       }
-      if (decision.action === 'block') {
+      if (decision.action === 'block' && !opts?.force) {
         return { ok: false, error: decision.reason };
+      }
+      if (opts?.force && streamPool.hasActiveTurn(session.id)) {
+        streamPool.abort(session.id, ctx.emitStream);
       }
 
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();

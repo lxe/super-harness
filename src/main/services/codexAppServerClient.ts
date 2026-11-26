@@ -556,6 +556,53 @@ export class CodexAppServerClient {
     }
   }
 
+  async steerTurn(
+    nativeThreadId: string,
+    prompt: string,
+    attachments?: ImageAttachment[]
+  ): Promise<boolean> {
+    try {
+      await this.ensureConnected();
+      let expectedTurnId = this.activeTurns.get(nativeThreadId)?.turnId;
+      if (!expectedTurnId) {
+        // Also support steering turns started externally (e.g. from Codex Desktop)
+        try {
+          const readRes = await this.request(
+            'thread/read',
+            { threadId: nativeThreadId, includeTurns: true },
+            5_000
+          );
+          const thread = readRes.thread as Record<string, unknown> | undefined;
+          const turns = Array.isArray(thread?.turns)
+            ? (thread.turns as Array<Record<string, unknown>>)
+            : [];
+          const active = [...turns]
+            .reverse()
+            .find((t) => String(t.status || '').toLowerCase() === 'inprogress');
+          if (typeof active?.id === 'string' && active.id) {
+            expectedTurnId = active.id;
+          }
+        } catch {
+          // Ignore if thread/read fails
+        }
+      }
+      if (!expectedTurnId) return false;
+      const input = CodexAppServerClient.buildUserInputs(prompt, attachments);
+      await this.request(
+        'turn/steer',
+        {
+          threadId: nativeThreadId,
+          expectedTurnId,
+          input,
+        },
+        10_000
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async interruptTurn(nativeThreadId: string): Promise<boolean> {
     const run = this.activeTurns.get(nativeThreadId);
     if (!run || !run.turnId) return false;

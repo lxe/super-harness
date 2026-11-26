@@ -77,6 +77,7 @@ interface ActivePromptRun {
   nativeSessionId: string;
   runId: string;
   onEvent: (ev: StreamEvent) => void;
+  promptPromise?: Promise<unknown>;
 }
 
 /**
@@ -330,16 +331,21 @@ class AcpConnection {
     runId: string,
     onEvent: (ev: StreamEvent) => void,
     onComplete: () => void,
-    model?: string
+    model?: string,
+    force = false
   ): Promise<void> {
     if (this.activeRuns.has(nativeSessionId)) {
-      throw new Error(
-        'This Antigravity conversation is already running a turn in Super Harness. Wait for it to finish or queue your message.'
-      );
+      if (force) {
+        await this.cancel(nativeSessionId);
+      } else {
+        throw new Error(
+          'This Antigravity conversation is already running a turn in Super Harness. Wait for it to finish or queue your message.'
+        );
+      }
     }
 
     const transcriptPath = this.getTranscriptPath(nativeSessionId);
-    if (isExternalAntigravityTurnActive(transcriptPath)) {
+    if (!force && isExternalAntigravityTurnActive(transcriptPath)) {
       throw new Error(
         'Antigravity Desktop is currently running a turn on this conversation. Wait for it to finish before sending from Super Harness so the conversation does not fork.'
       );
@@ -419,16 +425,17 @@ class AcpConnection {
       promptBlocks.push({ type: 'text', text: 'Inspect the attached image(s).' });
     }
 
-    this.activeRuns.set(nativeSessionId, {
+    const activeRun: ActivePromptRun = {
       shSessionId,
       nativeSessionId,
       runId,
       onEvent,
-    });
+    };
+    this.activeRuns.set(nativeSessionId, activeRun);
     onEvent({ sessionId: shSessionId, runId, kind: 'start' });
 
     // Run turn asynchronously so IPC `sendMessage` returns immediately while updates stream live
-    void this.request('session/prompt', {
+    const promptPromise = this.request('session/prompt', {
       sessionId: nativeSessionId,
       prompt: promptBlocks,
     })
@@ -451,16 +458,25 @@ class AcpConnection {
           onComplete();
         }
       });
+    activeRun.promptPromise = promptPromise;
   }
 
   async cancel(nativeSessionId: string): Promise<boolean> {
-    if (!this.activeRuns.has(nativeSessionId)) return false;
+    const run = this.activeRuns.get(nativeSessionId);
+    if (!run) return false;
     this.activeRuns.delete(nativeSessionId);
     try {
       this.sendJson({
         method: 'session/cancel',
         params: { sessionId: nativeSessionId },
       });
+      run.onEvent({ sessionId: run.shSessionId, runId: run.runId, kind: 'done' });
+      if (run.promptPromise) {
+        await Promise.race([
+          run.promptPromise.catch(() => {}),
+          new Promise<void>((r) => setTimeout(r, 800)),
+        ]);
+      }
       return true;
     } catch {
       return false;
@@ -510,7 +526,8 @@ export class AgyAcpPool {
     runId: string,
     onEvent: (ev: StreamEvent) => void,
     onComplete: () => void,
-    model?: string
+    model?: string,
+    force = false
   ): Promise<void> {
     const dir: AppDataDirName = originApp === 'antigravity-cli' ? 'antigravity-cli' : 'antigravity';
     await this.getConn(dir).sendPrompt(
@@ -522,7 +539,8 @@ export class AgyAcpPool {
       runId,
       onEvent,
       onComplete,
-      model
+      model,
+      force
     );
   }
 

@@ -1386,7 +1386,8 @@ export function createCodexDriver(): HarnessDriver {
       session: UnifiedSession,
       prompt: string,
       attachments: ImageAttachment[] | undefined,
-      ctx: DispatchContext
+      ctx: DispatchContext,
+      opts?: { force?: boolean }
     ): Promise<SendMessageResult> {
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
@@ -1396,8 +1397,22 @@ export function createCodexDriver(): HarnessDriver {
 
       // Primary path: speak directly to Codex's shared `app-server` daemon WebSocket
       // (the exact same upstream JSON-RPC API Codex Desktop uses), giving native
-      // `localImage` attachments, real-time bidirectional streaming, and `turn/interrupt`.
+      // `localImage` attachments, real-time bidirectional streaming, `turn/steer`, and `turn/interrupt`.
       if (appServer.isSocketAvailable()) {
+        if (opts?.force) {
+          const steered = await appServer.steerTurn(session.nativeId, prompt, attachments);
+          if (steered) {
+            ctx.triggerRefresh(300);
+            return {
+              ok: true,
+              runId,
+              dispatchedVia: 'Codex live steer',
+            };
+          }
+          if (appServer.hasActiveTurn(session.nativeId)) {
+            await appServer.interruptTurn(session.nativeId);
+          }
+        }
         try {
           await appServer.sendTurn({
             shSessionId: session.id,

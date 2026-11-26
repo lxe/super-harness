@@ -29,8 +29,9 @@ const api: SuperHarnessApi = {
   sendMessage: (
     sessionId: string,
     prompt: string,
-    attachments?: import('../shared/types').ImageAttachment[]
-  ) => ipcRenderer.invoke('sh:send', sessionId, prompt, attachments),
+    attachments?: import('../shared/types').ImageAttachment[],
+    opts?: { force?: boolean }
+  ) => ipcRenderer.invoke('sh:send', sessionId, prompt, attachments, opts),
   queueMessage: (
     sessionId: string,
     prompt: string,

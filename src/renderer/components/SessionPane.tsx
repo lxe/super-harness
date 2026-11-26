@@ -612,7 +612,11 @@ export const SessionPane: React.FC<Props> = ({
     (effectiveStreaming || Boolean(liveActivity?.isWorking) || session?.status === 'running');
 
   const dispatchMessageNow = useCallback(
-    async (prompt: string, msgAttachments: ImageAttachment[]) => {
+    async (
+      prompt: string,
+      msgAttachments: ImageAttachment[],
+      opts?: { force?: boolean }
+    ) => {
       if (!session) return;
       if (!prompt && msgAttachments.length === 0) return;
 
@@ -654,13 +658,14 @@ export const SessionPane: React.FC<Props> = ({
         const res = await window.superHarness.sendMessage(
           session.id,
           prompt,
-          msgAttachments.length > 0 ? msgAttachments : undefined
+          msgAttachments.length > 0 ? msgAttachments : undefined,
+          opts
         );
         if (!res.ok) {
           const errText = res.error || 'Dispatch failed';
           // Never fail a user's prompt with a red "Not delivered" banner when the harness
-          // is mid-turn — drop the optimistic bubble and queue it seamlessly so it drains next!
-          if (isBusyDispatchError(errText)) {
+          // is mid-turn (unless the user explicitly forced Send Now and it genuinely errored)
+          if (!opts?.force && isBusyDispatchError(errText)) {
             if (pendingOptimisticRef.current?.msg.id === optimisticId) {
               pendingOptimisticRef.current = null;
             }
@@ -805,7 +810,7 @@ export const SessionPane: React.FC<Props> = ({
       const item = queuedMessages.find((q) => q.id === id);
       if (!item) return;
       onQueueChange(session.id, (prev) => prev.filter((q) => q.id !== id));
-      void dispatchMessageNow(item.text, item.attachments ?? []);
+      void dispatchMessageNow(item.text, item.attachments ?? [], { force: true });
     },
     [session, queuedMessages, onQueueChange, dispatchMessageNow]
   );

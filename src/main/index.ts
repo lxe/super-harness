@@ -360,11 +360,17 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'sh:send',
-    async (_ev, sessionId: string, prompt: string, attachments?: ImageAttachment[]) => {
+    async (
+      _ev,
+      sessionId: string,
+      prompt: string,
+      attachments?: ImageAttachment[],
+      opts?: { force?: boolean }
+    ) => {
       if (sessionId === 'master:root') {
         return masterEngine.handlePrompt(prompt, attachments);
       }
-      return dispatcher.sendToSession(sessionId, prompt, attachments);
+      return dispatcher.sendToSession(sessionId, prompt, attachments, opts);
     }
   );
 

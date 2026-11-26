@@ -1127,7 +1127,8 @@ export function createAntigravityDriver(): HarnessDriver {
       session: UnifiedSession,
       prompt: string,
       attachments: ImageAttachment[] | undefined,
-      ctx: DispatchContext
+      ctx: DispatchContext,
+      opts?: { force?: boolean }
     ): Promise<SendMessageResult> {
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
@@ -1147,7 +1148,8 @@ export function createAntigravityDriver(): HarnessDriver {
             ctx.triggerRefresh(500);
             ctx.triggerRefresh(2000);
           },
-          session.model
+          session.model,
+          Boolean(opts?.force)
         );
         return {
           ok: true,

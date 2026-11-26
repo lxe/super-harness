@@ -85,7 +85,8 @@ export class HarnessDispatcher {
   async sendToSession(
     sessionId: string,
     prompt: string,
-    attachments?: ImageAttachment[]
+    attachments?: ImageAttachment[],
+    opts?: { force?: boolean }
   ): Promise<SendMessageResult> {
     let session = this.registry.getSession(sessionId);
     if (!session) {
@@ -104,7 +105,7 @@ export class HarnessDispatcher {
       return { ok: false, error: `No driver registered for ${session.harnessGroup}` };
     }
 
-    return driver.sendMessage(session, prompt, attachments, this.createContext());
+    return driver.sendMessage(session, prompt, attachments, this.createContext(), opts);
   }
 
   async queueToSession(

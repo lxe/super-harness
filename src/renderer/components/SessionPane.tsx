@@ -39,12 +39,58 @@ interface FailedUserEntry {
   attachments: ImageAttachment[];
 }
 
+const FAILED_MESSAGES_STORAGE_KEY = 'sh:failedUserMessages';
+
+function loadFailedMessagesCache(): Map<string, FailedUserEntry[]> {
+  const map = new Map<string, FailedUserEntry[]>();
+  try {
+    const raw = localStorage.getItem(FAILED_MESSAGES_STORAGE_KEY);
+    if (!raw) return map;
+    const parsed = JSON.parse(raw) as Record<string, FailedUserEntry[]>;
+    if (parsed && typeof parsed === 'object') {
+      for (const [sid, list] of Object.entries(parsed)) {
+        if (Array.isArray(list) && list.length > 0) map.set(sid, list);
+      }
+    }
+  } catch {
+    // ignore storage read errors
+  }
+  return map;
+}
+
+function saveFailedMessagesCache(map: Map<string, FailedUserEntry[]>): void {
+  try {
+    const obj: Record<string, FailedUserEntry[]> = {};
+    for (const [sid, list] of map.entries()) {
+      if (list.length === 0) continue;
+      // Strip bulky base64 previewDataUrl/dataUrl so localStorage stays lean; files reload via sh-media://path
+      obj[sid] = list.map((e) => ({
+        prompt: e.prompt,
+        attachments: e.attachments.map(({ previewDataUrl: _drop, ...rest }) => rest),
+        msg: {
+          ...e.msg,
+          blocks: e.msg.blocks.map((b) =>
+            b.type === 'image' && b.path ? { type: 'image', path: b.path, name: b.name } : b
+          ),
+        },
+      }));
+    }
+    if (Object.keys(obj).length === 0) {
+      localStorage.removeItem(FAILED_MESSAGES_STORAGE_KEY);
+    } else {
+      localStorage.setItem(FAILED_MESSAGES_STORAGE_KEY, JSON.stringify(obj));
+    }
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 /**
- * Persists failed user messages per session across transcript reloads and
- * session switches so unsent prompts stay visible with a `!` indicator until
- * retried or dismissed.
+ * Persists failed user messages per session across transcript reloads, session
+ * switches, and app restarts so unsent prompts stay visible with a `!` indicator
+ * until retried or dismissed.
  */
-const failedUserMessagesBySession = new Map<string, FailedUserEntry[]>();
+const failedUserMessagesBySession = loadFailedMessagesCache();
 
 export interface ComposerDraft {
   text: string;
@@ -210,6 +256,7 @@ export const SessionPane: React.FC<Props> = ({
       ...existing.filter((e) => e.msg.id !== failedMsg.id),
       { msg: failedMsg, prompt: pending.promptText, attachments: pending.attachments },
     ]);
+    saveFailedMessagesCache(failedUserMessagesBySession);
     pendingOptimisticRef.current = null;
     if (currentSessionRef.current === targetSid) {
       setMessages((prev) => {
@@ -609,6 +656,7 @@ export const SessionPane: React.FC<Props> = ({
         const next = list.filter((e) => e.msg.id !== msgId);
         if (next.length > 0) failedUserMessagesBySession.set(sessionId, next);
         else failedUserMessagesBySession.delete(sessionId);
+        saveFailedMessagesCache(failedUserMessagesBySession);
       }
       setMessages((prev) => prev.filter((m) => m.id !== msgId));
     },

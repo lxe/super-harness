@@ -185,7 +185,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
             onPreviewImage?.([{ src, name: block.name, path: block.path }], 0)
           }
           title={block.name ? `Preview ${block.name}` : 'Preview image'}
-          className="inline-block rounded-xl overflow-hidden border border-line-hairline hover:border-line-strong transition-colors cursor-pointer bg-black/30"
+          className="inline-block rounded-xl overflow-hidden border border-line-subtle hover:border-line-strong hover:brightness-110 transition-all cursor-pointer bg-black/40"
         >
           <img
             src={src}
@@ -193,7 +193,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
             loading="lazy"
             decoding="async"
             onError={() => setImageBroken(true)}
-            className="max-h-64 max-w-full object-contain block"
+            className="h-20 w-auto max-w-[144px] object-cover block"
           />
         </button>
       </div>

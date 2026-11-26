@@ -847,6 +847,8 @@ export function parseClaudeJsonlLines(
   const messages: UnifiedMessage[] = [];
   const uniqueId = createUniqueIdGenerator();
   const toolBlockById = new Map<string, UnifiedBlock>();
+  const toolReadPathById = new Map<string, string>();
+  let lastUserImagePaths = new Set<string>();
   const pendingToolNames = new Map<string, string>();
   const rawNativeQueue: Array<{ item: QueuedMessageItem; isInternal: boolean }> = [];
   let latestSteps: LiveStepItem[] | undefined;
@@ -968,8 +970,12 @@ export function parseClaudeJsonlLines(
         const trimmed = extracted.text.trim();
         if (!trimmed && allImages.length === 0) return;
 
-        // Hide Claude Code's internal local-command-caveat boilerplate
-        if (allImages.length === 0 && trimmed.startsWith('<local-command-caveat>')) {
+        // Hide Claude Code's internal local-command-caveat and image coordinate-scaling meta notes
+        if (
+          allImages.length === 0 &&
+          (trimmed.startsWith('<local-command-caveat>') ||
+            /^\[Image:\s*original\s+\d+x\d+,\s*displayed at\b/i.test(trimmed))
+        ) {
           return;
         }
 
@@ -1026,6 +1032,11 @@ export function parseClaudeJsonlLines(
         }
 
         currentAssistant = null;
+        if (allImages.length > 0) {
+          lastUserImagePaths = new Set(allImages.map((i) => i.path).filter(Boolean));
+        } else if (!isMeta) {
+          lastUserImagePaths = new Set();
+        }
         messages.push({
           id: uniqueId(String(obj.uuid || `cu-${seq++}`)),
           role: 'user',
@@ -1084,7 +1095,10 @@ export function parseClaudeJsonlLines(
               }
             }
             // Surface screenshots / read images returned by tool_result inline in the assistant turn
-            if (toolImages.length > 0 && currentAssistant) {
+            // unless it is a duplicate Read of the exact image path the user just attached.
+            const readTargetPath = toolReadPathById.get(b.tool_use_id);
+            const isDuplicateUserRead = Boolean(readTargetPath && lastUserImagePaths.has(readTargetPath));
+            if (toolImages.length > 0 && currentAssistant && !isDuplicateUserRead) {
               currentAssistant.blocks.push(...toolImages);
             }
           } else if (b.type === 'image') {
@@ -1121,7 +1135,12 @@ export function parseClaudeJsonlLines(
           const name = String(b.name || 'tool');
           const input = (b.input ?? {}) as Record<string, unknown>;
           const toolUseId = typeof b.id === 'string' ? b.id : undefined;
-          if (toolUseId) pendingToolNames.set(toolUseId, name);
+          if (toolUseId) {
+            pendingToolNames.set(toolUseId, name);
+            if (name === 'Read' && typeof input.file_path === 'string') {
+              toolReadPathById.set(toolUseId, input.file_path.trim());
+            }
+          }
 
           if (name === 'TodoWrite' && Array.isArray(input.todos)) {
             latestSteps = (input.todos as Array<Record<string, unknown>>).map((td) => ({

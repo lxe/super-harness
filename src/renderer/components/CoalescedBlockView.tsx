@@ -99,20 +99,20 @@ const CoalescedTerminalGroup: React.FC<{
         ) : undefined
       }
     >
-      <div className="rounded-lg bg-surface-code/85 px-3 py-2 space-y-2.5 max-h-72 overflow-y-auto font-mono text-micro">
+      <div className="rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] px-3.5 py-2.5 space-y-2.5 max-h-72 overflow-y-auto font-mono text-micro">
         {commands.map((cmd, idx) => (
-          <div key={idx} className={idx > 0 ? 'pt-2 border-t border-line-hairline/60 space-y-1' : 'space-y-1'}>
-            <div className="flex items-center gap-2 text-ink-secondary">
-              <span className="text-ink-faint select-none">$</span>
+          <div key={idx} className={idx > 0 ? 'pt-2.5 border-t border-white/[0.05] space-y-1.5' : 'space-y-1.5'}>
+            <div className="flex items-start gap-2 text-ink-secondary leading-relaxed">
+              <span className="text-ink-faint select-none shrink-0">$</span>
               <code className="break-all flex-1">{cmd.command}</code>
               {cmd.exitCode !== undefined && cmd.exitCode !== null && cmd.exitCode !== 0 && (
-                <Badge tone="danger" mono>
+                <Badge tone="danger" mono className="shrink-0 mt-0.5">
                   exit {cmd.exitCode}
                 </Badge>
               )}
             </div>
             {cmd.output?.trim() && (
-              <pre className="text-ink-muted whitespace-pre-wrap break-all pl-3">
+              <pre className="text-ink-muted whitespace-pre-wrap break-all pl-3.5 leading-relaxed">
                 {cmd.output.trim()}
               </pre>
             )}
@@ -523,7 +523,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
           ) : undefined
         }
       >
-        <pre className="rounded-lg bg-surface-code/85 px-3 py-2 max-h-64 overflow-y-auto text-micro text-ink-muted font-mono whitespace-pre-wrap break-all">
+        <pre className="rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] px-3.5 py-2.5 max-h-64 overflow-y-auto text-micro text-ink-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
           {block.output?.trim() || '(no output)'}
         </pre>
       </CollapsibleCard>
@@ -552,7 +552,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
               {ch.path}
             </button>
             {ch.diff && (
-              <pre className="text-micro font-mono bg-surface-code/85 p-2.5 rounded-lg overflow-x-auto leading-relaxed">
+              <pre className="text-micro font-mono rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] p-3 overflow-x-auto leading-relaxed">
                 {ch.diff.split('\n').map((line, i) => {
                   const cls = line.startsWith('+')
                     ? 'text-emerald-300/90 block'
@@ -587,7 +587,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
         bodyClassName="space-y-2 max-h-64 overflow-y-auto"
       >
         {(block.args || block.output) && (
-          <div className="rounded-lg bg-surface-code/85 px-3 py-2 space-y-2">
+          <div className="rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] px-3.5 py-2.5 space-y-2">
             {block.args && (
               <pre className="text-micro font-mono text-ink-muted whitespace-pre-wrap break-all">
                 {block.args}

@@ -62,16 +62,25 @@ export class HarnessRegistry {
     const { maxSessionsPerHarness, showArchived, enabledHarnesses, showHidden } = state.settings;
     const processes = await listProcesses();
 
-    const results = await Promise.all(
-      this.drivers.map((driver) =>
-        enabledHarnesses[driver.id]
-          ? driver.detect(processes, maxSessionsPerHarness, showArchived)
-          : Promise.resolve({
-              detection: createDisabledDetection(driver.id, driver.displayName),
-              sessions: [] as UnifiedSession[],
-            })
-      )
-    );
+    // Detectors are mostly synchronous file/SQLite work. Starting each on its own
+    // event-loop turn (their async parts still overlap) lets the Electron main thread,
+    // which is also the browser UI thread, handle input and frames in between instead
+    // of blocking for the whole sweep at once.
+    const pending: Array<ReturnType<HarnessDriver['detect']>> = [];
+    for (const driver of this.drivers) {
+      if (!enabledHarnesses[driver.id]) {
+        pending.push(
+          Promise.resolve({
+            detection: createDisabledDetection(driver.id, driver.displayName),
+            sessions: [] as UnifiedSession[],
+          })
+        );
+        continue;
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      pending.push(driver.detect(processes, maxSessionsPerHarness, showArchived));
+    }
+    const results = await Promise.all(pending);
 
     const harnesses = results.map((r) => r.detection);
     const mergedRaw = results.flatMap((r) => r.sessions);

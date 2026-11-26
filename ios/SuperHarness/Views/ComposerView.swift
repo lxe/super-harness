@@ -38,6 +38,8 @@ public struct ComposerView: View {
     public let onSelectModel: ((HarnessModelOption) -> Void)?
     public let onSelectReasoningEffort: ((String) -> Void)?
     public let onTranscribeAudio: ((Data) async throws -> String)?
+    /// Runs when recording starts, so the host connection can be opened while the user speaks.
+    public let onDictationStart: (@MainActor () async -> Void)?
     public let onSend: (SendMode) -> Void
     public let onAbort: () -> Void
 
@@ -63,6 +65,7 @@ public struct ComposerView: View {
         onSelectModel: ((HarnessModelOption) -> Void)? = nil,
         onSelectReasoningEffort: ((String) -> Void)? = nil,
         onTranscribeAudio: ((Data) async throws -> String)? = nil,
+        onDictationStart: (@MainActor () async -> Void)? = nil,
         onSend: @escaping (SendMode) -> Void,
         onAbort: @escaping () -> Void
     ) {
@@ -82,6 +85,7 @@ public struct ComposerView: View {
         self.onSelectModel = onSelectModel
         self.onSelectReasoningEffort = onSelectReasoningEffort
         self.onTranscribeAudio = onTranscribeAudio
+        self.onDictationStart = onDictationStart
         self.onSend = onSend
         self.onAbort = onAbort
     }
@@ -419,7 +423,7 @@ public struct ComposerView: View {
 
     private func handleDictationTap() async {
         guard let transcribe = onTranscribeAudio else { return }
-        if let spoken = await dictation.toggleRecording(transcribe: transcribe), !spoken.isEmpty {
+        if let spoken = await dictation.toggleRecording(prewarm: onDictationStart, transcribe: transcribe), !spoken.isEmpty {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
                 text = spoken

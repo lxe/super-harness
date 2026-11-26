@@ -13,22 +13,21 @@ public enum DraftProjectFilter {
     }
 }
 
-/// Clean inline Draft Chat view pushed directly onto the main navigation stack
-/// (or shown in iPad's detail column) — no modal form sheet.
+/// New Chat page pushed onto the main navigation stack (or shown in iPad's detail column).
+///
+/// The page itself is the setup surface: pick the harness (and project) from the cards, then the
+/// composer at the bottom carries one combined model + thinking-effort pill, like `ComposerView`.
+/// Text, attachments and the chosen setup live in `AppStore`, so leaving the page (back button or
+/// swipe) never discards them; they are cleared only after the session has been started.
 public struct DraftChatView: View {
     @Bindable var store: AppStore
     public let initialHarness: StartHarnessKind
     public let onSessionCreated: (String) -> Void
 
-    @State private var selectedHarness: StartHarnessKind
-    @State private var selectedProjectPath: String
-    @State private var selectedModelId: String = ""
-    @State private var selectedReasoning: String = ""
-    @State private var remoteControl: Bool = false
-    @State private var promptText: String = ""
-    @State private var attachments: [ImageAttachment] = []
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var isPhotoPickerPresented: Bool = false
     @State private var isStarting: Bool = false
+    @State private var didApplyInitialHarness: Bool = false
     @State private var dictation = DictationController()
     @FocusState private var isInputFocused: Bool
 
@@ -40,10 +39,22 @@ public struct DraftChatView: View {
         self.store = store
         self.initialHarness = initialHarness
         self.onSessionCreated = onSessionCreated
-        _selectedHarness = State(initialValue: initialHarness)
-        let scoped = DraftProjectFilter.projects(for: initialHarness.harnessGroup, in: store.catalog)
-        let defaultPath = scoped.first?.path ?? store.settings.defaultNewSessionCwd
-        _selectedProjectPath = State(initialValue: defaultPath)
+    }
+
+    // MARK: - Draft state (owned by the store so it survives navigation)
+
+    private var draftKey: String { AppStore.newThreadDraftKey }
+    private var selectedHarness: StartHarnessKind { store.newThreadConfig.harness }
+    private var selectedModelId: String { store.newThreadConfig.modelId }
+    private var selectedReasoning: String { store.newThreadConfig.reasoning }
+    private var selectedProjectPath: String { store.newThreadConfig.projectPath }
+    private var attachments: [ImageAttachment] { store.draftAttachments[draftKey] ?? [] }
+
+    private var promptText: Binding<String> {
+        Binding(
+            get: { store.draftInputs[draftKey] ?? "" },
+            set: { store.draftInputs[draftKey] = $0 }
+        )
     }
 
     private var availableProjects: [HarnessProjectOption] {
@@ -72,79 +83,55 @@ public struct DraftChatView: View {
     }
 
     private var hasContent: Bool {
-        !promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        !promptText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     public var body: some View {
-        ZStack {
-            SHColor.surfaceCanvas.ignoresSafeArea()
-
-            // Calm, spacious empty chat canvas
+        ScrollView {
             VStack(spacing: SHSpacing.md) {
-                HarnessLogoView(harness: selectedHarness.kind, size: 38)
-
-                VStack(spacing: 4) {
-                    Text(selectedHarness.label)
-                        .font(SHTypography.title)
-                        .foregroundStyle(SHColor.inkPrimary)
-
-                    HStack(spacing: 6) {
-                        Text(projectDisplayName)
-                        if let model = currentModel {
-                            Text("·")
-                                .foregroundStyle(SHColor.inkFaint)
-                            Text(model.label)
-                        }
-                        if !selectedReasoning.isEmpty && !reasoningLevels.isEmpty {
-                            Text("·")
-                                .foregroundStyle(SHColor.inkFaint)
-                            Text(selectedReasoning.capitalized)
-                        }
-                    }
-                    .font(SHTypography.caption)
-                    .foregroundStyle(SHColor.inkMuted)
-                    .lineLimit(1)
-                }
+                harnessCard
+                optionsCard
             }
-            .padding(.horizontal, SHSpacing.xl)
-            .padding(.bottom, 72)
+            .padding(.horizontal, SHSpacing.lg)
+            .padding(.vertical, SHSpacing.md)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            isInputFocused = false
-        }
+        .defaultScrollAnchor(.bottom)
+        .scrollDismissesKeyboard(.interactively)
+        .background(SHColor.surfaceCanvas.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: SHSpacing.sm) {
-                configPillsStrip
-                composerDock
-            }
-            .padding(.horizontal, SHSpacing.md)
-            .padding(.bottom, SHSpacing.sm)
-            .padding(.top, SHSpacing.xs)
-            .background(
-                LinearGradient(
-                    colors: [SHColor.surfaceCanvas.opacity(0.0), SHColor.surfaceCanvas.opacity(0.96), SHColor.surfaceCanvas],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            composerDock
+                .padding(.horizontal, SHSpacing.md)
+                .padding(.bottom, SHSpacing.sm)
+                .padding(.top, SHSpacing.xs)
         }
         .navigationTitle("New Chat")
         .navigationBarTitleDisplayMode(.inline)
+        .photosPicker(
+            isPresented: $isPhotoPickerPresented,
+            selection: $selectedPhotoItems,
+            maxSelectionCount: 4,
+            matching: .images
+        )
+        .onChange(of: selectedPhotoItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            let items = newItems
+            selectedPhotoItems = []
+            handlePickedPhotos(items)
+        }
         .onAppear {
-            syncProjectForCurrentHarness()
-            syncModelAndEffort()
+            // The route's harness applies once per visit; after that the user's pick on this page wins.
+            if !didApplyInitialHarness {
+                didApplyInitialHarness = true
+                selectHarness(initialHarness)
+            }
+            syncSetupForCurrentHarness()
         }
         .onChange(of: initialHarness) { _, next in
-            selectedHarness = next
-            syncProjectForCurrentHarness()
-            syncModelAndEffort()
+            selectHarness(next)
         }
-        .onChange(of: selectedHarness) { _, _ in
-            syncProjectForCurrentHarness()
-            syncModelAndEffort()
+        .onChange(of: store.catalog) { _, _ in
+            syncSetupForCurrentHarness()
         }
-        .onChange(of: selectedModelId) { _, _ in syncReasoningForCurrentModel() }
         .onDisappear {
             if dictation.state == .recording {
                 dictation.cancel()
@@ -152,70 +139,266 @@ public struct DraftChatView: View {
         }
     }
 
-    // MARK: - Compact Borderless Picker Strip Above Composer
+    // MARK: - Harness Picker (on the page)
 
-    private var configPillsStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // 1. Engine / Harness Menu
-                Menu {
-                    ForEach(StartHarnessKind.allCases) { kind in
+    private var harnessCard: some View {
+        VStack(alignment: .leading, spacing: SHSpacing.sm) {
+            sectionTitle("Harness")
+            VStack(spacing: 0) {
+                ForEach(Array(StartHarnessKind.allCases.enumerated()), id: \.element) { index, kind in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(SHColor.lineHairline)
+                            .frame(height: 1)
+                            .padding(.leading, 56)
+                    }
+                    harnessRow(kind)
+                }
+            }
+            .background(SHColor.surfaceSubtle)
+            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+        }
+    }
+
+    private func harnessRow(_ kind: StartHarnessKind) -> some View {
+        let isSelected = selectedHarness == kind
+        let brand = SHColor.harness(kind.harnessGroup)
+        return Button {
+            #if canImport(UIKit)
+            UISelectionFeedbackGenerator().selectionChanged()
+            #endif
+            withAnimation(.easeInOut(duration: 0.16)) {
+                selectHarness(kind)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                HarnessLogoView(harness: kind.kind, size: 18)
+                    .frame(width: 32, height: 32)
+                    .background(brand.opacity(isSelected ? 0.18 : 0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                Text(kind.label)
+                    .font(SHTypography.label.weight(isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(brand)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 50)
+            .background(isSelected ? brand.opacity(0.08) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(kind.label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("draft.harness.\(kind.rawValue)")
+    }
+
+    private var optionsCard: some View {
+        VStack(spacing: 0) {
+            Menu {
+                if !availableProjects.isEmpty {
+                    ForEach(availableProjects) { project in
                         Button {
-                            selectedHarness = kind
+                            store.newThreadConfig.projectPath = project.path
                         } label: {
-                            if selectedHarness == kind {
-                                Label(kind.label, systemImage: "checkmark")
+                            if selectedProjectPath == project.path {
+                                Label(project.name, systemImage: "checkmark")
                             } else {
-                                Text(kind.label)
+                                Text(project.name)
                             }
                         }
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        HarnessLogoView(harness: selectedHarness.kind, size: 13)
-                        Text(selectedHarness.label)
-                            .font(SHTypography.micro.weight(.semibold))
-                            .foregroundStyle(SHColor.inkPrimary)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(SHColor.surfaceSubtle)
-                    .clipShape(Capsule())
-                }
-                .accessibilityLabel("Select harness")
-
-                // 2. Model Menu
-                if !availableModels.isEmpty {
-                    Menu {
-                        ForEach(availableModels) { model in
-                            Button {
-                                selectedModelId = model.id
-                            } label: {
-                                if selectedModelId == model.id {
-                                    Label(model.label, systemImage: "checkmark")
-                                } else {
-                                    Text(model.label)
-                                }
-                            }
-                        }
+                } else {
+                    Button {
+                        store.newThreadConfig.projectPath = store.settings.defaultNewSessionCwd
                     } label: {
-                        menuPillLabel(
-                            icon: "cpu",
-                            text: currentModel?.label ?? "Model"
-                        )
+                        Label(projectDisplayName, systemImage: "checkmark")
                     }
-                    .accessibilityLabel("Select model")
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    optionIcon("folder")
+                    Text("Project")
+                        .font(SHTypography.label)
+                        .foregroundStyle(SHColor.inkSecondary)
+                    Spacer(minLength: 8)
+                    Text(projectDisplayName)
+                        .font(SHTypography.label)
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(SHColor.inkFaint)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 50)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Select project")
+
+            if selectedHarness.harnessGroup == .claude {
+                Rectangle()
+                    .fill(SHColor.lineHairline)
+                    .frame(height: 1)
+                    .padding(.leading, 56)
+                Toggle(isOn: $store.newThreadConfig.remoteControl) {
+                    HStack(spacing: 12) {
+                        optionIcon("antenna.radiowaves.left.and.right")
+                        Text("Remote Control")
+                            .font(SHTypography.label)
+                            .foregroundStyle(SHColor.inkSecondary)
+                    }
+                }
+                .tint(SHColor.brandClaude)
+                .padding(.horizontal, 12)
+                .frame(height: 50)
+                .accessibilityLabel("Toggle remote control")
+            }
+        }
+        .background(SHColor.surfaceSubtle)
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+    }
+
+    private func optionIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(SHColor.inkMuted)
+            .frame(width: 32, height: 32)
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(SHTypography.micro.weight(.semibold))
+            .foregroundStyle(SHColor.inkMuted)
+            .padding(.leading, 4)
+    }
+
+    // MARK: - Composer (same surface and controls as ComposerView)
+
+    private var composerDock: some View {
+        SHComposerSurface {
+            VStack(spacing: 0) {
+                if !attachments.isEmpty {
+                    SHAttachmentThumbStrip(
+                        items: attachments.map { att in
+                            SHAttachmentThumbItem(
+                                id: att.id,
+                                name: att.name,
+                                path: att.path,
+                                mimeType: att.mimeType,
+                                dataUrl: att.previewDataUrl,
+                                sizeBytes: att.sizeBytes,
+                                isUploading: false
+                            )
+                        },
+                        thumbSize: SHLayout.composerThumbSize,
+                        onTap: { item in
+                            if let match = attachments.first(where: { $0.id == item.id }) {
+                                store.lightboxPayload = LightboxPayload(
+                                    title: match.name,
+                                    dataUrl: match.previewDataUrl,
+                                    path: match.path
+                                )
+                            }
+                        },
+                        onRemove: { id in
+                            store.draftAttachments[draftKey]?.removeAll(where: { $0.id == id })
+                        }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
                 }
 
-                // 3. Thinking / Reasoning Effort Menu
+                if let err = dictation.errorMessage {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mic.slash.fill")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(SHColor.statusDanger)
+                        Text(err)
+                            .font(SHTypography.micro)
+                            .foregroundStyle(SHColor.statusDanger)
+                            .lineLimit(1)
+                        Spacer()
+                        Button {
+                            dictation.errorMessage = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                }
+
+                TextField("Message \(selectedHarness.label)…", text: promptText, axis: .vertical)
+                    .focused($isInputFocused)
+                    .lineLimit(1...6)
+                    .font(SHTypography.body)
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .padding(.horizontal, 15)
+                    .padding(.top, 15)
+                    .padding(.bottom, 12)
+                    .accessibilityIdentifier("composer.input")
+
+                HStack(spacing: 8) {
+                    Button {
+                        isPhotoPickerPresented = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .frame(width: 32, height: 32)
+                            .background(SHColor.surfaceBubble, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Attach image")
+                    .accessibilityIdentifier("composer.attach")
+
+                    modelEffortPill
+
+                    Spacer(minLength: 4)
+
+                    draftMicButton
+                    sendButton
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    /// One pill for model and thinking effort, mirroring the regular composer.
+    @ViewBuilder
+    private var modelEffortPill: some View {
+        if !availableModels.isEmpty {
+            Menu {
+                Section("Model") {
+                    ForEach(availableModels) { model in
+                        Button {
+                            store.newThreadConfig.modelId = model.id
+                            syncReasoningForCurrentModel()
+                        } label: {
+                            if currentModel?.id == model.id {
+                                Label(model.label, systemImage: "checkmark")
+                            } else {
+                                Text(model.label)
+                            }
+                        }
+                    }
+                }
                 if !reasoningLevels.isEmpty {
-                    Menu {
+                    Section("Thinking Effort") {
                         ForEach(reasoningLevels, id: \.self) { level in
                             Button {
-                                selectedReasoning = level
+                                store.newThreadConfig.reasoning = level
                             } label: {
                                 if selectedReasoning == level {
                                     Label(level.capitalized, systemImage: "checkmark")
@@ -224,242 +407,69 @@ public struct DraftChatView: View {
                                 }
                             }
                         }
-                    } label: {
-                        menuPillLabel(
-                            icon: "sparkles",
-                            text: selectedReasoning.isEmpty ? "Effort" : selectedReasoning.capitalized,
-                            tint: SHColor.harness(selectedHarness.harnessGroup)
-                        )
-                    }
-                    .accessibilityLabel("Select thinking effort")
-                }
-
-                // 4. Project Menu (filtered per harness group)
-                Menu {
-                    if !availableProjects.isEmpty {
-                        ForEach(availableProjects) { project in
-                            Button {
-                                selectedProjectPath = project.path
-                            } label: {
-                                if selectedProjectPath == project.path {
-                                    Label(project.name, systemImage: "checkmark")
-                                } else {
-                                    Text(project.name)
-                                }
-                            }
-                        }
-                    } else {
-                        Button {
-                            selectedProjectPath = store.settings.defaultNewSessionCwd
-                        } label: {
-                            Label(projectDisplayName, systemImage: "checkmark")
-                        }
-                    }
-                } label: {
-                    menuPillLabel(icon: "folder", text: projectDisplayName)
-                }
-                .accessibilityLabel("Select project")
-
-                // 5. Optional Remote toggle pill for Claude
-                if selectedHarness.harnessGroup == .claude {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            remoteControl.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: remoteControl ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Remote")
-                                .font(SHTypography.micro.weight(.medium))
-                        }
-                        .foregroundStyle(remoteControl ? SHColor.brandClaude : SHColor.inkMuted)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 7)
-                        .background(remoteControl ? SHColor.brandClaude.opacity(0.14) : SHColor.surfaceSubtle)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Toggle remote control")
-                }
-            }
-            .padding(.horizontal, 2)
-        }
-    }
-
-    private func menuPillLabel(icon: String, text: String, tint: Color? = nil) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(tint ?? SHColor.inkMuted)
-            Text(text)
-                .font(SHTypography.micro.weight(.medium))
-                .foregroundStyle(SHColor.inkSecondary)
-                .lineLimit(1)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(SHColor.inkFaint)
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
-        .background(SHColor.surfaceSubtle)
-        .clipShape(Capsule())
-    }
-
-    // MARK: - Chat Input Dock (Matched to ComposerView)
-
-    private var composerDock: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !attachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(attachments) { att in
-                            ZStack(alignment: .topTrailing) {
-                                Group {
-                                    if let uiImage = DataURLImageDecoder.decode(att.previewDataUrl) {
-                                        Image(uiImage: uiImage)
-                                            .resizable()
-                                            .scaledToFill()
-                                    } else {
-                                        ZStack {
-                                            SHColor.surfaceSubtle
-                                            Image(systemName: "photo")
-                                                .foregroundStyle(SHColor.inkMuted)
-                                        }
-                                    }
-                                }
-                                .frame(width: 54, height: 54)
-                                .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-
-                                Button {
-                                    attachments.removeAll(where: { $0.id == att.id })
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 16))
-                                        .symbolRenderingMode(.palette)
-                                        .foregroundStyle(SHColor.inkPrimary, SHColor.surfaceRail)
-                                }
-                                .buttonStyle(.plain)
-                                .offset(x: 4, y: -4)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                    .padding(.bottom, 4)
-                }
-            }
-
-            if let err = dictation.errorMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: "mic.slash.fill")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(SHColor.statusDanger)
-                    Text(err)
-                        .font(SHTypography.micro)
-                        .foregroundStyle(SHColor.statusDanger)
-                        .lineLimit(1)
-                    Spacer()
-                    Button {
-                        dictation.errorMessage = nil
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(SHColor.inkFaint)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-            }
-
-            TextField("Message \(selectedHarness.label)…", text: $promptText, axis: .vertical)
-                .focused($isInputFocused)
-                .lineLimit(1...6)
-                .font(SHTypography.body)
-                .foregroundStyle(SHColor.inkPrimary)
-                .padding(.horizontal, 14)
-                .padding(.top, 11)
-                .padding(.bottom, 8)
-                .accessibilityIdentifier("composer.input")
-
-            HStack(spacing: 10) {
-                PhotosPicker(
-                    selection: $selectedPhotoItems,
-                    maxSelectionCount: 4,
-                    matching: .images
-                ) {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(SHColor.inkMuted)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Rectangle())
-                }
-                .onChange(of: selectedPhotoItems) { _, newItems in
-                    guard !newItems.isEmpty else { return }
-                    let items = newItems
-                    selectedPhotoItems = []
-                    Task {
-                        for (index, item) in items.enumerated() {
-                            if let rawData = try? await item.loadTransferable(type: Data.self) {
-                                let dataUrl = await Task.detached(priority: .userInitiated) {
-                                    let jpeg = ComposerView.downscaledJPEG(from: rawData, maxDimension: 1600, quality: 0.75) ?? rawData
-                                    return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
-                                }.value
-                                attachments.append(
-                                    ImageAttachment(
-                                        name: "photo-\(index + 1).jpg",
-                                        mimeType: "image/jpeg",
-                                        previewDataUrl: dataUrl
-                                    )
-                                )
-                            }
-                        }
                     }
                 }
-                .accessibilityLabel("Attach image")
-
-                HStack(spacing: 6) {
-                    HarnessLogoView(harness: selectedHarness.kind, size: 13)
+            } label: {
+                HStack(spacing: 5) {
+                    HarnessLogoView(harness: selectedHarness.kind, size: 12.5)
                     Text(currentModel?.label ?? selectedHarness.label)
-                        .font(SHTypography.micro)
-                        .foregroundStyle(SHColor.inkMuted)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(SHColor.inkPrimary)
                         .lineLimit(1)
-                }
-
-                Spacer(minLength: 4)
-
-                draftMicButton
-
-                Button {
-                    Task { await startAndSend() }
-                } label: {
-                    Group {
-                        if isStarting {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .tint(SHColor.surfaceRail)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(SHColor.surfaceRail)
-                        }
+                    if !selectedReasoning.isEmpty, !reasoningLevels.isEmpty {
+                        Text(selectedReasoning.capitalized)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(SHColor.inkMuted)
+                            .lineLimit(1)
                     }
-                    .frame(width: 32, height: 32)
-                    .background(SHColor.inkPrimary)
-                    .opacity(hasContent && !isStarting ? 1.0 : 0.25)
-                    .clipShape(Circle())
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(SHColor.inkFaint)
                 }
-                .buttonStyle(.plain)
-                .disabled(!hasContent || isStarting)
-                .accessibilityLabel("Start chat and send")
-                .accessibilityIdentifier("composer.send")
+                .padding(.horizontal, 11)
+                .frame(height: 32)
+                .background(SHColor.surfaceBubble, in: Capsule())
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 10)
+            .accessibilityLabel("Select model and effort")
+            .accessibilityIdentifier("draft.model")
+        } else {
+            HStack(spacing: 5) {
+                HarnessLogoView(harness: selectedHarness.kind, size: 12.5)
+                Text(selectedHarness.label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(SHColor.inkMuted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
         }
-        .background(SHColor.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous))
+    }
+
+    private var sendButton: some View {
+        Button {
+            Task { await startAndSend() }
+        } label: {
+            Group {
+                if isStarting {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(SHColor.surfaceRail)
+                } else {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(SHColor.surfaceRail)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(SHColor.inkPrimary)
+            .opacity(hasContent && !isStarting ? 1.0 : 0.25)
+            .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasContent || isStarting)
+        .accessibilityLabel("Start chat and send")
+        .accessibilityIdentifier("composer.send")
     }
 
     // MARK: - Dictation Button
@@ -477,9 +487,8 @@ public struct DraftChatView: View {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
-                    .frame(width: 30, height: 30)
-                    .background(SHColor.surfaceSubtle)
-                    .clipShape(Circle())
+                    .frame(width: 32, height: 32)
+                    .background(SHColor.surfaceBubble, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Start voice dictation")
@@ -504,7 +513,7 @@ public struct DraftChatView: View {
                         .foregroundStyle(SHColor.statusDanger)
                 }
                 .padding(.horizontal, 9)
-                .padding(.vertical, 6)
+                .frame(height: 32)
                 .background(SHColor.statusDanger.opacity(0.16))
                 .clipShape(Capsule())
             }
@@ -516,42 +525,56 @@ public struct DraftChatView: View {
             ProgressView()
                 .controlSize(.mini)
                 .tint(SHColor.brandAntigravity)
-                .frame(width: 30, height: 30)
-                .background(SHColor.surfaceSubtle)
-                .clipShape(Circle())
+                .frame(width: 32, height: 32)
+                .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityIdentifier("composer.mic")
         }
     }
 
     private func handleDraftDictationTap() async {
-        let spoken = await dictation.toggleRecording { wavData in
-            try await store.transcribeDictation(wavData: wavData)
-        }
+        let spoken = await dictation.toggleRecording(
+            prewarm: { await store.prewarmDictation() },
+            transcribe: { audioData in
+                try await store.transcribeDictation(wavData: audioData)
+            }
+        )
         guard let spoken, !spoken.isEmpty else { return }
-        let trimmed = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            promptText = spoken
+        let current = promptText.wrappedValue
+        if current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            promptText.wrappedValue = spoken
         } else {
-            promptText = promptText.hasSuffix(" ") || promptText.hasSuffix("\n") ? promptText + spoken : promptText + " " + spoken
+            promptText.wrappedValue = current.hasSuffix(" ") || current.hasSuffix("\n") ? current + spoken : current + " " + spoken
         }
     }
 
     // MARK: - Actions & Sync
 
-    private func syncProjectForCurrentHarness() {
-        let scoped = availableProjects
-        guard !scoped.isEmpty else { return }
-        if !scoped.contains(where: { $0.path == selectedProjectPath }) {
-            selectedProjectPath = scoped[0].path
+    private func selectHarness(_ kind: StartHarnessKind) {
+        if store.newThreadConfig.harness != kind {
+            store.newThreadConfig.harness = kind
         }
+        syncSetupForCurrentHarness()
     }
 
-    private func syncModelAndEffort() {
+    /// Keeps the saved project, model and effort when they are valid for the selected harness,
+    /// and falls back to that harness's defaults when they are not.
+    private func syncSetupForCurrentHarness() {
+        let projects = availableProjects
+        if projects.isEmpty {
+            if selectedProjectPath.isEmpty {
+                store.newThreadConfig.projectPath = store.settings.defaultNewSessionCwd
+            }
+        } else if !projects.contains(where: { $0.path == selectedProjectPath }) {
+            store.newThreadConfig.projectPath = projects[0].path
+        }
+
         let models = availableModels
-        if let def = models.first(where: { $0.isDefault == true }) ?? models.first {
-            selectedModelId = def.id
-        } else {
-            selectedModelId = ""
+        if !models.contains(where: { $0.id == selectedModelId }) {
+            let fallback = models.first(where: { $0.isDefault == true }) ?? models.first
+            let nextId = fallback?.id ?? ""
+            if selectedModelId != nextId {
+                store.newThreadConfig.modelId = nextId
+            }
         }
         syncReasoningForCurrentModel()
     }
@@ -559,18 +582,43 @@ public struct DraftChatView: View {
     private func syncReasoningForCurrentModel() {
         let levels = reasoningLevels
         guard !levels.isEmpty else {
-            selectedReasoning = ""
+            if !selectedReasoning.isEmpty {
+                store.newThreadConfig.reasoning = ""
+            }
             return
         }
+        guard !levels.contains(selectedReasoning) else { return }
         let preferred = currentModel?.defaultReasoningLevel
             ?? store.catalog?.defaultReasoning(for: selectedHarness.harnessGroup)
             ?? "high"
-        selectedReasoning = levels.contains(preferred) ? preferred : (levels.last ?? "")
+        store.newThreadConfig.reasoning = levels.contains(preferred) ? preferred : (levels.last ?? "")
+    }
+
+    private func handlePickedPhotos(_ items: [PhotosPickerItem]) {
+        Task {
+            for (index, item) in items.enumerated() {
+                guard let rawData = try? await item.loadTransferable(type: Data.self) else { continue }
+                let dataUrl = await Task.detached(priority: .userInitiated) {
+                    let jpeg = ComposerView.downscaledJPEG(from: rawData, maxDimension: 1600, quality: 0.75) ?? rawData
+                    return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+                }.value
+                var current = store.draftAttachments[draftKey] ?? []
+                current.append(
+                    ImageAttachment(
+                        name: "photo-\(current.count + index + 1).jpg",
+                        mimeType: "image/jpeg",
+                        previewDataUrl: dataUrl
+                    )
+                )
+                store.draftAttachments[draftKey] = current
+            }
+        }
     }
 
     private func startAndSend() async {
-        let trimmedPrompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty || !attachments.isEmpty else { return }
+        let trimmedPrompt = promptText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pendingAttachments = attachments
+        guard !trimmedPrompt.isEmpty || !pendingAttachments.isEmpty else { return }
 
         #if canImport(UIKit)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -579,31 +627,24 @@ public struct DraftChatView: View {
         isStarting = true
         defer { isStarting = false }
 
-        let cwd = selectedProjectPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let config = store.newThreadConfig
+        let cwd = config.projectPath.trimmingCharacters(in: .whitespacesAndNewlines)
         let req = StartSessionRequest(
-            harness: selectedHarness,
+            harness: config.harness,
             cwd: cwd.isEmpty ? store.settings.defaultNewSessionCwd : cwd,
             prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt,
-            model: selectedModelId.isEmpty ? nil : selectedModelId,
-            reasoningEffort: selectedReasoning.isEmpty ? nil : selectedReasoning,
-            remoteControl: (selectedHarness.harnessGroup == .claude && remoteControl) ? true : nil
+            model: config.modelId.isEmpty ? nil : config.modelId,
+            reasoningEffort: config.reasoning.isEmpty ? nil : config.reasoning,
+            remoteControl: (config.harness.harnessGroup == .claude && config.remoteControl) ? true : nil
         )
 
+        // The draft is cleared only once the host has accepted the new session.
         if let newId = await store.startSession(req) {
-            if !attachments.isEmpty {
-                let pending = attachments
-                store.submitMessage(for: newId, text: "", attachments: pending)
+            store.clearNewThreadDraft()
+            if !pendingAttachments.isEmpty {
+                store.submitMessage(for: newId, text: "", attachments: pendingAttachments)
             }
             onSessionCreated(newId)
         }
-    }
-
-    private static func compressedJPEG(from data: Data) -> Data? {
-        #if canImport(UIKit)
-        guard let img = UIImage(data: data) else { return nil }
-        return img.jpegData(compressionQuality: 0.78)
-        #else
-        return data
-        #endif
     }
 }

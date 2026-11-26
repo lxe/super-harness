@@ -335,6 +335,9 @@ public struct SessionDetailView: View {
                 onTranscribeAudio: { wavData in
                     try await store.transcribeDictation(wavData: wavData)
                 },
+                onDictationStart: {
+                    await store.prewarmDictation()
+                },
                 onSend: { mode in
                     if store.submitMessage(for: session.id, mode: mode) != nil {
                         sendTrigger += 1
@@ -728,8 +731,14 @@ private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
         weak var navigationController: UINavigationController?
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let nav = navigationController else { return false }
-            return nav.viewControllers.count > 1
+            guard let nav = navigationController, nav.viewControllers.count > 1 else { return false }
+            // Only a deliberate rightward drag pops. Vertical scrolls and diagonal drags that
+            // happen to start at the left edge no longer navigate away.
+            if let pan = gestureRecognizer as? UIPanGestureRecognizer {
+                let velocity = pan.velocity(in: pan.view)
+                return velocity.x > 0 && abs(velocity.x) > abs(velocity.y) * 1.5
+            }
+            return true
         }
     }
 

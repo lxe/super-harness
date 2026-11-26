@@ -360,10 +360,26 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             req.setValue(overrideToken.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "X-Dictation-Token")
         }
 
+        let requestStartedAt = CFAbsoluteTimeGetCurrent()
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw SuperHarnessAPIError.httpError(0, "Invalid HTTP response")
         }
+        #if DEBUG
+        // Splits the round trip into YapYap time (reported by the host) and everything else
+        // (upload, host proxy, response), which is the network overhead to keep near zero.
+        struct TimingEnvelope: Decodable {
+            struct Timing: Decodable { var readMs: Double?; var yapyapMs: Double? }
+            var timing: Timing?
+        }
+        let totalMs = (CFAbsoluteTimeGetCurrent() - requestStartedAt) * 1000
+        if let timing = (try? decoder.decode(TimingEnvelope.self, from: data))?.timing, let yapyapMs = timing.yapyapMs {
+            print(String(format: "PERF dictate bytes=%d total_ms=%.0f yapyap_ms=%.0f host_read_ms=%.0f overhead_ms=%.0f",
+                         wavData.count, totalMs, yapyapMs, timing.readMs ?? 0, totalMs - yapyapMs))
+        } else {
+            print(String(format: "PERF dictate bytes=%d total_ms=%.0f (host sent no timing)", wavData.count, totalMs))
+        }
+        #endif
         if http.statusCode == 401 {
             throw SuperHarnessAPIError.unauthorized
         }

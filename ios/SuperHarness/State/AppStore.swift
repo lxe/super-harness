@@ -194,8 +194,22 @@ public final class AppStore {
     private var streamingTextBySessionId: [String: String] = [:]
     public var pendingOutgoingBySessionId: [String: [PendingOutgoingMessage]] = [:]
     public var sendingSessionIds: Set<String> = []
-    public var draftInputs: [String: String] = [:]
-    public var draftAttachments: [String: [ImageAttachment]] = [:]
+    /// Unsent composer text per session id, plus `newThreadDraftKey` for the New Chat page.
+    /// Kept until the message is sent or the user deletes it; saved to disk when persistence is enabled.
+    public var draftInputs: [String: String] = [:] {
+        didSet { scheduleDraftSave(attachments: false) }
+    }
+    public var draftAttachments: [String: [ImageAttachment]] = [:] {
+        didSet { scheduleDraftSave(attachments: true) }
+    }
+    /// Harness, project, model and effort chosen on the New Chat page.
+    public var newThreadConfig = NewThreadDraftConfig() {
+        didSet { scheduleDraftSave(attachments: false) }
+    }
+    public static let newThreadDraftKey = "draft:new-thread"
+    @ObservationIgnored private var draftPersistence: DraftPersistence?
+    @ObservationIgnored private var draftSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var draftAttachmentsDirty = false
     public var uploadingAttachmentIds: Set<String> = []
     public var isBootstrapping: Bool = false
     public var isRefreshing: Bool = false
@@ -343,6 +357,7 @@ public final class AppStore {
 
         // Only start NWPathMonitor in real app runtime (keep unit tests deterministic when client is injected)
         if client == nil {
+            enableDraftPersistence()
             self.pathWatcher = NetworkPathWatcher { [weak self] in
                 Task { @MainActor [weak self] in
                     self?.triggerImmediateReconnectIfOffline()
@@ -512,6 +527,7 @@ public final class AppStore {
         case .active:
             await handleSceneBecameActive()
         case .background:
+            flushDrafts()
             stopAutoReconnectLoop()
         case .inactive:
             break
@@ -1909,6 +1925,20 @@ public final class AppStore {
         await refreshDictationStatus()
     }
 
+    /// Called when the mic is tapped. One cheap status request opens the phone → host connection
+    /// (and the host → YapYap one) during recording, so the audio upload after "stop" does not
+    /// also pay for connection setup.
+    public func prewarmDictation() async {
+        let url = dictationURLOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tok = dictationTokenOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let status = await client.fetchDictationStatus(
+            overrideURL: url.isEmpty ? nil : url,
+            overrideToken: tok.isEmpty ? nil : tok
+        ) {
+            dictationStatus = status
+        }
+    }
+
     public func transcribeDictation(wavData: Data) async throws -> String {
         let url = dictationURLOverride.trimmingCharacters(in: .whitespacesAndNewlines)
         let tok = dictationTokenOverride.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2041,7 +2071,11 @@ public final class AppStore {
     }
 
     public func openDraftChat(for harness: HarnessGroup? = nil) {
-        let kind = harness?.defaultStartHarness ?? .antigravity
+        // An explicit harness (filter chip, long-press) wins; otherwise reopen the draft where it was left.
+        if let harness, newThreadConfig.harness.harnessGroup != harness {
+            newThreadConfig.harness = harness.defaultStartHarness
+        }
+        let kind = newThreadConfig.harness
         selectedSessionId = nil
         detailRoute = .draft(kind)
         let activeClient = client
@@ -2062,5 +2096,139 @@ public final class AppStore {
     private func mutateSession(_ id: String, _ mutation: (inout UnifiedSession) -> Void) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         mutation(&sessions[idx])
+    }
+
+    // MARK: - Draft Persistence
+
+    /// Loads saved drafts and keeps them saved from now on. The app calls this at launch;
+    /// stores built with an injected client (unit tests) stay in memory unless they opt in.
+    public func enableDraftPersistence(directory: URL = DraftPersistence.defaultDirectory) {
+        let persistence = DraftPersistence(directory: directory)
+        let saved = persistence.load()
+        draftPersistence = nil
+        draftInputs = saved.inputs
+        draftAttachments = saved.attachments
+        if let config = saved.newThread {
+            newThreadConfig = config
+        }
+        draftPersistence = persistence
+    }
+
+    /// Writes drafts to disk now (used when the app goes to the background).
+    public func flushDrafts() {
+        draftSaveTask?.cancel()
+        draftSaveTask = nil
+        guard let draftPersistence else { return }
+        draftPersistence.saveText(inputs: draftInputs, newThread: newThreadConfig)
+        if draftAttachmentsDirty {
+            draftAttachmentsDirty = false
+            draftPersistence.saveAttachments(persistableDraftAttachments)
+        }
+    }
+
+    /// Discards the New Chat draft after its session has been started.
+    public func clearNewThreadDraft() {
+        draftInputs[Self.newThreadDraftKey] = nil
+        draftAttachments[Self.newThreadDraftKey] = nil
+    }
+
+    /// Attachments still uploading have no host path yet and cannot be resumed after a relaunch.
+    private var persistableDraftAttachments: [String: [ImageAttachment]] {
+        draftAttachments.mapValues { list in list.filter { !uploadingAttachmentIds.contains($0.id) } }
+    }
+
+    private func scheduleDraftSave(attachments: Bool) {
+        guard draftPersistence != nil else { return }
+        if attachments { draftAttachmentsDirty = true }
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.flushDrafts()
+        }
+    }
+}
+
+// MARK: - Draft Models & Disk Store
+
+/// What the New Chat page had selected, so reopening it restores the same setup.
+public struct NewThreadDraftConfig: Codable, Sendable, Equatable {
+    public var harness: StartHarnessKind
+    public var projectPath: String
+    public var modelId: String
+    public var reasoning: String
+    public var remoteControl: Bool
+
+    public init(
+        harness: StartHarnessKind = .antigravity,
+        projectPath: String = "",
+        modelId: String = "",
+        reasoning: String = "",
+        remoteControl: Bool = false
+    ) {
+        self.harness = harness
+        self.projectPath = projectPath
+        self.modelId = modelId
+        self.reasoning = reasoning
+        self.remoteControl = remoteControl
+    }
+}
+
+/// Saves unsent composer drafts as two JSON files: text and New Chat setup in one (rewritten as
+/// the user types), attachments in the other (rewritten only when attachments change, since
+/// image previews make it large).
+public struct DraftPersistence: Sendable {
+    public struct Saved: Equatable, Sendable {
+        public var inputs: [String: String] = [:]
+        public var attachments: [String: [ImageAttachment]] = [:]
+        public var newThread: NewThreadDraftConfig?
+    }
+
+    private struct TextFile: Codable {
+        var inputs: [String: String]
+        var newThread: NewThreadDraftConfig?
+    }
+
+    public static var defaultDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("Drafts", isDirectory: true)
+    }
+
+    public let directory: URL
+    private var textURL: URL { directory.appendingPathComponent("drafts.json") }
+    private var attachmentsURL: URL { directory.appendingPathComponent("draft-attachments.json") }
+
+    public init(directory: URL) {
+        self.directory = directory
+    }
+
+    public func load() -> Saved {
+        var saved = Saved()
+        let decoder = JSONDecoder()
+        if let data = try? Data(contentsOf: textURL), let file = try? decoder.decode(TextFile.self, from: data) {
+            saved.inputs = file.inputs
+            saved.newThread = file.newThread
+        }
+        if let data = try? Data(contentsOf: attachmentsURL),
+           let attachments = try? decoder.decode([String: [ImageAttachment]].self, from: data) {
+            saved.attachments = attachments
+        }
+        return saved
+    }
+
+    public func saveText(inputs: [String: String], newThread: NewThreadDraftConfig) {
+        let file = TextFile(inputs: inputs.filter { !$0.value.isEmpty }, newThread: newThread)
+        write(file, to: textURL)
+    }
+
+    public func saveAttachments(_ attachments: [String: [ImageAttachment]]) {
+        write(attachments.filter { !$0.value.isEmpty }, to: attachmentsURL)
+    }
+
+    private func write<T: Encodable>(_ value: T, to url: URL) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
     }
 }

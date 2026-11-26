@@ -13,6 +13,57 @@ final class AppStoreTests: XCTestCase {
         return store
     }
 
+    func testDraftsSurviveRelaunchUntilSentOrDeleted() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AppStoreTests-drafts-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = await makeStore()
+        first.enableDraftPersistence(directory: directory)
+        let sessionId = try XCTUnwrap(first.sessions.first(where: { !$0.isMaster })?.id)
+        let photo = ImageAttachment(name: "photo-1.jpg", previewDataUrl: "data:image/jpeg;base64,AAAA")
+
+        first.draftInputs[sessionId] = "half-typed reply"
+        first.draftInputs[AppStore.newThreadDraftKey] = "new thread idea"
+        first.draftAttachments[AppStore.newThreadDraftKey] = [photo]
+        first.newThreadConfig = NewThreadDraftConfig(
+            harness: .claudeTmux, projectPath: "/tmp/project", modelId: "opus", reasoning: "medium", remoteControl: true
+        )
+        first.flushDrafts()
+        first.stopEventStream()
+
+        // A fresh store (app relaunch) restores text, attachments and the New Chat setup.
+        let second = await makeStore()
+        defer { second.stopEventStream() }
+        second.enableDraftPersistence(directory: directory)
+        XCTAssertEqual(second.draftInputs[sessionId], "half-typed reply")
+        XCTAssertEqual(second.draftInputs[AppStore.newThreadDraftKey], "new thread idea")
+        XCTAssertEqual(second.draftAttachments[AppStore.newThreadDraftKey], [photo])
+        XCTAssertEqual(second.newThreadConfig.harness, .claudeTmux)
+        XCTAssertEqual(second.newThreadConfig.modelId, "opus")
+        XCTAssertTrue(second.newThreadConfig.remoteControl)
+
+        // Leaving the New Chat page and reopening it keeps the draft and the chosen harness.
+        second.openDraftChat()
+        second.clearDetailRoute()
+        second.openDraftChat()
+        XCTAssertEqual(second.detailRoute, .draft(.claudeTmux))
+        XCTAssertEqual(second.draftInputs[AppStore.newThreadDraftKey], "new thread idea")
+
+        // Opening it for a specific harness switches harness but keeps the message.
+        second.openDraftChat(for: .codex)
+        XCTAssertEqual(second.detailRoute, .draft(.codex))
+        XCTAssertEqual(second.draftInputs[AppStore.newThreadDraftKey], "new thread idea")
+
+        // Starting the session is what clears the New Chat draft; the session draft is untouched.
+        second.clearNewThreadDraft()
+        second.flushDrafts()
+        let saved = DraftPersistence(directory: directory).load()
+        XCTAssertNil(saved.inputs[AppStore.newThreadDraftKey])
+        XCTAssertNil(saved.attachments[AppStore.newThreadDraftKey])
+        XCTAssertEqual(saved.inputs[sessionId], "half-typed reply")
+    }
+
     func testBootstrapLoadsDemoFixturesAndFiltersCorrectly() async {
         let store = await makeStore()
         defer { store.stopEventStream() }

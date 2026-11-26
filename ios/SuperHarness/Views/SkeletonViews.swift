@@ -1,7 +1,9 @@
 import SwiftUI
 
-// MARK: - Calm Obsidian Shimmer Modifier
+// MARK: - Calm Obsidian Skeleton Pulse
 
+/// Loading treatment for skeleton placeholders: the whole placeholder breathes slowly between
+/// two opacities. There is no moving highlight band, so nothing sweeps across the bars.
 public struct ObsidianShimmerModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -11,33 +13,12 @@ public struct ObsidianShimmerModifier: ViewModifier {
         if reduceMotion {
             content
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
-                let period: Double = 1.35
-                let raw = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
-                let eased = raw < 0.5 ? 2 * raw * raw : 1 - pow(-2 * raw + 2, 2) / 2
-                let phase = CGFloat(-1.0 + eased * 2.25)
-
-                content
-                    .overlay {
-                        GeometryReader { geo in
-                            let width = max(geo.size.width, 120)
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0.0),
-                                    .init(color: Color(hex: 0x2F3545).opacity(0.95), location: 0.38),
-                                    .init(color: Color.white.opacity(0.12), location: 0.50),
-                                    .init(color: Color(hex: 0x2F3545).opacity(0.95), location: 0.62),
-                                    .init(color: .clear, location: 1.0),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            .frame(width: width * 1.35)
-                            .offset(x: phase * width * 1.35)
-                            .blendMode(.screen)
-                        }
-                        .mask(content)
-                    }
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let period: Double = 1.8
+                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
+                // Cosine ease: 1.0 → 0.55 → 1.0 over one period.
+                let level = 0.775 + 0.225 * cos(phase * 2 * .pi)
+                content.opacity(level)
             }
         }
     }

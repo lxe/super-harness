@@ -121,9 +121,17 @@ public final class DictationController {
         return String(format: "%d:%02d", mins, secs)
     }
 
-    public func toggleRecording(transcribe: @escaping (Data) async throws -> String) async -> String? {
+    /// `prewarm` runs in the background the moment recording starts, so the caller can open the
+    /// network path to the dictation server while the user is still speaking.
+    public func toggleRecording(
+        prewarm: (@MainActor () async -> Void)? = nil,
+        transcribe: @escaping (Data) async throws -> String
+    ) async -> String? {
         switch state {
         case .idle:
+            if let prewarm {
+                Task { await prewarm() }
+            }
             await startRecording()
             return nil
         case .recording:

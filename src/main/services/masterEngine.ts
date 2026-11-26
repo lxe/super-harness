@@ -345,7 +345,7 @@ export class MasterEngine {
     const liveSummary = sessions
       .filter((s) => s.harness !== 'master' && s.isLive)
       .slice(0, 20)
-      .map((s) => `- ${s.id} | ${s.harness} | "${s.title}" | cwd=${s.cwd}${s.folderId ? ` | folderId=${s.folderId}` : ''}${s.tmuxTarget ? ` | tmux=${s.tmuxTarget}` : ''}${s.isRemote ? ' | REMOTE' : ''}`)
+      .map((s) => `- ${s.id} | ${s.harness} | "${s.title}" | cwd=${s.cwd}${s.folderId ? ` | folderId=${s.folderId}` : ''}${s.tmuxTarget ? ` | tmux=${s.tmuxTarget}` : ''}${s.isRemote ? ' | REMOTE' : ''}${s.summary ? ` | now: ${s.summary}` : ''}`)
       .join('\n');
 
     return [

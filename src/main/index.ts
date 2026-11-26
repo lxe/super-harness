@@ -26,6 +26,7 @@ import {
   openPathWithApp,
   readFilePreview,
 } from './services/systemLauncher';
+import { SessionSummarizer } from './services/sessionSummarizer';
 import { UsageService } from './services/usageService';
 import { ConfigStore } from './store/configStore';
 import { closeSqlitePool } from './utils/sqlite';
@@ -385,6 +386,7 @@ async function refreshAndBroadcast() {
         ])
       ).sort();
       const decorated = { ...result, sessions };
+      sessionSummarizer.noteSessions(sessions);
       broadcastToRenderer('sh:sessions-updated', decorated);
       broadcastSessionsDeltaToMobile(result.harnesses, sessions, activeWorkingSessionIds);
       lastBroadcastWorkingKey = activeWorkingSessionIds.join(',');
@@ -395,6 +397,20 @@ async function refreshAndBroadcast() {
     });
   return refreshInFlight;
 }
+
+// One-line "doing now" summaries for list rows, written in batches by a small model at idle times.
+const sessionSummarizer = new SessionSummarizer({
+  loadTranscript: (sessionId, limit) => registry.getTranscript(sessionId, limit),
+  getWorkingIds: () => getActiveWorkingSessionIds(),
+  getConfig: () => ({
+    enabled: store.getState().settings.summaries?.enabled ?? true,
+    model: store.getState().settings.summaries?.model || 'claude-haiku-5-5',
+  }),
+  onUpdated: () => {
+    void refreshAndBroadcast();
+  },
+});
+registry.setSummaryLookup((id) => sessionSummarizer.get(id));
 
 const dispatcher = new HarnessDispatcher(registry, store, emitStream, () => {
   void refreshAndBroadcast();
@@ -466,6 +482,8 @@ const controlServer = new ControlServer(
     },
     getActiveWorkingSessionIds: () => getActiveWorkingSessionIds(),
     restartApp: async (opts) => scheduleDetachedRestart(opts),
+    refreshSummaries: async (opts) => sessionSummarizer.refresh(opts),
+    getSummaries: () => sessionSummarizer.getAll(),
   }
 );
 controlServerRef = controlServer;

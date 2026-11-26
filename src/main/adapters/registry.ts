@@ -27,9 +27,16 @@ export class HarnessRegistry {
     maxEstimatedBytes: 40 * 1024 * 1024,
   });
 
+  private summaryLookup: (sessionId: string) => string | undefined = () => undefined;
+
   constructor(private readonly store: ConfigStore, drivers: HarnessDriver[] = createDefaultDrivers()) {
     this.drivers = drivers;
     this.driverMap = new Map(drivers.map((d) => [d.id, d]));
+  }
+
+  /** Source of one-line thread summaries overlaid on each discovered session. */
+  setSummaryLookup(fn: (sessionId: string) => string | undefined): void {
+    this.summaryLookup = fn;
   }
 
   getDrivers(): readonly HarnessDriver[] {
@@ -91,7 +98,8 @@ export class HarnessRegistry {
       .filter((raw) => !masterNativeIds.has(raw.nativeId))
       .map((raw) => {
         const lastUserText = raw.lastUserText ?? readLastUserText(raw.transcriptPath, raw.harnessGroup);
-        const s = lastUserText ? { ...raw, lastUserText } : raw;
+        const summary = this.summaryLookup(raw.id);
+        const s = lastUserText || summary ? { ...raw, lastUserText, summary } : raw;
         const ov = state.overrides[s.id];
         if (!ov) return s;
         return {

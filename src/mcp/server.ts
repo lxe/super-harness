@@ -210,6 +210,18 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'sh_refresh_summaries',
+    description:
+      'Rewrite the one-line "doing now" summaries shown under session rows for threads that changed since their last summary (one batched small-model call). Runs automatically at idle times; call it to refresh now. `force` includes sessions that are still running or just changed; `sessionIds` limits it to those sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: { type: 'boolean' },
+        sessionIds: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
 ];
 
 async function apiRequest(method: string, pathAndQuery: string, body?: unknown): Promise<unknown> {
@@ -268,6 +280,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       return apiRequest('GET', '/api/orchestrator/memory');
     case 'sh_write_memory':
       return apiRequest('POST', '/api/orchestrator/memory', args);
+    case 'sh_refresh_summaries':
+      return apiRequest('POST', '/api/summaries/refresh', args);
     case 'sh_restart_app':
       return apiRequest('POST', '/api/restart', args);
     default:

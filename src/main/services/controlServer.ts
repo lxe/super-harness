@@ -121,6 +121,8 @@ export interface ControlServerHooks {
   watchSession?: (paneId: string, sessionId: string | null, limit?: number) => Promise<void>;
   getActiveWorkingSessionIds?: () => string[];
   restartApp?: (opts?: { build?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+  refreshSummaries?: (opts: { force?: boolean; sessionIds?: string[] }) => Promise<unknown>;
+  getSummaries?: () => Record<string, { text: string; updatedAt: number; at: number }>;
 }
 
 interface BufferedEvent {
@@ -1031,6 +1033,24 @@ export class ControlServer {
           );
           await this.triggerRefresh();
           sendJson(result);
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/summaries') {
+          sendJson({ summaries: this.hooks.getSummaries?.() ?? {} });
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/summaries/refresh') {
+          const body = await readBody();
+          if (!this.hooks.refreshSummaries) {
+            sendJson({ ok: false, error: 'Summaries not configured' }, 404);
+            return;
+          }
+          const sessionIds = Array.isArray(body.sessionIds)
+            ? body.sessionIds.filter((x: unknown): x is string => typeof x === 'string')
+            : undefined;
+          sendJson(await this.hooks.refreshSummaries({ force: Boolean(body.force), sessionIds }));
           return;
         }
 

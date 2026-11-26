@@ -20,7 +20,8 @@ const TAIL_BYTES = 512 * 1024;
 const WIDE_TAIL_BYTES = 4 * 1024 * 1024;
 const MAX_LEN = 160;
 
-const isInjected = (t: string): boolean =>
+/** True for harness-injected context (reminders, notifications, AGENTS.md) rather than typed text. */
+export const isInjectedText = (t: string): boolean =>
   /^<(?:task-notification|cross-session-message|teammate-message|system-reminder|local-command-|command-name|environment_context|user_instructions|permissions)/i.test(
     t.trim()
   ) || t.trim().startsWith('# AGENTS.md');
@@ -127,7 +128,7 @@ function scanTail(filePath: string, size: number, maxBytes: number, fmt: Harness
       if (!fmt.needles.some((n) => line.includes(n))) continue;
       try {
         const raw = fmt.extract(JSON.parse(line) as Record<string, unknown>);
-        if (raw && !isInjected(raw)) text = cleanUserPreview(raw);
+        if (raw && !isInjectedText(raw)) text = cleanUserPreview(raw);
       } catch {
         // partial first line of the window
       }

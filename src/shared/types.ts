@@ -63,6 +63,8 @@ export interface UnifiedSession {
   hostLabel?: string;
   /** Start of the last message the person sent in this session (one line, for list rows). */
   lastUserText?: string;
+  /** One-line model-written summary of what the thread is doing now (replaces lastUserText in rows when set). */
+  summary?: string;
   pid?: number;
   transcriptPath?: string;
   createdAt: number;
@@ -370,6 +372,13 @@ export interface SuperHarnessSettings {
   defaultNewSessionCwd: string;
   apps: ExternalAppsSettings;
   mobileApi?: MobileApiSettings;
+  /** Background one-line thread summaries for list rows (default: enabled, Claude Haiku). */
+  summaries?: SummarySettings;
+}
+
+export interface SummarySettings {
+  enabled: boolean;
+  model: string;
 }
 
 /**

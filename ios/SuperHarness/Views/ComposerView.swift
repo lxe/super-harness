@@ -293,7 +293,7 @@ public struct ComposerView: View {
             Button {
                 handleClipboardPaste(allowTextFallback: true)
             } label: {
-                Label("Paste from Clipboard", systemImage: "doc.on.clipboard")
+                Label("Paste", systemImage: "doc.on.clipboard")
             }
         } label: {
             Image(systemName: "plus")
@@ -799,21 +799,30 @@ private struct SHPasteableTextInput: View {
                         .foregroundStyle(SHColor.inkFaint)
                         .allowsHitTesting(false)
                 }
-                if !(text.isEmpty && isLocked) {
-                    SHPasteableTextViewRepresentable(
-                        text: $text,
-                        measuredHeight: $measuredHeight,
-                        isLocked: isLocked,
-                        scrollToEndToken: scrollToEndToken,
-                        onPasteMedia: onPasteMedia
-                    )
-                    .frame(height: measuredHeight)
-                    .opacity(isLocked ? 0.6 : 1)
+                // The text view stays mounted in every state. Recreating it (as an earlier version
+                // did when dictation started from an empty composer) left its measured height stale,
+                // so the dictated text drew over the attachments and the toolbar.
+                SHPasteableTextViewRepresentable(
+                    text: $text,
+                    measuredHeight: $measuredHeight,
+                    isLocked: isLocked,
+                    scrollToEndToken: scrollToEndToken,
+                    onPasteMedia: onPasteMedia
+                )
+                .frame(height: measuredHeight)
+                .clipped()
+                .opacity(isLocked ? 0.6 : 1)
+                if text.isEmpty && isLocked {
+                    SHDotSpinner(tint: SHColor.inkMuted)
+                        .frame(height: 22, alignment: .leading)
+                        .allowsHitTesting(false)
+                        .accessibilityLabel("Transcribing")
+                        .accessibilityIdentifier("composer.transcribing")
                 }
             }
-            if isLocked {
+            if isLocked && !text.isEmpty {
                 SHDotSpinner(tint: SHColor.inkMuted)
-                    .frame(height: text.isEmpty ? 22 : 12, alignment: .leading)
+                    .frame(height: 12, alignment: .leading)
                     .accessibilityLabel("Transcribing")
                     .accessibilityIdentifier("composer.transcribing")
             }
@@ -879,6 +888,11 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
         let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         let clamped = min(Self.maxHeight, max(Self.minHeight, ceil(fitting.height)))
         uiView.isScrollEnabled = fitting.height > Self.maxHeight + 1
+        // Keep the SwiftUI frame in step with what the text needs, even when the text changed
+        // before the view had a width (recalcHeight cannot measure then).
+        if abs(measuredHeight - clamped) > 0.5 {
+            DispatchQueue.main.async { measuredHeight = clamped }
+        }
         return CGSize(width: width, height: clamped)
     }
 

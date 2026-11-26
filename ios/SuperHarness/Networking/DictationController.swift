@@ -104,6 +104,16 @@ public final class DictationController {
     public var levelHistory: [CGFloat] = DictationController.silentHistory
 
     public nonisolated static let levelBarCount = 7
+
+    /// Maps recorder power (dBFS) to a 0...1 bar level. Everything quieter than -38 dB (room
+    /// noise, a fan, distant talk) reads as zero, and the curve keeps low levels small so the
+    /// bars move for a voice near the phone and stay nearly flat otherwise.
+    public nonisolated static func displayLevel(decibels: Float) -> CGFloat {
+        let floorDb: Float = -38
+        let ceilingDb: Float = -6
+        let linear = (max(floorDb, min(ceilingDb, decibels)) - floorDb) / (ceilingDb - floorDb)
+        return CGFloat(pow(Double(linear), 1.6))
+    }
     public nonisolated static let silentHistory = [CGFloat](repeating: 0, count: 7)
 
     /// Shifts a new mic level into the history. A rising level is followed quickly and a
@@ -375,8 +385,7 @@ public final class DictationController {
                 if let rec = self.recorder {
                     rec.updateMeters()
                     let db = rec.averagePower(forChannel: 0)
-                    let clamped = max(-55.0, min(0.0, db))
-                    self.normalizedLevel = CGFloat((clamped + 55.0) / 55.0)
+                    self.normalizedLevel = Self.displayLevel(decibels: db)
                 }
                 #if DEBUG
                 // The Simulator records silence; SH_DICTATION_FAKE_LEVELS drives the bars for UI checks.

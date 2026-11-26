@@ -121,7 +121,9 @@ public struct SessionListView: View {
     @State private var renamingFolder: SessionFolder? = nil
     @State private var renameFolderDraft: String = ""
     @State private var isManageFoldersPresented: Bool = false
-    @State private var isSearchPresented: Bool = false
+    @State private var isSearchActive: Bool = false
+    @State private var isErrorDetailExpanded: Bool = false
+    @FocusState private var isSearchFieldFocused: Bool
 
     private var collapsedSectionIds: Set<String> {
         Set(collapsedSectionsRaw.split(separator: "\n").map(String.init))
@@ -218,15 +220,6 @@ public struct SessionListView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $isSearchPresented) {
-            SessionSearchSheet(store: store) { sessionId in
-                isSearchPresented = false
-                onSelectSession(sessionId)
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.ultraThinMaterial)
-        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 ConnectionStatusPill(health: store.connectionHealth) {
@@ -265,10 +258,15 @@ public struct SessionListView: View {
             // Search is its own glass circle, set apart from the usage/filter/new-chat group.
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    isSearchPresented = true
+                    if isSearchActive {
+                        closeSearch()
+                    } else {
+                        withAnimation(.easeOut(duration: 0.18)) { isSearchActive = true }
+                        isSearchFieldFocused = true
+                    }
                 } label: {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(SHColor.inkSecondary)
+                        .foregroundStyle(isSearchActive ? SHColor.brandMaster : SHColor.inkSecondary)
                 }
                 .accessibilityLabel("Search sessions")
                 .accessibilityIdentifier("header.search")
@@ -340,29 +338,96 @@ public struct SessionListView: View {
         }
     }
 
+    private func closeSearch() {
+        isSearchFieldFocused = false
+        store.searchQuery = ""
+        withAnimation(.easeOut(duration: 0.18)) { isSearchActive = false }
+    }
+
+    /// The search box that drops into the list under the top bar. Typing filters the list
+    /// in place; the X clears the filter and removes the box.
+    private var inlineSearchField: some View {
+        HStack(spacing: SHSpacing.sm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(SHColor.inkMuted)
+            TextField("Search sessions, messages, projects", text: $store.searchQuery)
+                .font(SHTypography.body)
+                .foregroundStyle(SHColor.inkPrimary)
+                .tint(SHColor.brandMaster)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .accessibilityIdentifier("search.field")
+            Button {
+                closeSearch()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(SHColor.inkMuted)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close search")
+            .accessibilityIdentifier("search.close")
+        }
+        .padding(.leading, SHSpacing.lg)
+        .padding(.trailing, SHSpacing.sm)
+        .frame(height: 44)
+        .modifier(SearchGlassModifier(shape: Capsule()))
+        .padding(.horizontal, SHSpacing.lg)
+        .padding(.top, SHSpacing.xs)
+        .padding(.bottom, SHSpacing.sm)
+    }
+
     private var sessionListContent: some View {
         List {
             // Subtle error banner if live host had an issue
             if let error = store.lastError {
                 Section {
-                    HStack(spacing: SHSpacing.sm) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(SHColor.statusWarning)
-                            .font(.system(size: 13))
-                        Text(error)
-                            .font(SHTypography.micro)
-                            .foregroundStyle(SHColor.inkSecondary)
-                            .lineLimit(2)
-                        Spacer()
-                        Button {
-                            store.lastError = nil
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(SHColor.inkMuted)
+                    let presented = SHErrorPresentation.present(error, technicalDetail: store.lastErrorDetail)
+                    VStack(alignment: .leading, spacing: SHSpacing.sm) {
+                        HStack(spacing: SHSpacing.sm) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(SHColor.statusWarning)
+                                .font(.system(size: 13))
+                            Text(presented.message)
+                                .font(SHTypography.micro)
+                                .foregroundStyle(SHColor.inkSecondary)
+                                .lineLimit(2)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
+                                .rotationEffect(.degrees(isErrorDetailExpanded ? 90 : 0))
+                            Spacer()
+                            Button {
+                                store.lastError = nil
+                                isErrorDetailExpanded = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(SHColor.inkMuted)
+                                    .frame(width: 24, height: 24)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Dismiss")
                         }
-                        .buttonStyle(.plain)
+                        if isErrorDetailExpanded {
+                            Text(presented.detail)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(SHColor.inkMuted)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.15)) { isErrorDetailExpanded.toggle() }
+                    }
+                    .accessibilityIdentifier("list.errorBanner")
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(SHColor.surfacePopover, in: RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
@@ -524,6 +589,12 @@ public struct SessionListView: View {
             }
         }
         .listStyle(.plain)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isSearchActive {
+                inlineSearchField
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .contentMargins(.top, 4, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(SHColor.surfaceRail)
@@ -1065,125 +1136,7 @@ private struct ManageFoldersSheet: View {
     }
 }
 
-// MARK: - Session Search Sheet
-
-/// Search opened from the top bar: a glass search field with the keyboard up at once,
-/// results that update as the query changes, and a tap that opens the thread.
-private struct SessionSearchSheet: View {
-    @Bindable var store: AppStore
-    let onSelect: (String) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var query: String = ""
-    @FocusState private var isFieldFocused: Bool
-
-    private var results: [UnifiedSession] {
-        store.sessions
-            .filter { s in
-                if s.isMaster { return false }
-                if !store.showHidden && s.hidden { return false }
-                if !store.showArchived && s.status == .archived { return false }
-                return SessionRowFormatting.matches(s, query: query)
-            }
-            .sorted { $0.updatedAt > $1.updatedAt }
-    }
-
-    var body: some View {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let matches = results
-
-        VStack(spacing: SHSpacing.md) {
-            HStack(spacing: SHSpacing.sm) {
-                HStack(spacing: SHSpacing.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(SHColor.inkMuted)
-                    TextField("Search sessions, messages, projects", text: $query)
-                        .font(SHTypography.body)
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .tint(SHColor.brandMaster)
-                        .focused($isFieldFocused)
-                        .submitLabel(.search)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .accessibilityIdentifier("search.field")
-                        .onSubmit {
-                            if let first = matches.first, !trimmedQuery.isEmpty {
-                                onSelect(first.id)
-                            }
-                        }
-                    if !query.isEmpty {
-                        Button {
-                            query = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(SHColor.inkFaint)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear search")
-                    }
-                }
-                .padding(.horizontal, SHSpacing.lg)
-                .frame(height: 44)
-                .modifier(SearchGlassModifier(shape: Capsule()))
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(SHColor.inkSecondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .modifier(SearchGlassModifier(shape: Circle()))
-                .accessibilityLabel("Close search")
-                .accessibilityIdentifier("search.close")
-            }
-            .padding(.horizontal, SHSpacing.lg)
-            .padding(.top, SHSpacing.xl)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: SHSpacing.sm) {
-                    Text(trimmedQuery.isEmpty ? "RECENT" : (matches.isEmpty ? "NO MATCHES" : "\(matches.count) \(matches.count == 1 ? "MATCH" : "MATCHES")"))
-                        .font(SHTypography.micro.weight(.semibold))
-                        .foregroundStyle(SHColor.inkMuted)
-                        .padding(.horizontal, SHSpacing.xs)
-
-                    ForEach(trimmedQuery.isEmpty ? Array(matches.prefix(12)) : matches) { session in
-                        Button {
-                            onSelect(session.id)
-                        } label: {
-                            SessionListRow(session: session, isBusy: store.isSessionBusy(session.id))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 11)
-                                .background(
-                                    RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
-                                        .fill(SHColor.surfaceSubtle.opacity(0.7))
-                                )
-                                .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if matches.isEmpty {
-                        Text("Nothing matches “\(trimmedQuery)”. Search looks at titles, your last message, previews, projects and branches.")
-                            .font(SHTypography.caption)
-                            .foregroundStyle(SHColor.inkMuted)
-                            .padding(.horizontal, SHSpacing.xs)
-                            .padding(.top, SHSpacing.xs)
-                    }
-                }
-                .padding(.horizontal, SHSpacing.lg)
-                .padding(.bottom, SHSpacing.xl)
-            }
-            .scrollDismissesKeyboard(.interactively)
-        }
-        .onAppear { isFieldFocused = true }
-    }
-}
+// MARK: - Search Field Glass
 
 private struct SearchGlassModifier<S: Shape>: ViewModifier {
     let shape: S
@@ -1196,5 +1149,57 @@ private struct SearchGlassModifier<S: Shape>: ViewModifier {
                 .background(.ultraThinMaterial, in: shape)
                 .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.75))
         }
+    }
+}
+
+// MARK: - Friendly Error Presentation
+
+/// Turns a raw error string into a sentence a person can act on, and keeps the raw text
+/// (plus any technical detail the store recorded) for the expanded developer view.
+public enum SHErrorPresentation {
+    public static func present(_ raw: String, technicalDetail: String? = nil) -> (message: String, detail: String) {
+        let detail = [raw, technicalDetail ?? ""]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { acc, part in if !acc.contains(part) { acc.append(part) } }
+            .joined(separator: "\n")
+        return (friendlyMessage(for: raw + " " + (technicalDetail ?? "")), detail)
+    }
+
+    public static func friendlyMessage(for raw: String) -> String {
+        let text = raw.lowercased()
+        func has(_ needles: String...) -> Bool { needles.contains { text.contains($0) } }
+
+        if has("timed out", "timeout", "-1001") {
+            return "Your host took too long to answer. It may be asleep or on a slow connection."
+        }
+        if has("offline", "internet connection", "-1009") {
+            return "This phone is offline. Check Wi-Fi, cellular or Tailscale."
+        }
+        if has("could not connect", "connection refused", "cannot connect", "-1004", "network connection was lost", "-1005") {
+            return "Can't reach your host. Check that Super Harness is running there."
+        }
+        if has("hostname could not be found", "cannot find host", "-1003") {
+            return "Can't find your host. Check the address in Host Connection."
+        }
+        if has("401", "403", "unauthorized", "forbidden", "invalid token") {
+            return "Your host refused this phone. Pair again in Host Connection."
+        }
+        if has("ssl", "certificate", "secure connection", "-1200") {
+            return "Couldn't make a secure connection to your host."
+        }
+        if has("not delivered", "failed to send") {
+            return "Your message wasn't delivered. Tap it to retry."
+        }
+        if has("failed to start") {
+            return "The new session didn't start."
+        }
+        if has("http 5", "status 5", "500", "502", "503", "internal server error") {
+            return "Your host hit a problem handling that. Try again."
+        }
+        if has("decod", "json", "keynotfound", "typemismatch", "data couldn’t be read", "data couldn't be read") {
+            return "Your host sent something this app version doesn't understand."
+        }
+        return "Something went wrong talking to your host."
     }
 }

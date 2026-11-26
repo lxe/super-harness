@@ -143,4 +143,24 @@ final class MarkdownRendererTests: XCTestCase {
         )
         XCTAssertTrue(command.runs.compactMap(\.link).isEmpty, "URLs inside a longer code span must not be auto-linked")
     }
+
+    @MainActor func testAutolinksTheInstallLinkPhrasingsFromRealReplies() {
+        let expected = "https://archlinux.tail6026.ts.net:8451/"
+        let samples = [
+            "install from https://archlinux.tail6026.ts.net:8451/. It includes the fix",
+            "from https://archlinux.tail6026.ts.net:8451/ as build `e895777-20261126`",
+            "**Ready to install** at https://archlinux.tail6026.ts.net:8451/:",
+            "from https://archlinux.tail6026.ts.net:8451/ (build `d993019-20261126`",
+            "(see https://archlinux.tail6026.ts.net:8451/)",
+            "\"https://archlinux.tail6026.ts.net:8451/\"",
+        ]
+        for sample in samples {
+            let links = SHMarkdownCache.inlineAttributedString(for: sample, isUserBubble: false)
+                .runs.compactMap { $0.link?.absoluteString }
+            XCTAssertEqual(links, [expected], "sample: \(sample)")
+        }
+        // A bare host:port in backticks has no scheme and stays plain.
+        let hostOnly = SHMarkdownCache.inlineAttributedString(for: "served at `archlinux.tail6026.ts.net:8451`", isUserBubble: false)
+        XCTAssertTrue(hostOnly.runs.compactMap(\.link).isEmpty)
+    }
 }

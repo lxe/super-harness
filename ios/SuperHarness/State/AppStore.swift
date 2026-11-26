@@ -154,6 +154,12 @@ public final class AppStore {
     public var bearerToken: String
     public var connectionHealth: ConnectionHealth = .demo
     public var lastError: String?
+    /// Developer-facing detail for `lastError` (domain, code, failing URL), when it is known.
+    public private(set) var lastErrorTechnicalDetail: (message: String, detail: String)?
+    public var lastErrorDetail: String? {
+        guard let recorded = lastErrorTechnicalDetail, recorded.message == lastError else { return nil }
+        return recorded.detail
+    }
     public var protocolVersion: Int?
     public var lastBootstrapSeq: Int?
 
@@ -439,6 +445,19 @@ public final class AppStore {
     // MARK: - Lifecycle
 
     public func bootstrap(quiet: Bool = false) async {
+        #if DEBUG
+        // UI checks for the error banner: report a realistic timeout shortly after launch.
+        if !quiet, ProcessInfo.processInfo.environment["SH_DEBUG_SIMULATE_TIMEOUT"] != nil {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                self?.reportError(URLError(.timedOut, userInfo: [
+                    NSURLErrorFailingURLStringErrorKey: "http://100.64.0.10:47890/api/bootstrap",
+                    NSLocalizedDescriptionKey: "The request timed out.",
+                ]))
+            }
+        }
+        #endif
+
         if !quiet || sessions.isEmpty {
             isBootstrapping = !quiet
         }
@@ -843,7 +862,21 @@ public final class AppStore {
         if error is CancellationError { return }
         if let urlError = error as? URLError, urlError.code == .cancelled { return }
         if (error as NSError).domain == NSURLErrorDomain, (error as NSError).code == NSURLErrorCancelled { return }
-        lastError = error.localizedDescription
+        let message = error.localizedDescription
+        let ns = error as NSError
+        var parts = ["\(ns.domain) code \(ns.code)"]
+        if let url = (ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.absoluteString
+            ?? (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) {
+            parts.append(url)
+        }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("underlying: \(underlying.domain) code \(underlying.code)")
+        }
+        if !(error is URLError), ns.domain != NSURLErrorDomain {
+            parts.append(String(describing: error))
+        }
+        lastErrorTechnicalDetail = (message, parts.joined(separator: "\n"))
+        lastError = message
     }
 
     public func applySessionsDelta(_ delta: SessionsDeltaEnvelope) {
@@ -1153,10 +1186,7 @@ public final class AppStore {
             if let filter = selectedHarnessFilter, s.harness.harnessGroup != filter {
                 return false
             }
-            if !q.isEmpty {
-                let hay = "\(s.displayTitle) \(s.projectName) \(s.cwd) \(s.preview) \(s.gitBranch ?? "") \(s.tags.joined(separator: " "))".lowercased()
-                if !hay.contains(q) { return false }
-            }
+            if !q.isEmpty, !SessionRowFormatting.matches(s, query: q) { return false }
             return true
         }
     }

@@ -176,6 +176,28 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(DictationController.advancing(history, with: 7).last ?? 0, 0.78 + 0.22 * 0.78, accuracy: 0.001)
     }
 
+    func testErrorsGetFriendlyMessagesAndKeepTechnicalDetail() {
+        let timeout = SHErrorPresentation.present("The request timed out.", technicalDetail: "NSURLErrorDomain code -1001\nhttp://100.64.0.10:47890/api/bootstrap")
+        XCTAssertEqual(timeout.message, "Your host took too long to answer. It may be asleep or on a slow connection.")
+        XCTAssertTrue(timeout.detail.contains("The request timed out."))
+        XCTAssertTrue(timeout.detail.contains("/api/bootstrap"))
+        XCTAssertFalse(timeout.message.lowercased().contains("request"))
+
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "The Internet connection appears to be offline."), "This phone is offline. Check Wi-Fi, cellular or Tailscale.")
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "Could not connect to the server."), "Can't reach your host. Check that Super Harness is running there.")
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "HTTP 401 Unauthorized"), "Your host refused this phone. Pair again in Host Connection.")
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "zxqv"), "Something went wrong talking to your host.")
+        XCTAssertEqual(SHErrorPresentation.present("zxqv").detail, "zxqv")
+    }
+
+    func testDisplayLevelIgnoresRoomNoiseAndRespondsToVoice() {
+        XCTAssertEqual(DictationController.displayLevel(decibels: -60), 0)
+        XCTAssertEqual(DictationController.displayLevel(decibels: -40), 0)
+        XCTAssertLessThan(DictationController.displayLevel(decibels: -32), 0.08)
+        XCTAssertGreaterThan(DictationController.displayLevel(decibels: -18), 0.4)
+        XCTAssertEqual(DictationController.displayLevel(decibels: 0), 1)
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

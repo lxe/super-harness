@@ -1,6 +1,6 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 import { cn } from './cn';
+import { WorkingOrb } from './WorkingOrb';
 import { ProgressBar, type ProgressTone } from './ProgressBar';
 
 export interface SegmentedItem<T extends string> {
@@ -158,34 +158,28 @@ export function SegmentedControl<T extends string>({
                   />
                 </svg>
 
-                {/* 2. Noticeable luminous activity glow when this harness is actively working */}
+                {/* 2. Liquid-light sweeping aurora & breathing outer bloom when harness is actively working */}
                 {item.working && (
                   <>
                     <span
                       aria-hidden="true"
-                      className="sh-gauge-halo absolute inset-[-6px] rounded-full pointer-events-none"
+                      className="sh-gauge-halo absolute inset-[-7px] rounded-full pointer-events-none"
                       style={{
-                        background: `radial-gradient(circle, ${palette.stroke}78 0%, ${palette.stroke}2e 45%, transparent 72%)`,
+                        background: `radial-gradient(circle, ${palette.stroke}8c 0%, ${palette.stroke}3d 44%, transparent 72%)`,
                       }}
                     />
-                    <svg
+                    <span
                       aria-hidden="true"
-                      viewBox="0 0 36 36"
-                      className="sh-gauge-halo absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                      className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
                       style={{
-                        filter: `drop-shadow(0 0 5px ${palette.stroke})`,
+                        background: `conic-gradient(from 0deg, transparent 0deg, ${palette.stroke}aa 65deg, #ffffff 115deg, ${palette.stroke}cc 165deg, transparent 225deg)`,
+                        WebkitMaskImage:
+                          'radial-gradient(farthest-side, transparent calc(100% - 3.6px), #000 calc(100% - 3.1px))',
+                        maskImage:
+                          'radial-gradient(farthest-side, transparent calc(100% - 3.6px), #000 calc(100% - 3.1px))',
+                        filter: `drop-shadow(0 0 6px ${palette.stroke})`,
                       }}
-                    >
-                      <circle
-                        cx="18"
-                        cy="18"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke={palette.stroke}
-                        strokeOpacity={0.78}
-                        strokeWidth="3.2"
-                      />
-                    </svg>
+                    />
                   </>
                 )}
 
@@ -283,11 +277,11 @@ export function SegmentedControl<T extends string>({
               )}
               {!logoOnly && <span className="truncate">{item.label}</span>}
               {!logoOnly && item.working && (
-                <Loader2 className="w-2.5 h-2.5 animate-spin text-ink-secondary shrink-0" />
+                <WorkingOrb tone="master" size="sm" className="shrink-0" />
               )}
             </div>
             {logoOnly && item.working && (
-              <Loader2 className="w-2 h-2 animate-spin text-ink-secondary absolute top-1 right-1 pointer-events-none" />
+              <WorkingOrb tone="master" size="sm" className="absolute top-0.5 right-0.5 pointer-events-none scale-75" />
             )}
             {hasAnyProgress && (
               <ProgressBar

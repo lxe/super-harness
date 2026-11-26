@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ImagePlus,
   ListPlus,
-  Loader2,
   Search,
   Square,
   X,
@@ -23,6 +22,7 @@ import {
   MenuItem,
   MenuSectionLabel,
   PopoverSurface,
+  WorkingOrb,
 } from '../ui';
 import { getHarnessVisual, mediaUrlForPath } from '../utils/format';
 import {
@@ -518,7 +518,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                 className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {sending ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <WorkingOrb tone={session.harnessGroup} size="sm" />
                 ) : (
                   <ArrowUp className="w-4 h-4" />
                 )}

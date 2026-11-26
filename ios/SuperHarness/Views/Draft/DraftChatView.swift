@@ -452,9 +452,7 @@ public struct DraftChatView: View {
         } label: {
             Group {
                 if isStarting {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(SHColor.surfaceRail)
+                    SHActivityPulse(tint: SHColor.surfaceRail, size: 16)
                 } else {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 14, weight: .bold))
@@ -522,9 +520,7 @@ public struct DraftChatView: View {
             .accessibilityIdentifier("composer.mic")
 
         case .transcribing:
-            ProgressView()
-                .controlSize(.mini)
-                .tint(SHColor.brandAntigravity)
+            SHActivityPulse(tint: SHColor.brandAntigravity, size: 16)
                 .frame(width: 32, height: 32)
                 .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityIdentifier("composer.mic")

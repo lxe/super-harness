@@ -73,7 +73,7 @@ public struct HostConnectionSheet: View {
                         Task { await saveAndClose() }
                     } label: {
                         if isSaving {
-                            ProgressView().controlSize(.small)
+                            SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                         } else {
                             Text("Save")
                                 .fontWeight(.semibold)
@@ -106,7 +106,7 @@ public struct HostConnectionSheet: View {
             } label: {
                 HStack {
                     if isTesting {
-                        ProgressView().controlSize(.small)
+                        SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                     } else {
                         Image(systemName: "bolt.horizontal.circle")
                     }
@@ -155,7 +155,7 @@ public struct HostConnectionSheet: View {
                     }
                 } label: {
                     if store.isCheckingDictation {
-                        ProgressView().controlSize(.small)
+                        SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                     } else {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 13, weight: .medium))
@@ -326,7 +326,7 @@ public struct HostConnectionSheet: View {
                         .font(SHTypography.label)
                     Spacer()
                     if isSendingTestPush {
-                        ProgressView().controlSize(.small)
+                        SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                     }
                 }
             }

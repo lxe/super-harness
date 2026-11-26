@@ -1,6 +1,6 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 import { cn } from './cn';
+import { WorkingOrb } from './WorkingOrb';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'subtle' | 'ghost' | 'danger';
 export type ButtonSize = 'xs' | 'sm' | 'md';
@@ -62,7 +62,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...rest}
       >
         {loading ? (
-          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+          <WorkingOrb tone="master" size="sm" className="shrink-0" />
         ) : (
           iconLeft && <span className="shrink-0 inline-flex">{iconLeft}</span>
         )}

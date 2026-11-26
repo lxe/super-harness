@@ -513,8 +513,7 @@ public struct ImageLightboxView: View {
                             }
                         }
                 } else if isLoadingRemote {
-                    ProgressView()
-                        .tint(SHColor.inkPrimary)
+                    SHActivityPulse(tint: SHColor.inkPrimary, size: 22)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "photo")

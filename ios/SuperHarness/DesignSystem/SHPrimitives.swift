@@ -440,9 +440,7 @@ private struct SHAttachmentThumbTile: View {
 
             if item.isUploading {
                 Color.black.opacity(0.42)
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.white)
+                SHActivityPulse(tint: .white, size: 16)
             }
         }
         .frame(width: thumbSize, height: thumbSize)
@@ -460,7 +458,7 @@ private struct SHAttachmentThumbTile: View {
                     .fill(SHColor.surfaceBubble)
                     .frame(width: 32, height: 32)
                 if item.isUploading {
-                    ProgressView().controlSize(.mini).tint(SHColor.inkPrimary)
+                    SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                 } else {
                     Image(systemName: fileIconName(for: item.name, mime: item.mimeType))
                         .font(.system(size: 14, weight: .medium))
@@ -658,71 +656,79 @@ public struct SHRadialGauge<Center: View>: View {
 
     public var body: some View {
         if isWorking && !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 1.8))
-                gaugeContent(pulse: wave)
+                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 1.6))
+                let sweepDeg = (t / 1.7).truncatingRemainder(dividingBy: 1.0) * 360.0
+                gaugeContent(pulse: wave, sweepDeg: sweepDeg)
             }
         } else {
-            gaugeContent(pulse: isWorking ? 0.72 : 0.0)
+            gaugeContent(pulse: isWorking ? 0.78 : 0.0, sweepDeg: 0)
         }
     }
 
     @ViewBuilder
-    private func gaugeContent(pulse: Double) -> some View {
+    private func gaugeContent(pulse: Double, sweepDeg: Double) -> some View {
         ZStack {
             if isWorking {
-                // Lush brand-tinted activity aura so active harnesses stand out unmistakably at a glance
+                // Vivid breathing outer energy bloom so active harnesses stand out unmistakably
                 Circle()
                     .fill(
                         RadialGradient(
                             colors: [
-                                stroke.opacity(0.30 + 0.30 * pulse),
-                                stroke.opacity(0.12 + 0.16 * pulse),
+                                stroke.opacity(0.36 + 0.34 * pulse),
+                                stroke.opacity(0.16 + 0.18 * pulse),
                                 stroke.opacity(0.0),
                             ],
                             center: .center,
                             startRadius: 2,
-                            endRadius: size * 0.72
+                            endRadius: size * 0.66
                         )
                     )
-                    .frame(width: size + 12, height: size + 12)
+                    .frame(width: size + 8, height: size + 8)
+                    .scaleEffect(0.92 + 0.12 * pulse)
 
-                // Soft outer ring bloom
+                // Softly blurred liquid-light aurora sheen sweeping smoothly around the ring
+                let auroraGradient = AngularGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: stroke.opacity(0.68), location: 0.18),
+                        .init(color: Color.white.opacity(0.96), location: 0.32),
+                        .init(color: stroke.opacity(0.78), location: 0.46),
+                        .init(color: .clear, location: 0.64),
+                        .init(color: .clear, location: 1.0),
+                    ]),
+                    center: .center
+                )
+
                 Circle()
                     .inset(by: ringInset)
-                    .stroke(
-                        stroke.opacity(0.34 + 0.44 * pulse),
-                        lineWidth: lineWidth + 1.8
-                    )
-                    .blur(radius: 2.6)
+                    .stroke(auroraGradient, lineWidth: lineWidth + 2.2)
+                    .blur(radius: 2.8)
+                    .rotationEffect(.degrees(sweepDeg))
+
+                Circle()
+                    .inset(by: ringInset)
+                    .stroke(auroraGradient, lineWidth: lineWidth + 0.4)
+                    .rotationEffect(.degrees(sweepDeg))
             }
 
             Circle()
                 .inset(by: ringInset)
                 .stroke(Color.white.opacity(isActive ? 0.15 : 0.09), lineWidth: lineWidth)
 
-            if isWorking {
-                Circle()
-                    .inset(by: ringInset)
-                    .stroke(
-                        stroke.opacity(0.30 + 0.46 * pulse),
-                        lineWidth: lineWidth
-                    )
-            }
-
             if displayFraction > 0 {
                 Circle()
                     .inset(by: ringInset)
                     .trim(from: 0, to: displayFraction)
                     .stroke(
-                        stroke.opacity(estimated ? (0.84 + 0.16 * pulse) : 1.0),
+                        stroke.opacity(estimated ? (0.86 + 0.14 * pulse) : 1.0),
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
                     .shadow(
-                        color: isWorking ? stroke.opacity(0.45 + 0.40 * pulse) : .clear,
-                        radius: isWorking ? (3.0 + 2.5 * pulse) : 0
+                        color: isWorking ? stroke.opacity(0.55 + 0.40 * pulse) : .clear,
+                        radius: isWorking ? (3.5 + 3.0 * pulse) : 0
                     )
                     .animation(.easeOut(duration: 0.3), value: displayFraction)
             }

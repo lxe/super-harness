@@ -5,9 +5,9 @@ import {
   ChevronRight,
   Circle,
   ListChecks,
-  Loader2,
 } from 'lucide-react';
 import type { LiveStepItem } from '../../shared/types';
+import { WorkingOrb } from '../ui';
 
 export interface LiveStepsBarProps {
   steps?: LiveStepItem[];
@@ -59,7 +59,7 @@ export const LiveStepsBar: React.FC<LiveStepsBarProps> = React.memo(({ steps }) 
               {st.status === 'done' ? (
                 <CheckCircle2 className="w-4 h-4 text-ink-faint shrink-0" />
               ) : st.status === 'in_progress' ? (
-                <Loader2 className="w-4 h-4 animate-spin text-ink-secondary shrink-0" />
+                <WorkingOrb tone="antigravity" size="sm" className="shrink-0" />
               ) : (
                 <Circle className="w-4 h-4 text-zinc-700 shrink-0" />
               )}

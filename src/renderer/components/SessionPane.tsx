@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Loader2, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Terminal } from 'lucide-react';
 import type {
   HarnessCatalog,
   ImageAttachment,
@@ -12,7 +12,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
-import { Badge, Button, Modal, WorkingIndicator } from '../ui';
+import { Badge, Button, Modal, WorkingIndicator, WorkingOrb } from '../ui';
 import { isBusyDispatchError } from '../utils/queueStorage';
 import {
   captureStreamTurnBaseline,
@@ -990,7 +990,7 @@ export const SessionPane: React.FC<Props> = ({
 
             {loading && messages.length === 0 ? (
               <div className="py-16 flex items-center justify-center gap-2 text-caption text-ink-muted">
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <WorkingOrb tone={session.harnessGroup} size="md" />
                 Loading…
               </div>
             ) : messages.length === 0 ? (

@@ -65,7 +65,7 @@ public struct UsageSheetView: View {
                         }
                     } label: {
                         if isRefreshing {
-                            ProgressView().controlSize(.small)
+                            SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                         } else {
                             Image(systemName: "arrow.clockwise")
                                 .foregroundStyle(SHColor.inkSecondary)

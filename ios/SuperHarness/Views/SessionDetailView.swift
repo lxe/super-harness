@@ -563,7 +563,7 @@ public struct SessionDetailView: View {
             } label: {
                 HStack(spacing: 6) {
                     if isLoadingEarlier {
-                        ProgressView().controlSize(.mini)
+                        SHActivityPulse(tint: SHColor.inkSecondary, size: 14)
                     } else {
                         Image(systemName: "arrow.up.circle")
                             .font(.system(size: 12))

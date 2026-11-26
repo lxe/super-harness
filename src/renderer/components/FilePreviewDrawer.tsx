@@ -8,12 +8,11 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  Loader2,
   Terminal,
   X,
 } from 'lucide-react';
 import type { FilePreviewData } from '../../shared/types';
-import { Badge, Button, IconButton } from '../ui';
+import { Badge, Button, IconButton, WorkingOrb } from '../ui';
 import { mediaUrlForPath, renderMarkdownHtml } from '../utils/format';
 
 export interface PreviewTarget {
@@ -184,7 +183,7 @@ export const FilePreviewDrawer: React.FC<Props> = ({
       <div className="flex-1 overflow-auto bg-surface-canvas/40">
         {loading ? (
           <div className="py-16 flex items-center justify-center gap-2 text-caption text-ink-faint">
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <WorkingOrb tone="master" size="md" />
             Loading preview…
           </div>
         ) : data?.error ? (

@@ -9,7 +9,6 @@ import {
   FolderPlus,
   HelpCircle,
   ImagePlus,
-  Loader2,
   Radio,
   Search,
   Sparkles,
@@ -23,7 +22,7 @@ import type {
   ImageAttachment,
   StartSessionRequest,
 } from '../../shared/types';
-import { Badge, Button, IconButton, MenuDivider, PopoverSurface } from '../ui';
+import { Badge, Button, IconButton, MenuDivider, PopoverSurface, WorkingOrb } from '../ui';
 import { mediaUrlForPath } from '../utils/format';
 import { HarnessLogo } from './HarnessLogo';
 import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
@@ -1090,7 +1089,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                 className="w-8 h-8 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-35 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {busy ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <WorkingOrb tone="master" size="sm" />
                 ) : (
                   <ArrowUp className="w-4 h-4" />
                 )}

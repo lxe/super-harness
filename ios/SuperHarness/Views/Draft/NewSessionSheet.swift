@@ -182,7 +182,7 @@ public struct NewSessionSheet: View {
                         Task { await createSession() }
                     } label: {
                         if isCreating {
-                            ProgressView().controlSize(.small)
+                            SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
                         } else {
                             Text("Start")
                                 .fontWeight(.semibold)

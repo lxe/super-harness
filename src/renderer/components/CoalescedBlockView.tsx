@@ -1159,8 +1159,10 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                       }
                     : undefined
                 }
-                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary sh-shadow-bubble transition-colors ${
-                  !expanded ? 'cursor-pointer hover:bg-[#272a33]' : ''
+                className={`group/bubble max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary sh-shadow-bubble ${
+                  !expanded
+                    ? 'cursor-pointer hover:bg-[#272a33] sh-shadow-bubble-interactive'
+                    : 'transition-colors'
                 } ${msg.error ? 'ring-1 ring-rose-500/35' : ''}`}
               >
                 {expanded ? (
@@ -1188,7 +1190,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                   </>
                 ) : (
                   <div>
-                    <div className="relative max-h-[5.1em] overflow-hidden">
+                    <div className="max-h-[5.1em] overflow-hidden sh-bubble-fade-mask">
                       <div className="space-y-2 pointer-events-none">
                         {nonImageBlocks.map((b, i) => (
                           <CoalescedBlockView
@@ -1200,11 +1202,12 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                           />
                         ))}
                       </div>
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
                     </div>
-                    <span className="mt-1 inline-flex items-center text-caption leading-none tracking-[0.15em] text-ink-muted">
-                      ···
-                    </span>
+                    <div className="mt-1 flex justify-center">
+                      <span className="inline-flex items-center text-caption leading-none tracking-[0.15em] text-ink-muted group-hover/bubble:text-ink-secondary transition-colors">
+                        ···
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>

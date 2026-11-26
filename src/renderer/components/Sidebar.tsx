@@ -1028,12 +1028,32 @@ export const Sidebar: React.FC<Props> = React.memo(({
       className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail select-none"
     >
       {/* Top Bar (draggable window region) */}
-      <div className="sh-drag-region h-12 px-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-2.5 px-1">
-          <Layers className="w-4 h-4 text-ink-secondary" />
-          <span className="text-heading font-semibold tracking-tight text-ink-primary">
-            Super Harness
-          </span>
+      <div className="sh-drag-region h-12 px-3 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <div className="w-8 h-8 flex items-center justify-center shrink-0" title="Super Harness">
+            <Layers className="w-4 h-4 text-ink-secondary" />
+          </div>
+          <IconButton
+            label="New Conversation"
+            onClick={() => onNewSession(filter)}
+          >
+            <SquarePen className="w-4 h-4" strokeWidth={1.75} />
+          </IconButton>
+          {masterSession && (
+            <IconButton
+              label="Master Orchestrator"
+              active={activeSessionId === masterSession.id}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey) {
+                  onOpenInSplit(masterSession.id);
+                } else {
+                  onSelectSession(masterSession.id);
+                }
+              }}
+            >
+              <HarnessLogo harness="master" size={16} />
+            </IconButton>
+          )}
         </div>
         <div className="flex items-center gap-0.5 relative">
           <IconButton
@@ -1141,48 +1161,14 @@ export const Sidebar: React.FC<Props> = React.memo(({
         </div>
       </div>
 
-      {/* Primary Actions + Global Top-Pinned Chats (all harnesses, flat below Master Orchestrator) */}
-      <div className="px-2.5 pb-2.5 space-y-0.5">
-        <button
-          type="button"
-          onClick={() => onNewSession(filter)}
-          className="w-full h-8 flex items-center gap-2 px-2.5 rounded-lg text-[13px] text-ink-secondary hover:text-ink-primary hover:bg-white/[0.045] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
-        >
-          <SquarePen className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-          <span className="leading-[1.35]">New Conversation</span>
-        </button>
-
-        {masterSession && (
-          <NavRow
-            data-session-id={masterSession.id}
-            aria-current={activeSessionId === masterSession.id ? 'page' : undefined}
-            icon={<HarnessLogo harness="master" size={16} />}
-            title="Master Orchestrator"
-            active={activeSessionId === masterSession.id}
-            onClick={() => onSelectSession(masterSession.id)}
-            hoverActions={
-              <IconButton
-                size="xs"
-                label="Open in split"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenInSplit(masterSession.id);
-                }}
-              >
-                <Columns2 className="w-3.5 h-3.5" />
-              </IconButton>
-            }
-          />
-        )}
-
-        {globalPinnedSessions.length > 0 && (
-          <div className="space-y-0.5 max-h-[32vh] overflow-y-auto">
-            {globalPinnedSessions.map((s) =>
-              renderSessionRow(s, { showLogo: true, showPin: false })
-            )}
-          </div>
-        )}
-      </div>
+      {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar) */}
+      {globalPinnedSessions.length > 0 && (
+        <div className="px-2.5 pb-2.5 space-y-0.5 max-h-[32vh] overflow-y-auto">
+          {globalPinnedSessions.map((s) =>
+            renderSessionRow(s, { showLogo: true, showPin: false })
+          )}
+        </div>
+      )}
 
       {/* Top Harness Switcher Bar (Antigravity | Codex | Claude | Muse | Pi) with toggle-to-deselect */}
       {(() => {

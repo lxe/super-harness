@@ -470,7 +470,9 @@ export function parseAntigravityJsonlLines(
     }
 
     if (stepType === 'SYSTEM_MESSAGE' && typeof obj.content === 'string') {
-      for (const m of obj.content.matchAll(/Task id "([^"]+)" finished/g)) {
+      for (const m of obj.content.matchAll(
+        /Task id "([^"]+)"\s+(?:finished|was canceled|canceled|cancelled|failed|stopped|completed|exited)/gi
+      )) {
         runningTasks.delete(m[1]);
       }
       continue;
@@ -715,7 +717,21 @@ export function parseAntigravityJsonlLines(
       lastStepType === 'USER_INPUT' ||
       (lastStepType === 'PLANNER_RESPONSE' && lastPlannerHadToolCalls));
 
-  const runningTasksList = Array.from(runningTasks.values());
+  const nowMs = Date.now();
+  const runningTasksList = Array.from(runningTasks.values()).filter((task) => {
+    if (task.isDaemon) return true;
+    // Prune ghost non-daemon tasks (e.g. from aborted/forked turns whose completion message never landed)
+    if (task.logPath) {
+      try {
+        const logMtime = fs.statSync(task.logPath).mtimeMs;
+        if (nowMs - logMtime > 180_000) return false;
+      } catch {
+        // If log file no longer exists, drop once the session has gone idle
+        if (!isWorking) return false;
+      }
+    }
+    return true;
+  });
 
   const liveActivity: LiveActivityState = {
     isWorking,

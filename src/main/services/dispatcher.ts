@@ -109,7 +109,17 @@ export class HarnessDispatcher {
       return { ok: false, error: `No driver registered for ${session.harnessGroup}` };
     }
 
-    return driver.sendMessage(session, prompt, attachments, this.createContext(), opts);
+    const res = await driver.sendMessage(session, prompt, attachments, this.createContext(), opts);
+    if (!res.ok) {
+      console.error(
+        `[dispatcher] sendMessage failed session=${sessionId} harness=${session.harnessGroup} force=${Boolean(opts?.force)}: ${res.error || 'unknown error'}`
+      );
+    } else {
+      console.log(
+        `[dispatcher] sent session=${sessionId} via=${res.dispatchedVia || session.harnessGroup} force=${Boolean(opts?.force)}`
+      );
+    }
+    return res;
   }
 
   async queueToSession(

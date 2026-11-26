@@ -345,13 +345,22 @@ export const App: React.FC = () => {
       const session = sessionById.get(sid);
       if (!session || session.harness === 'master') continue;
 
-      const cachedActivity = rendererTranscriptCache.get(sid)?.result.liveActivity;
+      const cachedEntry = rendererTranscriptCache.get(sid);
+      const cachedActivity = cachedEntry?.result.liveActivity;
+      const isWatchedPane = sid === activeSessionId || sid === splitSessionId;
+      const freshCachedWorking =
+        isWatchedPane &&
+        liveWorkingMap[sid] !== false &&
+        Boolean(cachedEntry && Date.now() - cachedEntry.cachedAt < 20_000 && cachedActivity?.isWorking);
       const isBusy =
         streamingIds.has(sid) ||
         Boolean(liveWorkingMap[sid]) ||
-        Boolean(cachedActivity?.isWorking) ||
+        freshCachedWorking ||
         session.status === 'running';
-      const nativeQueueCount = cachedActivity?.queuedMessages?.length ?? 0;
+      const nativeQueueCount =
+        isWatchedPane && cachedEntry && Date.now() - cachedEntry.cachedAt < 20_000
+          ? (cachedActivity?.queuedMessages?.length ?? 0)
+          : 0;
 
       if (isBusy || nativeQueueCount > 0 || drainingQueuesRef.current.has(sid)) {
         const existingTimer = queueTimersRef.current.get(sid);
@@ -446,7 +455,16 @@ export const App: React.FC = () => {
         queueTimersRef.current.delete(sid);
       }
     }
-  }, [queuedBySession, sessions, streamingIds, liveWorkingMap, queueDrainTick, handleQueueChange]);
+  }, [
+    queuedBySession,
+    sessions,
+    streamingIds,
+    liveWorkingMap,
+    queueDrainTick,
+    activeSessionId,
+    splitSessionId,
+    handleQueueChange,
+  ]);
 
   // Clear pending queue timers on unmount
   useEffect(() => {

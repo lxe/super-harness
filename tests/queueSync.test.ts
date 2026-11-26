@@ -211,4 +211,23 @@ describe('Persistent Super Harness queue storage', () => {
     expect(codexAdapterSrc).toContain('appServer.steerTurn(session.nativeId, prompt, attachments)');
     expect(claudeAdapterSrc).toContain("if (decision.action === 'block' && !opts?.force)");
   });
+
+  it('clears canceled Antigravity background tasks and avoids stale transcript-cache queue deadlocks', () => {
+    const agySrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/main/adapters/antigravityAdapter.ts'),
+      'utf8'
+    );
+    const appSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/App.tsx'),
+      'utf8'
+    );
+    const paneSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/components/SessionPane.tsx'),
+      'utf8'
+    );
+
+    expect(agySrc).toContain('was canceled');
+    expect(appSrc).toContain('Date.now() - cachedEntry.cachedAt < 20_000');
+    expect(paneSrc).toContain('outline-none focus:outline-none');
+  });
 });

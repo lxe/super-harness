@@ -24,6 +24,10 @@ public struct SessionDetailView: View {
     @State private var isNewFolderAlertPresented: Bool = false
     @State private var newFolderDraft: String = ""
     @State private var isThreadInfoExpanded: Bool = false
+    private static var usesGlassPopover: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
 
     public init(store: AppStore, session: UnifiedSession) {
         self.store = store
@@ -379,7 +383,9 @@ public struct SessionDetailView: View {
         }
         .background(SHColor.surfaceCanvas)
         .overlay(alignment: .top) {
-            if isThreadInfoExpanded {
+            // Before iOS 26 the card drops in below the bar. On iOS 26 it is a Liquid Glass
+            // popover that grows out of the title pill (see the toolbar below).
+            if isThreadInfoExpanded, !Self.usesGlassPopover {
                 ZStack(alignment: .top) {
                     Color.black.opacity(0.32)
                         .ignoresSafeArea()
@@ -438,6 +444,26 @@ public struct SessionDetailView: View {
                 .accessibilityLabel(currentSession.displayTitle)
                 .accessibilityHint("Tap to show thread summary, duration, host, and token usage")
                 .accessibilityIdentifier("thread.header.pill")
+                .popover(
+                    isPresented: Binding(
+                        get: { isThreadInfoExpanded && Self.usesGlassPopover },
+                        set: { if !$0 { isThreadInfoExpanded = false } }
+                    ),
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .top
+                ) {
+                    ThreadInfoTopSheet(
+                        session: currentSession,
+                        stats: transcript?.stats,
+                        messageCount: transcript?.totalCount ?? messages.count,
+                        isBusy: isBusy,
+                        accentTint: store.gaugeTint(for: currentSession.harness),
+                        drawsOwnSurface: false,
+                        onDismiss: { isThreadInfoExpanded = false }
+                    )
+                    .frame(width: 350)
+                    .presentationCompactAdaptation(.popover)
+                }
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -936,6 +962,8 @@ private struct ThreadInfoTopSheet: View {
     let messageCount: Int
     let isBusy: Bool
     let accentTint: Color
+    /// False when a system popover hosts the card and provides the glass and dismissal.
+    var drawsOwnSurface: Bool = true
     let onDismiss: () -> Void
 
     private var summaryCopy: String? {
@@ -946,21 +974,6 @@ private struct ThreadInfoTopSheet: View {
             }
         }
         return nil
-    }
-
-    private var durationLabel: String {
-        let nowMs = Date().timeIntervalSince1970 * 1000.0
-        let createdMs = session.createdAt > 0 ? session.createdAt : session.updatedAt
-        let startedAgo = UsageMetrics.formatUpdatedAgo(createdMs)
-        let spanSec = max(0, Int((max(session.updatedAt, createdMs) - createdMs) / 1000.0))
-        let ageSec = max(0, Int((nowMs - createdMs) / 1000.0))
-        if spanSec >= 60 {
-            return "Started \(startedAgo) · Span \(Self.formatDuration(spanSec))"
-        }
-        if ageSec >= 60 {
-            return "Started \(startedAgo)"
-        }
-        return "Started just now"
     }
 
     private var hostDescription: String {
@@ -989,20 +1002,6 @@ private struct ThreadInfoTopSheet: View {
         return trimmed
     }
 
-    private var modelSummary: String? {
-        var parts: [String] = []
-        if let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
-            parts.append(m)
-        }
-        if let eff = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines), !eff.isEmpty {
-            parts.append(eff.capitalized)
-        }
-        if let perm = session.permissionMode?.trimmingCharacters(in: .whitespacesAndNewlines), !perm.isEmpty {
-            parts.append(perm)
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
     private static func formatDuration(_ totalSeconds: Int) -> String {
         let hrs = totalSeconds / 3600
         let mins = (totalSeconds % 3600) / 60
@@ -1023,151 +1022,253 @@ private struct ThreadInfoTopSheet: View {
         return String(format: "$%.2f", usd)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header: title + status badge + close chevron
-            HStack(alignment: .top, spacing: 10) {
-                HarnessLogoView(harness: session.harness, size: 18)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(session.displayTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .lineLimit(2)
-                    HStack(spacing: 6) {
-                        if isBusy {
-                            SHActivityPulse(tint: accentTint, size: 10)
-                            Text("Working")
-                                .font(SHTypography.micro.weight(.semibold))
-                                .foregroundStyle(accentTint)
-                        } else if session.status == .waitingInput {
-                            Image(systemName: "questionmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(SHColor.statusWarning)
-                            Text("Waiting for input")
-                                .font(SHTypography.micro.weight(.semibold))
-                                .foregroundStyle(SHColor.statusWarning)
-                        } else {
-                            Text("Idle · updated \(UsageMetrics.formatUpdatedAgo(session.updatedAt))")
-                                .font(SHTypography.micro)
-                                .foregroundStyle(SHColor.inkMuted)
-                        }
-                    }
-                }
-                Spacer(minLength: 8)
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(SHColor.inkMuted)
-                        .frame(width: 26, height: 26)
-                        .background(SHColor.surfaceBubble, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close thread info")
-            }
+    // MARK: Pieces of the duration line, shown as separate rows
 
-            // Summary well
+    private var startedLabel: String {
+        let createdMs = session.createdAt > 0 ? session.createdAt : session.updatedAt
+        return UsageMetrics.formatUpdatedAgo(createdMs)
+    }
+
+    private var spanLabel: String? {
+        let createdMs = session.createdAt > 0 ? session.createdAt : session.updatedAt
+        let spanSec = max(0, Int((max(session.updatedAt, createdMs) - createdMs) / 1000.0))
+        return spanSec >= 60 ? Self.formatDuration(spanSec) : nil
+    }
+
+    private var activityCountLabel: String {
+        if let stats, stats.turnCount > 0 {
+            return stats.turnCount == 1 ? "1 turn" : "\(stats.turnCount) turns"
+        }
+        return messageCount == 1 ? "1 message" : "\(messageCount) messages"
+    }
+
+    private var modelName: String? {
+        let model = session.model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return model.isEmpty ? nil : model
+    }
+
+    private var modelChips: [String] {
+        [session.reasoningEffort?.capitalized, session.permissionMode]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var statusChip: (text: String, color: Color) {
+        if isBusy { return ("Working", accentTint) }
+        if session.status == .waitingInput { return ("Needs input", SHColor.statusWarning) }
+        return ("Idle", SHColor.inkMuted)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SHSpacing.lg) {
+            header
+
             if let summaryCopy {
                 Text(summaryCopy)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13.5))
                     .foregroundStyle(SHColor.inkSecondary)
+                    .lineSpacing(2)
+                    .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 9)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(SHColor.surfaceSubtle, in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
             }
 
-            // Context usage bar + token/cost telemetry
             if let stats, stats.totalTokens > 0 {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let pct = stats.contextUsedPercent, let window = stats.contextWindowTokens {
-                        let barTint = SHRadialGauge<EmptyView>.resolvedTint(base: accentTint, value: pct)
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Text("Context")
-                                    .font(SHTypography.micro.weight(.semibold))
-                                    .foregroundStyle(SHColor.inkMuted)
-                                Spacer()
-                                Text("\(UsageMetrics.formatTokens(stats.contextUsedTokens)) / \(UsageMetrics.formatTokens(window)) · \(Int(pct.rounded()))%")
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(SHColor.inkPrimary)
-                            }
-                            GeometryReader { geo in
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(Color.white.opacity(0.08))
-                                    Capsule()
-                                        .fill(barTint)
-                                        .frame(width: max(4, geo.size.width * CGFloat(pct / 100.0)))
-                                }
-                            }
-                            .frame(height: 5)
-                        }
-                    }
-
-                    HStack(spacing: 6) {
-                        metricCell(label: "Input", value: UsageMetrics.formatTokens(stats.inputTokens))
-                        metricCell(label: "Cached", value: UsageMetrics.formatTokens(stats.cacheReadTokens))
-                        metricCell(label: "Output", value: UsageMetrics.formatTokens(stats.outputTokens))
-                        metricCell(label: "Est. Cost", value: Self.formatCost(stats.estimatedCostUsd))
-                    }
-                }
-                .padding(10)
-                .background(SHColor.surfaceSubtle, in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                usageWell(stats)
             }
 
-            // Runtime & environment rows
-            VStack(alignment: .leading, spacing: 6) {
-                infoRow(
-                    icon: "clock",
-                    text: stats.map { "\(durationLabel) · \($0.turnCount) turns" }
-                        ?? "\(durationLabel) · \(messageCount) msgs"
-                )
-                infoRow(icon: "desktopcomputer", text: hostDescription)
-                if let shortCwd {
-                    infoRow(
-                        icon: "folder",
-                        text: session.gitBranch.map { "\(shortCwd) (\($0))" } ?? shortCwd
-                    )
-                }
-                if let modelSummary {
-                    infoRow(icon: "cpu", text: modelSummary)
-                }
-            }
+            detailRows
         }
-        .padding(14)
-        .modifier(SHTopSheetGlassModifier())
+        .padding(SHSpacing.lg + 2)
+        .modifier(SHTopSheetSurface(drawsOwnSurface: drawsOwnSurface))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("thread.info.sheet")
     }
 
-    private func metricCell(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(SHColor.inkFaint)
-            Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(SHColor.inkPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            HarnessLogoView(harness: session.harness, size: 20)
+                .frame(width: 40, height: 40)
+                .background(accentTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(session.displayTitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 7) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(statusChip.color)
+                            .frame(width: 6, height: 6)
+                        Text(statusChip.text)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(statusChip.color)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(statusChip.color.opacity(0.14), in: Capsule())
+
+                    Text("Updated \(UsageMetrics.formatUpdatedAgo(session.updatedAt))")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if drawsOwnSurface {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.08), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close thread info")
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func infoRow(icon: String, text: String) -> some View {
-        HStack(spacing: 8) {
+    private func usageWell(_ stats: SessionStats) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let pct = stats.contextUsedPercent, let window = stats.contextWindowTokens {
+                let barTint = SHRadialGauge<EmptyView>.resolvedTint(base: accentTint, value: pct)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label("Context", systemImage: "square.stack.3d.up")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(SHColor.inkSecondary)
+                            .labelStyle(.titleAndIcon)
+                        Spacer()
+                        Text("\(Int(pct.rounded()))%")
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(SHColor.inkPrimary)
+                        Text("\(UsageMetrics.formatTokens(stats.contextUsedTokens)) of \(UsageMetrics.formatTokens(window))")
+                            .font(.system(size: 11.5).monospacedDigit())
+                            .foregroundStyle(SHColor.inkMuted)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.09))
+                            Capsule()
+                                .fill(barTint)
+                                .frame(width: max(6, geo.size.width * CGFloat(min(pct, 100) / 100.0)))
+                        }
+                    }
+                    .frame(height: 6)
+                }
+
+                Rectangle()
+                    .fill(SHColor.lineHairline)
+                    .frame(height: 1)
+            }
+
+            HStack(alignment: .top, spacing: 0) {
+                metricCell(label: "Input", value: UsageMetrics.formatTokens(stats.inputTokens))
+                metricDivider
+                metricCell(label: "Cached", value: UsageMetrics.formatTokens(stats.cacheReadTokens))
+                metricDivider
+                metricCell(label: "Output", value: UsageMetrics.formatTokens(stats.outputTokens))
+                metricDivider
+                metricCell(label: "Est. cost", value: Self.formatCost(stats.estimatedCostUsd))
+            }
+        }
+        .padding(SHSpacing.md + 2)
+        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75)
+        )
+    }
+
+    private var metricDivider: some View {
+        Rectangle()
+            .fill(SHColor.lineHairline)
+            .frame(width: 1, height: 30)
+    }
+
+    private func metricCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                .foregroundStyle(SHColor.inkPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(label)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(SHColor.inkMuted)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var detailRows: some View {
+        VStack(spacing: 10) {
+            detailRow(icon: "clock", label: "Started", value: startedLabel)
+            if let spanLabel {
+                detailRow(icon: "timer", label: "Active for", value: "\(spanLabel) · \(activityCountLabel)")
+            } else {
+                detailRow(icon: "bubble.left.and.bubble.right", label: "Activity", value: activityCountLabel)
+            }
+            detailRow(icon: "desktopcomputer", label: "Host", value: hostDescription)
+            if let shortCwd {
+                detailRow(icon: "folder", label: "Folder", value: shortCwd, monospaced: true)
+            }
+            if let branch = session.gitBranch?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
+                detailRow(icon: "arrow.triangle.branch", label: "Branch", value: branch, monospaced: true)
+            }
+            if let modelName {
+                detailRow(icon: "cpu", label: "Model", value: modelName, chips: modelChips)
+            }
+        }
+    }
+
+    /// One labelled fact: icon and label in fixed columns on the left, the value right-aligned.
+    private func detailRow(icon: String, label: String, value: String, monospaced: Bool = false, chips: [String] = []) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(SHColor.inkFaint)
-                .frame(width: 14)
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundStyle(SHColor.inkSecondary)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(SHColor.inkMuted)
+                .frame(width: 20)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(SHColor.inkMuted)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.system(size: 13, weight: .medium, design: monospaced ? .monospaced : .default))
+                .foregroundStyle(SHColor.inkPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 0)
+            ForEach(chips, id: \.self) { chip in
+                Text(chip)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Color.white.opacity(0.09), in: Capsule())
+                    .fixedSize()
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The card's background. Inside the iOS 26 popover the system supplies the Liquid Glass, so
+/// the card draws nothing of its own there.
+private struct SHTopSheetSurface: ViewModifier {
+    let drawsOwnSurface: Bool
+    func body(content: Content) -> some View {
+        if drawsOwnSurface {
+            content.modifier(SHTopSheetGlassModifier())
+        } else {
+            content
         }
     }
 }

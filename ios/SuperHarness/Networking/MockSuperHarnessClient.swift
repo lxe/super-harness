@@ -758,7 +758,20 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
     }
 
     public func fetchTranscript(sessionId: String, limit: Int) async throws -> SessionTranscriptResult {
-        if let existing = transcripts[sessionId] {
+        if var existing = transcripts[sessionId] {
+            // Demo token and cost figures so the thread info card has its usage block.
+            if existing.stats == nil, sessionId == "codex:cx-test-harness" {
+                existing.stats = SessionStats(
+                    inputTokens: 5_600_000,
+                    outputTokens: 943_000,
+                    cacheReadTokens: 232_700_000,
+                    totalTokens: 239_243_000,
+                    contextUsedTokens: 117_000,
+                    contextWindowTokens: 1_000_000,
+                    estimatedCostUsd: 62.69,
+                    turnCount: 820
+                )
+            }
             return existing
         }
         let session = sessions.first(where: { $0.id == sessionId })

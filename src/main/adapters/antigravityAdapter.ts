@@ -495,6 +495,9 @@ export function parseAntigravityJsonlLines(
         pendingQuestionBlock = null;
       }
       lastPlannerHadToolCalls = false;
+      // Clear previous turn's live focus & checklist so old turns never bleed into new ones
+      latestFocus = undefined;
+      latestSteps = undefined;
       messages.push({
         id: uniqueId(`agy-u-${obj.step_index ?? seq++}`),
         role: 'user',

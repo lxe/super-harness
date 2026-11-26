@@ -306,7 +306,16 @@ describe('Antigravity transcript parsing & tail parity', () => {
       expect(qBlock.questions[0].answer).toBe('64');
       expect(qBlock.questions[1].answer).toBe('Yes');
     }
-    expect(res.liveActivity?.steps?.[0]).toEqual({ title: 'Build cache', status: 'in_progress' });
+    // New USER_INPUT clears stale focus & steps from the earlier turn
+    expect(res.liveActivity?.steps).toBeUndefined();
+    expect(res.liveActivity?.focus).toBeUndefined();
+    expect(res.liveActivity?.isWorking).toBe(false);
+
+    // Within an active turn (before the next USER_INPUT), focus & steps are preserved
+    const activeTurn = parseAntigravityJsonlLines(lines.slice(0, 4), 'antigravity:active', Date.now(), 60);
+    expect(activeTurn.liveActivity?.steps?.[0]).toEqual({ title: 'Build cache', status: 'in_progress' });
+    expect(activeTurn.liveActivity?.focus).toBe('Checking cache');
+    expect(activeTurn.liveActivity?.isWorking).toBe(true);
   });
 
   it('loads multi-MB Antigravity transcript via progressive tail reader', async () => {

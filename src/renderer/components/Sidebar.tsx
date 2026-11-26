@@ -780,6 +780,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         data-session-id={s.id}
         aria-current={isPrimary ? 'page' : undefined}
         icon={leadingIcon}
+        unread={Boolean(s.unread)}
         title={s.title}
         titleBadge={titleBadge}
         titleOpacity={recencyOpacity}
@@ -807,31 +808,20 @@ export const Sidebar: React.FC<Props> = React.memo(({
           };
         }}
         meta={
-          s.unread || s.hostAddress || s.harness === 'claude-tmux' ? (
-            <>
-              {s.hostAddress ? (
-                <span
-                  title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-                  className={remoteHostColorClass(s.hostAddress || s.hostLabel || 'remote')}
-                >
-                  <Laptop className="w-3.5 h-3.5" />
-                </span>
-              ) : s.harness === 'claude-tmux' ? (
-                <span
-                  title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'local'}`}
-                  className="text-ink-muted"
-                >
-                  <Laptop className="w-3.5 h-3.5" />
-                </span>
-              ) : undefined}
-              {s.unread && (
-                <span
-                  aria-label="Unread"
-                  title="New activity since you last opened this thread"
-                  className="w-2 h-2 rounded-full bg-accent-primary shrink-0"
-                />
-              )}
-            </>
+          s.hostAddress ? (
+            <span
+              title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
+              className={remoteHostColorClass(s.hostAddress || s.hostLabel || 'remote')}
+            >
+              <Laptop className="w-3.5 h-3.5" />
+            </span>
+          ) : s.harness === 'claude-tmux' ? (
+            <span
+              title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'local'}`}
+              className="text-ink-muted"
+            >
+              <Laptop className="w-3.5 h-3.5" />
+            </span>
           ) : undefined
         }
         hoverActions={

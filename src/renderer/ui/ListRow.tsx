@@ -115,6 +115,8 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
 export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {
   icon?: React.ReactNode;
+  /** Yellow notification dot rendered at the bottom-right of the leading icon (or left of title when iconless). */
+  unread?: boolean;
   title: string;
   /** Optional compact badge rendered inline right next to the title text. */
   titleBadge?: React.ReactNode;
@@ -131,6 +133,7 @@ export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export const NavRow: React.FC<NavRowProps> = ({
   icon,
+  unread = false,
   title,
   titleBadge,
   titleOpacity,
@@ -140,7 +143,7 @@ export const NavRow: React.FC<NavRowProps> = ({
   secondaryActive = false,
   selected = false,
   working = false,
-  workingTone = 'master',
+  workingTone: _workingTone = 'master',
   className,
   ...rest
 }) => {
@@ -164,22 +167,42 @@ export const NavRow: React.FC<NavRowProps> = ({
         )}
         {...rest}
       >
-        {icon && <span className="shrink-0 inline-flex items-center">{icon}</span>}
+        {icon && (
+          <span className="relative shrink-0 inline-flex items-center">
+            {icon}
+            {unread && (
+              <span
+                aria-label="Unread"
+                title="New activity since you last opened this thread"
+                className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 ring-[1.5px] ring-surface-rail"
+              />
+            )}
+          </span>
+        )}
         <span className="min-w-0 flex-1 inline-flex items-center gap-1.5">
+          {!icon && unread && (
+            <span
+              aria-label="Unread"
+              title="New activity since you last opened this thread"
+              className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"
+            />
+          )}
           {titleBadge && <span className="shrink-0 inline-flex items-center">{titleBadge}</span>}
           <span
             style={effectiveOpacity !== undefined ? { opacity: effectiveOpacity } : undefined}
-            className="text-[13px] leading-[1.35] truncate transition-opacity group-hover:!opacity-100"
+            className={cn(
+              'text-[13px] leading-[1.35] truncate transition-opacity group-hover:!opacity-100',
+              working && 'sh-working-shimmer font-medium'
+            )}
           >
             {title}
           </span>
         </span>
         {meta && (
-          <span className="shrink-0 inline-flex items-center gap-1.5 group-hover:opacity-0 transition-opacity">
+          <span className="shrink-0 inline-flex items-center justify-end gap-1.5 group-hover:opacity-0 transition-opacity">
             {meta}
           </span>
         )}
-        {working && <WorkingOrb tone={workingTone} size="md" />}
         {hoverActions && (
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 absolute right-1.5 top-1/2 -translate-y-1/2 bg-surface-raised/95 rounded-md p-0.5 transition-opacity">
             {hoverActions}

@@ -144,6 +144,7 @@ public final class SSEClient: Sendable {
         url: URL,
         bearerToken: String,
         initialLastEventId: String? = nil,
+        latestEventId: (@Sendable () -> String?)? = nil,
         onStateChange: (@Sendable (Bool, String?) -> Void)? = nil,
         onEventIdUpdate: (@Sendable (String) -> Void)? = nil
     ) -> AsyncStream<SSEFrame> {
@@ -155,7 +156,10 @@ public final class SSEClient: Sendable {
 
                 while !Task.isCancelled {
                     do {
-                        let request = Self.makeRequest(url: url, bearerToken: bearerToken, lastEventId: lastEventId)
+                        // A full refresh fetched since the last frame is newer than that frame.
+                        // Resuming from it stops the host replaying events the refresh covers.
+                        let resumeId = latestEventId?() ?? lastEventId
+                        let request = Self.makeRequest(url: url, bearerToken: bearerToken, lastEventId: resumeId)
 
                         let (bytes, response) = try await session.bytes(for: request)
                         guard let http = response as? HTTPURLResponse else {

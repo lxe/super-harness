@@ -893,4 +893,62 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(SHScrollInset<EmptyView>.visibleHeight(contentHeight: 2400, maxHeight: 320), 320)
         XCTAssertEqual(SHScrollInset<EmptyView>.visibleHeight(contentHeight: 0, maxHeight: 320), 1)
     }
+
+    /// Records the session order each time SwiftUI would be told the list changed.
+    @MainActor
+    private final class ListPublishRecorder {
+        var orders: [[String]] = []
+        private let store: AppStore
+        init(store: AppStore) { self.store = store; track() }
+        private func track() {
+            withObservationTracking { _ = store.sessions } onChange: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.orders.append(self.store.sessions.map(\.id))
+                    self.track()
+                }
+            }
+        }
+    }
+
+    @MainActor func testABurstOfListUpdatesIsDrawnOnceWithTheFinalOrder() async throws {
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "ListBurst.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        await store.bootstrap()
+        let ids = store.sessions.map(\.id)
+        XCTAssertGreaterThan(ids.count, 3)
+        let recorder = ListPublishRecorder(store: store)
+
+        let orders = [Array(ids.reversed()), Array(ids.dropFirst() + ids.prefix(1)), Array(ids.dropFirst(2) + ids.prefix(2))]
+        for order in orders {
+            store.handleServerEvent(.sessionsDelta(SessionsDeltaEnvelope(order: order)), mode: .demo)
+        }
+        XCTAssertEqual(store.sessions.map(\.id), ids, "updates are held until the burst ends")
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(store.sessions.map(\.id), orders[2])
+        XCTAssertEqual(recorder.orders, [orders[2]], "the intermediate orders are never shown")
+    }
+
+    @MainActor func testListStaysStillInTheBackgroundAndShowsOnlyTheFinalStateOnReturn() async throws {
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "ListFreeze.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        await store.bootstrap()
+        let ids = store.sessions.map(\.id)
+        let recorder = ListPublishRecorder(store: store)
+
+        await store.handleScenePhaseChanged(.background)
+        let orders = [Array(ids.reversed()), Array(ids.dropFirst() + ids.prefix(1)), Array(ids.dropFirst(2) + ids.prefix(2))]
+        for order in orders {
+            store.handleServerEvent(.sessionsDelta(SessionsDeltaEnvelope(order: order)), mode: .demo)
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(store.sessions.map(\.id), ids, "nothing is applied while the app is away")
+        XCTAssertTrue(recorder.orders.isEmpty)
+
+        await store.handleScenePhaseChanged(.active)
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(store.sessions.map(\.id), orders[2])
+        XCTAssertEqual(recorder.orders, [orders[2]], "one redraw, straight to the final order")
+    }
 }

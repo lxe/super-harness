@@ -255,6 +255,22 @@ public final class AppStore {
     private var hasBootstrapped: Bool = false
     public var hasCompletedBootstrap: Bool { hasBootstrapped }
     private var isResyncing: Bool = false
+
+    // Session-list updates from the host are collected and applied together, so a burst of
+    // them redraws the list once. See `enqueueListEvent`.
+    @ObservationIgnored private var listEventInbox: [(event: SuperHarnessServerEvent, mode: ConnectionMode)] = []
+    @ObservationIgnored private var stagedBootstrap: BootstrapPayload?
+    /// True from the moment the app goes to the background until the foreground refresh has
+    /// arrived. While true, list updates are held back instead of being drawn one by one.
+    @ObservationIgnored private var isListFrozen = false
+    @ObservationIgnored private var listFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var listThawTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var listInboxOldestAt: Date?
+    @ObservationIgnored private var nextListFlushIsHydration = false
+    static let listQuietInterval: TimeInterval = 0.06
+    static let listMaxHold: TimeInterval = 1.0
+    static let listThawTimeout: TimeInterval = 3.0
+    static let listInboxLimit = 400
     private var isSceneActive: Bool = true
     private var mediaCache: [String: Data] = [:]
     private var mediaFailedKeys: Set<String> = []
@@ -456,9 +472,52 @@ public final class AppStore {
         }
     }
 
+    // MARK: - Debug: list publish log
+
+    #if DEBUG
+    /// With `SH_DEBUG_LIST_LOG=<file>` set, appends one line per session-list publish (and per
+    /// list-affecting server event) so a foreground refresh can be checked for reshuffles.
+    private static let listLogPath: String? = ProcessInfo.processInfo.environment["SH_DEBUG_LIST_LOG"]
+
+    func debugListLog(_ message: @autoclosure () -> String) {
+        guard let path = Self.listLogPath else { return }
+        let line = String(format: "%.3f %@\n", Date().timeIntervalSince1970, message())
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+
+    func debugStartListPublishLog() {
+        guard Self.listLogPath != nil else { return }
+        withObservationTracking {
+            _ = sessions
+            _ = harnessOrder
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let ids = self.sessions.filter { !$0.isMaster }.map(\.id)
+                var hasher = Hasher()
+                hasher.combine(ids)
+                hasher.combine(self.harnessOrder)
+                let head = ids.prefix(4).map { String($0.suffix(6)) }.joined(separator: ",")
+                self.debugListLog("PUBLISH count=\(ids.count) order=\(String(UInt(bitPattern: hasher.finalize()), radix: 16).prefix(8)) head=\(head)")
+                self.debugStartListPublishLog()
+            }
+        }
+    }
+    #endif
+
     // MARK: - Lifecycle
 
     public func bootstrap(quiet: Bool = false) async {
+        #if DEBUG
+        if !quiet { debugStartListPublishLog() }
+        #endif
         #if DEBUG
         // UI checks for the error banner: report a realistic timeout shortly after launch.
         if !quiet, ProcessInfo.processInfo.environment["SH_DEBUG_SIMULATE_TIMEOUT"] != nil {
@@ -555,8 +614,9 @@ public final class AppStore {
 
         do {
             let payload = try await client.fetchBootstrap()
-            applyBootstrap(payload)
+            applyBootstrap(payload, stageWhileFrozen: true)
             hasBootstrapped = true
+            if isSceneActive { thawList() }
             if let sid = selectedSessionId {
                 await client.watchSession(sessionId: sid, limit: transcriptLimit(for: sid))
                 await loadTranscript(for: sid)
@@ -567,6 +627,7 @@ public final class AppStore {
             }
             lastError = nil
         } catch {
+            if isSceneActive { thawList() }
             if connectionMode == .live {
                 connectionHealth = .offline(error.localizedDescription)
                 startAutoReconnectLoop()
@@ -575,6 +636,9 @@ public final class AppStore {
     }
 
     public func handleScenePhaseChanged(_ phase: ScenePhase) async {
+        #if DEBUG
+        debugListLog("PHASE \(phase)")
+        #endif
         isSceneActive = (phase == .active)
         switch phase {
         case .active:
@@ -582,6 +646,7 @@ public final class AppStore {
         case .background:
             flushDrafts()
             stopAutoReconnectLoop()
+            freezeList()
         case .inactive:
             break
         @unknown default:
@@ -591,8 +656,10 @@ public final class AppStore {
 
     public func handleSceneBecameActive() async {
         isSceneActive = true
+        startListThawTimeout()
         if connectionMode == .live {
             if !hasBootstrapped {
+                thawList()
                 await bootstrap(quiet: !sessions.isEmpty)
             } else {
                 await resync()
@@ -603,6 +670,9 @@ public final class AppStore {
         } else if hasBootstrapped {
             await resync()
         }
+        // A refresh that was already running when the app came back thaws the list itself
+        // when it finishes; the timeout covers one that never does.
+        if !isResyncing { thawList() }
     }
 
     public func refreshUsage(force: Bool = true) async {
@@ -622,6 +692,14 @@ public final class AppStore {
     public func stopEventStream() {
         sseTask?.cancel()
         sseTask = nil
+        listFlushTask?.cancel()
+        listFlushTask = nil
+        listThawTimeoutTask?.cancel()
+        listThawTimeoutTask = nil
+        listEventInbox.removeAll()
+        stagedBootstrap = nil
+        listInboxOldestAt = nil
+        isListFrozen = false
         stopAutoReconnectLoop()
         prefetchTask?.cancel()
         prefetchTask = nil
@@ -716,7 +794,11 @@ public final class AppStore {
         return Array(sorted.prefix(limit).map(\.id))
     }
 
-    private func applyBootstrap(_ payload: BootstrapPayload) {
+    private func applyBootstrap(_ payload: BootstrapPayload, stageWhileFrozen: Bool = false) {
+        if stageWhileFrozen, isListFrozen {
+            stagedBootstrap = payload
+            return
+        }
         lastError = nil
         if let version = payload.protocolVersion, protocolVersion != version {
             protocolVersion = version
@@ -788,7 +870,119 @@ public final class AppStore {
         }
     }
 
-    private func handleServerEvent(_ event: SuperHarnessServerEvent, mode: ConnectionMode) {
+    // MARK: - Batched session-list updates
+
+    /// Events that can change which rows the session list shows or their order.
+    nonisolated static func isListEvent(_ event: SuperHarnessServerEvent) -> Bool {
+        switch event {
+        case .sessions, .sessionsDelta, .state, .activity: return true
+        default: return false
+        }
+    }
+
+    /// Holds a list event briefly so that events arriving together are applied in one pass.
+    /// The host sends them in bursts after the app was away: it replays every list change the
+    /// app missed. Applying each one separately made the sections visibly reshuffle through
+    /// every intermediate order.
+    private func enqueueListEvent(_ event: SuperHarnessServerEvent, mode: ConnectionMode) {
+        listEventInbox.append((event, mode))
+        if listEventInbox.count > Self.listInboxLimit {
+            listEventInbox.removeFirst(listEventInbox.count - Self.listInboxLimit)
+        }
+        if listInboxOldestAt == nil { listInboxOldestAt = Date() }
+        scheduleListFlush()
+    }
+
+    private func scheduleListFlush() {
+        guard !isListFrozen else { return }
+        listFlushTask?.cancel()
+        let heldFor = listInboxOldestAt.map { Date().timeIntervalSince($0) } ?? 0
+        if heldFor >= Self.listMaxHold {
+            flushListUpdates()
+            return
+        }
+        let delay = min(Self.listQuietInterval, Self.listMaxHold - heldFor)
+        listFlushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.flushListUpdates()
+        }
+    }
+
+    /// Applies the staged refresh and every held event in one synchronous pass, which SwiftUI
+    /// draws as a single update.
+    func flushListUpdates() {
+        listFlushTask?.cancel()
+        listFlushTask = nil
+        listInboxOldestAt = nil
+        let bootstrapPayload = stagedBootstrap
+        let events = listEventInbox
+        stagedBootstrap = nil
+        listEventInbox.removeAll(keepingCapacity: true)
+        let isHydration = nextListFlushIsHydration
+        nextListFlushIsHydration = false
+        guard bootstrapPayload != nil || !events.isEmpty else { return }
+
+        let apply = {
+            if let bootstrapPayload { self.applyBootstrap(bootstrapPayload) }
+            for item in events { self.applyServerEvent(item.event, mode: item.mode) }
+        }
+        if isHydration {
+            // Returning from the background: show the final state without animating to it.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction, apply)
+        } else {
+            apply()
+        }
+    }
+
+    private func freezeList() {
+        guard !isListFrozen else { return }
+        flushListUpdates()
+        isListFrozen = true
+    }
+
+    private func thawList() {
+        listThawTimeoutTask?.cancel()
+        listThawTimeoutTask = nil
+        guard isListFrozen else { return }
+        isListFrozen = false
+        nextListFlushIsHydration = true
+        // Wait for the stream to go quiet (measured from now) so the replayed events that are
+        // still arriving land in the same pass as the refresh.
+        listInboxOldestAt = Date()
+        scheduleListFlush()
+    }
+
+    private func startListThawTimeout() {
+        guard isListFrozen else { return }
+        listThawTimeoutTask?.cancel()
+        listThawTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.listThawTimeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.thawList()
+        }
+    }
+
+    func handleServerEvent(_ event: SuperHarnessServerEvent, mode: ConnectionMode) {
+        if Self.isListEvent(event) {
+            #if DEBUG
+            debugListLog("EVENT \(String(describing: event).prefix(24))")
+            #endif
+            enqueueListEvent(event, mode: mode)
+        } else {
+            applyServerEvent(event, mode: mode)
+        }
+    }
+
+    private func applyServerEvent(_ event: SuperHarnessServerEvent, mode: ConnectionMode) {
+        #if DEBUG
+        switch event {
+        case .connected, .disconnected, .resyncRequired: debugListLog("EVENT \(String(describing: event).prefix(24))")
+        default: break
+        }
+        #endif
         switch event {
         case .connected:
             let recoveringFromOffline: Bool = !hasBootstrapped || {

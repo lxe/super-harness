@@ -647,6 +647,7 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
                 url: url,
                 bearerToken: token,
                 initialLastEventId: idBox.get(),
+                latestEventId: { idBox.get() },
                 onStateChange: { connected, reason in
                     if connected {
                         continuation.yield(.connected)

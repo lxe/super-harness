@@ -1,5 +1,7 @@
 # Super Harness
 
+<img width="2502" height="1583" alt="image" src="https://github.com/user-attachments/assets/dcf71a56-6c54-4fb1-acd2-d8ef1342fbc3" />
+
 A calm, high-performance Electron desktop multiplexer and control plane for local AI coding harnesses — unifying **OpenAI Codex** (Desktop + app-server daemon + CLI), **Claude** (Desktop + Code CLI + `tmux --remote-control`), and **Google Antigravity** (Desktop + CLI via ACP) under one cohesive interface.
 
 ## Highlights

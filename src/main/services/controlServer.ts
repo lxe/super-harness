@@ -20,7 +20,7 @@ import type { HarnessRegistry } from '../adapters/registry';
 import type { ConfigStore } from '../store/configStore';
 import type { HarnessDispatcher } from './dispatcher';
 
-export const MOBILE_PROTOCOL_VERSION = 1;
+export const MOBILE_PROTOCOL_VERSION = 2;
 
 export interface ControlServerHooks {
   getUsage?: (force: boolean) => Promise<UsageSnapshot>;

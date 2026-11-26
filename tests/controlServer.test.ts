@@ -237,7 +237,7 @@ describe('ControlServer mobile API gateway', () => {
       seq: number;
     };
     expect(health.ok).toBe(true);
-    expect(health.protocolVersion).toBe(1);
+    expect(health.protocolVersion).toBe(2);
 
     const watchRes = await fetch(`${base}/api/watch`, {
       method: 'POST',

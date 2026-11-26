@@ -289,6 +289,45 @@ const emitStream = (ev: StreamEvent) => {
   broadcastActivityIfChanged();
 };
 
+// Mobile SSE: send only sessions that actually changed (full list is ~75 KB and
+// re-rendering it several times per turn made the phone stutter).
+let lastMobileSessionJsonById = new Map<string, string>();
+let lastMobileSessionOrder = '';
+let lastMobileHarnessesJson = '';
+
+function broadcastSessionsDeltaToMobile(
+  harnesses: Awaited<ReturnType<HarnessRegistry['discover']>>['harnesses'],
+  sessions: Awaited<ReturnType<HarnessRegistry['discover']>>['sessions'],
+  activeWorkingSessionIds: string[]
+): void {
+  const nextById = new Map<string, string>();
+  const upserts: typeof sessions = [];
+  for (const s of sessions) {
+    const json = JSON.stringify(s);
+    nextById.set(s.id, json);
+    if (lastMobileSessionJsonById.get(s.id) !== json) upserts.push(s);
+  }
+  const removedIds = Array.from(lastMobileSessionJsonById.keys()).filter((id) => !nextById.has(id));
+  const order = sessions.map((s) => s.id).join('\n');
+  const orderChanged = order !== lastMobileSessionOrder;
+  const harnessesJson = JSON.stringify(harnesses);
+  const harnessesChanged = harnessesJson !== lastMobileHarnessesJson;
+  if (upserts.length === 0 && removedIds.length === 0 && !orderChanged && !harnessesChanged) return;
+  lastMobileSessionJsonById = nextById;
+  lastMobileSessionOrder = order;
+  lastMobileHarnessesJson = harnessesJson;
+  controlServerRef?.broadcastEvent('sessions_delta', {
+    upserts,
+    removedIds,
+    order: orderChanged ? sessions.map((s) => s.id) : undefined,
+    harnesses: harnessesChanged ? harnesses : undefined,
+    activeWorkingSessionIds,
+  });
+}
+
+// Drop duplicate transcript pushes (desktop + mobile panes watching the same session).
+const lastTranscriptPushKeyBySession = new Map<string, string>();
+
 let refreshInFlight: Promise<{
   harnesses: Awaited<ReturnType<HarnessRegistry['discover']>>['harnesses'];
   sessions: Awaited<ReturnType<HarnessRegistry['discover']>>['sessions'];
@@ -313,7 +352,7 @@ async function refreshAndBroadcast() {
       ).sort();
       const decorated = { ...result, sessions };
       broadcastToRenderer('sh:sessions-updated', decorated);
-      controlServerRef?.broadcastEvent('sessions', { ...decorated, activeWorkingSessionIds });
+      broadcastSessionsDeltaToMobile(result.harnesses, sessions, activeWorkingSessionIds);
       lastBroadcastWorkingKey = activeWorkingSessionIds.join(',');
       return decorated;
     })
@@ -394,6 +433,17 @@ const liveSync = new LiveSyncService(
       broadcastActivityIfChanged();
     }
     broadcastToRenderer('sh:transcript-updated', transcript);
+    const lastMsg = transcript.messages[transcript.messages.length - 1];
+    const pushKey = [
+      transcript.sourceMtimeMs,
+      transcript.totalCount,
+      transcript.messages.length,
+      lastMsg?.id ?? '',
+      lastMsg?.blocks.length ?? 0,
+      JSON.stringify(transcript.liveActivity ?? null),
+    ].join('|');
+    if (lastTranscriptPushKeyBySession.get(transcript.sessionId) === pushKey) return;
+    lastTranscriptPushKeyBySession.set(transcript.sessionId, pushKey);
     controlServer.broadcastEvent('transcript', transcript);
     controlServer.broadcastEvent('transcript_updated', {
       sessionId: transcript.sessionId,

@@ -748,8 +748,26 @@ public struct SHActivityPulse: View {
         }
     }
 
+    private func hsbComponents(of color: Color) -> (hue: Double, sat: Double, bright: Double) {
+        #if canImport(UIKit)
+        var h: CGFloat = 0
+        var s: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        if UIColor(color).getHue(&h, saturation: &s, brightness: &b, alpha: &a) {
+            return (Double(h), Double(s), Double(b))
+        }
+        var white: CGFloat = 0
+        if UIColor(color).getWhite(&white, alpha: &a) {
+            return (0, 0, Double(white))
+        }
+        #endif
+        return (0.62, 0.55, 0.90)
+    }
+
     private func spheresCanvas(phase: Double) -> some View {
         let box = renderSize
+        let hsb = hsbComponents(of: tint)
         return Canvas { ctx, sz in
             let cx = sz.width * 0.5
             let cy = sz.height * 0.5
@@ -757,64 +775,71 @@ public struct SHActivityPulse: View {
             let ry = sz.height * 0.21
             let baseR = sz.width * 0.175
 
-            // Soft ambient halo beneath the orbiting 3D spheres
-            let haloR = sz.width * 0.46
-            let haloRect = CGRect(x: cx - haloR, y: cy - haloR, width: haloR * 2, height: haloR * 2)
-            ctx.fill(
-                Path(ellipseIn: haloRect),
-                with: .radialGradient(
-                    Gradient(colors: [tint.opacity(0.22), tint.opacity(0.0)]),
-                    center: CGPoint(x: cx, y: cy),
-                    startRadius: 0,
-                    endRadius: haloR
-                )
-            )
-
             struct SphereSample {
                 let x: CGFloat
                 let y: CGFloat
                 let z: Double
+                let depth: Double
                 let radius: CGFloat
-                let opacity: Double
             }
 
             let samples: [SphereSample] = (0..<3).map { idx in
                 let angle = phase + Double(idx) * (2.0 * .pi / 3.0)
                 let z = sin(angle) // -1 (back) ... +1 (front)
                 let depth = (z + 1.0) * 0.5
-                let scale = 0.66 + 0.42 * depth
+                let scale = 0.68 + 0.40 * depth
                 return SphereSample(
                     x: cx + CGFloat(cos(angle)) * rx,
                     y: cy + CGFloat(sin(angle)) * ry,
                     z: z,
-                    radius: baseR * CGFloat(scale),
-                    opacity: 0.44 + 0.56 * depth
+                    depth: depth,
+                    radius: baseR * CGFloat(scale)
                 )
             }.sorted { a, b in a.z < b.z }
 
             for s in samples {
                 let r = s.radius
+                // Depth is expressed purely via scale & HSB brightness — fully opaque, no muddiness, no glow.
+                let depthBright = 0.74 + 0.26 * s.depth
+                let hiColor = Color(
+                    hue: hsb.hue,
+                    saturation: hsb.sat * 0.36,
+                    brightness: min(1.0, max(hsb.bright * 1.32, 0.90) * depthBright)
+                )
+                let midColor = Color(
+                    hue: hsb.hue,
+                    saturation: min(1.0, hsb.sat * 1.04),
+                    brightness: min(1.0, hsb.bright * 1.06 * depthBright)
+                )
+                let deepColor = Color(
+                    hue: hsb.hue,
+                    saturation: min(1.0, hsb.sat * 1.18),
+                    brightness: hsb.bright * 0.56 * depthBright
+                )
+                let glintColor = Color(
+                    hue: hsb.hue,
+                    saturation: hsb.sat * 0.12,
+                    brightness: 1.0
+                )
 
-                // 3D lit sphere with top-left specular highlight and deep underside shading
                 let sphereRect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)
-                let lightPoint = CGPoint(x: s.x - r * 0.30, y: s.y - r * 0.32)
+                let lightPoint = CGPoint(x: s.x - r * 0.28, y: s.y - r * 0.30)
                 ctx.fill(
                     Path(ellipseIn: sphereRect),
                     with: .radialGradient(
                         Gradient(stops: [
-                            .init(color: Color.white.opacity(0.96 * s.opacity), location: 0.0),
-                            .init(color: tint.opacity(0.96 * s.opacity), location: 0.34),
-                            .init(color: tint.opacity(0.84 * s.opacity), location: 0.70),
-                            .init(color: Color.black.opacity(0.62 * s.opacity), location: 1.0),
+                            .init(color: hiColor, location: 0.0),
+                            .init(color: midColor, location: 0.38),
+                            .init(color: deepColor, location: 1.0),
                         ]),
                         center: lightPoint,
                         startRadius: 0,
-                        endRadius: r * 1.55
+                        endRadius: r * 1.48
                     )
                 )
 
-                // Crisp glossy specular glint
-                let glintR = max(0.75, r * 0.26)
+                // Crisp small specular glint
+                let glintR = max(0.7, r * 0.22)
                 let glintCenter = CGPoint(x: s.x - r * 0.28, y: s.y - r * 0.30)
                 let glintRect = CGRect(
                     x: glintCenter.x - glintR,
@@ -824,7 +849,7 @@ public struct SHActivityPulse: View {
                 )
                 ctx.fill(
                     Path(ellipseIn: glintRect),
-                    with: .color(Color.white.opacity(0.85 * s.opacity))
+                    with: .color(glintColor.opacity(0.68 + 0.28 * s.depth))
                 )
             }
         }

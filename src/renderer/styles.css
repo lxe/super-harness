@@ -336,34 +336,34 @@ body,
 @keyframes sh-orb-orbit-3d {
   0% {
     transform: translate3d(var(--sh-orbit-rx, 5px), 0px, 0) scale(0.88);
-    opacity: 0.78;
+    filter: brightness(0.9);
     z-index: 2;
   }
   25% {
-    transform: translate3d(0px, var(--sh-orbit-ry, 3.2px), 0) scale(1.14);
-    opacity: 1;
+    transform: translate3d(0px, var(--sh-orbit-ry, 3.2px), 0) scale(1.12);
+    filter: brightness(1.04);
     z-index: 3;
   }
   50% {
     transform: translate3d(calc(var(--sh-orbit-rx, 5px) * -1), 0px, 0) scale(0.88);
-    opacity: 0.78;
+    filter: brightness(0.9);
     z-index: 2;
   }
   75% {
-    transform: translate3d(0px, calc(var(--sh-orbit-ry, 3.2px) * -1), 0) scale(0.64);
-    opacity: 0.4;
+    transform: translate3d(0px, calc(var(--sh-orbit-ry, 3.2px) * -1), 0) scale(0.68);
+    filter: brightness(0.72);
     z-index: 1;
   }
   100% {
     transform: translate3d(var(--sh-orbit-rx, 5px), 0px, 0) scale(0.88);
-    opacity: 0.78;
+    filter: brightness(0.9);
     z-index: 2;
   }
 }
 
 .sh-orb-sphere {
   animation: sh-orb-orbit-3d 1.5s linear infinite;
-  will-change: transform, opacity;
+  will-change: transform, filter;
 }
 
 .sh-gauge-halo {

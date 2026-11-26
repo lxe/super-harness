@@ -2,51 +2,55 @@ import React from 'react';
 import type { HarnessGroup } from '../../shared/types';
 import { cn } from './cn';
 
-export type WorkingOrbTone = HarnessGroup | 'master';
+export type WorkingOrbTone = HarnessGroup | 'master' | 'neutral';
 
 interface OrbPalette {
+  glint: string;
   highlight: string;
   mid: string;
   deep: string;
-  glow: string;
-  halo: string;
 }
 
+/**
+ * HSB-derived opaque 3D sphere palettes matching the exact harness gauge & icon tints:
+ * Antigravity #60a5fa, Codex #10a37f, Claude #d97757, Muse #a855f7, Master #818cf8, All #d4d4d8.
+ */
 const ORB_PALETTES: Record<WorkingOrbTone, OrbPalette> = {
   antigravity: {
-    highlight: '#dbeafe',
-    mid: '#60a5fa',
-    deep: '#1d4ed8',
-    glow: 'rgba(96, 165, 250, 0.65)',
-    halo: 'rgba(96, 165, 250, 0.24)',
+    glint: '#ecf5ff',
+    highlight: '#c6e0ff',
+    mid: '#5ca5ff',
+    deep: '#26548c',
   },
   codex: {
-    highlight: '#d1fae5',
-    mid: '#34d399',
-    deep: '#047857',
-    glow: 'rgba(52, 211, 153, 0.62)',
-    halo: 'rgba(52, 211, 153, 0.22)',
+    glint: '#e3fff8',
+    highlight: '#9be6d3',
+    mid: '#0bad85',
+    deep: '#005b45',
   },
   claude: {
-    highlight: '#ffedd5',
-    mid: '#f08762',
-    deep: '#9a3412',
-    glow: 'rgba(240, 135, 98, 0.62)',
-    halo: 'rgba(240, 135, 98, 0.22)',
+    glint: '#fff1ed',
+    highlight: '#ffd6c8',
+    mid: '#e67a57',
+    deep: '#7a3924',
   },
   muse: {
-    highlight: '#f3e8ff',
-    mid: '#c084fc',
-    deep: '#6b21a8',
-    glow: 'rgba(192, 132, 252, 0.62)',
-    halo: 'rgba(192, 132, 252, 0.22)',
+    glint: '#f5ebff',
+    highlight: '#e2c3ff',
+    mid: '#aa51ff',
+    deep: '#561f8a',
   },
   master: {
-    highlight: '#ede9fe',
-    mid: '#a78bfa',
-    deep: '#5b21b6',
-    glow: 'rgba(167, 139, 250, 0.62)',
-    halo: 'rgba(167, 139, 250, 0.22)',
+    glint: '#f0f2ff',
+    highlight: '#d3d7ff',
+    mid: '#808cff',
+    deep: '#3c448b',
+  },
+  neutral: {
+    glint: '#fefeff',
+    highlight: '#fdfdff',
+    mid: '#e1e1e5',
+    deep: '#767679',
   },
 };
 
@@ -63,8 +67,8 @@ const SIZE_PX: Record<NonNullable<WorkingOrbProps['size']>, number> = {
 };
 
 /**
- * Refined 3D orbiting lit-sphere activity indicator tinted to the active harness colorway:
- * three specular-highlighted 3D spheres revolving in depth-scaled perspective.
+ * Glow-free 3D orbiting lit-sphere activity indicator tinted to the exact harness colorway:
+ * three fully opaque HSB-shaded spheres revolving in depth-scaled perspective with a crisp specular glint.
  */
 export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   tone = 'master',
@@ -72,10 +76,13 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   className,
 }) => {
   const px = SIZE_PX[size];
-  const dotPx = Math.max(4.5, Math.round(px * 0.34 * 10) / 10);
-  const orbitR = Math.round(px * 0.32 * 10) / 10;
+  const dotPx = Math.max(4.6, Math.round(px * 0.34 * 10) / 10);
+  const orbitR = Math.round(px * 0.31 * 10) / 10;
   const palette = ORB_PALETTES[tone] ?? ORB_PALETTES.master;
-  const sphereBg = `radial-gradient(circle at 32% 28%, #ffffff 0%, ${palette.highlight} 22%, ${palette.mid} 58%, ${palette.deep} 100%)`;
+  const sphereBg = [
+    `radial-gradient(circle at 30% 27%, ${palette.glint} 0%, ${palette.glint} 11%, transparent 24%)`,
+    `radial-gradient(circle at 32% 28%, ${palette.highlight} 0%, ${palette.mid} 42%, ${palette.deep} 100%)`,
+  ].join(', ');
 
   return (
     <span
@@ -98,7 +105,6 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
             width: dotPx,
             height: dotPx,
             background: sphereBg,
-            boxShadow: 'inset -1px -1px 1.5px rgba(0,0,0,0.45)',
             animationDelay: `${(-idx * 1.5) / 3}s`,
           }}
         />
@@ -109,33 +115,30 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
 
 export interface WorkingIndicatorProps {
   tone?: WorkingOrbTone;
-  label?: string;
   focus?: string;
+  label?: string;
   size?: 'sm' | 'md';
   className?: string;
 }
 
 /**
  * Cohesive working status row combining the kinetic WorkingOrb with a subtle
- * light-sweep shimmer on the status label.
+ * shimmering text sweep.
  */
 export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
   tone = 'master',
-  label = 'Working',
   focus,
+  label,
   size = 'md',
   className,
 }) => (
-  <div
+  <span
     className={cn(
-      'flex items-center gap-2 text-caption text-ink-muted pt-1.5 select-none',
+      'inline-flex items-center gap-2 text-caption font-medium select-none',
       className
     )}
   >
     <WorkingOrb tone={tone} size={size} />
-    <span className="sh-working-shimmer font-medium leading-[1.35] pt-[1px]">{label}</span>
-    {focus && (
-      <span className="text-ink-faint truncate leading-[1.35] pt-[1px]">· {focus}</span>
-    )}
-  </div>
+    <span className="sh-working-shimmer">{focus || label || 'Working'}</span>
+  </span>
 );

@@ -147,6 +147,7 @@ public struct DesignSystemCatalogView: View {
                             swatch("Codex", SHColor.brandCodex)
                             swatch("Claude", SHColor.brandClaude)
                             swatch("Muse", SHColor.brandMuse)
+                            swatch("Pi", SHColor.brandPi)
                         }
                     }
                 }

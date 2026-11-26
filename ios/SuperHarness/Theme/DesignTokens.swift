@@ -23,6 +23,7 @@ public enum SHColor {
     public static let brandCodex = Color(hex: 0x10A37F)
     public static let brandClaude = Color(hex: 0xD97757)
     public static let brandMuse = Color(hex: 0xA855F7)
+    public static let brandPi = Color(hex: 0x22D3EE)
     public static let brandMaster = Color(hex: 0x818CF8)
 
     // Semantic accents
@@ -43,6 +44,7 @@ public enum SHColor {
         case .codex: return brandCodex
         case .claudeTmux, .claudeDesktop, .claudeCli: return brandClaude
         case .muse: return brandMuse
+        case .pi: return brandPi
         }
     }
 
@@ -52,6 +54,7 @@ public enum SHColor {
         case .codex: return brandCodex
         case .claude: return brandClaude
         case .muse: return brandMuse
+        case .pi: return brandPi
         }
     }
 
@@ -62,6 +65,7 @@ public enum SHColor {
         case .codex: return brandCodex
         case .claude: return brandClaude
         case .muse: return brandMuse
+        case .pi: return brandPi
         }
     }
 
@@ -179,6 +183,13 @@ public struct HarnessVisual: Sendable {
                 symbolName: "circle.dashed",
                 color: SHColor.brandMuse
             )
+        case .pi:
+            return HarnessVisual(
+                label: "Pi",
+                shortLabel: "Pi",
+                symbolName: "function",
+                color: SHColor.brandPi
+            )
         }
     }
 
@@ -188,6 +199,7 @@ public struct HarnessVisual: Sendable {
         case .codex: return forKind(.codex)
         case .claude: return forKind(.claudeCli)
         case .muse: return forKind(.muse)
+        case .pi: return forKind(.pi)
         }
     }
 }
@@ -215,6 +227,7 @@ public struct HarnessLogoView: View {
         case .codex: return "HarnessCodex"
         case .claudeTmux, .claudeDesktop, .claudeCli: return "HarnessClaude"
         case .muse: return "HarnessMuse"
+        case .pi: return "HarnessPi"
         case .master: return "HarnessMaster"
         }
     }

@@ -522,7 +522,7 @@ public enum SHMarkdownCache {
     }
 
     private static let bareURLRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"(?i)\b(?:https?|conversation|session|sh|super-harness|antigravity|agy|codex|claude|muse)://[^\s<>"'\[\]]+"#
+        pattern: #"(?i)\b(?:https?|conversation|session|sh|super-harness|antigravity|agy|codex|claude|muse|pi)://[^\s<>"'\[\]]+"#
     )
 
     private static func autolinkBareURLs(in attr: inout AttributedString) {

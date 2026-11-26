@@ -45,6 +45,7 @@ public enum HarnessKind: String, Codable, CaseIterable, Sendable, Hashable {
     case claudeCli = "claude-cli"
     case antigravity
     case muse
+    case pi
 
     public var groupOrMaster: HarnessGroupOrMaster {
         switch self {
@@ -53,6 +54,7 @@ public enum HarnessKind: String, Codable, CaseIterable, Sendable, Hashable {
         case .antigravity: return .antigravity
         case .claudeTmux, .claudeDesktop, .claudeCli: return .claude
         case .muse: return .muse
+        case .pi: return .pi
         }
     }
 
@@ -63,6 +65,7 @@ public enum HarnessKind: String, Codable, CaseIterable, Sendable, Hashable {
         case .antigravity: return .antigravity
         case .claudeTmux, .claudeDesktop, .claudeCli: return .claude
         case .muse: return .muse
+        case .pi: return .pi
         }
     }
 
@@ -74,6 +77,7 @@ public enum HarnessKind: String, Codable, CaseIterable, Sendable, Hashable {
         case .claudeDesktop, .claudeCli: return .claudeResume
         case .antigravity: return .agyResume
         case .muse: return .museExec
+        case .pi: return .piRpc
         }
     }
 }
@@ -83,6 +87,7 @@ public enum HarnessGroup: String, Codable, CaseIterable, Identifiable, Sendable,
     case codex
     case claude
     case muse
+    case pi
 
     public var id: String { rawValue }
 
@@ -92,6 +97,7 @@ public enum HarnessGroup: String, Codable, CaseIterable, Identifiable, Sendable,
         case .codex: return "Codex"
         case .claude: return "Claude"
         case .muse: return "Muse"
+        case .pi: return "Pi"
         }
     }
 
@@ -101,6 +107,7 @@ public enum HarnessGroup: String, Codable, CaseIterable, Identifiable, Sendable,
         case .codex: return .codex
         case .claude: return .claudeCli
         case .muse: return .muse
+        case .pi: return .pi
         }
     }
 
@@ -110,8 +117,22 @@ public enum HarnessGroup: String, Codable, CaseIterable, Identifiable, Sendable,
         case .codex: return .codex
         case .claude: return .claudeCli
         case .muse: return .muse
+        case .pi: return .pi
         }
     }
+}
+
+extension HarnessGroup {
+    /// Harnesses that run on API keys: no quota to fill, so the gauge shows recent spend.
+    public var usesSpendGauge: Bool { self == .pi }
+}
+
+/// Compact gauge caption for a spend amount (matches desktop `formatSpendCaption`): `$0`, `$.42`, `$3.1`, `$27`.
+public func spendGaugeCaption(_ usd: Double) -> String {
+    guard usd.isFinite, usd > 0 else { return "$0" }
+    if usd < 1 { return "$" + String(format: "%.2f", usd).replacingOccurrences(of: "0.", with: ".") }
+    if usd < 10 { return "$" + String(format: "%.1f", usd) }
+    return "$\(Int(usd.rounded()))"
 }
 
 public enum HarnessGroupOrMaster: String, Codable, Sendable, Hashable {
@@ -120,6 +141,7 @@ public enum HarnessGroupOrMaster: String, Codable, Sendable, Hashable {
     case claude
     case antigravity
     case muse
+    case pi
 }
 
 public enum StartHarnessKind: String, Codable, CaseIterable, Identifiable, Sendable, Hashable {
@@ -128,6 +150,7 @@ public enum StartHarnessKind: String, Codable, CaseIterable, Identifiable, Senda
     case claudeCli = "claude-cli"
     case claudeTmux = "claude-tmux"
     case muse
+    case pi
 
     public var id: String { rawValue }
 
@@ -138,6 +161,7 @@ public enum StartHarnessKind: String, Codable, CaseIterable, Identifiable, Senda
         case .claudeCli: return "Claude CLI"
         case .claudeTmux: return "Claude tmux"
         case .muse: return "Muse"
+        case .pi: return "Pi"
         }
     }
 
@@ -147,6 +171,7 @@ public enum StartHarnessKind: String, Codable, CaseIterable, Identifiable, Senda
         case .codex: return .codex
         case .claudeCli, .claudeTmux: return .claude
         case .muse: return .muse
+        case .pi: return .pi
         }
     }
 
@@ -157,6 +182,7 @@ public enum StartHarnessKind: String, Codable, CaseIterable, Identifiable, Senda
         case .claudeCli: return .claudeCli
         case .claudeTmux: return .claudeTmux
         case .muse: return .muse
+        case .pi: return .pi
         }
     }
 }
@@ -182,6 +208,7 @@ public enum DispatchMode: String, Codable, Sendable, Hashable {
     case codexResume = "codex-resume"
     case agyResume = "agy-resume"
     case museExec = "muse-exec"
+    case piRpc = "pi-rpc"
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -1582,17 +1609,20 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
     public var codex: HarnessUsageSummary
     public var claude: HarnessUsageSummary
     public var muse: HarnessUsageSummary?
+    public var pi: HarnessUsageSummary?
 
     public init(
         antigravity: HarnessUsageSummary,
         codex: HarnessUsageSummary,
         claude: HarnessUsageSummary,
-        muse: HarnessUsageSummary? = nil
+        muse: HarnessUsageSummary? = nil,
+        pi: HarnessUsageSummary? = nil
     ) {
         self.antigravity = antigravity
         self.codex = codex
         self.claude = claude
         self.muse = muse
+        self.pi = pi
     }
 
     public init(from decoder: Decoder) throws {
@@ -1609,6 +1639,7 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         codex = parsed[.codex] ?? HarnessUsageSummary(harness: .codex)
         claude = parsed[.claude] ?? HarnessUsageSummary(harness: .claude)
         muse = parsed[.muse]
+        pi = parsed[.pi]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1617,10 +1648,11 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         try c.encode(codex, forKey: .codex)
         try c.encode(claude, forKey: .claude)
         try c.encodeIfPresent(muse, forKey: .muse)
+        try c.encodeIfPresent(pi, forKey: .pi)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case antigravity, codex, claude, muse
+        case antigravity, codex, claude, muse, pi
     }
 
     public subscript(_ group: HarnessGroup) -> HarnessUsageSummary {
@@ -1629,6 +1661,7 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         case .codex: return codex
         case .claude: return claude
         case .muse: return muse ?? HarnessUsageSummary(harness: .muse)
+        case .pi: return pi ?? HarnessUsageSummary(harness: .pi)
         }
     }
 
@@ -1636,6 +1669,9 @@ public struct UsageSnapshot: Codable, Sendable, Equatable {
         var list = [antigravity, codex, claude]
         if let muse {
             list.append(muse)
+        }
+        if let pi {
+            list.append(pi)
         }
         return list
     }
@@ -2045,6 +2081,7 @@ public enum SessionLinkResolver {
         "codex": .codex,
         "claude": .claude,
         "muse": .muse,
+        "pi": .pi,
         "session": nil,
         "sh": nil,
         "super-harness": nil,

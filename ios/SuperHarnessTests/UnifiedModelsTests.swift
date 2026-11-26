@@ -340,9 +340,9 @@ final class UnifiedModelsTests: XCTestCase {
     }
 
     func testHarnessOrderNormalizesAndMoves() throws {
-        XCTAssertEqual(HarnessOrder.normalized(nil), [.antigravity, .codex, .claude, .muse])
-        XCTAssertEqual(HarnessOrder.normalized(["claude", "codex"]), [.claude, .codex, .antigravity, .muse])
-        XCTAssertEqual(HarnessOrder.normalized(["Muse", "bogus", "muse", "claude"]), [.muse, .claude, .antigravity, .codex])
+        XCTAssertEqual(HarnessOrder.normalized(nil), [.antigravity, .codex, .claude, .muse, .pi])
+        XCTAssertEqual(HarnessOrder.normalized(["claude", "codex"]), [.claude, .codex, .antigravity, .muse, .pi])
+        XCTAssertEqual(HarnessOrder.normalized(["Muse", "bogus", "muse", "claude"]), [.muse, .claude, .antigravity, .codex, .pi])
 
         let order: [HarnessGroup] = [.antigravity, .codex, .claude, .muse]
         XCTAssertEqual(HarnessOrder.moving(.muse, onto: .antigravity, in: order), [.muse, .antigravity, .codex, .claude])
@@ -361,16 +361,16 @@ final class UnifiedModelsTests: XCTestCase {
         let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
         defer { store.stopEventStream() }
         await store.bootstrap()
-        XCTAssertEqual(store.harnessOrder, [.antigravity, .codex, .claude, .muse])
+        XCTAssertEqual(store.harnessOrder, [.antigravity, .codex, .claude, .muse, .pi])
 
         store.moveHarness(.claude, onto: .antigravity)
-        XCTAssertEqual(store.harnessOrder, [.claude, .antigravity, .codex, .muse])
-        XCTAssertEqual(defaults.stringArray(forKey: "sh.harnessOrder") ?? [], ["claude", "antigravity", "codex", "muse"])
+        XCTAssertEqual(store.harnessOrder, [.claude, .antigravity, .codex, .muse, .pi])
+        XCTAssertEqual(defaults.stringArray(forKey: "sh.harnessOrder") ?? [], ["claude", "antigravity", "codex", "muse", "pi"])
 
         // A second store on the same defaults starts with the saved order.
         let reopened = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
         defer { reopened.stopEventStream() }
-        XCTAssertEqual(reopened.harnessOrder, [.claude, .antigravity, .codex, .muse])
+        XCTAssertEqual(reopened.harnessOrder, [.claude, .antigravity, .codex, .muse, .pi])
     }
 
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {

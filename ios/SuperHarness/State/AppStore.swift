@@ -1414,7 +1414,7 @@ public final class AppStore {
         }
         let proj = session.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = proj.lowercased()
-        let redundantHarnessNames: Set<String> = ["antigravity", "codex", "claude", "muse", "master", "super harness", ""]
+        let redundantHarnessNames: Set<String> = ["antigravity", "codex", "claude", "muse", "pi", "master", "super harness", ""]
         if !redundantHarnessNames.contains(lower) {
             return proj
         }

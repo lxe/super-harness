@@ -1376,6 +1376,11 @@ public final class AppStore {
     public func selectSession(_ sessionId: String?) {
         selectedSessionId = sessionId
         if let sessionId {
+            // Opening a thread reads it. The host learns this from the watch below; clear the
+            // dot here too so it does not linger until the next session update.
+            if sessions.first(where: { $0.id == sessionId })?.isUnread == true {
+                mutateSession(sessionId) { $0.unread = false }
+            }
             detailRoute = .session(sessionId)
         } else if case .session = detailRoute {
             detailRoute = nil
@@ -1524,6 +1529,20 @@ public final class AppStore {
                 sessions[idx].folderId = nil
             }
             scheduleSnapshotPersist()
+        } catch {
+            reportError(error)
+        }
+    }
+
+    /// Marks a session read or unread here at once and on the host, which shares it with other clients.
+    public func setUnread(sessionId: String, unread: Bool) async {
+        mutateSession(sessionId) { item in
+            item.unread = unread
+        }
+        do {
+            try await client.setSessionUnread(sessionId: sessionId, unread: unread)
+        } catch SuperHarnessAPIError.notFound {
+            // Host predates /api/sessions/read; the local mark still applies until the next refresh.
         } catch {
             reportError(error)
         }

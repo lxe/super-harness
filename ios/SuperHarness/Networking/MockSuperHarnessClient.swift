@@ -227,7 +227,8 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 dispatchMode: .agyResume,
                 nativeSection: "obsidian-kit",
                 nativeSectionOrder: 1,
-                originApp: .antigravityApp
+                originApp: .antigravityApp,
+                unread: true
             ),
             UnifiedSession(
                 id: "codex:cx-test-harness",
@@ -272,7 +273,8 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 tags: ["security"],
                 dispatchMode: .claudeResume,
                 nativeSection: "security-playbooks",
-                nativeSectionOrder: 1
+                nativeSectionOrder: 1,
+                unread: true
             ),
             UnifiedSession(
                 id: "muse:muse-orb-review",
@@ -994,6 +996,13 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         }
         broadcast(.sessions(harnesses: harnesses, sessions: sessions))
         return OrganizeResponse(ok: true, folders: folders)
+    }
+
+    public func setSessionUnread(sessionId: String, unread: Bool) async throws {
+        if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
+            sessions[idx].unread = unread
+            broadcast(.sessions(harnesses: harnesses, sessions: sessions))
+        }
     }
 
     public func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse {

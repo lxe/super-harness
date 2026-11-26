@@ -65,6 +65,7 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func fetchFolders() async throws -> FoldersResponse
     func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings?
     func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse
+    func setSessionUnread(sessionId: String, unread: Bool) async throws
     func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse
     func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment
     func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment
@@ -477,6 +478,17 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             _ = try? await organize(actions: [OrganizeAction(type: .hideSession, sessionId: sessionId)])
             return ArchiveResponse(ok: true, method: "hide-fallback", error: nil)
         }
+    }
+
+    /// POST /api/sessions/read marks a session read; with `unread: true` it marks it unread.
+    public func setSessionUnread(sessionId: String, unread: Bool) async throws {
+        struct ReadBody: Encodable { let sessionId: String; let unread: Bool? }
+        struct ReadResponse: Decodable { let ok: Bool? }
+        let _: ReadResponse = try await request(
+            path: "/api/sessions/read",
+            method: "POST",
+            body: ReadBody(sessionId: sessionId, unread: unread ? true : nil)
+        )
     }
 
     public func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse {

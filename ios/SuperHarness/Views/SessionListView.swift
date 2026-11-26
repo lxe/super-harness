@@ -682,6 +682,15 @@ public struct SessionListView: View {
         }
         .contextMenu {
             Button {
+                Task { await store.setUnread(sessionId: session.id, unread: !session.isUnread) }
+            } label: {
+                if session.isUnread {
+                    Label("Mark as Read", systemImage: "envelope.open")
+                } else {
+                    Label("Mark as Unread", systemImage: "envelope.badge")
+                }
+            }
+            Button {
                 renameDraft = session.displayTitle
                 renamingSession = session
             } label: {
@@ -985,9 +994,18 @@ private struct SessionListRow: View {
                     .foregroundStyle(SHColor.statusWarning)
                     .accessibilityLabel("Question pending")
             } else {
-                Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
-                    .font(SHTypography.micro.monospacedDigit())
-                    .foregroundStyle(SHColor.inkFaint)
+                HStack(spacing: 6) {
+                    Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
+                        .font(SHTypography.micro.monospacedDigit())
+                        .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)
+                    if session.isUnread {
+                        Circle()
+                            .fill(SHColor.brandMaster)
+                            .frame(width: 8, height: 8)
+                            .accessibilityLabel("Unread")
+                            .accessibilityIdentifier("row.unread")
+                    }
+                }
             }
         }
         .contentShape(Rectangle())

@@ -198,6 +198,20 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(DictationController.displayLevel(decibels: 0), 1)
     }
 
+    func testDecodesOptionalUnreadFlag() throws {
+        func decode(_ extra: String) throws -> UnifiedSession {
+            let json = "{ \"id\": \"codex:u\", \"harness\": \"codex\", \"title\": \"T\", \"updatedAt\": 1\(extra) }"
+            return try JSONDecoder().decode(UnifiedSession.self, from: Data(json.utf8))
+        }
+        XCTAssertTrue(try decode(", \"unread\": true").isUnread)
+        XCTAssertFalse(try decode(", \"unread\": false").isUnread)
+        let old = try decode("")
+        XCTAssertNil(old.unread)
+        XCTAssertFalse(old.isUnread)
+        // A malformed value must not break decoding of the session.
+        XCTAssertFalse(try decode(", \"unread\": \"yes\"").isUnread)
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

@@ -363,6 +363,11 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
     public var hostLabel: String?
     /// Start of the newest message the person sent in this session (one line, host-trimmed).
     public var lastUserText: String?
+    /// New activity since the person last had the session open on any client. The host
+    /// computes it and never sets it while the session is running.
+    public var unread: Bool?
+
+    public var isUnread: Bool { unread == true }
 
     public var displayTitle: String {
         if let custom = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
@@ -420,7 +425,8 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         permissionMode: String? = nil,
         hostAddress: String? = nil,
         hostLabel: String? = nil,
-        lastUserText: String? = nil
+        lastUserText: String? = nil,
+        unread: Bool? = nil
     ) {
         self.id = id
         self.nativeId = nativeId ?? Self.inferNativeId(from: id)
@@ -463,6 +469,7 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         self.hostAddress = hostAddress
         self.hostLabel = hostLabel
         self.lastUserText = lastUserText
+        self.unread = unread
     }
 
     public init(from decoder: Decoder) throws {
@@ -514,6 +521,7 @@ public struct UnifiedSession: Codable, Identifiable, Sendable, Equatable, Hashab
         hostAddress = try? c.decodeIfPresent(String.self, forKey: .hostAddress)
         hostLabel = try? c.decodeIfPresent(String.self, forKey: .hostLabel)
         lastUserText = try? c.decodeIfPresent(String.self, forKey: .lastUserText)
+        unread = try? c.decodeIfPresent(Bool.self, forKey: .unread)
     }
 
     private static func inferNativeId(from id: String) -> String {

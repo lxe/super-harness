@@ -91,7 +91,7 @@ const ResetBadge: React.FC<{ text: string; title?: string; className?: string }>
     title={title || `Resets ${text}`}
     className={`inline-flex items-center justify-end gap-1 text-micro text-ink-faint tabular-nums leading-none min-w-0 ${className || ''}`}
   >
-    <RotateCcw className="w-2.5 h-2.5 shrink-0 opacity-75" strokeWidth={2} />
+    <RotateCcw className="w-2.5 h-2.5 shrink-0 opacity-80 -translate-y-[1px]" strokeWidth={2.1} />
     <span className="truncate">{text}</span>
   </span>
 );

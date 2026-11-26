@@ -28,6 +28,7 @@ import {
   prefetchSessionTranscript,
   rendererTranscriptCache,
 } from './utils/transcriptCache';
+import { reconcileById, reuseIfEqual } from './utils/reconcile';
 
 const EMPTY_DRAFT: ComposerDraft = { text: '', attachments: [] };
 const EMPTY_QUEUE: QueuedMessageItem[] = [];
@@ -205,9 +206,11 @@ export const App: React.FC = () => {
     });
 
     const offSessions = window.superHarness.onSessionsUpdated((payload) => {
-      setHarnesses(payload.harnesses);
-      setSessions(payload.sessions);
-      setLiveWorkingMap({});
+      // Discovery re-sends the full list every few seconds, usually unchanged; keep
+      // unchanged objects (and the array) so the sidebar and panes skip re-rendering.
+      setHarnesses((prev) => reuseIfEqual(prev, payload.harnesses));
+      setSessions((prev) => reconcileById(prev, payload.sessions));
+      setLiveWorkingMap((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     });
     const offState = window.superHarness.onStateChanged((next) => {
       setState(next);

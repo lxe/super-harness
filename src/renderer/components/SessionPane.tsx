@@ -34,6 +34,7 @@ import { LiveStepsBar } from './LiveStepsBar';
 import { QueuedMessagesTray } from './QueuedMessagesTray';
 import { SessionComposer } from './SessionComposer';
 import { SessionHeader } from './SessionHeader';
+import { reconcileById } from '../utils/reconcile';
 
 interface FailedUserEntry {
   msg: UnifiedMessage;
@@ -392,7 +393,8 @@ export const SessionPane: React.FC<Props> = ({
         if (currentSessionRef.current !== reqId) return;
         if (!isTranscriptEquivalent(lastResultRef.current, res)) {
           lastResultRef.current = res;
-          setMessages(mergeWithOptimistic(reqId, res.messages, res.liveActivity));
+          const merged = mergeWithOptimistic(reqId, res.messages, res.liveActivity);
+          setMessages((prev) => reconcileById(prev, merged));
           setTotalCount(res.totalCount);
           setLiveActivity(res.liveActivity);
         }
@@ -428,7 +430,9 @@ export const SessionPane: React.FC<Props> = ({
       if (res.sessionId !== sessionId) return;
       if (!isTranscriptEquivalent(lastResultRef.current, res)) {
         lastResultRef.current = res;
-        setMessages(mergeWithOptimistic(sessionId, res.messages, res.liveActivity));
+        // Keep unchanged messages' identity so memoized message views skip re-rendering.
+        const merged = mergeWithOptimistic(sessionId, res.messages, res.liveActivity);
+        setMessages((prev) => reconcileById(prev, merged));
         setTotalCount(res.totalCount);
         setLiveActivity(res.liveActivity);
       }

@@ -63,6 +63,8 @@ export interface UnifiedSession {
   hostLabel?: string;
   /** Start of the last message the person sent in this session (one line, for list rows). */
   lastUserText?: string;
+  /** New activity since lxe last had this session open (on any client). */
+  unread?: boolean;
   /** One-line model-written summary of what the thread is doing now (replaces lastUserText in rows when set). */
   summary?: string;
   pid?: number;
@@ -412,6 +414,10 @@ export interface SuperHarnessState {
   masterThread?: MasterThreadState;
   /** Maps read-only desktop conversation IDs (e.g. Antigravity App) to linked resumable CLI IDs */
   linkedCliSessions?: Record<string, string>;
+  /** Per-session `updatedAt` that lxe has seen (session open on a client). */
+  readMarks?: Record<string, number>;
+  /** Sessions with no read mark count as read up to this time (set when unread tracking started). */
+  readBaseline?: number;
 }
 
 export interface StartSessionRequest {

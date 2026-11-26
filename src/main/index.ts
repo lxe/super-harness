@@ -581,6 +581,14 @@ const liveSync = new LiveSyncService(
   }
 );
 liveSyncRef = liveSync;
+// A session counts as read while it is open on the phone (mobile:<client> panes exist only
+// while that client is connected) or in a desktop pane while the window has focus.
+registry.setReadingLookup(() => {
+  const desktopFocused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
+  return liveSync.getWatchedSessionIds(
+    (paneId) => paneId.startsWith('mobile:') || (desktopFocused && !paneId.startsWith('mobile'))
+  );
+});
 for (const driver of registry.getDrivers()) {
   driver.setActivitySink?.((sessionId) => liveSync.notifyExternalActivity(sessionId));
 }
@@ -634,6 +642,10 @@ function createWindow(): void {
     },
   });
 
+  // Opening the window marks the visible session read right away.
+  mainWindow.on('focus', () => {
+    void refreshAndBroadcast();
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       void shell.openExternal(url);

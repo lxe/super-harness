@@ -15,6 +15,8 @@ const STATE_FILE = path.join(CONFIG_DIR, 'state.json');
 
 export function createDefaultState(): SuperHarnessState {
   return {
+    readMarks: {},
+    readBaseline: Date.now(),
     settings: {
       pollIntervalMs: 5000,
       maxSessionsPerHarness: 80,
@@ -83,6 +85,7 @@ export function createDefaultState(): SuperHarnessState {
 }
 
 export class ConfigStore {
+  private readSaveTimer: NodeJS.Timeout | null = null;
   private state: SuperHarnessState;
   private listeners = new Set<(state: SuperHarnessState) => void>();
 
@@ -138,6 +141,9 @@ export class ConfigStore {
         folders: Array.isArray(raw.folders) ? raw.folders : def.folders,
         overrides: migratedOverrides,
         linkedCliSessions: raw.linkedCliSessions ?? {},
+        readMarks: raw.readMarks ?? {},
+        // Existing installs start with everything read, so the dot only marks new activity.
+        readBaseline: typeof raw.readBaseline === 'number' ? raw.readBaseline : Date.now(),
         masterThread: raw.masterThread && Array.isArray(raw.masterThread.segments) ? raw.masterThread : { segments: [] },
         masterMessages:
           Array.isArray(raw.masterMessages) && raw.masterMessages.length > 0
@@ -393,6 +399,45 @@ export class ConfigStore {
     const idx = this.state.masterMessages.findIndex((m) => m.id === id);
     if (idx === -1) return;
     this.state.masterMessages[idx] = updater(this.state.masterMessages[idx]);
+    this.save();
+    this.emit();
+  }
+
+  /** Last-read `updatedAt` per session, with the baseline for sessions never opened. */
+  getReadMark(sessionId: string): number {
+    const mark = this.state.readMarks?.[sessionId];
+    if (mark === -1) return -1; // marked unread by hand
+    return Math.max(mark ?? 0, this.state.readBaseline ?? 0);
+  }
+
+  /**
+   * Record that lxe has seen these sessions up to the given updatedAt. Saves at most every
+   * few seconds (it is called on every discovery pass for open sessions).
+   */
+  markRead(marks: Array<{ sessionId: string; updatedAt: number }>): boolean {
+    if (!this.state.readMarks) this.state.readMarks = {};
+    let changed = false;
+    for (const { sessionId, updatedAt } of marks) {
+      const prev = this.state.readMarks[sessionId] ?? 0;
+      if (prev === -1 || prev < updatedAt) {
+        this.state.readMarks[sessionId] = updatedAt;
+        changed = true;
+      }
+    }
+    if (changed && !this.readSaveTimer) {
+      this.readSaveTimer = setTimeout(() => {
+        this.readSaveTimer = null;
+        this.save();
+      }, 3000);
+      this.readSaveTimer.unref?.();
+    }
+    return changed;
+  }
+
+  /** Mark a session unread again (it shows the dot until opened). */
+  markUnread(sessionId: string): void {
+    if (!this.state.readMarks) this.state.readMarks = {};
+    this.state.readMarks[sessionId] = -1;
     this.save();
     this.emit();
   }

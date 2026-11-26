@@ -888,6 +888,20 @@ export class ControlServer {
           return;
         }
 
+        if (req.method === 'POST' && url.pathname === '/api/sessions/read') {
+          const body = await readBody();
+          const sessionId = String(body.sessionId || '');
+          if (!sessionId) {
+            sendJson({ ok: false, error: 'sessionId required' }, 400);
+            return;
+          }
+          if (body.unread === true) this.store.markUnread(sessionId);
+          else this.store.markRead([{ sessionId, updatedAt: Date.now() }]);
+          await this.triggerRefresh();
+          sendJson({ ok: true, sessionId, unread: body.unread === true });
+          return;
+        }
+
         if (url.pathname === '/api/orchestrator/memory') {
           if (req.method === 'GET') {
             sendJson({ path: ORCHESTRATOR_MEMORY_PATH, content: readOrchestratorMemory() });

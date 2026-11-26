@@ -783,7 +783,16 @@ export const Sidebar: React.FC<Props> = React.memo(({
           };
         }}
         meta={
-          s.hostAddress ? (
+          s.unread || s.hostAddress || s.harness === 'claude-tmux' ? (
+            <>
+              {s.unread && (
+                <span
+                  aria-label="Unread"
+                  title="New activity since you last opened this thread"
+                  className="w-2 h-2 rounded-full bg-accent-primary"
+                />
+              )}
+              {s.hostAddress ? (
             <span
               title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
               className="rounded px-1 py-px text-[10px] font-medium leading-none tabular-nums text-ink-secondary bg-surface-subtle border border-line-hairline"
@@ -797,6 +806,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
             >
               <Laptop className="w-3.5 h-3.5" />
             </span>
+          ) : undefined}
+            </>
           ) : undefined
         }
         hoverActions={

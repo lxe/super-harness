@@ -93,6 +93,8 @@ describe('HarnessDriver shared utilities & registry delegation', () => {
 
     const fakeStore = {
       getMasterNativeIds: () => new Set<string>(),
+      markRead: () => false,
+      getReadMark: () => 0,
       getState: () => ({
         version: 1,
         folders: [],

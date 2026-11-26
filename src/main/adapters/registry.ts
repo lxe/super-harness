@@ -34,6 +34,13 @@ export class HarnessRegistry {
     this.driverMap = new Map(drivers.map((d) => [d.id, d]));
   }
 
+  private readingLookup: () => Set<string> = () => new Set();
+
+  /** Sessions lxe is looking at right now (open in a focused desktop pane or on the phone). */
+  setReadingLookup(fn: () => Set<string>): void {
+    this.readingLookup = fn;
+  }
+
   /** Source of one-line thread summaries overlaid on each discovered session. */
   setSummaryLookup(fn: (sessionId: string) => string | undefined): void {
     this.summaryLookup = fn;
@@ -130,6 +137,17 @@ export class HarnessRegistry {
         if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
         return b.updatedAt - a.updatedAt;
       });
+
+    // Unread: activity newer than what lxe last saw. Sessions open right now are read.
+    const reading = this.readingLookup();
+    this.store.markRead(
+      [masterSession, ...decorated]
+        .filter((s) => reading.has(s.id))
+        .map((s) => ({ sessionId: s.id, updatedAt: s.updatedAt }))
+    );
+    for (const s of [masterSession, ...decorated] as UnifiedSession[]) {
+      s.unread = s.status !== 'running' && !reading.has(s.id) && s.updatedAt > this.store.getReadMark(s.id) + 1000;
+    }
 
     const sessions = [masterSession, ...decorated];
     this.lastHarnesses = harnesses;

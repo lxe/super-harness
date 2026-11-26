@@ -204,6 +204,13 @@ export class LiveSyncService {
     }
   }
 
+  /** Sessions currently open in a pane, optionally filtered by pane id. */
+  getWatchedSessionIds(includePane: (paneId: string) => boolean = () => true): Set<string> {
+    const ids = new Set<string>();
+    for (const pw of this.paneWatches.values()) if (includePane(pw.paneId)) ids.add(pw.sessionId);
+    return ids;
+  }
+
   unwatchPane(paneId: string): void {
     const existing = this.paneWatches.get(paneId);
     if (!existing) return;

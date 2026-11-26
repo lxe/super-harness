@@ -1094,13 +1094,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 {
                   id: 'muse',
                   label: 'Muse',
-                  icon: (
-                    <HarnessLogo
-                      harness="muse"
-                      size={16}
-                      className="-translate-x-[0.5px] translate-y-[0.5px]"
-                    />
-                  ),
+                  // The Muse mark is drawn centered on its 24x24 box and the 16px icon sits
+                  // at an integer offset in the 32px gauge, so it needs no pixel nudge.
+                  icon: <HarnessLogo harness="muse" size={16} />,
                   working: workingByHarness.muse,
                   progress: {
                     value: usage?.muse?.barPercent ?? null,

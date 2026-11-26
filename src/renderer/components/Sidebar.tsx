@@ -743,6 +743,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         secondaryActive={isSplit}
         selected={isMultiSelected}
         working={s.status === 'running'}
+        workingTone={s.harnessGroup}
         className={isBeingDragged ? 'opacity-45' : undefined}
         onPointerDown={(e) => {
           if (e.button !== 0 || s.harnessGroup === 'master') return;
@@ -1261,7 +1262,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   <SectionHeader
                     level={1}
                     variant={isHarnessDivider ? 'separator' : 'tree'}
-                    accent={grp.harnessLogo}
+                    accent={grp.harnessLogo || grp.harnessGroup}
                     collapsed={isTopClosed}
                     dropTarget={isTopDragOver}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
@@ -1330,6 +1331,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                             >
                               <SectionHeader
                                 level={2}
+                                accent={grp.harnessLogo || grp.harnessGroup}
                                 collapsed={isSecClosed}
                                 dropTarget={isSecDragOver}
                                 onToggle={() =>

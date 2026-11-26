@@ -1,6 +1,7 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Loader2, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { cn } from './cn';
+import { WorkingOrb, type WorkingOrbTone } from './WorkingOrb';
 
 export type SectionHeaderAccent = 'antigravity' | 'codex' | 'claude' | 'muse';
 
@@ -74,12 +75,12 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           className="flex-1 min-w-0 h-full flex items-center gap-2 cursor-pointer focus:outline-none focus-visible:shadow-none"
         >
           {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
-          <span className="text-micro font-semibold uppercase tracking-[0.06em] leading-none translate-y-[1px] text-ink-primary/90 group-hover:text-ink-primary transition-colors truncate">
+          <span className="text-micro font-semibold uppercase tracking-[0.06em] leading-none text-ink-primary/90 group-hover:text-ink-primary transition-colors truncate">
             {label}
           </span>
           <span className="ml-auto flex items-center gap-1.5 text-micro leading-none tabular-nums font-normal text-ink-faint shrink-0">
-            {working && <Loader2 className="w-3 h-3 animate-spin text-ink-secondary shrink-0" />}
-            {count !== undefined && <span className="translate-y-[0.5px]">{count}</span>}
+            {working && <WorkingOrb tone={accent ?? 'master'} size="sm" />}
+            {count !== undefined && <span>{count}</span>}
             {collapsed ? (
               <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-secondary shrink-0" />
             ) : (
@@ -130,21 +131,16 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
         )}
         {working ? (
-          <span className="shrink-0 inline-flex items-center justify-center">
-            <Loader2
-              className={cn(
-                level === 1 ? 'w-4 h-4' : 'w-3.5 h-3.5',
-                'animate-spin text-ink-secondary shrink-0'
-              )}
-            />
+          <span className="shrink-0 inline-flex items-center justify-center w-4 h-4">
+            <WorkingOrb tone={accent ?? 'master'} size={level === 1 ? 'md' : 'sm'} />
           </span>
         ) : (
           icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
         )}
-        <span className="leading-none translate-y-[1px] truncate">{label}</span>
+        <span className="leading-none truncate">{label}</span>
         {count !== undefined && (
           <span className="ml-auto flex items-center gap-1.5 text-caption leading-none tabular-nums font-normal text-ink-faint shrink-0">
-            <span className="translate-y-[0.5px]">{count}</span>
+            <span>{count}</span>
           </span>
         )}
       </button>
@@ -177,6 +173,7 @@ export interface NavRowProps extends React.HTMLAttributes<HTMLDivElement> {
   secondaryActive?: boolean;
   selected?: boolean;
   working?: boolean;
+  workingTone?: WorkingOrbTone;
 }
 
 export const NavRow: React.FC<NavRowProps> = ({
@@ -189,6 +186,7 @@ export const NavRow: React.FC<NavRowProps> = ({
   secondaryActive = false,
   selected = false,
   working = false,
+  workingTone = 'master',
   className,
   ...rest
 }) => {
@@ -224,9 +222,7 @@ export const NavRow: React.FC<NavRowProps> = ({
             {meta}
           </span>
         )}
-        {working && (
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-secondary shrink-0" />
-        )}
+        {working && <WorkingOrb tone={workingTone} size="md" />}
         {hoverActions && (
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 absolute right-1.5 top-1/2 -translate-y-1/2 bg-surface-raised/95 rounded-md p-0.5 transition-opacity">
             {hoverActions}

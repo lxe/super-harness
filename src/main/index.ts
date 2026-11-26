@@ -484,7 +484,23 @@ async function refreshUsageAndBroadcast(): Promise<void> {
   }
 }
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   protocol.handle('sh-media', (request) => {
     try {
       const u = new URL(request.url);

@@ -347,6 +347,19 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                         ],
                         harnessMeta: MessageHarnessMeta(model: "gpt-5.3-codex", sourceKind: .agent)
                     ),
+                    UnifiedMessage(
+                        id: "th-3",
+                        role: .user,
+                        timestamp: now - 25 * hour,
+                        blocks: [.text(text: "Another Claude session sent a message:\n<cross-session-message from=\"bridge:session_01\" from-name=\"Release Ops\" from-mode=\"bypass\">\nThe folder migration is deployed to staging. Two things before you continue:\n\n1. Re-run the organizer tests against the staging snapshot.\n2. Tell me the commit hash so I can tag the release.\n</cross-session-message>")]
+                    ),
+                    UnifiedMessage(
+                        id: "th-4",
+                        role: .assistant,
+                        timestamp: now - 25 * hour,
+                        blocks: [.text(text: "Re-running the organizer tests against the staging snapshot now.")],
+                        harnessMeta: MessageHarnessMeta(model: "gpt-5.3-codex", sourceKind: .agent)
+                    ),
                 ],
                 liveActivity: LiveActivityState(isWorking: false)
             ),

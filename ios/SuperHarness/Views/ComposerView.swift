@@ -47,6 +47,9 @@ public struct ComposerView: View {
     @State private var isPhotoPickerPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
     @State private var dictation = DictationController()
+    /// Set when send is tapped while dictation is recording or transcribing: the message goes
+    /// out with this mode as soon as the dictated text has landed in the composer.
+    @State private var pendingSendMode: SendMode?
 
     public init(
         session: UnifiedSession,
@@ -95,7 +98,7 @@ public struct ComposerView: View {
     }
 
     private var showsStopButton: Bool {
-        (isStreaming || isAgentBusy) && !hasContent
+        (isStreaming || isAgentBusy) && !hasContent && dictation.state == .idle
     }
 
     private static let effortSuffixes = ["-low", "-medium", "-high", "-xhigh", "-max"]
@@ -264,6 +267,7 @@ public struct ComposerView: View {
             handleImportedFiles(result)
         }
         .onDisappear {
+            pendingSendMode = nil
             if dictation.state == .recording {
                 dictation.cancel()
             }
@@ -422,15 +426,35 @@ public struct ComposerView: View {
 
     private func handleDictationTap() async {
         guard let transcribe = onTranscribeAudio else { return }
-        if let spoken = await dictation.toggleRecording(prewarm: onDictationStart, transcribe: transcribe), !spoken.isEmpty {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                text = spoken
-            } else {
-                text = text.hasSuffix(" ") || text.hasSuffix("\n") ? text + spoken : text + " " + spoken
-            }
+        let wasRecording = dictation.state == .recording
+        let spoken = await dictation.toggleRecording(prewarm: onDictationStart, transcribe: transcribe)
+        if let spoken, !spoken.isEmpty {
+            text = ComposerDictation.appending(spoken, to: text)
+        }
+        guard wasRecording, let mode = pendingSendMode else { return }
+        pendingSendMode = nil
+        // A failed transcription leaves the composer text as it is and sends nothing.
+        if ComposerDictation.shouldSendAfterFinalizing(text: text, hasAttachments: !attachments.isEmpty, errorMessage: dictation.errorMessage) {
+            onSend(mode)
         }
     }
+
+    /// Send, finishing any in-progress dictation first so the dictated text is part of the message.
+    private func handleSendTap(_ mode: SendMode) {
+        switch dictation.state {
+        case .idle:
+            onSend(mode)
+        case .recording:
+            guard pendingSendMode == nil else { return }
+            pendingSendMode = mode
+            Task { await handleDictationTap() }
+        case .transcribing:
+            // The stop tap's task is already waiting on the transcription and will send.
+            pendingSendMode = mode
+        }
+    }
+
+    private var isFinalizingDictationForSend: Bool { pendingSendMode != nil }
 
     /// Default tap immediately steers (`SendMode.steer`). Long-press opens a menu to Steer Now or Queue for Later.
     @ViewBuilder
@@ -450,12 +474,13 @@ public struct ComposerView: View {
             .accessibilityLabel("Stop agent")
             .accessibilityIdentifier("composer.stop")
         } else {
+            let canSend = (hasContent || dictation.state != .idle) && !isSending && !isFinalizingDictationForSend
             Button {
                 triggerHaptic(.light)
-                onSend(.steer)
+                handleSendTap(.steer)
             } label: {
                 Group {
-                    if isSending {
+                    if isSending || isFinalizingDictationForSend {
                         SHActivityPulse(tint: SHColor.surfaceRail, size: 11)
                     } else {
                         Image(systemName: "arrow.up")
@@ -465,21 +490,21 @@ public struct ComposerView: View {
                 }
                 .frame(width: 32, height: 32)
                 .background(SHColor.inkPrimary, in: Circle())
-                .opacity(hasContent && !isSending ? 1.0 : 0.28)
+                .opacity(canSend ? 1.0 : 0.28)
             }
             .buttonStyle(.plain)
-            .disabled(!hasContent || isSending)
+            .disabled(!canSend)
             .contextMenu {
-                if hasContent && !isSending {
+                if canSend {
                     Button {
                         triggerHaptic(.light)
-                        onSend(.steer)
+                        handleSendTap(.steer)
                     } label: {
                         Label("Steer Now", systemImage: "arrow.up.circle.fill")
                     }
                     Button {
                         triggerHaptic(.light)
-                        onSend(.queue)
+                        handleSendTap(.queue)
                     } label: {
                         Label("Queue for Later", systemImage: "text.badge.plus")
                     }
@@ -866,3 +891,20 @@ private struct SHPasteableTextInput: View {
     }
 }
 #endif
+
+/// Pure rules for combining dictated text with the composer, kept out of the view for testing.
+enum ComposerDictation {
+    static func appending(_ spoken: String, to text: String) -> String {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return spoken
+        }
+        return text.hasSuffix(" ") || text.hasSuffix("\n") ? text + spoken : text + " " + spoken
+    }
+
+    /// After send was tapped during dictation: send only when the transcription did not fail
+    /// and there is something to send.
+    static func shouldSendAfterFinalizing(text: String, hasAttachments: Bool, errorMessage: String?) -> Bool {
+        guard errorMessage == nil else { return false }
+        return hasAttachments || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}

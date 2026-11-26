@@ -1204,3 +1204,141 @@ private struct NoticeBlockView: View, Equatable {
         .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
     }
 }
+
+// MARK: - Injected User-Turn Messages (cross-session, task, compaction, context notes)
+
+/// A message that arrives in the user turn but was not typed by the person: another session's
+/// message, a task notification, a compaction summary or an injected context note. The chat
+/// shows these as a labelled row that expands, instead of dumping the raw text as a user bubble.
+/// Mirrors `classifyUserMessage` in the desktop CoalescedBlockView.
+struct InjectedMessageInfo: Equatable {
+    enum Kind: Equatable { case agent, task, compaction, systemMeta }
+
+    let kind: Kind
+    let label: String
+    let preview: String
+    let body: String
+
+    var icon: String {
+        switch kind {
+        case .agent: return "arrow.left.arrow.right"
+        case .task: return "checklist"
+        case .compaction: return "rectangle.compress.vertical"
+        case .systemMeta: return "info.circle"
+        }
+    }
+
+    static func classify(_ message: UnifiedMessage) -> InjectedMessageInfo? {
+        guard message.role == .user else { return nil }
+        let fullText = message.blocks.compactMap { block -> String? in
+            if case .text(let text) = block { return text }
+            return nil
+        }
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fullText.isEmpty else { return nil }
+
+        let metaKind = message.harnessMeta?.sourceKind
+        let body = readableBody(fullText)
+        let preview = String(body.split(whereSeparator: \.isNewline).joined(separator: " ").prefix(120))
+
+        func matches(_ pattern: String) -> Bool {
+            fullText.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+
+        if metaKind == .compaction
+            || matches("^This session is being continued from a previous conversation")
+            || matches("^<CONTEXT_SUMMARY>") {
+            return InjectedMessageInfo(kind: .compaction, label: "Compacted conversation summary", preview: preview, body: body)
+        }
+
+        if metaKind == .agent
+            || matches("<cross-session-message\\b")
+            || matches("<teammate-message\\b")
+            || matches("<subagent[_-]notification\\b")
+            || matches("^Another (?:Claude|Codex|agent|session)\\b.*sent a message:") {
+            let sender = message.harnessMeta?.senderName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                ?? firstCapture("<cross-session-message[^>]*\\bname=\"([^\"]+)\"", in: fullText)
+                ?? firstCapture("<teammate-message[^>]*\\bteammate_id=\"([^\"]+)\"", in: fullText)
+            let label = sender.map { "From session · \($0)" } ?? "Message from another session"
+            return InjectedMessageInfo(kind: .agent, label: label, preview: preview, body: body)
+        }
+
+        if metaKind == .task || matches("^<task-notification\\b") {
+            return InjectedMessageInfo(kind: .task, label: "Task notification", preview: preview, body: body)
+        }
+
+        if metaKind == .systemMeta
+            || matches("^<(?:INSTRUCTIONS|environment_context|local-command-caveat|turn_aborted|system-reminder)\\b") {
+            return InjectedMessageInfo(kind: .systemMeta, label: "Context note", preview: preview, body: body)
+        }
+        return nil
+    }
+
+    /// The message without its delivery wrapper: the "Another session sent a message:" intro and
+    /// the surrounding tags are dropped, inner line breaks are kept.
+    static func readableBody(_ text: String) -> String {
+        var out = text
+        if let summary = firstCapture("<summary>([\\s\\S]*?)</summary>", in: text) {
+            out = summary
+        }
+        out = out.replacingOccurrences(
+            of: "^Another (?:Claude|Codex|agent|session)\\b[^\\n]*sent a message:\\s*",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        out = out.replacingOccurrences(of: "</?[A-Za-z][A-Za-z0-9_-]*(?:\\s[^<>]*)?>", with: "", options: .regularExpression)
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func firstCapture(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        let value = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+/// Collapsed row for an injected message: label on the first line, the start of the message
+/// on the second. Tapping expands the full message below.
+struct InjectedMessageView: View {
+    let info: InjectedMessageInfo
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SHSpacing.xs) {
+            SHInlineDisclosureRow(
+                icon: info.icon,
+                title: info.label,
+                tint: info.kind == .agent ? SHColor.brandMaster : SHColor.inkMuted,
+                isExpanded: isExpanded
+            ) {
+                withAnimation(.easeInOut(duration: 0.14)) { isExpanded.toggle() }
+            }
+
+            if isExpanded {
+                MarkdownTextBlockView(text: info.body, isUserBubble: false)
+                    .equatable()
+                    .padding(SHSpacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(SHColor.surfaceSubtle)
+                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            } else if !info.preview.isEmpty {
+                Text(info.preview)
+                    .font(SHTypography.caption)
+                    .foregroundStyle(SHColor.inkFaint)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.leading, 21)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("message.injected")
+    }
+}

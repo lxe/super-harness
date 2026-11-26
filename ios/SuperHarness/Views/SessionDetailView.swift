@@ -618,7 +618,11 @@ private struct MessageBubbleView: View, Equatable {
         Group {
             switch message.role {
             case .user:
-                userMessageView
+                if pendingDeliveryState == nil, let injected = InjectedMessageInfo.classify(message) {
+                    InjectedMessageView(info: injected)
+                } else {
+                    userMessageView
+                }
             case .assistant, .system:
                 assistantMessageView
             }

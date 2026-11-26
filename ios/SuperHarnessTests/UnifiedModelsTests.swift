@@ -115,6 +115,42 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertFalse(ScrollingCommandText.isMultiLine("npm test\n"))
     }
 
+    func testClassifiesCrossSessionMessagesAndLeavesTypedMessagesAlone() {
+        let raw = "Another Claude session sent a message:\n<cross-session-message from=\"bridge:s1\" from-name=\"Release Ops\" from-mode=\"bypass\">\nDeployed to staging.\nSend me the hash.\n</cross-session-message>"
+        let peer = UnifiedMessage(id: "u1", role: .user, timestamp: 1, blocks: [.text(text: raw)])
+        let info = InjectedMessageInfo.classify(peer)
+        XCTAssertEqual(info?.kind, .agent)
+        XCTAssertEqual(info?.label, "From session · Release Ops")
+        XCTAssertEqual(info?.body, "Deployed to staging.\nSend me the hash.")
+        XCTAssertEqual(info?.preview, "Deployed to staging. Send me the hash.")
+
+        // The host can also tag the message without any wrapper text.
+        let tagged = UnifiedMessage(
+            id: "u2", role: .user, timestamp: 1, blocks: [.text(text: "Tests are green.")],
+            harnessMeta: MessageHarnessMeta(sourceKind: .agent, senderName: "CI watcher")
+        )
+        XCTAssertEqual(InjectedMessageInfo.classify(tagged)?.label, "From session · CI watcher")
+
+        let task = UnifiedMessage(id: "u3", role: .user, timestamp: 1, blocks: [.text(text: "<task-notification><summary>Build finished</summary></task-notification>")])
+        XCTAssertEqual(InjectedMessageInfo.classify(task)?.kind, .task)
+        XCTAssertEqual(InjectedMessageInfo.classify(task)?.preview, "Build finished")
+
+        let typed = UnifiedMessage(id: "u4", role: .user, timestamp: 1, blocks: [.text(text: "Use a <div> here, and compare a < b.")])
+        XCTAssertNil(InjectedMessageInfo.classify(typed))
+        let assistant = UnifiedMessage(id: "a1", role: .assistant, timestamp: 1, blocks: [.text(text: raw)])
+        XCTAssertNil(InjectedMessageInfo.classify(assistant))
+    }
+
+    func testDictationSendRules() {
+        XCTAssertEqual(ComposerDictation.appending("world", to: ""), "world")
+        XCTAssertEqual(ComposerDictation.appending("world", to: "hello"), "hello world")
+        XCTAssertEqual(ComposerDictation.appending("world", to: "hello "), "hello world")
+        XCTAssertTrue(ComposerDictation.shouldSendAfterFinalizing(text: "hello world", hasAttachments: false, errorMessage: nil))
+        XCTAssertTrue(ComposerDictation.shouldSendAfterFinalizing(text: "", hasAttachments: true, errorMessage: nil))
+        XCTAssertFalse(ComposerDictation.shouldSendAfterFinalizing(text: "typed before dictating", hasAttachments: false, errorMessage: "No speech detected."))
+        XCTAssertFalse(ComposerDictation.shouldSendAfterFinalizing(text: "  ", hasAttachments: false, errorMessage: nil))
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

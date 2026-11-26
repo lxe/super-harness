@@ -413,6 +413,7 @@ class AcpConnection {
       prompt: promptBlocks,
     })
       .catch((err) => {
+        if (this.activeRuns.get(nativeSessionId)?.runId !== runId) return;
         // Drop cached resume flag in case session needs fresh resume next time
         this.resumedSessions.delete(nativeSessionId);
         onEvent({
@@ -424,14 +425,17 @@ class AcpConnection {
       })
       .finally(() => {
         this.lastTranscriptMtime.set(nativeSessionId, this.getTranscriptMtime(nativeSessionId));
-        this.activeRuns.delete(nativeSessionId);
-        onEvent({ sessionId: shSessionId, runId, kind: 'done' });
-        onComplete();
+        if (this.activeRuns.get(nativeSessionId)?.runId === runId) {
+          this.activeRuns.delete(nativeSessionId);
+          onEvent({ sessionId: shSessionId, runId, kind: 'done' });
+          onComplete();
+        }
       });
   }
 
   async cancel(nativeSessionId: string): Promise<boolean> {
     if (!this.activeRuns.has(nativeSessionId)) return false;
+    this.activeRuns.delete(nativeSessionId);
     try {
       this.sendJson({
         method: 'session/cancel',

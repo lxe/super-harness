@@ -13,6 +13,7 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 import { Badge, Button, WorkingIndicator } from '../ui';
+import { isBusyDispatchError } from '../utils/queueStorage';
 import {
   captureStreamTurnBaseline,
   DEFAULT_TRANSCRIPT_LIMIT,
@@ -103,6 +104,7 @@ interface Props {
   subagents: UnifiedSession[];
   folders: SessionFolder[];
   catalog?: HarnessCatalog | null;
+  isStreamingGlobal?: boolean;
   draft: ComposerDraft;
   onDraftChange: (
     sessionId: string,
@@ -144,6 +146,7 @@ export const SessionPane: React.FC<Props> = ({
   subagents,
   folders,
   catalog,
+  isStreamingGlobal = false,
   draft,
   onDraftChange,
   queuedMessages,
@@ -587,9 +590,10 @@ export const SessionPane: React.FC<Props> = ({
     [setAttachments]
   );
 
+  const effectiveStreaming = isStreaming || isStreamingGlobal;
   const isAgentBusy =
     !isMaster &&
-    (isStreaming || Boolean(liveActivity?.isWorking) || session?.status === 'running');
+    (effectiveStreaming || Boolean(liveActivity?.isWorking) || session?.status === 'running');
 
   const dispatchMessageNow = useCallback(
     async (prompt: string, msgAttachments: ImageAttachment[]) => {
@@ -601,6 +605,7 @@ export const SessionPane: React.FC<Props> = ({
       setStreamError(null);
       stickyBottomRef.current = true;
 
+      let optimisticId: string | null = null;
       if (!isMaster) {
         const optimisticBlocks: UnifiedBlock[] = [
           ...msgAttachments.map((a) => ({
@@ -618,6 +623,7 @@ export const SessionPane: React.FC<Props> = ({
           timestamp: sentAt,
           blocks: optimisticBlocks,
         };
+        optimisticId = optMsg.id;
         pendingOptimisticRef.current = {
           sessionId: session.id,
           msg: optMsg,
@@ -636,6 +642,42 @@ export const SessionPane: React.FC<Props> = ({
         );
         if (!res.ok) {
           const errText = res.error || 'Dispatch failed';
+          // Never fail a user's prompt with a red "Not delivered" banner when the harness
+          // is mid-turn — drop the optimistic bubble and queue it seamlessly so it drains next!
+          if (isBusyDispatchError(errText)) {
+            if (pendingOptimisticRef.current?.msg.id === optimisticId) {
+              pendingOptimisticRef.current = null;
+            }
+            if (optimisticId) {
+              setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+            }
+            if (session.harnessGroup === 'codex') {
+              try {
+                const qRes = await window.superHarness.queueMessage(
+                  session.id,
+                  prompt,
+                  msgAttachments.length > 0 ? msgAttachments : undefined
+                );
+                if (qRes.ok) {
+                  setDispatchNote(qRes.dispatchedVia || 'Codex queue');
+                  void loadTranscript(true);
+                  return;
+                }
+              } catch {
+                // Fall back to Super Harness persistent queue below
+              }
+            }
+            const queuedItem: QueuedMessageItem = {
+              id: `sh-q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              text: prompt,
+              attachments: msgAttachments.length > 0 ? msgAttachments : undefined,
+              createdAt: Date.now(),
+              source: 'super-harness',
+            };
+            onQueueChange(session.id, (prev) => [...prev, queuedItem]);
+            setDispatchNote('Queued until current turn finishes');
+            return;
+          }
           const attached = markPendingFailed(session.id, errText);
           if (!attached) setStreamError(errText);
         } else {
@@ -648,7 +690,7 @@ export const SessionPane: React.FC<Props> = ({
         setSending(false);
       }
     },
-    [session, isMaster, loadTranscript]
+    [session, isMaster, loadTranscript, onQueueChange]
   );
 
   const handleDismissFailed = useCallback(
@@ -952,8 +994,8 @@ export const SessionPane: React.FC<Props> = ({
             )}
 
             {/* Quiet live Working indicator */}
-            {!isMaster && !isStreaming && liveActivity?.isWorking && (
-              <WorkingIndicator tone={session.harnessGroup} focus={liveActivity.focus} />
+            {!isMaster && !isStreaming && (effectiveStreaming || liveActivity?.isWorking) && (
+              <WorkingIndicator tone={session.harnessGroup} focus={liveActivity?.focus} />
             )}
 
             {/* Running background tasks indicator (Antigravity parity) */}
@@ -1065,7 +1107,7 @@ export const SessionPane: React.FC<Props> = ({
             input={input}
             attachments={attachments}
             sending={sending}
-            isStreaming={isStreaming}
+            isStreaming={effectiveStreaming}
             isAgentBusy={isAgentBusy}
             dispatchNote={dispatchNote}
             textareaRef={textareaRef}

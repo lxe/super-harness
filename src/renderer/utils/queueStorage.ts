@@ -111,5 +111,7 @@ export function saveStoredQueues(map: Record<string, QueuedMessageItem[]>): void
 
 export function isBusyDispatchError(errorText: string | undefined): boolean {
   if (!errorText) return false;
-  return /currently running|already running|active turn|busy/i.test(errorText);
+  return /currently running|already running|active turn|active writer|running a turn|busy/i.test(
+    errorText
+  );
 }

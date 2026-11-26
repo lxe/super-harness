@@ -947,6 +947,7 @@ export const App: React.FC = () => {
             subagents={activeSubagents}
             folders={folders}
             catalog={catalog}
+            isStreamingGlobal={streamingIds.has(activeSessionId)}
             draft={drafts[activeSessionId] ?? EMPTY_DRAFT}
             onDraftChange={handleDraftChange}
             queuedMessages={queuedBySession[activeSessionId] ?? EMPTY_QUEUE}
@@ -968,6 +969,7 @@ export const App: React.FC = () => {
             subagents={splitSubagents}
             folders={folders}
             catalog={catalog}
+            isStreamingGlobal={streamingIds.has(splitSessionId)}
             draft={drafts[splitSessionId] ?? EMPTY_DRAFT}
             onDraftChange={handleDraftChange}
             queuedMessages={queuedBySession[splitSessionId] ?? EMPTY_QUEUE}

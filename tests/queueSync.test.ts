@@ -150,6 +150,12 @@ describe('Persistent Super Harness queue storage', () => {
     expect(
       isBusyDispatchError('Antigravity Desktop is currently running a turn on this conversation.')
     ).toBe(true);
+    expect(
+      isBusyDispatchError(
+        'This Antigravity conversation is already running a turn in Super Harness. Wait for it to finish or queue your message.'
+      )
+    ).toBe(true);
+    expect(isBusyDispatchError('thread already has an active writer')).toBe(true);
     expect(isBusyDispatchError('Session not found')).toBe(false);
   });
 });

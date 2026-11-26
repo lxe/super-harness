@@ -5,58 +5,48 @@ import { cn } from './cn';
 export type WorkingOrbTone = HarnessGroup | 'master';
 
 interface OrbPalette {
-  core: string;
-  arcPrimary: string;
-  arcSecondary: string;
+  highlight: string;
+  mid: string;
+  deep: string;
+  glow: string;
   halo: string;
-  rim: string;
 }
 
 const ORB_PALETTES: Record<WorkingOrbTone, OrbPalette> = {
   antigravity: {
-    core: 'radial-gradient(circle, rgba(147,197,253,0.92) 0%, rgba(96,165,250,0.45) 55%, transparent 100%)',
-    arcPrimary:
-      'conic-gradient(from 0deg, transparent 0deg, rgba(125,211,252,0.85) 70deg, rgba(99,102,241,0.35) 145deg, transparent 220deg)',
-    arcSecondary:
-      'conic-gradient(from 180deg, transparent 0deg, rgba(129,140,248,0.65) 80deg, transparent 190deg)',
-    halo: 'rgba(96, 165, 250, 0.22)',
-    rim: 'rgba(147, 197, 253, 0.22)',
+    highlight: '#dbeafe',
+    mid: '#60a5fa',
+    deep: '#1d4ed8',
+    glow: 'rgba(96, 165, 250, 0.65)',
+    halo: 'rgba(96, 165, 250, 0.24)',
   },
   codex: {
-    core: 'radial-gradient(circle, rgba(167,243,208,0.92) 0%, rgba(52,211,153,0.45) 55%, transparent 100%)',
-    arcPrimary:
-      'conic-gradient(from 0deg, transparent 0deg, rgba(110,231,183,0.85) 70deg, rgba(20,184,166,0.35) 145deg, transparent 220deg)',
-    arcSecondary:
-      'conic-gradient(from 180deg, transparent 0deg, rgba(45,212,191,0.6) 80deg, transparent 190deg)',
-    halo: 'rgba(52, 211, 153, 0.2)',
-    rim: 'rgba(110, 231, 183, 0.22)',
+    highlight: '#d1fae5',
+    mid: '#34d399',
+    deep: '#047857',
+    glow: 'rgba(52, 211, 153, 0.62)',
+    halo: 'rgba(52, 211, 153, 0.22)',
   },
   claude: {
-    core: 'radial-gradient(circle, rgba(254,215,170,0.9) 0%, rgba(251,146,60,0.42) 55%, transparent 100%)',
-    arcPrimary:
-      'conic-gradient(from 0deg, transparent 0deg, rgba(253,186,116,0.82) 70deg, rgba(234,88,12,0.3) 145deg, transparent 220deg)',
-    arcSecondary:
-      'conic-gradient(from 180deg, transparent 0deg, rgba(251,146,60,0.55) 80deg, transparent 190deg)',
-    halo: 'rgba(251, 146, 60, 0.18)',
-    rim: 'rgba(253, 186, 116, 0.2)',
+    highlight: '#ffedd5',
+    mid: '#f08762',
+    deep: '#9a3412',
+    glow: 'rgba(240, 135, 98, 0.62)',
+    halo: 'rgba(240, 135, 98, 0.22)',
   },
   muse: {
-    core: 'radial-gradient(circle, rgba(240,171,252,0.92) 0%, rgba(168,85,247,0.45) 55%, transparent 100%)',
-    arcPrimary:
-      'conic-gradient(from 0deg, transparent 0deg, rgba(216,180,254,0.85) 70deg, rgba(56,189,248,0.35) 145deg, transparent 220deg)',
-    arcSecondary:
-      'conic-gradient(from 180deg, transparent 0deg, rgba(125,211,252,0.6) 80deg, transparent 190deg)',
-    halo: 'rgba(168, 85, 247, 0.2)',
-    rim: 'rgba(216, 180, 254, 0.22)',
+    highlight: '#f3e8ff',
+    mid: '#c084fc',
+    deep: '#6b21a8',
+    glow: 'rgba(192, 132, 252, 0.62)',
+    halo: 'rgba(192, 132, 252, 0.22)',
   },
   master: {
-    core: 'radial-gradient(circle, rgba(233,213,255,0.92) 0%, rgba(167,139,250,0.45) 55%, transparent 100%)',
-    arcPrimary:
-      'conic-gradient(from 0deg, transparent 0deg, rgba(216,180,254,0.85) 70deg, rgba(129,140,248,0.35) 145deg, transparent 220deg)',
-    arcSecondary:
-      'conic-gradient(from 180deg, transparent 0deg, rgba(167,139,250,0.6) 80deg, transparent 190deg)',
-    halo: 'rgba(167, 139, 250, 0.2)',
-    rim: 'rgba(216, 180, 254, 0.22)',
+    highlight: '#ede9fe',
+    mid: '#a78bfa',
+    deep: '#5b21b6',
+    glow: 'rgba(167, 139, 250, 0.62)',
+    halo: 'rgba(167, 139, 250, 0.22)',
   },
 };
 
@@ -67,15 +57,14 @@ export interface WorkingOrbProps {
 }
 
 const SIZE_PX: Record<NonNullable<WorkingOrbProps['size']>, number> = {
-  sm: 12,
-  md: 14,
-  lg: 20,
+  sm: 14,
+  md: 16,
+  lg: 22,
 };
 
 /**
- * Refined, calm luminous activity pulse tinted to the active harness colorway:
- * a soft ambient bloom, delicate glass rim, and gently breathing pearlescent core
- * (no distracting spinning or flying elements).
+ * Refined 3D orbiting lit-sphere activity indicator tinted to the active harness colorway:
+ * three specular-highlighted 3D spheres revolving in depth-scaled perspective.
  */
 export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   tone = 'master',
@@ -83,39 +72,45 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   className,
 }) => {
   const px = SIZE_PX[size];
+  const dotPx = Math.max(4.5, Math.round(px * 0.34 * 10) / 10);
+  const orbitR = Math.round(px * 0.32 * 10) / 10;
   const palette = ORB_PALETTES[tone] ?? ORB_PALETTES.master;
+  const sphereBg = `radial-gradient(circle at 32% 28%, #ffffff 0%, ${palette.highlight} 22%, ${palette.mid} 58%, ${palette.deep} 100%)`;
 
   return (
     <span
       aria-hidden="true"
-      style={{ width: px, height: px }}
+      style={
+        {
+          width: px,
+          height: px,
+          '--sh-orbit-rx': `${orbitR}px`,
+          '--sh-orbit-ry': `${Math.round(orbitR * 0.64 * 10) / 10}px`,
+        } as React.CSSProperties
+      }
       className={cn('relative inline-flex items-center justify-center shrink-0', className)}
     >
-      {/* Whisper-soft ambient breathing bloom */}
+      {/* Subtle ambient depth glow behind orbiting spheres */}
       <span
-        className="sh-orb-halo absolute inset-[-4px] rounded-full pointer-events-none"
+        className="absolute inset-[-3px] rounded-full pointer-events-none"
         style={{
           background: `radial-gradient(circle, ${palette.halo} 0%, transparent 72%)`,
         }}
       />
 
-      {/* Delicate breathing glass rim */}
-      <span
-        className="sh-gauge-halo absolute inset-[1px] rounded-full pointer-events-none"
-        style={{
-          boxShadow: `inset 0 0 0 1.25px ${palette.rim}`,
-        }}
-      />
-
-      {/* Softly breathing luminous core */}
-      <span
-        className="sh-orb-core relative rounded-full pointer-events-none"
-        style={{
-          width: '48%',
-          height: '48%',
-          background: palette.core,
-        }}
-      />
+      {[0, 1, 2].map((idx) => (
+        <span
+          key={idx}
+          className="sh-orb-sphere absolute rounded-full pointer-events-none"
+          style={{
+            width: dotPx,
+            height: dotPx,
+            background: sphereBg,
+            boxShadow: `0 0 4px ${palette.glow}, inset -1px -1px 1.5px rgba(0,0,0,0.45)`,
+            animationDelay: `${(-idx * 1.5) / 3}s`,
+          }}
+        />
+      ))}
     </span>
   );
 };

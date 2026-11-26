@@ -22,6 +22,7 @@ import type {
 } from '../../shared/types';
 import { AgyAcpPool } from '../services/agyAcpClient';
 import { AntigravityLsClient } from '../services/antigravityLsClient';
+import { RemoteAntigravityMirror } from './remoteAntigravity';
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import {
@@ -1100,6 +1101,7 @@ export async function loadAntigravityTranscript(
 export function createAntigravityDriver(): HarnessDriver {
   const acpPool = new AgyAcpPool();
   const lsClient = new AntigravityLsClient();
+  const remote = new RemoteAntigravityMirror();
   let activitySink: ((sessionId: string) => void) | null = null;
 
   const ensureLsSubscription = (nativeId: string): void => {
@@ -1132,17 +1134,42 @@ export function createAntigravityDriver(): HarnessDriver {
     id: 'antigravity',
     displayName: 'Google Antigravity',
 
-    detect(processes, maxSessions) {
-      return detectAntigravity(processes, maxSessions);
+    async detect(processes, maxSessions) {
+      const [local, remoteSessions] = await Promise.all([
+        detectAntigravity(processes, maxSessions),
+        remote.sessions().catch(() => [] as UnifiedSession[]),
+      ]);
+      const localIds = new Set(local.sessions.map((s) => s.id));
+      const extra = remoteSessions.filter((s) => !localIds.has(s.id));
+      if (extra.length === 0) return local;
+      const extraTopLevel = extra.filter((s) => !s.isSubagent);
+      return {
+        detection: {
+          ...local.detection,
+          activeSessionCount:
+            local.detection.activeSessionCount + extraTopLevel.filter((s) => s.isLive).length,
+          totalSessionCount: local.detection.totalSessionCount + extraTopLevel.length,
+        },
+        sessions: [...extra, ...local.sessions],
+      };
     },
 
     async getTranscriptFingerprint(session) {
+      const remoteFp = remote.fingerprint(session.id);
+      if (remoteFp) return remoteFp;
       const resolved = resolveAntigravityTranscriptPath(session.nativeId, session.transcriptPath);
       const messagesDir = resolveAntigravityMessagesDir(session.nativeId, resolved);
       return `${computeFileFingerprint(resolved)}|${computeAntigravityMessagesFingerprint(messagesDir)}`;
     },
 
     async loadTranscript(session, limit) {
+      if (!remote.isRemote(session.id) && session.tags?.includes('remote-host')) {
+        await remote.sessions();
+      }
+      if (remote.isRemote(session.id)) {
+        const res = await remote.loadTranscript(session.id, limit);
+        if (res) return res;
+      }
       const resolved = resolveAntigravityTranscriptPath(session.nativeId, session.transcriptPath);
       const res = await loadAntigravityTranscript(session.nativeId, resolved, limit);
       // Native live lane: the hub LS agent-state stream drives refreshes
@@ -1168,6 +1195,9 @@ export function createAntigravityDriver(): HarnessDriver {
     },
 
     getSessionWatchFiles(session: UnifiedSession): string[] {
+      if (remote.isRemote(session.id) || session.tags?.includes('remote-host')) {
+        return [];
+      }
       const tr =
         resolveAntigravityTranscriptPath(session.nativeId, session.transcriptPath) ||
         path.join(
@@ -1189,6 +1219,9 @@ export function createAntigravityDriver(): HarnessDriver {
       ctx: DispatchContext,
       opts?: { force?: boolean }
     ): Promise<SendMessageResult> {
+      if (remote.isRemote(session.id) || session.tags?.includes('remote-host')) {
+        return remote.sendMessage(session, prompt, attachments, ctx);
+      }
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
       const originApp =
@@ -1339,6 +1372,9 @@ export function createAntigravityDriver(): HarnessDriver {
 
     abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
       if (!sessionId.startsWith('antigravity:')) return false;
+      if (remote.isRemote(sessionId)) {
+        return remote.abort(sessionId, emitStream);
+      }
       const nativeId = sessionId.slice('antigravity:'.length);
       if (lsClient.isHubAvailable()) {
         void lsClient.cancelInvocation(nativeId).catch(() => {});
@@ -1349,12 +1385,14 @@ export function createAntigravityDriver(): HarnessDriver {
     },
 
     shutdown(): void {
+      remote.stop();
       lsClient.closeAll();
       acpPool.closeAll();
     },
 
     setActivitySink(sink: ((sessionId: string) => void) | null): void {
       activitySink = sink;
+      remote.setActivitySink(sink);
     },
   };
 }

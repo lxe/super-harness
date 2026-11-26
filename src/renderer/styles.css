@@ -305,29 +305,64 @@ body,
 @keyframes sh-gauge-pulse {
   0%,
   100% {
-    opacity: 0.28;
+    opacity: 0.42;
+    transform: scale(0.97);
   }
   50% {
-    opacity: 0.82;
+    opacity: 1;
+    transform: scale(1.05);
   }
 }
 
 @keyframes sh-gauge-arc-glow {
   0%,
   100% {
-    filter: brightness(1);
+    filter: brightness(1.04);
   }
   50% {
-    filter: brightness(1.22);
+    filter: brightness(1.36);
   }
+}
+
+@keyframes sh-orb-orbit-3d {
+  0% {
+    transform: translate3d(var(--sh-orbit-rx, 5px), 0px, 0) scale(0.88);
+    opacity: 0.78;
+    z-index: 2;
+  }
+  25% {
+    transform: translate3d(0px, var(--sh-orbit-ry, 3.2px), 0) scale(1.14);
+    opacity: 1;
+    z-index: 3;
+  }
+  50% {
+    transform: translate3d(calc(var(--sh-orbit-rx, 5px) * -1), 0px, 0) scale(0.88);
+    opacity: 0.78;
+    z-index: 2;
+  }
+  75% {
+    transform: translate3d(0px, calc(var(--sh-orbit-ry, 3.2px) * -1), 0) scale(0.64);
+    opacity: 0.4;
+    z-index: 1;
+  }
+  100% {
+    transform: translate3d(var(--sh-orbit-rx, 5px), 0px, 0) scale(0.88);
+    opacity: 0.78;
+    z-index: 2;
+  }
+}
+
+.sh-orb-sphere {
+  animation: sh-orb-orbit-3d 1.5s linear infinite;
+  will-change: transform, opacity;
 }
 
 .sh-gauge-halo {
-  animation: sh-gauge-pulse 2.2s ease-in-out infinite;
-  will-change: opacity;
+  animation: sh-gauge-pulse 1.8s ease-in-out infinite;
+  will-change: opacity, transform;
 }
 
 .sh-gauge-arc-shimmer {
-  animation: sh-gauge-arc-glow 2.2s ease-in-out infinite;
+  animation: sh-gauge-arc-glow 1.8s ease-in-out infinite;
   will-change: filter;
 }

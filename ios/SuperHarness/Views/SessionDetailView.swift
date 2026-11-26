@@ -150,6 +150,7 @@ public struct SessionDetailView: View {
                     .defaultScrollAnchor(.bottom, for: .initialOffset)
                     .defaultScrollAnchor(.bottom, for: .sizeChanges)
                     .scrollDismissesKeyboard(.never)
+                    .modifier(SHClearTopScrollEdgeModifier())
                     .background(SHColor.surfaceCanvas)
                     .onScrollPhaseChange { _, newPhase in
                         userIsDragging = (newPhase == .interacting || newPhase == .decelerating)
@@ -370,6 +371,7 @@ public struct SessionDetailView: View {
         }
         .background(SHColor.surfaceCanvas)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button {
@@ -383,8 +385,8 @@ public struct SessionDetailView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
-                    .padding(.horizontal, 12)
-                    .frame(height: 36)
+                    .padding(.horizontal, 14)
+                    .frame(height: 44)
                     .modifier(SHPrincipalGlassPillModifier())
                 }
                 .buttonStyle(.plain)
@@ -775,6 +777,16 @@ private struct SHPrincipalGlassPillModifier: ViewModifier {
             content
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
+        }
+    }
+}
+
+private struct SHClearTopScrollEdgeModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.none, for: .top)
+        } else {
+            content
         }
     }
 }

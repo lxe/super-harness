@@ -158,20 +158,23 @@ export function SegmentedControl<T extends string>({
                   />
                 </svg>
 
-                {/* 2. Subtle breathing shimmer when working (replaces orbiting chaser) */}
+                {/* 2. Noticeable luminous activity glow when this harness is actively working */}
                 {item.working && (
                   <>
                     <span
                       aria-hidden="true"
-                      className="sh-gauge-halo absolute inset-[-2px] rounded-full pointer-events-none"
+                      className="sh-gauge-halo absolute inset-[-6px] rounded-full pointer-events-none"
                       style={{
-                        background: `radial-gradient(circle, ${palette.stroke}33 0%, transparent 70%)`,
+                        background: `radial-gradient(circle, ${palette.stroke}78 0%, ${palette.stroke}2e 45%, transparent 72%)`,
                       }}
                     />
                     <svg
                       aria-hidden="true"
                       viewBox="0 0 36 36"
                       className="sh-gauge-halo absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                      style={{
+                        filter: `drop-shadow(0 0 5px ${palette.stroke})`,
+                      }}
                     >
                       <circle
                         cx="18"
@@ -179,8 +182,8 @@ export function SegmentedControl<T extends string>({
                         r={GAUGE_RADIUS}
                         fill="none"
                         stroke={palette.stroke}
-                        strokeOpacity={0.55}
-                        strokeWidth="3.0"
+                        strokeOpacity={0.78}
+                        strokeWidth="3.2"
                       />
                     </svg>
                   </>
@@ -195,6 +198,11 @@ export function SegmentedControl<T extends string>({
                       'absolute inset-0 w-full h-full -rotate-90 pointer-events-none',
                       item.working && 'sh-gauge-arc-shimmer'
                     )}
+                    style={
+                      item.working
+                        ? { filter: `drop-shadow(0 0 4px ${palette.stroke})` }
+                        : undefined
+                    }
                   >
                     <circle
                       cx="18"

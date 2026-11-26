@@ -660,11 +660,11 @@ public struct SHRadialGauge<Center: View>: View {
         if isWorking && !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 2.2))
+                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 1.8))
                 gaugeContent(pulse: wave)
             }
         } else {
-            gaugeContent(pulse: isWorking ? 0.55 : 0.0)
+            gaugeContent(pulse: isWorking ? 0.72 : 0.0)
         }
     }
 
@@ -672,19 +672,30 @@ public struct SHRadialGauge<Center: View>: View {
     private func gaugeContent(pulse: Double) -> some View {
         ZStack {
             if isWorking {
+                // Lush brand-tinted activity aura so active harnesses stand out unmistakably at a glance
                 Circle()
                     .fill(
                         RadialGradient(
                             colors: [
-                                stroke.opacity(0.10 + 0.16 * pulse),
+                                stroke.opacity(0.30 + 0.30 * pulse),
+                                stroke.opacity(0.12 + 0.16 * pulse),
                                 stroke.opacity(0.0),
                             ],
                             center: .center,
                             startRadius: 2,
-                            endRadius: size * 0.62
+                            endRadius: size * 0.72
                         )
                     )
-                    .frame(width: size + 4, height: size + 4)
+                    .frame(width: size + 12, height: size + 12)
+
+                // Soft outer ring bloom
+                Circle()
+                    .inset(by: ringInset)
+                    .stroke(
+                        stroke.opacity(0.34 + 0.44 * pulse),
+                        lineWidth: lineWidth + 1.8
+                    )
+                    .blur(radius: 2.6)
             }
 
             Circle()
@@ -695,7 +706,7 @@ public struct SHRadialGauge<Center: View>: View {
                 Circle()
                     .inset(by: ringInset)
                     .stroke(
-                        stroke.opacity(0.20 + 0.36 * pulse),
+                        stroke.opacity(0.30 + 0.46 * pulse),
                         lineWidth: lineWidth
                     )
             }
@@ -705,10 +716,14 @@ public struct SHRadialGauge<Center: View>: View {
                     .inset(by: ringInset)
                     .trim(from: 0, to: displayFraction)
                     .stroke(
-                        stroke.opacity(estimated ? (0.80 + 0.14 * pulse) : min(1.0, 0.94 + 0.06 * pulse)),
+                        stroke.opacity(estimated ? (0.84 + 0.16 * pulse) : 1.0),
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
+                    .shadow(
+                        color: isWorking ? stroke.opacity(0.45 + 0.40 * pulse) : .clear,
+                        radius: isWorking ? (3.0 + 2.5 * pulse) : 0
+                    )
                     .animation(.easeOut(duration: 0.3), value: displayFraction)
             }
 
@@ -718,10 +733,10 @@ public struct SHRadialGauge<Center: View>: View {
     }
 }
 
-// MARK: - Refined Luminous Activity Shimmer Pulse (Replaces Harsh Spoke Spinners)
+// MARK: - 3D Orbiting Lit-Sphere Activity Indicator (Replaces Spoke Spinners)
 
-/// Calm, softly breathing luminous pulse tinted to the active harness accent color:
-/// whisper-soft radial bloom, delicate frosted ring, and gently breathing pearlescent core.
+/// Three glossy 3D-shaded lit spheres orbiting in tilted 3D perspective with specular highlights,
+/// underside shading, and back-to-front depth sorting.
 public struct SHActivityPulse: View {
     public let tint: Color
     public var size: CGFloat = 14
@@ -733,53 +748,120 @@ public struct SHActivityPulse: View {
         self.size = size
     }
 
+    private var renderSize: CGFloat {
+        max(size, 16)
+    }
+
     public var body: some View {
         if reduceMotion {
-            pulseView(wave: 0.65)
+            spheresCanvas(phase: 0.35)
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
-                let wave = 0.5 - 0.5 * cos(t * (2.0 * .pi / 2.2))
-                pulseView(wave: wave)
+                let phase = (t / 1.5).truncatingRemainder(dividingBy: 1.0) * 2.0 * .pi
+                spheresCanvas(phase: phase)
             }
         }
     }
 
-    private func pulseView(wave: Double) -> some View {
-        ZStack {
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            tint.opacity(0.18 + 0.24 * wave),
-                            tint.opacity(0.0),
-                        ],
-                        center: .center,
-                        startRadius: 1,
-                        endRadius: size * 0.72
-                    )
+    private func spheresCanvas(phase: Double) -> some View {
+        let box = renderSize
+        return Canvas { ctx, sz in
+            let cx = sz.width * 0.5
+            let cy = sz.height * 0.5
+            let rx = sz.width * 0.30
+            let ry = sz.height * 0.21
+            let baseR = sz.width * 0.175
+
+            // Soft ambient halo beneath the orbiting 3D spheres
+            let haloR = sz.width * 0.46
+            let haloRect = CGRect(x: cx - haloR, y: cy - haloR, width: haloR * 2, height: haloR * 2)
+            ctx.fill(
+                Path(ellipseIn: haloRect),
+                with: .radialGradient(
+                    Gradient(colors: [tint.opacity(0.22), tint.opacity(0.0)]),
+                    center: CGPoint(x: cx, y: cy),
+                    startRadius: 0,
+                    endRadius: haloR
                 )
-                .frame(width: size * 1.45, height: size * 1.45)
+            )
 
-            Circle()
-                .strokeBorder(tint.opacity(0.24 + 0.30 * wave), lineWidth: 1.15)
-                .frame(width: size * 0.88, height: size * 0.88)
+            struct SphereSample {
+                let x: CGFloat
+                let y: CGFloat
+                let z: Double
+                let radius: CGFloat
+                let opacity: Double
+            }
 
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            Color.white.opacity(0.85 + 0.15 * wave),
-                            tint.opacity(0.82 + 0.18 * wave),
-                        ],
-                        center: .center,
+            let samples: [SphereSample] = (0..<3).map { idx in
+                let angle = phase + Double(idx) * (2.0 * .pi / 3.0)
+                let z = sin(angle) // -1 (back) ... +1 (front)
+                let depth = (z + 1.0) * 0.5
+                let scale = 0.66 + 0.42 * depth
+                return SphereSample(
+                    x: cx + CGFloat(cos(angle)) * rx,
+                    y: cy + CGFloat(sin(angle)) * ry,
+                    z: z,
+                    radius: baseR * CGFloat(scale),
+                    opacity: 0.44 + 0.56 * depth
+                )
+            }.sorted { a, b in a.z < b.z }
+
+            for s in samples {
+                let r = s.radius
+                let center = CGPoint(x: s.x, y: s.y)
+
+                // Soft luminous rim glow for nearer spheres
+                if s.z > -0.15 {
+                    let glowR = r * 1.75
+                    let glowAlpha = 0.18 + 0.22 * ((s.z + 1.0) * 0.5)
+                    let glowRect = CGRect(x: s.x - glowR, y: s.y - glowR, width: glowR * 2, height: glowR * 2)
+                    ctx.fill(
+                        Path(ellipseIn: glowRect),
+                        with: .radialGradient(
+                            Gradient(colors: [tint.opacity(glowAlpha), tint.opacity(0.0)]),
+                            center: center,
+                            startRadius: r * 0.3,
+                            endRadius: glowR
+                        )
+                    )
+                }
+
+                // 3D lit sphere with top-left specular highlight and deep underside shading
+                let sphereRect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)
+                let lightPoint = CGPoint(x: s.x - r * 0.30, y: s.y - r * 0.32)
+                ctx.fill(
+                    Path(ellipseIn: sphereRect),
+                    with: .radialGradient(
+                        Gradient(stops: [
+                            .init(color: Color.white.opacity(0.96 * s.opacity), location: 0.0),
+                            .init(color: tint.opacity(0.96 * s.opacity), location: 0.34),
+                            .init(color: tint.opacity(0.84 * s.opacity), location: 0.70),
+                            .init(color: Color.black.opacity(0.62 * s.opacity), location: 1.0),
+                        ]),
+                        center: lightPoint,
                         startRadius: 0,
-                        endRadius: size * 0.32
+                        endRadius: r * 1.55
                     )
                 )
-                .frame(width: size * (0.44 + 0.08 * wave), height: size * (0.44 + 0.08 * wave))
+
+                // Crisp glossy specular glint
+                let glintR = max(0.75, r * 0.26)
+                let glintCenter = CGPoint(x: s.x - r * 0.28, y: s.y - r * 0.30)
+                let glintRect = CGRect(
+                    x: glintCenter.x - glintR,
+                    y: glintCenter.y - glintR,
+                    width: glintR * 2,
+                    height: glintR * 2
+                )
+                ctx.fill(
+                    Path(ellipseIn: glintRect),
+                    with: .color(Color.white.opacity(0.85 * s.opacity))
+                )
+            }
         }
-        .frame(width: size, height: size)
+        .frame(width: box, height: box)
         .accessibilityHidden(true)
     }
 }

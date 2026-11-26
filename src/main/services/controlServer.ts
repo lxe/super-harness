@@ -48,7 +48,11 @@ interface BufferedEvent {
   seq: number;
   event: string;
   frame: string;
+  /** Set for per-session events (transcripts) so they only reach clients watching that session. */
+  sessionId?: string;
 }
+
+const SESSION_SCOPED_EVENTS = new Set(['transcript', 'transcript_updated']);
 
 interface DictationServerConfig {
   url: string;
@@ -114,6 +118,8 @@ export class ControlServer {
   private mobileServer: http.Server | null = null;
   private mobileConfigKey = '';
   private sseClients = new Set<http.ServerResponse>();
+  private sseClientIdByRes = new Map<http.ServerResponse, string>();
+  private watchedSessionByClient = new Map<string, string | null>();
   private sseKeepaliveTimer: NodeJS.Timeout | null = null;
   private eventSeq = 0;
   private eventBuffer: BufferedEvent[] = [];
@@ -131,15 +137,34 @@ export class ControlServer {
     private readonly hooks: ControlServerHooks = {}
   ) {}
 
+  /** Mobile clients that registered a watch only receive transcripts for that session. */
+  private shouldDeliver(res: http.ServerResponse, item: { event: string; sessionId?: string }): boolean {
+    if (!item.sessionId || !SESSION_SCOPED_EVENTS.has(item.event)) return true;
+    const clientId = this.sseClientIdByRes.get(res);
+    if (!clientId || !this.watchedSessionByClient.has(clientId)) return true;
+    return this.watchedSessionByClient.get(clientId) === item.sessionId;
+  }
+
   broadcastEvent(event: string, data: unknown): void {
     const seq = ++this.eventSeq;
     const frame = `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    this.eventBuffer.push({ seq, event, frame });
+    const sessionId =
+      SESSION_SCOPED_EVENTS.has(event) && data && typeof data === 'object'
+        ? (data as { sessionId?: unknown }).sessionId
+        : undefined;
+    const item: BufferedEvent = {
+      seq,
+      event,
+      frame,
+      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+    };
+    this.eventBuffer.push(item);
     if (this.eventBuffer.length > this.maxBufferedEvents) {
       this.eventBuffer.splice(0, this.eventBuffer.length - this.maxBufferedEvents);
     }
     if (this.sseClients.size === 0) return;
     for (const client of this.sseClients) {
+      if (!this.shouldDeliver(client, item)) continue;
       try {
         client.write(frame);
       } catch {
@@ -348,8 +373,9 @@ export class ControlServer {
                   })}\n\n`
                 );
               } else {
+                if (clientId) this.sseClientIdByRes.set(res, clientId);
                 for (const item of this.eventBuffer) {
-                  if (item.seq > lastSeq) {
+                  if (item.seq > lastSeq && this.shouldDeliver(res, item)) {
                     res.write(item.frame);
                   }
                 }
@@ -357,10 +383,15 @@ export class ControlServer {
             }
           }
 
+          if (clientId) this.sseClientIdByRes.set(res, clientId);
           this.sseClients.add(res);
           this.ensureKeepalive();
           req.on('close', () => {
             this.sseClients.delete(res);
+            this.sseClientIdByRes.delete(res);
+            if (clientId && ![...this.sseClientIdByRes.values()].includes(clientId)) {
+              this.watchedSessionByClient.delete(clientId);
+            }
             if (clientId && this.hooks.watchSession) {
               void this.hooks.watchSession(`mobile:${clientId}`, null);
             }
@@ -408,6 +439,7 @@ export class ControlServer {
           const clientId = String(body.clientId || 'default').replace(/[^a-zA-Z0-9._-]/g, '_');
           const sessionId = body.sessionId ? String(body.sessionId) : null;
           const limit = body.limit ? Number(body.limit) : 80;
+          this.watchedSessionByClient.set(clientId, sessionId);
           await this.hooks.watchSession(`mobile:${clientId}`, sessionId, limit);
           res.end(JSON.stringify({ ok: true, paneId: `mobile:${clientId}`, sessionId }));
           return;

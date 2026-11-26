@@ -313,9 +313,13 @@ function broadcastSessionsDeltaToMobile(
   const harnessesJson = JSON.stringify(harnesses);
   const harnessesChanged = harnessesJson !== lastMobileHarnessesJson;
   if (upserts.length === 0 && removedIds.length === 0 && !orderChanged && !harnessesChanged) return;
+  const isFirstBaseline = lastMobileSessionJsonById.size === 0;
   lastMobileSessionJsonById = nextById;
   lastMobileSessionOrder = order;
   lastMobileHarnessesJson = harnessesJson;
+  // Clients always bootstrap (or resync after a host restart) before applying deltas,
+  // so the very first snapshot after launch never needs to be pushed as a giant delta.
+  if (isFirstBaseline) return;
   controlServerRef?.broadcastEvent('sessions_delta', {
     upserts,
     removedIds,

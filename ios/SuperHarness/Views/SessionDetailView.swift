@@ -166,7 +166,7 @@ public struct SessionDetailView: View {
                         distanceFromBottom = newDistance
                         if newDistance <= 80 {
                             if !isPinnedToBottom { isPinnedToBottom = true }
-                        } else if newDistance > 220 && userIsDragging && newDistance > oldDistance + 0.5 && Date() >= suppressUnpinUntil {
+                        } else if newDistance > 180 && userIsDragging && Date() >= suppressUnpinUntil {
                             if isPinnedToBottom { isPinnedToBottom = false }
                         }
                     }
@@ -224,33 +224,30 @@ public struct SessionDetailView: View {
                         anchorBottomIfNeeded(sessionId: session.id, hasMessages: !store.messages(for: session.id).isEmpty)
                     }
 
-                    // Floating "↓ Latest" pill — only shown when scrolled high up (>220pt).
-                    let showLatestButton = !isPinnedToBottom && distanceFromBottom > 220 && !messages.isEmpty
+                    // Floating scroll-to-bottom button, centered above the composer. It depends on
+                    // the pinned flag as well as the distance: while the transcript follows new
+                    // output it stays hidden, so growing content at the bottom cannot flash it.
+                    let showLatestButton = !isPinnedToBottom && distanceFromBottom > 180 && !messages.isEmpty
                     Group {
                         if showLatestButton {
                             Button {
                                 scrollToBottomTrigger += 1
                             } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "arrow.down")
-                                        .font(.system(size: 11, weight: .bold))
-                                    Text("Latest")
-                                        .font(SHTypography.micro.weight(.semibold))
-                                }
-                                .foregroundStyle(SHColor.inkPrimary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(.ultraThinMaterial, in: Capsule())
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-                                .shadow(color: Color.black.opacity(0.4), radius: 8, y: 3)
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(SHColor.inkPrimary)
+                                    .frame(width: 38, height: 38)
+                                    .modifier(ScrollToBottomSurface())
+                                    .contentShape(Circle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Scroll to bottom")
                             .accessibilityIdentifier("transcript.latest")
-                            .padding(.trailing, SHLayout.screenPad)
-                            .padding(.bottom, max(composerHeight, 84) + 8)
-                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                            .padding(.bottom, max(composerHeight, 84) + 10)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .animation(.easeInOut(duration: 0.16), value: showLatestButton)
             }
 
@@ -1189,6 +1186,20 @@ private struct SHTopSheetGlassModifier: ViewModifier {
                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75)
                 )
                 .shadow(color: Color.black.opacity(0.45), radius: 18, y: 10)
+        }
+    }
+}
+
+/// Round floating surface for the scroll-to-bottom button: Liquid Glass where available.
+private struct ScrollToBottomSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
+                .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
         }
     }
 }

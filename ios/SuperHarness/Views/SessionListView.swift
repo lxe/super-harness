@@ -225,18 +225,13 @@ public struct SessionListView: View {
                 .presentationDragIndicator(.visible)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            // Left group, one shared pill: connection status and settings, orchestrator, search.
+            ToolbarItemGroup(placement: .topBarLeading) {
                 ConnectionStatusPill(health: store.connectionHealth) {
                     store.isHostSettingsSheetPresented = true
                 }
-            }
 
-            if #available(iOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .topBarLeading)
-            }
-
-            if let master = store.masterSession {
-                ToolbarItem(placement: .topBarLeading) {
+                if let master = store.masterSession {
                     let isMasterBusy = store.isSessionBusy(master.id)
                     Button {
                         onSelectSession(master.id)
@@ -253,14 +248,10 @@ public struct SessionListView: View {
                         .frame(width: 28, height: 28)
                         .contentShape(Circle())
                     }
-                    .buttonStyle(.plain)
                     .accessibilityLabel("Master Orchestrator")
                     .accessibilityIdentifier("header.master")
                 }
-            }
 
-            // Search is its own glass circle, set apart from the usage/filter/new-chat group.
-            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     if isSearchActive {
                         closeSearch()
@@ -276,8 +267,12 @@ public struct SessionListView: View {
                 .accessibilityIdentifier("header.search")
             }
 
+            // The logo sits between the two pills, on the bar itself with no glass behind it.
             if #available(iOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                ToolbarItem(placement: .principal) { SHToolbarLogo() }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .principal) { SHToolbarLogo() }
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -1383,5 +1378,17 @@ struct SHShimmerText: View {
             .font(font)
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+}
+
+/// The Super Harness mark shown in the middle of the session list's top bar.
+struct SHToolbarLogo: View {
+    var body: some View {
+        Image("SuperHarnessLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 26, height: 26)
+            .accessibilityLabel("Super Harness")
+            .accessibilityIdentifier("header.logo")
     }
 }

@@ -178,12 +178,22 @@ public struct ConnectionStatusPill: View {
 
     public var body: some View {
         Button(action: action) {
-            SuperHarnessStatusLogo(statusColor: dotColor, size: 22)
+            // A gear for settings with the connection state as a dot on its corner. The logo
+            // itself lives in the middle of the bar.
+            Image(systemName: "gearshape")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(SHColor.inkSecondary)
                 .frame(width: 28, height: 28)
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 7, height: 7)
+                        .overlay(Circle().strokeBorder(SHColor.surfaceCanvas.opacity(0.9), lineWidth: 1))
+                        .offset(x: -2, y: 3)
+                }
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Super Harness · \(health.label)")
+        .accessibilityLabel("Connection and settings · \(health.label)")
         .accessibilityIdentifier("header.status")
     }
 

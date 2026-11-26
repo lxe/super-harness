@@ -412,13 +412,13 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
 
                     {thinkingMenuOpen && (
                       <PopoverSurface
-                        width="md"
+                        width="lg"
                         onClose={() => setThinkingMenuOpen(false)}
                         ignoreRef={thinkingTriggerRef}
-                        className="absolute left-0 bottom-full mb-2 z-50 w-56"
+                        className="absolute left-0 bottom-full mb-2 z-50 w-72"
                       >
                         <MenuSectionLabel>Thinking effort</MenuSectionLabel>
-                        <div className="space-y-0.5 mt-0.5">
+                        <div className="space-y-1 mt-1">
                           {modelControls.thinkingLevels.map((lvl) => {
                             const isSelected = modelControls.activeEffort === lvl;
                             const isDefault = modelControls.defaultEffort === lvl;
@@ -430,7 +430,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                                 title={hint || undefined}
                                 onClick={() => handleSelectThinking(lvl)}
                                 rightSlot={
-                                  <span className="inline-flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1.5 shrink-0">
                                     {isDefault && <Badge tone="neutral">Default</Badge>}
                                     {isSelected && (
                                       <Check
@@ -441,12 +441,12 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                                   </span>
                                 }
                               >
-                                <div className="min-w-0">
+                                <div className="min-w-0 py-0.5">
                                   <div className="font-medium leading-snug">
                                     {formatEffortLabel(lvl)}
                                   </div>
                                   {hint && (
-                                    <div className="text-micro text-ink-faint truncate leading-tight">
+                                    <div className="text-micro text-ink-faint leading-tight mt-0.5">
                                       {hint}
                                     </div>
                                   )}

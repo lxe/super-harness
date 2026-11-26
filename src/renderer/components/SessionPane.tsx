@@ -1149,8 +1149,9 @@ export const SessionPane: React.FC<Props> = ({
       </div>
 
       {/* Bottom Composer Dock */}
-      <div className="relative z-10 -mt-7 pt-7 px-6 pb-4 shrink-0 pointer-events-none bg-gradient-to-t from-surface-canvas via-surface-canvas/85 to-transparent">
-        <div className="max-w-[740px] mx-auto space-y-2 pointer-events-auto">
+      <div className="relative z-10 px-6 pb-4 pt-2 shrink-0 bg-surface-canvas">
+        <div className="pointer-events-none absolute -top-11 inset-x-0 h-11 bg-gradient-to-t from-surface-canvas via-surface-canvas/75 to-transparent" />
+        <div className="max-w-[740px] mx-auto space-y-2">
           {!isMaster && <LiveStepsBar key={session.id} steps={liveActivity?.steps} />}
 
           <QueuedMessagesTray

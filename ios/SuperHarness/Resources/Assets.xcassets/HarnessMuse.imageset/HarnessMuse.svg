@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="muse-grad" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="55%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+  </defs>
+  <circle cx="12" cy="12" r="8.6" stroke="url(#muse-grad)" stroke-width="2.3"/>
+  <circle cx="12" cy="12" r="3.1" fill="url(#muse-grad)"/>
+  <circle cx="18.6" cy="5.4" r="1.9" fill="#F0ABFC"/>
+</svg>

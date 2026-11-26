@@ -1,0 +1,95 @@
+name: SuperHarness
+options:
+  bundleIdPrefix: com.lxe
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  SuperHarness:
+    type: application
+    platform: iOS
+    sources:
+      - path: SuperHarness
+    info:
+      path: SuperHarness/Info.plist
+      properties:
+        CFBundleDisplayName: Super Harness
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UIUserInterfaceStyle: Dark
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: "Super Harness connects to your desktop host over LAN or Tailscale."
+        NSMicrophoneUsageDescription: "Super Harness records voice dictation for transcription via your configured YapYap server."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lxe.superharness
+        DEVELOPMENT_TEAM: 9592R2Q8PP
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_STRICT_CONCURRENCY: complete
+
+  SuperHarnessTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SuperHarnessTests
+    dependencies:
+      - target: SuperHarness
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lxe.superharness.tests
+        DEVELOPMENT_TEAM: 9592R2Q8PP
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_STRICT_CONCURRENCY: complete
+
+  SuperHarnessUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SuperHarnessUITests
+    dependencies:
+      - target: SuperHarness
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lxe.superharness.uitests
+        DEVELOPMENT_TEAM: 9592R2Q8PP
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_STRICT_CONCURRENCY: complete
+        TEST_TARGET_NAME: SuperHarness
+
+schemes:
+  SuperHarness:
+    build:
+      targets:
+        SuperHarness: all
+        SuperHarnessTests: [test]
+        SuperHarnessUITests: [test]
+    test:
+      targets:
+        - SuperHarnessTests
+        - SuperHarnessUITests

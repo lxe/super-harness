@@ -13,7 +13,25 @@ A calm, high-performance Electron desktop multiplexer and control plane for loca
 - **Master Orchestrator + MCP Control Plane**: A pinned orchestrator thread backed by your choice of harness, wired via a loopback-only authenticated Control HTTP Server + bundled stdio MCP server (`src/mcp/server.ts`) to inspect sessions, dispatch prompts, organize folders/pins, and update settings.
 - **2-up Split View & live `tmux` mirror**: Monitor and drive two sessions side-by-side or flip any `tmux`-backed Claude thread into a live terminal mirror.
 - **Usage & spend telemetry**: Hover any harness tab for live quota bars (Claude/Codex/Muse via `muse usage`), 5h/24h/7d/14d API-equivalent spend, 7-day sparklines, and quick links to account usage pages.
+- **Native SwiftUI iOS Companion (`ios/`)**: Drive every local harness from your iPhone over Tailscale or LAN with live SSE delta sync, optimistic message delivery, collapsible project sections, interactive diff/tool cards, usage telemetry, and low-latency YapYap voice dictation.
 - **Design System + Storybook 8**: Reusable semantic tokens (`src/renderer/ui/tokens.css`), UI primitives (`src/renderer/ui/`), and interactive stories.
+
+## iOS Companion
+
+Super Harness includes a native SwiftUI iOS companion app (`ios/`, zero third-party dependencies) that connects to the desktop host's authenticated Mobile API (`Settings → Master agent → Mobile companion API`, default port `47890`) over Tailscale or LAN.
+
+<table>
+  <tr>
+    <td align="center"><img src="./docs/ios/ios-sessions.png" width="250" alt="Super Harness iOS — Session List" /><br /><sub><b>Sessions &amp; Live Activity</b></sub></td>
+    <td align="center"><img src="./docs/ios/ios-chat.png" width="250" alt="Super Harness iOS — Coalesced Transcript" /><br /><sub><b>Coalesced Transcript &amp; Queue</b></sub></td>
+    <td align="center"><img src="./docs/ios/ios-draft.png" width="250" alt="Super Harness iOS — New Chat Composer" /><br /><sub><b>Inline New Chat &amp; Dictation</b></sub></td>
+  </tr>
+</table>
+
+- **Real-time Protocol v2 sync**: Gzipped `/api/bootstrap`, incremental `sessions_delta` SSE updates with `Last-Event-ID` replay, per-client scoped transcript streaming, and live busy spinners across harnesses and folders.
+- **Snappy mobile UX**: Instant optimistic outgoing bubbles with retry reconciliation, pinned bottom-anchored transcripts with geometric `↓ Latest` hysteresis, collapsible sections with rounded swipeable row cards, and built-in Demo Mode.
+- **Voice dictation**: On-device 16 kHz WAV capture proxied through `/api/dictate` to a local YapYap / Whisper server.
+- **Build & run**: Requires Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`cd ios && xcodegen generate && open SuperHarness.xcodeproj`, or run `ios/scripts/install-device.sh` to sign and install to a connected iPhone). See [ios/IOS_ARCHITECTURE.md](./ios/IOS_ARCHITECTURE.md) and [ios/MOBILE_API_CONTRACT.md](./ios/MOBILE_API_CONTRACT.md) for details.
 
 ## Architecture
 
@@ -33,6 +51,8 @@ src/
 │   └── utils/          # Renderer LRU transcript cache, LRU Markdown renderer, pure sidebarGrouping
 └── shared/             # Shared IPC & domain types
 tests/                  # Vitest unit, adapter parity, and performance regression suites
+ios/                    # Native SwiftUI iOS companion app, unit tests, and live Simulator E2E tests
+docs/ios/               # iOS companion screenshots
 ```
 
 ## Development

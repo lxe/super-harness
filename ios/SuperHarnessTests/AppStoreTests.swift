@@ -1,0 +1,619 @@
+import Foundation
+import XCTest
+@testable import SuperHarness
+
+@MainActor
+final class AppStoreTests: XCTestCase {
+    private func makeStore() async -> AppStore {
+        let suiteName = "AppStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = InMemoryKeychainStore()
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: keychain, defaults: defaults)
+        await store.bootstrap()
+        return store
+    }
+
+    func testBootstrapLoadsDemoFixturesAndFiltersCorrectly() async {
+        let store = await makeStore()
+        defer { store.stopEventStream() }
+
+        XCTAssertNotNil(store.masterSession)
+        XCTAssertEqual(store.harnesses.count, 4)
+        XCTAssertTrue(store.harnesses.contains(where: { $0.id == .muse }))
+        XCTAssertNotNil(store.usage)
+        XCTAssertNotNil(store.usage?.muse)
+        XCTAssertNotNil(store.catalog)
+        XCTAssertFalse(store.pinnedToTopSessions.isEmpty)
+
+        // Filter by Muse
+        store.selectedHarnessFilter = .muse
+        let museOnly = store.filteredNonMasterSessions
+        XCTAssertFalse(museOnly.isEmpty)
+        XCTAssertTrue(museOnly.allSatisfy { $0.harness.harnessGroup == .muse })
+
+        // Filter by Codex
+        store.selectedHarnessFilter = .codex
+        let codexOnly = store.filteredNonMasterSessions
+        XCTAssertFalse(codexOnly.isEmpty)
+        XCTAssertTrue(codexOnly.allSatisfy { $0.harness.harnessGroup == .codex })
+
+        // Search query
+        store.selectedHarnessFilter = nil
+        store.searchQuery = "tailscale"
+        let matches = store.filteredNonMasterSessions
+        XCTAssertEqual(matches.count, 1)
+        XCTAssertEqual(matches.first?.id, "codex:cx-control-server")
+    }
+
+    func testPinPinToTopHideAndArchiveActions() async {
+        let store = await makeStore()
+        defer { store.stopEventStream() }
+
+        guard let target = store.sessions.first(where: { $0.id == "claude-tmux:cc-usage-redesign" }) else {
+            return XCTFail("Expected demo session")
+        }
+        XCTAssertFalse(target.pinned)
+        XCTAssertFalse(target.pinnedToTop)
+
+        await store.togglePin(target)
+        XCTAssertTrue(store.sessions.first(where: { $0.id == target.id })?.pinned == true)
+
+        if let updated = store.sessions.first(where: { $0.id == target.id }) {
+            await store.togglePinToTop(updated)
+        }
+        XCTAssertTrue(store.pinnedToTopSessions.contains(where: { $0.id == target.id }))
+
+        if let updated = store.sessions.first(where: { $0.id == target.id }) {
+            await store.toggleHideSession(updated)
+        }
+        XCTAssertFalse(store.filteredNonMasterSessions.contains(where: { $0.id == target.id }))
+
+        if let updated = store.sessions.first(where: { $0.id == target.id }) {
+            await store.archiveSession(updated)
+        }
+        XCTAssertEqual(store.sessions.first(where: { $0.id == target.id })?.status, .archived)
+    }
+
+    func testDemoQueueWhenBusyAndAbortStopsRun() async {
+        let store = await makeStore()
+        defer { store.stopEventStream() }
+
+        // antigravity:agy-ios-companion starts in working state in MockSuperHarnessClient
+        let busyId = "antigravity:agy-ios-companion"
+        await store.loadTranscript(for: busyId)
+        XCTAssertTrue(store.isSessionBusy(busyId))
+        let initialQueuedCount = store.liveActivity(for: busyId)?.queuedMessages?.count ?? 0
+
+        // Sending while busy should queue the follow-up message
+        await store.sendMessage(for: busyId, text: "Queued follow-up test")
+        await store.loadTranscript(for: busyId)
+        let afterQueuedCount = store.liveActivity(for: busyId)?.queuedMessages?.count ?? 0
+        XCTAssertEqual(afterQueuedCount, initialQueuedCount + 1)
+
+        // Aborting should mark session idle
+        await store.abortRun(for: busyId)
+        XCTAssertFalse(store.isSessionBusy(busyId))
+    }
+
+    func testDemoSendStartsStreamingAndProducesAssistantReply() async {
+        let store = await makeStore()
+        defer { store.stopEventStream() }
+
+        let sessionId = "claude-tmux:cc-usage-redesign"
+        await store.loadTranscript(for: sessionId)
+        let beforeCount = store.messages(for: sessionId).count
+
+        await store.sendMessage(for: sessionId, text: "Verify hero window math")
+        // Give MockSuperHarnessClient brief time to process simulated reply
+        try? await Task.sleep(nanoseconds: 1_900_000_000)
+        await store.loadTranscript(for: sessionId)
+
+        let afterMessages = store.messages(for: sessionId)
+        XCTAssertGreaterThanOrEqual(afterMessages.count, beforeCount + 2)
+        XCTAssertFalse(store.isSessionBusy(sessionId))
+    }
+
+    func testEnvironmentOverridesConfigureLiveHostWhenNoClientInjected() {
+        let suiteName = "AppStoreEnvTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = InMemoryKeychainStore()
+
+        let store = AppStore(
+            client: nil,
+            keychain: keychain,
+            defaults: defaults,
+            environment: [
+                "SH_HOST_URL": "http://100.64.0.10:47890",
+                "SH_BEARER_TOKEN": "secret-token-xyz",
+                "SH_CONNECTION_MODE": "live",
+            ]
+        )
+
+        XCTAssertEqual(store.hostURLString, "http://100.64.0.10:47890")
+        XCTAssertEqual(store.bearerToken, "secret-token-xyz")
+        XCTAssertEqual(store.connectionMode, .live)
+        XCTAssertEqual(store.connectionHealth, .connecting)
+        XCTAssertEqual(defaults.string(forKey: "sh.hostURL"), "http://100.64.0.10:47890")
+        XCTAssertEqual(defaults.string(forKey: "sh.connectionMode"), "live")
+        XCTAssertEqual(keychain.loadToken(for: "desktop-control-server"), "secret-token-xyz")
+    }
+
+    func testSelectSessionCallsWatchSessionAndResyncRequiredTriggersBootstrap() async {
+        let suiteName = "AppStoreSyncV1Tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = InMemoryKeychainStore()
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: keychain, defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        XCTAssertEqual(store.protocolVersion, 1)
+        let initialBootstraps = await mock.bootstrapCallCount
+        XCTAssertEqual(initialBootstraps, 1)
+
+        // Selecting a session calls watchSession with its ID
+        store.selectSession("codex:cx-control-server")
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        let watchedAfterSelect = await mock.watchedSessions
+        XCTAssertTrue(watchedAfterSelect.contains("codex:cx-control-server"))
+
+        // Emitting resync_required over SSE triggers a lightweight resync()
+        await mock.emitServerEventForTesting(.resyncRequired)
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        let afterResyncBootstraps = await mock.bootstrapCallCount
+        XCTAssertGreaterThan(afterResyncBootstraps, initialBootstraps)
+
+        // loadMediaData fetches and caches media bytes
+        let firstBytes = await store.loadMediaData(path: "/tmp/sample.png")
+        XCTAssertNotNil(firstBytes)
+        XCTAssertFalse(firstBytes?.isEmpty ?? true)
+    }
+
+    func testInitialSessionIdEnvVarAndSessionRowSubtitleFormatting() async {
+        let suiteName = "AppStoreInitialSessionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = InMemoryKeychainStore()
+        let store = AppStore(
+            client: MockSuperHarnessClient(),
+            keychain: keychain,
+            defaults: defaults,
+            environment: ["SH_INITIAL_SESSION_ID": "codex:cx-control-server"]
+        )
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        XCTAssertEqual(store.selectedSessionId, "codex:cx-control-server")
+        XCTAssertEqual(store.pendingInitialSessionId, "codex:cx-control-server")
+
+        // Subtitle formatting suppresses redundant harness names and duplicate previews
+        let duplicateSession = UnifiedSession(
+            id: "antigravity:dup",
+            harness: .antigravity,
+            title: "Blue Bubbles Native Project",
+            preview: "  blue bubbles   native project  ",
+            projectName: "Antigravity"
+        )
+        XCTAssertNil(SessionRowFormatting.cleanPreview(for: duplicateSession))
+        XCTAssertNil(SessionRowFormatting.cleanProjectName(for: duplicateSession))
+
+        let distinctSession = UnifiedSession(
+            id: "codex:real",
+            harness: .codex,
+            title: "Fix mobile SSE reconnect",
+            preview: "Added Last-Event-ID replay buffer handling",
+            projectName: "super-harness"
+        )
+        XCTAssertEqual(SessionRowFormatting.cleanPreview(for: distinctSession), "Added Last-Event-ID replay buffer handling")
+        XCTAssertEqual(SessionRowFormatting.cleanProjectName(for: distinctSession), "super-harness")
+    }
+
+    func testArchiveActiveSessionClearsRouteAndDraftRouteFlow() async {
+        let suiteName = "AppStoreDraftArchiveTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = InMemoryKeychainStore()
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: keychain, defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+
+        // Open inline draft chat for Codex
+        store.openDraftChat(for: .codex)
+        XCTAssertNil(store.selectedSessionId)
+        XCTAssertEqual(store.detailRoute, .draft(.codex))
+
+        // Starting a session transitions cleanly to .session(newId)
+        let startedId = await store.startSession(
+            StartSessionRequest(
+                harness: .codex,
+                cwd: "/Users/lxe/Developer/super-harness",
+                prompt: "Run smoke check"
+            )
+        )
+        XCTAssertNotNil(startedId)
+        XCTAssertEqual(store.selectedSessionId, startedId)
+        XCTAssertEqual(store.detailRoute, startedId.map { .session($0) })
+
+        // Archiving the currently active session clears selection & detailRoute cleanly
+        if let active = store.activeSession {
+            await store.archiveSession(active)
+        }
+        XCTAssertNil(store.selectedSessionId)
+        XCTAssertNil(store.detailRoute)
+
+        // Env var SH_INITIAL_ROUTE=draft initializes directly into DraftChatView route
+        let draftEnvStore = AppStore(
+            client: nil,
+            keychain: InMemoryKeychainStore(),
+            defaults: UserDefaults(suiteName: "AppStoreDraftEnv.\(UUID().uuidString)")!,
+            environment: [
+                "SH_INITIAL_ROUTE": "draft",
+                "SH_INITIAL_HARNESS": "claude-cli",
+            ]
+        )
+        XCTAssertEqual(draftEnvStore.detailRoute, .draft(.claudeCli))
+        XCTAssertEqual(draftEnvStore.pendingInitialRoute, .draft(.claudeCli))
+    }
+
+    func testSetSessionModelDeduplicatesTranscriptsAndFiltersProjectsPerHarness() async {
+        let suiteName = "AppStorePerfDictationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let keychain = InMemoryKeychainStore()
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: keychain, defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+
+        // 1. Mid-session model & effort switching
+        let sid = "codex:cx-control-server"
+        await store.setSessionModel(sessionId: sid, model: "gpt-5.3-codex-mini", reasoningEffort: "medium")
+        let updated = store.sessions.first(where: { $0.id == sid })
+        XCTAssertEqual(updated?.model, "gpt-5.3-codex-mini")
+        XCTAssertEqual(updated?.reasoningEffort, "medium")
+
+        // 2. Per-harness project filtering
+        let codexProjects = DraftProjectFilter.projects(for: .codex, in: store.catalog)
+        XCTAssertTrue(codexProjects.allSatisfy { $0.harnesses.contains(.codex) })
+        XCTAssertFalse(codexProjects.contains(where: { $0.name == "obsidian-kit" }))
+
+        let agyProjects = DraftProjectFilter.projects(for: .antigravity, in: store.catalog)
+        XCTAssertTrue(agyProjects.contains(where: { $0.name == "obsidian-kit" }))
+        XCTAssertFalse(agyProjects.contains(where: { $0.name == "security-playbooks" }))
+
+        // 3. Tail-only limit default (15) & loadEarlierMessages (+25 -> 40)
+        XCTAssertEqual(store.transcriptLimit(for: sid), 15)
+        await store.loadEarlierMessages(for: sid)
+        XCTAssertEqual(store.transcriptLimit(for: sid), 40)
+
+        // 4. Transcript SSE deduplication
+        let tr = SessionTranscriptResult(
+            sessionId: sid,
+            messages: [UnifiedMessage(id: "m-1", role: .assistant, timestamp: 1000, blocks: [.text(text: "Hi")])],
+            totalCount: 1,
+            hasMore: false,
+            sourceMtimeMs: 9999,
+            liveActivity: LiveActivityState(isWorking: false)
+        )
+        XCTAssertTrue(store.applyTranscriptUpdate(tr))
+        XCTAssertFalse(store.applyTranscriptUpdate(tr))
+
+        var trChanged = tr
+        trChanged.sourceMtimeMs = 10000
+        XCTAssertTrue(store.applyTranscriptUpdate(trChanged))
+
+        // 5. Dictation status & transcription via mock
+        await store.refreshDictationStatus()
+        XCTAssertEqual(store.dictationStatus?.healthy, true)
+        XCTAssertEqual(store.dictationStatus?.model, "whisper-large-v3-turbo")
+    }
+
+    func testColdLaunchOfflineAutoReconnectsWhenDesktopOpens() async {
+        let defaults = UserDefaults(suiteName: "AppStoreReconnectCold.\(UUID().uuidString)")!
+        defaults.set(ConnectionMode.live.rawValue, forKey: "sh.connectionMode")
+        let mock = MockSuperHarnessClient()
+        await mock.setSimulateOffline(true)
+
+        let store = AppStore(
+            client: mock,
+            keychain: InMemoryKeychainStore(),
+            defaults: defaults,
+            reconnectIntervalNs: 40_000_000
+        )
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertNotNil(store.lastError)
+        if case .offline = store.connectionHealth {} else {
+            XCTFail("Expected .offline after failed cold bootstrap, got \(store.connectionHealth)")
+        }
+
+        // Desktop app opens
+        await mock.setSimulateOffline(false)
+
+        // Wait up to 600ms for autoReconnectLoop to recover
+        for _ in 0..<20 {
+            if store.connectionHealth == .connected && !store.sessions.isEmpty { break }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+
+        XCTAssertEqual(store.connectionHealth, .connected)
+        XCTAssertNil(store.lastError)
+        XCTAssertFalse(store.sessions.isEmpty)
+    }
+
+    func testMidSessionDisconnectThenConnectedClearsErrorAndResyncs() async {
+        let defaults = UserDefaults(suiteName: "AppStoreReconnectMid.\(UUID().uuidString)")!
+        defaults.set(ConnectionMode.live.rawValue, forKey: "sh.connectionMode")
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(
+            client: mock,
+            keychain: InMemoryKeychainStore(),
+            defaults: defaults,
+            reconnectIntervalNs: 5_000_000_000
+        )
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        let beforeBootstraps = await mock.bootstrapCallCount
+
+        store.lastError = "Stale network error"
+        await mock.emitServerEventForTesting(.disconnected("Connection lost"))
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        if case .offline = store.connectionHealth {} else {
+            XCTFail("Expected .offline on disconnect")
+        }
+
+        await mock.emitServerEventForTesting(.connected)
+        for _ in 0..<20 {
+            let currentCount = await mock.bootstrapCallCount
+            if store.connectionHealth == .connected && currentCount > beforeBootstraps { break }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+
+        XCTAssertEqual(store.connectionHealth, .connected)
+        XCTAssertNil(store.lastError)
+        let afterBootstraps = await mock.bootstrapCallCount
+        XCTAssertGreaterThan(afterBootstraps, beforeBootstraps)
+    }
+
+    func testSceneBecameActiveRetriesBootstrapWhenNotYetBootstrapped() async {
+        let defaults = UserDefaults(suiteName: "AppStoreReconnectForeground.\(UUID().uuidString)")!
+        defaults.set(ConnectionMode.live.rawValue, forKey: "sh.connectionMode")
+        let mock = MockSuperHarnessClient()
+        await mock.setSimulateOffline(true)
+
+        let store = AppStore(
+            client: mock,
+            keychain: InMemoryKeychainStore(),
+            defaults: defaults,
+            reconnectIntervalNs: 60_000_000_000
+        )
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        XCTAssertTrue(store.sessions.isEmpty)
+        if case .offline = store.connectionHealth {} else {
+            XCTFail("Expected .offline before foreground retry")
+        }
+
+        // Simulate app going to background, Desktop opening, then returning to foreground
+        await store.handleScenePhaseChanged(.background)
+        await mock.setSimulateOffline(false)
+        await store.handleSceneBecameActive()
+
+        XCTAssertEqual(store.connectionHealth, .connected)
+        XCTAssertNil(store.lastError)
+        XCTAssertFalse(store.sessions.isEmpty)
+    }
+
+    func testOptimisticPendingMessageInsertionReconciliationExpiryAndRetry() async {
+        let defaults = UserDefaults(suiteName: "AppStorePending.\(UUID().uuidString)")!
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: InMemoryKeychainStore(), defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        let sid = "muse:muse-orb-review"
+        await store.loadTranscript(for: sid)
+
+        // 1. Synchronous optimistic insertion clears draft and immediately renders pending bubble
+        await mock.setSimulateSendError("Host temporarily unreachable")
+        store.draftInputs[sid] = "Ship optimistic user bubbles"
+        let pending = store.submitMessage(for: sid)
+        XCTAssertNotNil(pending)
+        XCTAssertEqual(store.draftInputs[sid], "")
+        XCTAssertEqual(store.pendingOutgoingBySessionId[sid]?.count, 1)
+        XCTAssertEqual(store.pendingOutgoingBySessionId[sid]?.first?.state, .sending)
+        XCTAssertTrue(store.messages(for: sid).contains(where: { $0.id == pending?.messageId && $0.role == .user }))
+
+        // 2. Send failure keeps the bubble in .failed state
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        if case .failed(let err) = store.pendingOutgoingBySessionId[sid]?.first?.state {
+            XCTAssertEqual(err, "Host temporarily unreachable")
+        } else {
+            XCTFail("Expected failed delivery state")
+        }
+        XCTAssertTrue(store.messages(for: sid).contains(where: { $0.id == pending?.messageId }))
+
+        // 3. Retry clears error and reconciles away once transcript echoes the user message
+        await mock.setSimulateSendError(nil)
+        if let messageId = pending?.messageId {
+            store.retryPendingMessage(for: sid, messageId: messageId)
+        }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(store.pendingOutgoingBySessionId[sid]?.isEmpty ?? true)
+
+        // 4. Direct reconciliation matches text within timestamp >= createdAt - 10s & expires .sent after 90s
+        let baseTs = 1_732_500_000_000.0
+        store.pendingOutgoingBySessionId[sid] = [
+            PendingOutgoingMessage(id: "p-match", text: "Check pace bar", createdAt: baseTs, state: .sent),
+            PendingOutgoingMessage(id: "p-expired", text: "Old message", createdAt: baseTs - 95_000, state: .sent),
+            PendingOutgoingMessage(id: "p-keep", text: "Still in flight", createdAt: baseTs, state: .sending),
+        ]
+        let echoed = SessionTranscriptResult(
+            sessionId: sid,
+            messages: [
+                UnifiedMessage(
+                    id: "u-echo",
+                    role: .user,
+                    timestamp: baseTs - 5_000,
+                    blocks: [.text(text: "Check pace bar")]
+                ),
+            ],
+            sourceMtimeMs: baseTs
+        )
+        store.reconcilePendingOutgoing(for: sid, transcript: echoed, nowMs: baseTs)
+        XCTAssertEqual(store.pendingOutgoingBySessionId[sid]?.map(\.id), ["p-keep"])
+    }
+
+    func testUnchangedSessionsAndActivityUpdatesDoNotMutateObservedProperties() async {
+        final class FlagBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = false
+            func set() { lock.lock(); value = true; lock.unlock() }
+            func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+        }
+
+        let defaults = UserDefaults(suiteName: "AppStoreNoopDiff.\(UUID().uuidString)")!
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: InMemoryKeychainStore(), defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        let sessionsChanged = FlagBox()
+        let harnessesChanged = FlagBox()
+        let workingChanged = FlagBox()
+
+        withObservationTracking {
+            _ = store.sessions
+        } onChange: {
+            sessionsChanged.set()
+        }
+        withObservationTracking {
+            _ = store.harnesses
+        } onChange: {
+            harnessesChanged.set()
+        }
+        withObservationTracking {
+            _ = store.hostWorkingSessionIds
+        } onChange: {
+            workingChanged.set()
+        }
+
+        // Emit identical sessions + harnesses + activity -> none of the tracked properties should fire onChange
+        await mock.emitServerEventForTesting(
+            .sessions(
+                harnesses: store.harnesses,
+                sessions: store.sessions,
+                workingSessionIds: Array(store.hostWorkingSessionIds)
+            )
+        )
+        await mock.emitServerEventForTesting(.activity(Array(store.hostWorkingSessionIds)))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(sessionsChanged.get())
+        XCTAssertFalse(harnessesChanged.get())
+        XCTAssertFalse(workingChanged.get())
+    }
+
+    func testActivityEventMirrorsHostWorkingSpinnersAndMasterStaysIdle() async {
+        let defaults = UserDefaults(suiteName: "AppStoreActivity.\(UUID().uuidString)")!
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: InMemoryKeychainStore(), defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        // Initial bootstrap mirrors activeWorkingSessionIds from host
+        XCTAssertTrue(store.hostWorkingSessionIds.contains("antigravity:agy-ios-companion"))
+        XCTAssertFalse(store.isSessionBusy("master:root"))
+
+        // Emit SSE event: activity with codex + muse working
+        await mock.emitServerEventForTesting(.activity(["codex:cx-control-server", "muse:muse-orb-review"]))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(store.hostWorkingSessionIds, Set(["codex:cx-control-server", "muse:muse-orb-review"]))
+        XCTAssertTrue(store.isSessionBusy("codex:cx-control-server"))
+        XCTAssertTrue(store.isSessionBusy("muse:muse-orb-review"))
+        XCTAssertTrue(store.isAnyWorking(for: .codex))
+        XCTAssertTrue(store.isAnyWorking(for: .muse))
+        XCTAssertFalse(store.isSessionBusy("master:root"))
+
+        // Clearing activity stops spinners on idle sessions
+        await mock.emitServerEventForTesting(.activity([]))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(store.hostWorkingSessionIds.isEmpty)
+        XCTAssertFalse(store.isSessionBusy("codex:cx-control-server"))
+        XCTAssertFalse(store.isSessionBusy("muse:muse-orb-review"))
+    }
+
+    func testProtocolV2SessionsDeltaUpsertsRemovesReordersAndSkipsNoOp() async {
+        final class FlagBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = false
+            func set() { lock.lock(); value = true; lock.unlock() }
+            func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+        }
+
+        let defaults = UserDefaults(suiteName: "AppStoreDelta.\(UUID().uuidString)")!
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: InMemoryKeychainStore(), defaults: defaults)
+        defer { store.stopEventStream() }
+
+        await store.bootstrap()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        let existingCount = store.sessions.count
+        guard var updatedCodex = store.sessions.first(where: { $0.id == "codex:cx-control-server" }) else {
+            return XCTFail("Expected codex session")
+        }
+        updatedCodex.title = "Protocol v2 Delta Updated Title"
+
+        let brandNew = UnifiedSession(
+            id: "muse:delta-new",
+            harness: .muse,
+            title: "Fresh Delta Session",
+            updatedAt: Date().timeIntervalSince1970 * 1000.0
+        )
+
+        let delta = SessionsDeltaEnvelope(
+            upserts: [updatedCodex, brandNew],
+            removedIds: ["codex:cx-test-harness"],
+            order: ["muse:delta-new", "codex:cx-control-server"],
+            harnesses: nil,
+            activeWorkingSessionIds: ["muse:delta-new"]
+        )
+        await mock.emitServerEventForTesting(.sessionsDelta(delta))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(store.sessions.count, existingCount) // +1 added, -1 removed
+        XCTAssertFalse(store.sessions.contains(where: { $0.id == "codex:cx-test-harness" }))
+        XCTAssertEqual(store.sessions.first?.id, "muse:delta-new")
+        XCTAssertEqual(store.sessions[1].id, "codex:cx-control-server")
+        XCTAssertEqual(store.sessions[1].title, "Protocol v2 Delta Updated Title")
+        XCTAssertEqual(store.hostWorkingSessionIds, Set(["muse:delta-new"]))
+        XCTAssertTrue(store.isSessionBusy("muse:delta-new"))
+
+        // Re-applying an identical no-op delta must NOT trigger observation mutation on store.sessions
+        let sessionsMutated = FlagBox()
+        withObservationTracking {
+            _ = store.sessions
+        } onChange: {
+            sessionsMutated.set()
+        }
+        let noopDelta = SessionsDeltaEnvelope(
+            upserts: [updatedCodex],
+            removedIds: [],
+            order: nil,
+            harnesses: nil,
+            activeWorkingSessionIds: ["muse:delta-new"]
+        )
+        store.applySessionsDelta(noopDelta)
+        XCTAssertFalse(sessionsMutated.get())
+    }
+}

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="agy-base" x1="12" y1="2.5" x2="12" y2="21.5" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F97316"/>
+      <stop offset="32%" stop-color="#EA4335"/>
+      <stop offset="58%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#4F9CF9"/>
+    </linearGradient>
+    <radialGradient id="agy-left" cx="34%" cy="32%" r="48%">
+      <stop offset="0%" stop-color="#5BB957" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#34A853" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="agy-top" cx="50%" cy="16%" r="36%">
+      <stop offset="0%" stop-color="#FBBC04" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#F97316" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#EA4335" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M12 2.4C8.4 2.4 6.9 6.6 5.4 11.4C4.2 15.3 3.2 17.6 1.9 19.2C1.2 20.1 1.6 21.4 2.8 21.4C4.9 21.4 7.3 18.8 8.9 15.8C10 13.7 10.9 12.6 12 12.6C13.1 12.6 14 13.7 15.1 15.8C16.7 18.8 19.1 21.4 21.2 21.4C22.4 21.4 22.8 20.1 22.1 19.2C20.8 17.6 19.8 15.3 18.6 11.4C17.1 6.6 15.6 2.4 12 2.4Z" fill="url(#agy-base)"/>
+  <path d="M12 2.4C8.4 2.4 6.9 6.6 5.4 11.4C4.2 15.3 3.2 17.6 1.9 19.2C1.2 20.1 1.6 21.4 2.8 21.4C4.9 21.4 7.3 18.8 8.9 15.8C10 13.7 10.9 12.6 12 12.6C13.1 12.6 14 13.7 15.1 15.8C16.7 18.8 19.1 21.4 21.2 21.4C22.4 21.4 22.8 20.1 22.1 19.2C20.8 17.6 19.8 15.3 18.6 11.4C17.1 6.6 15.6 2.4 12 2.4Z" fill="url(#agy-left)"/>
+  <path d="M12 2.4C8.4 2.4 6.9 6.6 5.4 11.4C4.2 15.3 3.2 17.6 1.9 19.2C1.2 20.1 1.6 21.4 2.8 21.4C4.9 21.4 7.3 18.8 8.9 15.8C10 13.7 10.9 12.6 12 12.6C13.1 12.6 14 13.7 15.1 15.8C16.7 18.8 19.1 21.4 21.2 21.4C22.4 21.4 22.8 20.1 22.1 19.2C20.8 17.6 19.8 15.3 18.6 11.4C17.1 6.6 15.6 2.4 12 2.4Z" fill="url(#agy-top)"/>
+</svg>

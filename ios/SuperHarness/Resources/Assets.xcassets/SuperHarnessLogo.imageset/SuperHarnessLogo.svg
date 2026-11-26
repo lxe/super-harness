@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="sh-top" x1="3" y1="3" x2="21" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </linearGradient>
+    <linearGradient id="sh-left" x1="4" y1="8" x2="12" y2="21" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#10A37F"/>
+    </linearGradient>
+    <linearGradient id="sh-right" x1="20" y1="8" x2="12" y2="21" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D97757"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 2.2L20.4 7.05L17.4 8.8L12 5.65L6.6 8.8L3.6 7.05L12 2.2Z" fill="url(#sh-top)"/>
+  <path d="M3.6 8.95L6.6 10.7V16.2L11.15 18.85V22.3L3.6 17.95V8.95Z" fill="url(#sh-left)"/>
+  <path d="M20.4 8.95V17.95L12.85 22.3V18.85L17.4 16.2V10.7L20.4 8.95Z" fill="url(#sh-right)"/>
+  <path d="M12 8.7L15.1 10.5V14.1L12 15.9L8.9 14.1V10.5L12 8.7Z" fill="#F1F3F7" fill-opacity="0.92"/>
+</svg>

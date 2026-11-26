@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="master-grad" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C084FC"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 2.2C12.8 7.5 16.5 11.2 21.8 12C16.5 12.8 12.8 16.5 12 21.8C11.2 16.5 7.5 12.8 2.2 12C7.5 11.2 11.2 7.5 12 2.2Z" fill="url(#master-grad)"/>
+</svg>

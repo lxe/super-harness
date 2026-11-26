@@ -1,0 +1,9 @@
+# Xcode & user workspace state
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.DS_Store
+
+# Bootstrap & runner temp files
+.*-prompt.txt
+.agy-*

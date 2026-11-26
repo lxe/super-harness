@@ -7,6 +7,7 @@ import {
   buildSendUserCascadeMessageRequest,
   buildStartCascadeRequest,
   ConnectEnvelopeDecoder,
+  extractAgentStateSignalsFromBuffer,
   encodeConnectEnvelope,
   extractAgentStateSignals,
   parseAntigravityHubFile,
@@ -36,6 +37,46 @@ describe('Connect streaming envelopes (5-byte framing)', () => {
       { endStream: false, body: '{"hello":"world"}' },
       { endStream: true, body: '{"error":{"code":"unknown"}}' },
     ]);
+  });
+});
+
+describe('Connect envelope decoder on large chunked frames', () => {
+  it('decodes a multi-MB frame split into small socket chunks in linear time', () => {
+    const big = { payload: 'x'.repeat(16 * 1024 * 1024), status: 'CASCADE_RUN_STATUS_IDLE' };
+    const wire = Buffer.concat([encodeConnectEnvelope(big), encodeConnectEnvelope({ tail: 1 }, true)]);
+    const dec = new ConnectEnvelopeDecoder();
+    const frames = [];
+    const t0 = performance.now();
+    for (let i = 0; i < wire.length; i += 16 * 1024) frames.push(...dec.push(wire.subarray(i, i + 16 * 1024)));
+    const ms = performance.now() - t0;
+    expect(frames.map((f) => f.endStream)).toEqual([false, true]);
+    expect(frames[0].body.length).toBe(JSON.stringify(big).length);
+    expect(frames[1].body).toBe('{"tail":1}');
+    // The old re-concat-per-chunk decoder took several seconds here.
+    expect(ms).toBeLessThan(1500);
+  });
+
+  it('reads agent-state signals from raw bytes exactly like the string regexes', () => {
+    const samples = [
+      '{"status":"CASCADE_RUN_STATUS_RUNNING","x":{"lastStepIdx": 42}}',
+      '{"lastStepIdx":7,"status":"CASCADE_RUN_STATUS_IDLE"}',
+      '{"status":"CASCADE_RUN_STATUS_","status":"CASCADE_RUN_STATUS_DONE_OK"}',
+      '{"status":"CASCADE_RUN_STATUS_abc","lastStepIdx":"x","lastStepIdx":\n 3}',
+      '{"t":"héllo ✓","status":"CASCADE_RUN_STATUS_WAITING"}',
+      '{"nothing":true}',
+      '',
+    ];
+    for (const s of samples) {
+      expect(extractAgentStateSignalsFromBuffer(Buffer.from(s))).toEqual(extractAgentStateSignals(s));
+    }
+  });
+
+  it('handles a header split across chunks', () => {
+    const wire = encodeConnectEnvelope({ a: 1 });
+    const dec = new ConnectEnvelopeDecoder();
+    const out = [];
+    for (let i = 0; i < wire.length; i++) out.push(...dec.push(wire.subarray(i, i + 1)));
+    expect(out).toEqual([{ endStream: false, body: '{"a":1}' }]);
   });
 });
 

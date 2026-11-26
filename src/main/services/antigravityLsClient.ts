@@ -104,24 +104,51 @@ export interface ConnectEnvelope {
   body: string;
 }
 
-/** Incremental decoder for Connect streaming envelopes over chunked HTTPS. */
+export interface ConnectEnvelopeBytes {
+  endStream: boolean;
+  bytes: Buffer;
+}
+
+/**
+ * Incremental decoder for Connect streaming envelopes over chunked HTTPS.
+ *
+ * Agent-state frames can be many MB and arrive in 16–64 KB socket chunks, so
+ * chunks are queued and joined once per complete frame. Re-concatenating the
+ * whole buffer on every chunk was quadratic and blocked the main (browser UI)
+ * thread for seconds at a time, freezing the window.
+ */
 export class ConnectEnvelopeDecoder {
-  private buf: Buffer = Buffer.alloc(0);
+  private chunks: Buffer[] = [];
+  private total = 0;
 
   push(chunk: Buffer): ConnectEnvelope[] {
-    this.buf = this.buf.length > 0 ? Buffer.concat([this.buf, chunk]) : chunk;
-    const frames: ConnectEnvelope[] = [];
-    while (this.buf.length >= 5) {
-      const len = this.buf.readUInt32BE(1);
-      if (this.buf.length < 5 + len) break;
-      const flags = this.buf[0];
-      frames.push({
-        endStream: (flags & 0x02) !== 0,
-        body: this.buf.subarray(5, 5 + len).toString('utf8'),
-      });
-      this.buf = this.buf.subarray(5 + len);
+    return this.pushBytes(chunk).map((f) => ({ endStream: f.endStream, body: f.bytes.toString('utf8') }));
+  }
+
+  /** Like `push`, but leaves each frame body as raw bytes (no multi-MB string decode). */
+  pushBytes(chunk: Buffer): ConnectEnvelopeBytes[] {
+    if (chunk.length > 0) {
+      this.chunks.push(chunk);
+      this.total += chunk.length;
+    }
+    const frames: ConnectEnvelopeBytes[] = [];
+    while (this.total >= 5) {
+      const head = this.chunks[0].length >= 5 ? this.chunks[0] : this.join();
+      const len = head.readUInt32BE(1);
+      if (this.total < 5 + len) break;
+      const buf = this.join();
+      frames.push({ endStream: (buf[0] & 0x02) !== 0, bytes: buf.subarray(5, 5 + len) });
+      const rest = buf.subarray(5 + len);
+      this.chunks = rest.length > 0 ? [rest] : [];
+      this.total = rest.length;
     }
     return frames;
+  }
+
+  /** Collapses the queued chunks into one buffer (no copy when there is only one). */
+  private join(): Buffer {
+    if (this.chunks.length > 1) this.chunks = [Buffer.concat(this.chunks, this.total)];
+    return this.chunks[0];
   }
 }
 
@@ -143,6 +170,43 @@ export function extractAgentStateSignals(body: string): AgentStateSignals {
   return { status, lastStepIdx: stepRaw !== undefined ? Number(stepRaw) : null };
 }
 
+const STATUS_PREFIX = Buffer.from('"status":"CASCADE_RUN_STATUS_');
+const STEP_PREFIX = Buffer.from('"lastStepIdx":');
+
+const isUpperOrUnderscore = (c: number) => (c >= 0x41 && c <= 0x5a) || c === 0x5f;
+const isDigit = (c: number) => c >= 0x30 && c <= 0x39;
+const isAsciiSpace = (c: number) => c === 0x20 || (c >= 0x09 && c <= 0x0d);
+
+/**
+ * Same result as `extractAgentStateSignals(buf.toString('utf8'))`, found with native
+ * byte search so a 60 MB agent-state frame never has to become a JS string. Both
+ * markers are pure ASCII, and UTF-8 never encodes other characters with ASCII bytes.
+ */
+export function extractAgentStateSignalsFromBuffer(buf: Buffer): AgentStateSignals {
+  let status: string | null = null;
+  for (let at = buf.indexOf(STATUS_PREFIX); at !== -1; at = buf.indexOf(STATUS_PREFIX, at + 1)) {
+    let end = at + STATUS_PREFIX.length;
+    while (end < buf.length && isUpperOrUnderscore(buf[end])) end++;
+    // `[A-Z_]+"`: a non-empty run closed by a quote (a shorter run can never end in `"`).
+    if (end > at + STATUS_PREFIX.length && buf[end] === 0x22) {
+      status = buf.toString('latin1', at + '"status":"'.length, end);
+      break;
+    }
+  }
+  let lastStepIdx: number | null = null;
+  for (let at = buf.indexOf(STEP_PREFIX); at !== -1; at = buf.indexOf(STEP_PREFIX, at + 1)) {
+    let i = at + STEP_PREFIX.length;
+    while (i < buf.length && isAsciiSpace(buf[i])) i++;
+    const start = i;
+    while (i < buf.length && isDigit(buf[i])) i++;
+    if (i > start) {
+      lastStepIdx = Number(buf.toString('latin1', start, i));
+      break;
+    }
+  }
+  return { status, lastStepIdx };
+}
+
 /**
  * Change-only, rate-limited gate for agent-state frames: `offer` returns
  * true at most once per `minIntervalMs` and only when (status, lastStepIdx)
@@ -157,7 +221,10 @@ export class AgentStateSignalGate {
   constructor(private readonly minIntervalMs = 1000) {}
 
   offer(body: string, now: number): boolean {
-    const { status, lastStepIdx } = extractAgentStateSignals(body);
+    return this.offerSignals(extractAgentStateSignals(body), now);
+  }
+
+  offerSignals({ status, lastStepIdx }: AgentStateSignals, now: number): boolean {
     if (status === null && lastStepIdx === null) return false;
     const key = `${status ?? ''}|${lastStepIdx ?? ''}`;
     if (key === this.lastNotifiedKey) {
@@ -411,17 +478,16 @@ export class AntigravityLsClient {
 
     const gate = new AgentStateSignalGate(1000);
     let trailingTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastBody = '';
-    const offerBody = (body: string) => {
-      lastBody = body;
-      const { status } = extractAgentStateSignals(body);
-      if (status) this.observedStatus.set(cascadeId, status);
-      if (gate.offer(body, Date.now())) {
+    let lastSignals: AgentStateSignals = { status: null, lastStepIdx: null };
+    const offerSignals = (signals: AgentStateSignals) => {
+      lastSignals = signals;
+      if (signals.status) this.observedStatus.set(cascadeId, signals.status);
+      if (gate.offerSignals(signals, Date.now())) {
         onUpdate();
       } else if (gate.hasPending() && !trailingTimer) {
         trailingTimer = setTimeout(() => {
           trailingTimer = null;
-          if (gate.offer(lastBody, Date.now())) onUpdate();
+          if (gate.offerSignals(lastSignals, Date.now())) onUpdate();
         }, 1050);
         trailingTimer.unref?.();
       }
@@ -443,8 +509,8 @@ export class AntigravityLsClient {
       },
       (res) => {
         res.on('data', (chunk: Buffer) => {
-          for (const frame of decoder.push(chunk)) {
-            if (!frame.endStream) offerBody(frame.body);
+          for (const frame of decoder.pushBytes(chunk)) {
+            if (!frame.endStream) offerSignals(extractAgentStateSignalsFromBuffer(frame.bytes));
           }
         });
         res.on('end', () => this.subscriptions.delete(cascadeId));

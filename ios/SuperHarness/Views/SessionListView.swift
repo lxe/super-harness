@@ -447,25 +447,46 @@ public struct SessionListView: View {
                     .listRowSeparator(.hidden)
             }
 
-            // Globally Pinned-to-Top section
+            // Globally Pinned-to-Top section (collapsible)
             let topPinned = store.pinnedToTopSessions
             if !topPinned.isEmpty {
+                let pinnedSectionId = "__pinned_to_top__"
+                let isPinnedCollapsed = collapsedSectionIds.contains(pinnedSectionId)
                 Section {
-                    HStack(spacing: 6) {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(SHColor.brandMaster)
-                        Text("PINNED TO TOP")
-                            .font(SHTypography.micro.weight(.semibold))
-                            .foregroundStyle(SHColor.inkMuted)
-                        Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            toggleCollapsed(pinnedSectionId)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(SHColor.brandMaster)
+                            Text("Super Harness Pins")
+                                .font(SHTypography.micro.weight(.semibold))
+                                .foregroundStyle(SHColor.inkMuted)
+                            if isPinnedCollapsed && topPinned.contains(where: { store.isSessionBusy($0.id) }) {
+                                SHActivityPulse(tint: SHColor.brandMaster, size: 11)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(SHColor.inkFaint)
+                                .rotationEffect(.degrees(isPinnedCollapsed ? 0 : 90))
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("section.header.pinned-to-top")
+                    .accessibilityValue(isPinnedCollapsed ? "collapsed" : "expanded")
                     .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 4, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                    ForEach(topPinned) { session in
-                        sessionRowButton(session)
+                    if !isPinnedCollapsed {
+                        ForEach(topPinned) { session in
+                            sessionRowButton(session)
+                        }
                     }
                 }
             }

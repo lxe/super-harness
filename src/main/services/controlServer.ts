@@ -1,9 +1,15 @@
+import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import zlib from 'node:zlib';
+
+const execFileAsync = promisify(execFile);
+const WEBP_CACHE_DIR = path.join(os.tmpdir(), 'sh-media-webp-cache');
+const TRANSCODABLE_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff']);
 import type {
   FilePreviewData,
   HarnessCatalog,
@@ -130,8 +136,10 @@ export class ControlServer {
   private mobileServer: http.Server | null = null;
   private mobileConfigKey = '';
   private sseClients = new Set<http.ServerResponse>();
+  private sseGzipByRes = new Map<http.ServerResponse, zlib.Gzip>();
   private sseClientIdByRes = new Map<http.ServerResponse, string>();
   private watchedSessionByClient = new Map<string, string | null>();
+  private webpInFlight = new Map<string, Promise<string | null>>();
   private sseKeepaliveTimer: NodeJS.Timeout | null = null;
   private eventSeq = 0;
   private eventBuffer: BufferedEvent[] = [];
@@ -162,6 +170,82 @@ export class ControlServer {
       if (watched === sessionId) return true;
     }
     return false;
+  }
+
+  private writeSseFrame(res: http.ServerResponse, frame: string): void {
+    const gz = this.sseGzipByRes.get(res);
+    if (gz) {
+      gz.write(frame);
+      gz.flush(zlib.constants.Z_SYNC_FLUSH);
+    } else {
+      res.write(frame);
+    }
+  }
+
+  private removeSseClient(res: http.ServerResponse): void {
+    this.sseClients.delete(res);
+    this.sseClientIdByRes.delete(res);
+    const gz = this.sseGzipByRes.get(res);
+    if (gz) {
+      this.sseGzipByRes.delete(res);
+      try {
+        gz.end();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /**
+   * Compresses raster images (PNG/JPEG/etc.) into cached lossy WebP for fast mobile delivery.
+   * Returns cached WebP file path, or null to fall back to the original file.
+   */
+  private async transcodeToCachedWebp(
+    filePath: string,
+    stat: fs.Stats,
+    maxWidth: number,
+    quality: number
+  ): Promise<string | null> {
+    const key = crypto
+      .createHash('sha256')
+      .update(`${filePath}|${stat.mtimeMs}|${stat.size}|w${maxWidth}|q${quality}`)
+      .digest('hex');
+    const cachePath = path.join(WEBP_CACHE_DIR, `${key}.webp`);
+    if (fs.existsSync(cachePath)) {
+      return cachePath;
+    }
+    const existing = this.webpInFlight.get(key);
+    if (existing) return existing;
+
+    const job = (async (): Promise<string | null> => {
+      try {
+        fs.mkdirSync(WEBP_CACHE_DIR, { recursive: true });
+        const tmpPath = `${cachePath}.${process.pid}.${Date.now()}.tmp.webp`;
+        await execFileAsync(
+          'magick',
+          [
+            filePath,
+            '-auto-orient',
+            '-strip',
+            '-resize',
+            `${maxWidth}x${maxWidth}>`,
+            '-quality',
+            String(quality),
+            `webp:${tmpPath}`,
+          ],
+          { timeout: 12_000 }
+        );
+        fs.renameSync(tmpPath, cachePath);
+        return cachePath;
+      } catch {
+        return null;
+      } finally {
+        this.webpInFlight.delete(key);
+      }
+    })();
+
+    this.webpInFlight.set(key, job);
+    return job;
   }
 
   broadcastEvent(event: string, data: unknown): void {
@@ -205,9 +289,9 @@ export class ControlServer {
     for (const client of this.sseClients) {
       if (!this.shouldDeliver(client, item)) continue;
       try {
-        client.write(frame);
+        this.writeSseFrame(client, frame);
       } catch {
-        this.sseClients.delete(client);
+        this.removeSseClient(client);
       }
     }
   }
@@ -218,9 +302,9 @@ export class ControlServer {
       if (this.sseClients.size === 0) return;
       for (const client of this.sseClients) {
         try {
-          client.write(': ping\n\n');
+          this.writeSseFrame(client, ': ping\n\n');
         } catch {
-          this.sseClients.delete(client);
+          this.removeSseClient(client);
         }
       }
     }, 25_000);
@@ -232,6 +316,19 @@ export class ControlServer {
       const acceptsGzip = String(req.headers['accept-encoding'] || '').includes('gzip');
       const sendJson = (payload: unknown, statusCode = 200): void => {
         const buf = Buffer.from(JSON.stringify(payload), 'utf8');
+        // Conditional GETs: on reconnect/foreground the phone re-requests bootstrap and the
+        // open transcript; when nothing changed it gets an empty 304 instead of the payload
+        // again (iOS URLCache revalidates with If-None-Match and serves its cached body).
+        if (req.method === 'GET' && statusCode === 200) {
+          const etag = `"${crypto.createHash('sha1').update(buf).digest('base64url')}"`;
+          res.setHeader('ETag', etag);
+          res.setHeader('Cache-Control', 'no-cache');
+          if (req.headers['if-none-match'] === etag) {
+            res.statusCode = 304;
+            res.end();
+            return;
+          }
+        }
         res.statusCode = statusCode;
         res.setHeader('Content-Type', 'application/json');
         if (acceptsGzip && buf.length > 1024) {
@@ -385,55 +482,61 @@ export class ControlServer {
             '';
           const lastSeq = lastEventRaw ? Number(lastEventRaw) : 0;
 
-          res.writeHead(200, {
+          req.socket?.setNoDelay?.(true);
+          const sseHeaders: Record<string, string> = {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             Connection: 'keep-alive',
-          });
-          res.write(
-            `id: ${this.eventSeq}\nevent: connected\ndata: ${JSON.stringify({
-              ok: true,
-              protocolVersion: MOBILE_PROTOCOL_VERSION,
-              seq: this.eventSeq,
-            })}\n\n`
-          );
+          };
+          if (acceptsGzip) {
+            sseHeaders['Content-Encoding'] = 'gzip';
+            sseHeaders['Vary'] = 'Accept-Encoding';
+          }
+          res.writeHead(200, sseHeaders);
+          if (acceptsGzip) {
+            const gz = zlib.createGzip({ level: 5 });
+            gz.on('error', () => this.removeSseClient(res));
+            gz.pipe(res);
+            this.sseGzipByRes.set(res, gz);
+          }
+          let initialBurst = `id: ${this.eventSeq}\nevent: connected\ndata: ${JSON.stringify({
+            ok: true,
+            protocolVersion: MOBILE_PROTOCOL_VERSION,
+            seq: this.eventSeq,
+          })}\n\n`;
 
           if (Number.isFinite(lastSeq) && lastSeq > 0) {
             if (lastSeq > this.eventSeq) {
-              res.write(
-                `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
-                  reason: 'host_restarted',
-                  lastSeq,
-                  currentSeq: this.eventSeq,
-                })}\n\n`
-              );
+              initialBurst += `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
+                reason: 'host_restarted',
+                lastSeq,
+                currentSeq: this.eventSeq,
+              })}\n\n`;
             } else if (lastSeq < this.eventSeq) {
               const oldestSeq = this.eventBuffer[0]?.seq ?? this.eventSeq + 1;
               if (lastSeq + 1 < oldestSeq) {
-                res.write(
-                  `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
-                    reason: 'buffer_gap',
-                    lastSeq,
-                    currentSeq: this.eventSeq,
-                  })}\n\n`
-                );
+                initialBurst += `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
+                  reason: 'buffer_gap',
+                  lastSeq,
+                  currentSeq: this.eventSeq,
+                })}\n\n`;
               } else {
                 if (clientId) this.sseClientIdByRes.set(res, clientId);
                 for (const item of this.eventBuffer) {
                   if (item.seq > lastSeq && this.shouldDeliver(res, item)) {
-                    res.write(item.frame);
+                    initialBurst += item.frame;
                   }
                 }
               }
             }
           }
+          this.writeSseFrame(res, initialBurst);
 
           if (clientId) this.sseClientIdByRes.set(res, clientId);
           this.sseClients.add(res);
           this.ensureKeepalive();
           req.on('close', () => {
-            this.sseClients.delete(res);
-            this.sseClientIdByRes.delete(res);
+            this.removeSseClient(res);
             if (clientId && ![...this.sseClientIdByRes.values()].includes(clientId)) {
               this.watchedSessionByClient.delete(clientId);
             }
@@ -513,6 +616,31 @@ export class ControlServer {
             res.end(JSON.stringify({ error: 'Media not found' }));
             return;
           }
+
+          const rawRequested = url.searchParams.get('raw') === '1';
+          const widthParam = Number(url.searchParams.get('w') || '0');
+          const hasExplicitWidth = Number.isFinite(widthParam) && widthParam > 0;
+          const shouldCompressWebp =
+            !rawRequested &&
+            TRANSCODABLE_IMAGE_EXTS.has(ext) &&
+            (ext === '.png' || hasExplicitWidth || stat.size > 45_000);
+
+          if (shouldCompressWebp) {
+            const maxW = hasExplicitWidth ? Math.max(64, Math.min(2400, Math.round(widthParam))) : 1600;
+            const quality = maxW <= 480 ? 74 : 78;
+            const cachedWebp = await this.transcodeToCachedWebp(filePath, stat, maxW, quality);
+            if (cachedWebp && fs.existsSync(cachedWebp)) {
+              const webpStat = fs.statSync(cachedWebp);
+              res.writeHead(200, {
+                'Content-Type': 'image/webp',
+                'Content-Length': String(webpStat.size),
+                'Cache-Control': 'private, max-age=3600',
+              });
+              fs.createReadStream(cachedWebp).pipe(res);
+              return;
+            }
+          }
+
           res.writeHead(200, {
             'Content-Type': contentType,
             'Content-Length': String(stat.size),

@@ -246,6 +246,7 @@ public struct SHInlineDisclosureRow: View {
     public let icon: String
     public let title: String
     public var trailingBadge: String? = nil
+    public var trailingMeta: String? = nil
     public var tint: Color = SHColor.inkMuted
     public var isSpinning: Bool = false
     public var isExpanded: Bool = false
@@ -255,6 +256,7 @@ public struct SHInlineDisclosureRow: View {
         icon: String,
         title: String,
         trailingBadge: String? = nil,
+        trailingMeta: String? = nil,
         tint: Color = SHColor.inkMuted,
         isSpinning: Bool = false,
         isExpanded: Bool = false,
@@ -263,6 +265,7 @@ public struct SHInlineDisclosureRow: View {
         self.icon = icon
         self.title = title
         self.trailingBadge = trailingBadge
+        self.trailingMeta = trailingMeta
         self.tint = tint
         self.isSpinning = isSpinning
         self.isExpanded = isExpanded
@@ -304,7 +307,14 @@ public struct SHInlineDisclosureRow: View {
                     .foregroundStyle(SHColor.inkFaint)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+
+                if let trailingMeta, !trailingMeta.isEmpty {
+                    Text(trailingMeta)
+                        .font(.system(size: 11))
+                        .foregroundStyle(SHColor.inkFaint)
+                        .lineLimit(1)
+                }
             }
             .padding(.vertical, 2)
             .contentShape(Rectangle())
@@ -630,5 +640,121 @@ public struct SuperHarnessStatusLogo: View {
         }
         .frame(width: size, height: size)
         .shadow(color: statusColor.opacity(0.35), radius: 4, x: 0, y: 0)
+    }
+}
+
+// MARK: - Radial Quota Gauge (harness switcher; mirrors desktop SegmentedControl `gauge` variant)
+
+/// Circular quota ring drawn around a centered glyph. While `isWorking`, a conic "chaser"
+/// rotates on the track underneath the usage arc, like the desktop sidebar gauges.
+public struct SHRadialGauge<Center: View>: View {
+    public let value: Double?
+    public let tint: Color
+    public var estimated: Bool = false
+    public var isWorking: Bool = false
+    public var isActive: Bool = false
+    public var size: CGFloat = 34
+    private let center: Center
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public init(
+        value: Double?,
+        tint: Color,
+        estimated: Bool = false,
+        isWorking: Bool = false,
+        isActive: Bool = false,
+        size: CGFloat = 34,
+        @ViewBuilder center: () -> Center
+    ) {
+        self.value = value
+        self.tint = tint
+        self.estimated = estimated
+        self.isWorking = isWorking
+        self.isActive = isActive
+        self.size = size
+        self.center = center()
+    }
+
+    // Desktop draws radius 15 with a 2.3 stroke inside a 36pt box.
+    private var lineWidth: CGFloat { size * 2.3 / 36 }
+    private var ringInset: CGFloat { size * 3 / 36 - lineWidth / 2 }
+
+    private var clamped: Double? {
+        guard let value, value.isFinite else { return nil }
+        return min(100, max(0, value))
+    }
+
+    /// A non-zero value always shows at least a 4% arc so it stays visible.
+    private var displayFraction: Double {
+        guard let clamped, clamped > 0 else { return 0 }
+        return max(clamped, 4) / 100
+    }
+
+    private var stroke: Color {
+        if let clamped, !estimated {
+            if clamped >= 95 { return SHColor.statusDanger }
+            if clamped >= 80 { return SHColor.statusWarning }
+        }
+        return tint
+    }
+
+    public var body: some View {
+        ZStack {
+            Circle()
+                .inset(by: ringInset)
+                .stroke(Color.white.opacity(isActive ? 0.13 : 0.08), lineWidth: lineWidth)
+
+            if isWorking {
+                chaser
+            }
+
+            if displayFraction > 0 {
+                Circle()
+                    .inset(by: ringInset)
+                    .trim(from: 0, to: displayFraction)
+                    .stroke(
+                        stroke.opacity(estimated ? 0.78 : 0.96),
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut(duration: 0.3), value: displayFraction)
+            }
+
+            center
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var chaserRing: some View {
+        Circle()
+            .inset(by: ringInset)
+            .stroke(
+                AngularGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .clear, location: 120.0 / 360),
+                        .init(color: stroke.opacity(0.16), location: 195.0 / 360),
+                        .init(color: stroke.mix(with: .white, by: 0.4).opacity(0.62), location: 295.0 / 360),
+                        .init(color: Color.white.opacity(0.92), location: 348.0 / 360),
+                        .init(color: .clear, location: 1),
+                    ],
+                    center: .center
+                ),
+                lineWidth: lineWidth
+            )
+    }
+
+    @ViewBuilder
+    private var chaser: some View {
+        if reduceMotion {
+            chaserRing.rotationEffect(.degrees(-90))
+        } else {
+            // One turn every 2.2s, matching desktop `sh-gauge-spin`.
+            TimelineView(.animation) { context in
+                let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 2.2
+                chaserRing.rotationEffect(.degrees(turn * 360 - 90))
+            }
+        }
     }
 }

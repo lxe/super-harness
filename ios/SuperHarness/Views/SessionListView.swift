@@ -59,6 +59,8 @@ public enum SessionRowFormatting {
 
 public struct SessionListView: View {
     @AppStorage("sh.collapsedSections") private var collapsedSectionsRaw: String = ""
+    @State private var renamingSession: UnifiedSession? = nil
+    @State private var renameDraft: String = "" 
 
     private var collapsedSectionIds: Set<String> {
         Set(collapsedSectionsRaw.split(separator: "\n").map(String.init))
@@ -88,34 +90,55 @@ public struct SessionListView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .alert(
+            "Rename Thread",
+            isPresented: Binding(
+                get: { renamingSession != nil },
+                set: { if !$0 { renamingSession = nil } }
+            )
+        ) {
+            TextField("Thread title", text: $renameDraft)
+            Button("Save") {
+                if let target = renamingSession {
+                    let nextTitle = renameDraft
+                    renamingSession = nil
+                    Task { await store.renameSession(target, title: nextTitle) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                renamingSession = nil
+            }
+        }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarLeading) {
                 ConnectionStatusPill(health: store.connectionHealth) {
                     store.isHostSettingsSheetPresented = true
                 }
+            }
 
-                if let master = store.masterSession {
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarLeading)
+            }
+
+            if let master = store.masterSession {
+                ToolbarItem(placement: .topBarLeading) {
                     let isMasterBusy = store.isSessionBusy(master.id)
                     Button {
                         onSelectSession(master.id)
                     } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 12.5, weight: .semibold))
-                                .foregroundStyle(SHColor.brandMaster)
-                            Text("Master")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(SHColor.inkPrimary)
-                                .lineLimit(1)
+                        ZStack {
                             if isMasterBusy {
                                 ProgressView()
                                     .controlSize(.mini)
                                     .tint(SHColor.brandMaster)
-                                    .scaleEffect(0.75)
+                            } else {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(SHColor.brandMaster)
                             }
                         }
-                        .padding(.horizontal, 6)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Master Orchestrator")
@@ -201,7 +224,7 @@ public struct SessionListView: View {
 
 
 
-            // Horizontal harness switcher pills with live quota bar & quick '+' button
+            // Harness switcher: icon-only chips with radial quota gauges
             Section {
                 HarnessSwitcherStrip(store: store)
                     .listRowInsets(EdgeInsets())
@@ -384,6 +407,12 @@ public struct SessionListView: View {
         }
         .contextMenu {
             Button {
+                renameDraft = session.displayTitle
+                renamingSession = session
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button {
                 Task { await store.togglePin(session) }
             } label: {
                 Label(session.pinned ? "Unpin" : "Pin", systemImage: session.pinned ? "pin.slash" : "pin")
@@ -458,133 +487,129 @@ private struct MasterSessionRow: View {
     }
 }
 
-// MARK: - Horizontal Harness Switcher Strip
+// MARK: - Harness Switcher (icon-only radial gauges, matches desktop sidebar)
 
 private struct HarnessSwitcherStrip: View {
     @Bindable var store: AppStore
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                allPill
-
-                ForEach(HarnessGroup.allCases) { group in
-                    harnessPill(group)
-                }
+        // Five equal cells that always fit the row width; no horizontal scrolling.
+        HStack(spacing: 4) {
+            allChip
+            ForEach(HarnessGroup.allCases) { group in
+                harnessChip(group)
             }
-            .padding(.trailing, 4)
-            .padding(.vertical, 2)
         }
+        .padding(6)
+        .background(SHColor.surfaceSubtle)
+        .overlay(
+            RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous)
+                .stroke(SHColor.lineHairline, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous))
+        .padding(.vertical, 2)
     }
 
-    private var allPill: some View {
+    private var allChip: some View {
         let isSelected = store.selectedHarnessFilter == nil
+        let working = HarnessGroup.allCases.contains { store.isAnyWorking(for: $0) }
         return Button {
             withAnimation(.easeInOut(duration: 0.16)) {
                 store.selectedHarnessFilter = nil
             }
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkMuted)
-                    Text("All")
-                        .font(SHTypography.caption.weight(.semibold))
-                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
-                    Text("\(store.sessions.filter { !$0.isMaster && !$0.hidden && $0.status != .archived }.count)")
-                        .font(SHTypography.micro.monospacedDigit())
-                        .foregroundStyle(SHColor.inkFaint)
-                }
-                ObsidianProgressBar(
-                    value: averageBarPercent,
+            chipCell(isSelected: isSelected) {
+                SHRadialGauge(
+                    value: peakBarPercent,
                     tint: SHColor.inkSecondary,
-                    height: 3
-                )
-                .frame(width: 56, height: 4)
+                    estimated: true,
+                    isWorking: working,
+                    isActive: isSelected
+                ) {
+                    Text("All")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkMuted)
+                }
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 10)
-            .background(isSelected ? SHColor.surfaceBubble : SHColor.surfaceSubtle)
-            .overlay(
-                RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
-                    .stroke(isSelected ? SHColor.lineSubtle : Color.clear, lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("All harnesses")
+        .accessibilityValue(gaugeAccessibilityValue(percent: peakBarPercent, working: working))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .contextMenu {
+            Button {
+                store.openUsageSheet(for: nil)
+            } label: {
+                Label("Usage", systemImage: "chart.bar")
+            }
+        }
     }
 
-    private func harnessPill(_ group: HarnessGroup) -> some View {
+    private func harnessChip(_ group: HarnessGroup) -> some View {
         let isSelected = store.selectedHarnessFilter == group
         let summary = store.usage?[group]
         let barPct = summary?.barPercent ?? UsageMetrics.pickHeroWindow(summary?.windows ?? []).hero?.usedPercent
-        let brand = SHColor.harness(group)
         let working = store.isAnyWorking(for: group)
 
-        return HStack(spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.16)) {
-                    store.selectedHarnessFilter = isSelected ? nil : group
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        HarnessLogoView(group: group, size: 14)
-                        Text(group.title)
-                            .font(SHTypography.caption.weight(.semibold))
-                            .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
-                        if working {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .tint(brand)
-                        } else {
-                            Text("\(store.activeCount(for: group))")
-                                .font(SHTypography.micro.monospacedDigit())
-                                .foregroundStyle(SHColor.inkFaint)
-                        }
-                    }
-                    ObsidianProgressBar(
-                        value: barPct,
-                        tint: brand,
-                        estimated: summary?.barIsEstimated ?? false,
-                        height: 3
-                    )
-                    .frame(width: 82, height: 4)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                store.selectedHarnessFilter = isSelected ? nil : group
+            }
+        } label: {
+            chipCell(isSelected: isSelected) {
+                SHRadialGauge(
+                    value: barPct,
+                    tint: SHColor.harness(group),
+                    estimated: summary?.barIsEstimated ?? false,
+                    isWorking: working,
+                    isActive: isSelected
+                ) {
+                    HarnessLogoView(group: group, size: 15)
+                        .opacity(isSelected ? 1 : 0.8)
                 }
             }
-            .buttonStyle(.plain)
-
-            // Quick '+' new chat button for this harness
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(group.title)
+        .accessibilityValue(gaugeAccessibilityValue(percent: barPct, working: working))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        // The chip no longer carries its own '+'; long-press keeps the per-harness shortcuts.
+        .contextMenu {
             Button {
                 store.openDraftChat(for: group)
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(brand)
-                    .frame(width: 26, height: 26)
-                    .background(brand.opacity(0.12))
-                    .clipShape(Circle())
+                Label("New \(group.title) Session", systemImage: "plus")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("New \(group.title) session")
+            Button {
+                store.openUsageSheet(for: group)
+            } label: {
+                Label("\(group.title) Usage", systemImage: "chart.bar")
+            }
         }
-        .padding(.leading, 13)
-        .padding(.trailing, 8)
-        .padding(.vertical, 10)
-        .background(isSelected ? brand.opacity(0.14) : SHColor.surfaceSubtle)
-        .overlay(
-            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
-                .stroke(isSelected ? brand.opacity(0.35) : Color.clear, lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 
-    private var averageBarPercent: Double? {
+    private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(isSelected ? Color.white.opacity(0.11) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+    }
+
+    private func gaugeAccessibilityValue(percent: Double?, working: Bool) -> String {
+        var parts: [String] = []
+        if let percent { parts.append("\(Int(percent.rounded())) percent of quota used") }
+        if working { parts.append("working") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// Desktop's "All" gauge shows the highest quota use across harnesses.
+    private var peakBarPercent: Double? {
         guard let usage = store.usage else { return nil }
-        let vals = usage.allSummaries.compactMap { $0.barPercent ?? UsageMetrics.pickHeroWindow($0.windows).hero?.usedPercent }
-        guard !vals.isEmpty else { return nil }
-        return vals.reduce(0, +) / Double(vals.count)
+        return usage.allSummaries
+            .compactMap { $0.barPercent ?? UsageMetrics.pickHeroWindow($0.windows).hero?.usedPercent }
+            .max()
     }
 }
 

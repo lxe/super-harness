@@ -226,9 +226,9 @@ public struct ComposerView: View {
                 .lineLimit(1...5)
                 .font(SHTypography.body)
                 .foregroundStyle(SHColor.inkPrimary)
-                .padding(.horizontal, 14)
-                .padding(.top, 11)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 15)
+                .padding(.top, 15)
+                .padding(.bottom, 12)
                 .accessibilityIdentifier("composer.input")
 
                 HStack(spacing: 8) {

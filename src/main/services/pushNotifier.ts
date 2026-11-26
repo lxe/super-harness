@@ -21,7 +21,7 @@ export interface PushSendPayload {
   threadId?: string;
 }
 
-const DEFAULT_RELAY_URL = 'https://super-harness-push.lxe.workers.dev';
+const DEFAULT_RELAY_URL = 'https://super-harness-push.lxe-sh.workers.dev';
 const COOLDOWN_MS = 12_000;
 
 function sha256Buf(data: string | Buffer): Buffer {

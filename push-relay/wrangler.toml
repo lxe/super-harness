@@ -2,9 +2,8 @@ name = "super-harness-push"
 main = "src/index.js"
 compatibility_date = "2026-11-01"
 workers_dev = true
-account_id = "fd390209d565a1e61cc9455b1312fe12"
 
-# Set once with: wrangler secret put APNS_KEY < AuthKey_7CV9JYHX47.p8
+# Set once with: wrangler secret put APNS_KEY < AuthKey_KEYID.p8
 [vars]
 APNS_KEY_ID = "7CV9JYHX47"
 APNS_TEAM_ID = "9592R2Q8PP"

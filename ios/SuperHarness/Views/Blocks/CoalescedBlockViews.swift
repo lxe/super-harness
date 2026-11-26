@@ -58,22 +58,25 @@ public enum CoalescedSegment: Sendable, Equatable {
 
 public struct CollapsedTraceGroupView: View, Equatable {
     public let blocks: [UnifiedBlock]
+    public var trailingMeta: String? = nil
     public let onAnswerQuestion: (String) -> Void
     public let onTapImage: (LightboxPayload) -> Void
     public let onLoadMedia: ((String) async -> Data?)?
     @State private var isExpanded: Bool = false
 
     nonisolated public static func == (lhs: CollapsedTraceGroupView, rhs: CollapsedTraceGroupView) -> Bool {
-        lhs.blocks == rhs.blocks
+        lhs.blocks == rhs.blocks && lhs.trailingMeta == rhs.trailingMeta
     }
 
     public init(
         blocks: [UnifiedBlock],
+        trailingMeta: String? = nil,
         onAnswerQuestion: @escaping (String) -> Void,
         onTapImage: @escaping (LightboxPayload) -> Void,
         onLoadMedia: ((String) async -> Data?)? = nil
     ) {
         self.blocks = blocks
+        self.trailingMeta = trailingMeta
         self.onAnswerQuestion = onAnswerQuestion
         self.onTapImage = onTapImage
         self.onLoadMedia = onLoadMedia
@@ -84,6 +87,7 @@ public struct CollapsedTraceGroupView: View, Equatable {
             SHInlineDisclosureRow(
                 icon: summaryIcon,
                 title: summaryText,
+                trailingMeta: trailingMeta,
                 isExpanded: isExpanded
             ) {
                 isExpanded.toggle()

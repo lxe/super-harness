@@ -11,7 +11,7 @@ import UIKit
 @MainActor
 public final class PushNotificationCoordinator: NSObject {
     public static let shared = PushNotificationCoordinator()
-    public static let defaultRelayURL = "https://super-harness-push.lxe.workers.dev"
+    public static let defaultRelayURL = "https://super-harness-push.lxe-sh.workers.dev"
     public static let bgRefreshTaskId = "com.lxe.superharness.refresh"
 
     public weak var store: AppStore?

@@ -19,6 +19,8 @@ public struct SessionDetailView: View {
     @State private var suppressUnpinUntil: Date = .distantPast
     @State private var stableQueuedMessages: [QueuedMessageItem] = []
     @State private var composerHeight: CGFloat = 96
+    @State private var isRenameAlertPresented: Bool = false
+    @State private var renameDraft: String = "" 
 
     public init(store: AppStore, session: UnifiedSession) {
         self.store = store
@@ -108,7 +110,7 @@ public struct SessionDetailView: View {
                                             store.lightboxPayload = payload
                                         },
                                         onLoadMedia: { path in
-                                            await store.loadMediaData(path: path)
+                                            await store.loadMediaData(path: path, maxWidth: 320)
                                         },
                                         onRetryPending: {
                                             store.retryPendingMessage(for: session.id, messageId: message.id)
@@ -370,6 +372,14 @@ public struct SessionDetailView: View {
         .background(SHColor.surfaceCanvas)
         .background(InteractivePopGestureEnabler())
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Rename Thread", isPresented: $isRenameAlertPresented) {
+            TextField("Thread title", text: $renameDraft)
+            Button("Save") {
+                let nextTitle = renameDraft
+                Task { await store.renameSession(currentSession, title: nextTitle) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: - Floating Liquid Glass Top Chrome
@@ -396,6 +406,12 @@ public struct SessionDetailView: View {
                 accentColor: SHColor.harness(currentSession.harness)
             ) {
                 if !currentSession.isMaster {
+                    Button {
+                        renameDraft = currentSession.displayTitle
+                        isRenameAlertPresented = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
                     Button {
                         Task { await store.togglePin(currentSession) }
                     } label: {
@@ -649,26 +665,13 @@ private struct MessageBubbleView: View, Equatable {
 
     private var assistantMessageView: some View {
         let segments = CoalescedSegment.coalesce(message.blocks)
+        let timestampLabel: String? = message.timestamp > 0 ? UsageMetrics.formatUpdatedAgo(message.timestamp) : nil
+        let lastTraceIndex: Int? = segments.indices.last { idx in
+            if case .traceGroup = segments[idx] { return true }
+            return false
+        }
         return VStack(alignment: .leading, spacing: SHLayout.blockGap) {
-            HStack(spacing: 6) {
-                HarnessLogoView(harness: harness, size: 13)
-                Text(message.harnessMeta?.model ?? HarnessVisual.forKind(harness).label)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(SHColor.inkMuted)
-                if message.streaming == true {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(SHColor.harness(harness))
-                }
-                Spacer()
-                if message.timestamp > 0 {
-                    Text(UsageMetrics.formatUpdatedAgo(message.timestamp))
-                        .font(.system(size: 11))
-                        .foregroundStyle(SHColor.inkFaint)
-                }
-            }
-
-            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+            ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
                 switch segment {
                 case .single(let block):
                     UnifiedBlockView(
@@ -683,6 +686,7 @@ private struct MessageBubbleView: View, Equatable {
                 case .traceGroup(let traceBlocks):
                     CollapsedTraceGroupView(
                         blocks: traceBlocks,
+                        trailingMeta: idx == lastTraceIndex ? timestampLabel : nil,
                         onAnswerQuestion: onAnswerQuestion,
                         onTapImage: onTapImage,
                         onLoadMedia: onLoadMedia

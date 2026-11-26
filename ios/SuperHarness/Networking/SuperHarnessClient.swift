@@ -54,6 +54,7 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func fetchCatalog(force: Bool) async throws -> HarnessCatalog?
     func watchSession(sessionId: String?, limit: Int) async
     func fetchMedia(path: String) async throws -> Data
+    func fetchMedia(path: String, maxWidth: Int?) async throws -> Data
     func fetchDictationStatus(overrideURL: String?, overrideToken: String?) async -> DictationStatusResponse?
     func transcribeAudio(wavData: Data, overrideURL: String?, overrideToken: String?) async throws -> String
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment]) async throws -> SendMessageResult
@@ -72,6 +73,9 @@ public protocol SuperHarnessClientProtocol: Sendable {
 }
 
 public extension SuperHarnessClientProtocol {
+    func fetchMedia(path: String, maxWidth: Int?) async throws -> Data {
+        try await fetchMedia(path: path)
+    }
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment], mode: SendMode) async throws -> SendMessageResult {
         try await sendMessage(sessionId: sessionId, message: message, attachments: attachments)
     }
@@ -275,7 +279,15 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
     }
 
     public func fetchMedia(path: String) async throws -> Data {
-        guard let url = makeURL(path: "/api/media", queryItems: [URLQueryItem(name: "path", value: path)]) else {
+        try await fetchMedia(path: path, maxWidth: nil)
+    }
+
+    public func fetchMedia(path: String, maxWidth: Int?) async throws -> Data {
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let maxWidth, maxWidth > 0 {
+            items.append(URLQueryItem(name: "w", value: String(maxWidth)))
+        }
+        guard let url = makeURL(path: "/api/media", queryItems: items) else {
             throw SuperHarnessAPIError.invalidURL(path)
         }
         var req = URLRequest(url: url)

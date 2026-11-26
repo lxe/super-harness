@@ -248,7 +248,13 @@ public final class AppStore {
         if defaults.object(forKey: StorageKey.pushEnabled) != nil {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
-        self.pushRelayURL = defaults.string(forKey: StorageKey.pushRelayURL) ?? PushNotificationCoordinator.defaultRelayURL
+        let savedRelay = defaults.string(forKey: StorageKey.pushRelayURL)
+        if savedRelay == "https://super-harness-push.lxe.workers.dev" || savedRelay?.isEmpty == true {
+            self.pushRelayURL = PushNotificationCoordinator.defaultRelayURL
+            defaults.set(PushNotificationCoordinator.defaultRelayURL, forKey: StorageKey.pushRelayURL)
+        } else {
+            self.pushRelayURL = savedRelay ?? PushNotificationCoordinator.defaultRelayURL
+        }
         self.dictationTokenOverride = keychain.loadToken(for: StorageKey.dictationTokenAccount) ?? ""
 
         if let rawGroup = defaults.string(forKey: StorageKey.groupBy),
@@ -1212,16 +1218,41 @@ public final class AppStore {
         return true
     }
 
-    public func loadMediaData(path: String) async -> Data? {
+    public func loadMediaData(path: String, maxWidth: Int? = nil) async -> Data? {
         guard !path.isEmpty else { return nil }
-        if let cached = mediaCache[path] {
+        // If full-resolution image is already cached locally, reuse it immediately.
+        if let fullCached = mediaCache[path] {
+            return fullCached
+        }
+        let cacheKey = maxWidth.map { "w\($0):\(path)" } ?? path
+        if let cached = mediaCache[cacheKey] {
             return cached
         }
-        guard let data = try? await client.fetchMedia(path: path), !data.isEmpty else {
+        guard let data = try? await client.fetchMedia(path: path, maxWidth: maxWidth), !data.isEmpty else {
             return nil
         }
-        mediaCache[path] = data
+        mediaCache[cacheKey] = data
         return data
+    }
+
+    public func renameSession(_ session: UnifiedSession, title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        mutateSession(session.id) { item in
+            item.customTitle = trimmed.isEmpty ? nil : trimmed
+        }
+        let action = OrganizeAction(
+            type: .renameSession,
+            sessionId: session.id,
+            title: trimmed
+        )
+        do {
+            _ = try await client.organize(actions: [action])
+            mutateSession(session.id) { item in
+                item.customTitle = trimmed.isEmpty ? nil : trimmed
+            }
+        } catch {
+            reportError(error)
+        }
     }
 
     public func loadTranscript(for sessionId: String, limit: Int? = nil) async {

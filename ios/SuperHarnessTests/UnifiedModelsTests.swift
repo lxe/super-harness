@@ -331,6 +331,13 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertFalse(menu(selected: "a") == menu(selected: "b"))
     }
 
+    func testShimmerBandSweepsAcrossTheTextOncePerPeriod() {
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 0, period: 2.6), -0.6, accuracy: 0.0001, "starts left of the text")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 1.3, period: 2.6), 0.5, accuracy: 0.0001, "mid-sweep is the middle of the text")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 2.599, period: 2.6), 1.6, accuracy: 0.01, "ends right of the text")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 2.6 * 7 + 1.3, period: 2.6), 0.5, accuracy: 0.0001, "repeats")
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

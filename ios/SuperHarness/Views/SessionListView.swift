@@ -771,13 +771,10 @@ private struct MasterSessionRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(session.displayTitle)
-                        .font(SHTypography.heading)
-                        .foregroundStyle(SHColor.inkPrimary)
-                        .lineLimit(1)
+                    SHShimmerText(text: session.displayTitle, font: SHTypography.heading, isActive: isBusy)
                     Spacer()
                     if isBusy {
-                        SHActivityPulse(tint: SHColor.brandMaster, size: 14)
+                        EmptyView()
                     } else {
                         Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
                             .font(SHTypography.micro)
@@ -932,6 +929,7 @@ private struct HarnessSwitcherStrip: View {
 private struct SessionListRow: View {
     let session: UnifiedSession
     let isBusy: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let vis = HarnessVisual.forKind(session.harness)
@@ -947,11 +945,11 @@ private struct SessionListRow: View {
                 )
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(session.displayTitle)
-                    .font(SHTypography.label.weight(.medium))
-                    .foregroundStyle(SHColor.inkPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                SHShimmerText(
+                    text: session.displayTitle,
+                    font: SHTypography.label.weight(.medium),
+                    isActive: isBusy
+                )
 
                 if hostBadge != nil || subtitle != nil {
                     HStack(alignment: .center, spacing: 6) {
@@ -985,10 +983,14 @@ private struct SessionListRow: View {
 
             Spacer(minLength: 6)
 
-            if isBusy {
-                SHActivityPulse(tint: vis.color, size: 11)
-                    .frame(width: 14, height: 14)
-            } else if session.status == .waitingInput {
+            // A working thread is shown by its shimmering title, so the right slot keeps the time.
+            // With Reduce Motion on, the shimmer is still, so a small dot marks the thread instead.
+            if isBusy && reduceMotion {
+                Circle()
+                    .fill(vis.color)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel("Working")
+            } else if session.status == .waitingInput && !isBusy {
                 Image(systemName: "questionmark.circle.fill")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(SHColor.statusWarning)
@@ -1240,5 +1242,56 @@ public enum SHErrorPresentation {
             return "Your host sent something this app version doesn't understand."
         }
         return "Something went wrong talking to your host."
+    }
+}
+
+// MARK: - Working Title Shimmer
+
+/// A one-line title that shows activity by itself: while `isActive`, a soft band of light
+/// sweeps across the letters. It matches the desktop `.sh-working-shimmer` (muted grey to
+/// near-white and back, one sweep every 2.6 seconds, eased in and out).
+struct SHShimmerText: View {
+    let text: String
+    let font: Font
+    let isActive: Bool
+    var period: Double = 2.6
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let dim = Color(red: 161 / 255, green: 166 / 255, blue: 179 / 255).opacity(0.72)
+    private static let bright = Color(red: 244 / 255, green: 245 / 255, blue: 247 / 255).opacity(0.96)
+
+    /// Centre of the bright band at `time`, in units of the text width. It travels from just
+    /// left of the text to just right of it, eased in and out, then starts again.
+    nonisolated static func bandCenter(at time: Double, period: Double) -> Double {
+        let linear = (time / period).truncatingRemainder(dividingBy: 1)
+        let progress = linear < 0 ? linear + 1 : linear
+        let eased = 0.5 - 0.5 * cos(progress * .pi)
+        return -0.6 + eased * 2.2
+    }
+
+    var body: some View {
+        if isActive && !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let center = Self.bandCenter(at: context.date.timeIntervalSinceReferenceDate, period: period)
+                label.foregroundStyle(
+                    LinearGradient(
+                        colors: [Self.dim, Self.bright, Self.dim],
+                        startPoint: UnitPoint(x: center - 0.6, y: 0.5),
+                        endPoint: UnitPoint(x: center + 0.6, y: 0.5)
+                    )
+                )
+            }
+            .accessibilityLabel("\(text), working")
+        } else {
+            label.foregroundStyle(SHColor.inkPrimary)
+        }
+    }
+
+    private var label: some View {
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 }

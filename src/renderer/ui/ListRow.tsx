@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { cn } from './cn';
-import { WorkingOrb, type WorkingOrbTone } from './WorkingOrb';
+import type { WorkingOrbTone } from './WorkingOrb';
 
 export type SectionHeaderAccent = 'antigravity' | 'codex' | 'claude' | 'muse';
 
@@ -70,18 +70,13 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         ) : (
           <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
         )}
-        {working && !isTopLevel ? (
-          <span className="shrink-0 inline-flex items-center justify-center w-3.5 h-3.5">
-            <WorkingOrb tone={accent ?? 'master'} size="sm" />
-          </span>
-        ) : (
-          icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>
-        )}
-        <span className="leading-none truncate">{label}</span>
-        {(count !== undefined || (working && isTopLevel)) && (
+        {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
+        <span className={cn('leading-none truncate', working && 'sh-nav-title-shimmer')}>
+          {label}
+        </span>
+        {count !== undefined && (
           <span className="ml-auto flex items-center gap-1.5 text-[11px] leading-none tabular-nums font-normal text-ink-faint shrink-0">
-            {working && isTopLevel && <WorkingOrb tone={accent ?? 'master'} size="sm" />}
-            {count !== undefined && <span>{count}</span>}
+            <span>{count}</span>
           </span>
         )}
       </button>

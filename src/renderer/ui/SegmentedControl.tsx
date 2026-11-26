@@ -303,15 +303,15 @@ export function SegmentedControl<T extends string>({
                   </svg>
                 )}
 
-                {/* 3. Pure luminosity shimmer wave sweeping over both grey track & colored arc */}
+                {/* 3. Long color-dodge shimmer wave: lifts grey toward white & boosts chroma on colored arcs */}
                 {item.working && (
                   <span
                     aria-hidden="true"
                     className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
                     style={{
                       background:
-                        'conic-gradient(from 0deg, transparent 0deg, rgba(255,255,255,0.06) 35deg, rgba(255,255,255,0.44) 80deg, rgba(255,255,255,0.06) 125deg, transparent 160deg)',
-                      mixBlendMode: 'screen',
+                        'conic-gradient(from 0deg, transparent 0deg, rgba(255,255,255,0.12) 45deg, rgba(255,255,255,0.52) 115deg, rgba(255,255,255,0.12) 185deg, transparent 230deg)',
+                      mixBlendMode: 'color-dodge',
                       WebkitMaskImage:
                         'radial-gradient(farthest-side, transparent calc(100% - 3.1px), #000 calc(100% - 2.8px))',
                       maskImage:

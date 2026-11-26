@@ -44,6 +44,7 @@ import {
   type HarnessDriver,
   type HarnessWatchSpec,
 } from './types';
+import { readJsonFileCached } from '../utils/jsonFileCache';
 
 const execFileAsync = promisify(execFile);
 
@@ -239,7 +240,8 @@ export async function detectCodex(
   try {
     const gsPath = path.join(CODEX_DIR, '.codex-global-state.json');
     if (fs.existsSync(gsPath)) {
-      const gs = JSON.parse(fs.readFileSync(gsPath, 'utf8')) as Record<string, unknown>;
+      // 4.8 MB and rarely changes; parsed once per file version (read-only below).
+      const gs = readJsonFileCached<Record<string, unknown>>(gsPath);
       const pinnedArr = gs['pinned-thread-ids'];
       if (Array.isArray(pinnedArr)) {
         for (const id of pinnedArr) if (typeof id === 'string') globalPinnedIds.add(id);

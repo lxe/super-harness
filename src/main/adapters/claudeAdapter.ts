@@ -51,6 +51,7 @@ import {
   type HarnessDriver,
   type HarnessWatchSpec,
 } from './types';
+import { readJsonFileCached } from '../utils/jsonFileCache';
 
 const execFileAsync = promisify(execFile);
 
@@ -614,7 +615,7 @@ export async function detectClaude(
   >();
 
   if (fs.existsSync(CLAUDE_DESKTOP_SESSIONS_DIR)) {
-    const metaFiles: Array<{ file: string; mtime: number }> = [];
+    const metaFiles: Array<{ file: string; mtime: number; st: fs.Stats }> = [];
     const walk = (dir: string, depth: number) => {
       if (depth > 3) return;
       let entries: fs.Dirent[];
@@ -629,7 +630,8 @@ export async function detectClaude(
           walk(p, depth + 1);
         } else if (e.isFile() && e.name.startsWith('local_') && e.name.endsWith('.json')) {
           try {
-            metaFiles.push({ file: p, mtime: fs.statSync(p).mtimeMs });
+            const st = fs.statSync(p);
+            metaFiles.push({ file: p, mtime: st.mtimeMs, st });
           } catch {
             // ignore
           }
@@ -642,7 +644,8 @@ export async function detectClaude(
     for (const item of metaFiles) {
       let data: ClaudeDesktopMetaJson;
       try {
-        data = JSON.parse(fs.readFileSync(item.file, 'utf8')) as ClaudeDesktopMetaJson;
+        // Re-parsed only when the file changes; `data` is read-only below.
+        data = readJsonFileCached<ClaudeDesktopMetaJson>(item.file, item.st);
       } catch {
         continue;
       }

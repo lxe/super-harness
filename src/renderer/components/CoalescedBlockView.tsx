@@ -1120,9 +1120,23 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
             <div className="flex items-center justify-end gap-2 w-full">
               {renderFailedBadge()}
               <div
-                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary ${
-                  msg.error ? 'ring-1 ring-rose-500/35' : ''
-                }`}
+                onClick={!expanded ? () => setExpanded(true) : undefined}
+                role={!expanded ? 'button' : undefined}
+                tabIndex={!expanded ? 0 : undefined}
+                aria-label={!expanded ? 'Expand full message' : undefined}
+                onKeyDown={
+                  !expanded
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setExpanded(true);
+                        }
+                      }
+                    : undefined
+                }
+                className={`max-w-[82%] rounded-[20px] bg-surface-bubble px-4 py-3 text-body text-ink-primary transition-colors ${
+                  !expanded ? 'cursor-pointer hover:bg-[#272a33]' : ''
+                } ${msg.error ? 'ring-1 ring-rose-500/35' : ''}`}
               >
                 {expanded ? (
                   <>
@@ -1149,11 +1163,8 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                   </>
                 ) : (
                   <div>
-                    <div
-                      onClick={() => setExpanded(true)}
-                      className="relative max-h-[5.1em] overflow-hidden cursor-pointer"
-                    >
-                      <div className="space-y-2">
+                    <div className="relative max-h-[5.1em] overflow-hidden">
+                      <div className="space-y-2 pointer-events-none">
                         {nonImageBlocks.map((b, i) => (
                           <CoalescedBlockView
                             key={i}
@@ -1166,14 +1177,9 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                       </div>
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-bubble to-transparent" />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setExpanded(true)}
-                      aria-label="Show full message"
-                      className="mt-1 inline-flex items-center px-1.5 py-0.5 -ml-1.5 rounded text-caption leading-none tracking-[0.15em] text-ink-muted hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
-                    >
+                    <span className="mt-1 inline-flex items-center text-caption leading-none tracking-[0.15em] text-ink-muted">
                       ···
-                    </button>
+                    </span>
                   </div>
                 )}
               </div>

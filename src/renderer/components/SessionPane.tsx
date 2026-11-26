@@ -983,7 +983,7 @@ export const SessionPane: React.FC<Props> = ({
             </pre>
           </div>
         ) : (
-          <div className="max-w-[740px] mx-auto space-y-6 pb-8">
+          <div className="max-w-[740px] mx-auto space-y-6 pb-12">
             {totalCount > messages.length && (
               <div className="flex justify-center">
                 <Button size="xs" variant="ghost" onClick={() => setLimit((prev) => prev + 60)}>
@@ -1149,8 +1149,8 @@ export const SessionPane: React.FC<Props> = ({
       </div>
 
       {/* Bottom Composer Dock */}
-      <div className="px-6 pb-4 pt-2 shrink-0">
-        <div className="max-w-[740px] mx-auto space-y-2">
+      <div className="relative z-10 -mt-7 pt-7 px-6 pb-4 shrink-0 pointer-events-none bg-gradient-to-t from-surface-canvas via-surface-canvas/85 to-transparent">
+        <div className="max-w-[740px] mx-auto space-y-2 pointer-events-auto">
           {!isMaster && <LiveStepsBar key={session.id} steps={liveActivity?.steps} />}
 
           <QueuedMessagesTray

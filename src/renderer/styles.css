@@ -90,6 +90,18 @@ body,
 }
 
 /* Clean, calm Antigravity-grade markdown prose */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    corner-shape: squircle;
+  }
+
+  .rounded-full {
+    corner-shape: round;
+  }
+}
+
 .sh-markdown {
   font-size: 0.975rem;
   line-height: 1.68;

@@ -210,6 +210,25 @@ export class HarnessDispatcher {
     }
   }
 
+  async promoteToTmux(
+    sessionId: string
+  ): Promise<{ ok: boolean; tmuxSession?: string; error?: string }> {
+    let session = this.registry.getSession(sessionId);
+    if (!session) {
+      await this.registry.discover();
+      session = this.registry.getSession(sessionId);
+    }
+    if (!session) return { ok: false, error: 'Session not found' };
+    if (session.harnessGroup === 'master') {
+      return { ok: false, error: 'Master session cannot be moved to tmux' };
+    }
+    const driver = this.registry.getDriver(session.harnessGroup);
+    if (!driver?.promoteToTmux) {
+      return { ok: false, error: `tmux handoff not supported for ${session.harnessGroup}` };
+    }
+    return driver.promoteToTmux(session, this.createContext());
+  }
+
   private spawnStreaming(opts: {
     sessionId: string;
     runId: string;

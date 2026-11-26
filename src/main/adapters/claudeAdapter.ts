@@ -19,6 +19,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
+import { sendToClaudeDesktopViaA11y } from '../services/claudeDesktopA11yBridge';
 import { ClaudeStreamPool } from '../services/claudeStreamClient';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
 import {
@@ -1770,6 +1771,27 @@ export function createClaudeDriver(): HarnessDriver {
       const liveOwners = findLiveClaudeOwners(session.nativeId).filter(
         (o) => !ownPid || o.pid !== ownPid
       );
+      const hasDesktopOwner = liveOwners.some((o) => o.entrypoint === 'claude-desktop');
+
+      // When the session is currently open in Claude Desktop and Claude Desktop exposes
+      // its documented AT-SPI2 accessibility tree, submit directly through Claude Desktop's
+      // own live composer (with automatic Hyprland focus restore) for 100% live 1:1 sync!
+      if (hasDesktopOwner) {
+        const a11yRes = await sendToClaudeDesktopViaA11y({
+          sessionTitle: session.title,
+          prompt,
+          attachments,
+        });
+        if (a11yRes.ok) {
+          ctx.triggerRefresh(600);
+          ctx.triggerRefresh(2000);
+          return {
+            ok: true,
+            dispatchedVia: a11yRes.dispatchedVia || 'Claude Desktop live',
+          };
+        }
+      }
+
       const decision = resolveClaudeDispatchGuard(liveOwners);
       if (decision.action === 'tmux') {
         return sendViaTmux(decision.tmuxTarget);
@@ -1820,6 +1842,50 @@ export function createClaudeDriver(): HarnessDriver {
 
     abort(sessionId: string, emitStream: (ev: StreamEvent) => void): boolean {
       return streamPool.abort(sessionId, emitStream);
+    },
+
+    async promoteToTmux(
+      session: UnifiedSession,
+      ctx: DispatchContext
+    ): Promise<{ ok: boolean; tmuxSession?: string; error?: string }> {
+      if (session.dispatchMode === 'tmux-send' && session.tmuxSessionName) {
+        return { ok: true, tmuxSession: session.tmuxSessionName };
+      }
+      const claudeBin = await whichBinary('claude');
+      const tmuxBin = await whichBinary('tmux');
+      if (!claudeBin) return { ok: false, error: 'claude CLI not found' };
+      if (!tmuxBin) return { ok: false, error: 'tmux not found' };
+
+      const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
+      const slug =
+        (session.title || 'claude')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 20) || 'claude';
+      const tmuxSession = `sh-${slug}-${session.nativeId.slice(0, 6)}`;
+
+      const flags = ['--resume', session.nativeId, '--remote-control'];
+      if (session.model?.trim()) flags.push('--model', session.model.trim());
+      if (session.reasoningEffort?.trim()) flags.push('--effort', session.reasoningEffort.trim());
+      if (session.permissionMode && VALID_CLAUDE_PERM_MODES.has(session.permissionMode)) {
+        flags.push('--permission-mode', session.permissionMode);
+      }
+      const cmd = [claudeBin, ...flags].map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+
+      // Close any warm stream worker before handing ownership to tmux
+      streamPool.abort(session.id, ctx.emitStream);
+
+      try {
+        await execFileAsync(tmuxBin, ['new-session', '-d', '-s', tmuxSession, '-c', cwd, cmd], {
+          timeout: 5000,
+        });
+        ctx.triggerRefresh(1200);
+        ctx.triggerRefresh(3000);
+        return { ok: true, tmuxSession };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
 
     shutdown(): void {

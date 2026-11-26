@@ -39,6 +39,7 @@ export interface SessionHeaderProps {
   onSelectSession: (id: string) => void;
   onOrganize: (actions: OrganizeAction[]) => void;
   onReloadTranscript: () => void;
+  onPromoteToTmux?: () => void;
   onArchiveSession: (session: UnifiedSession, killTmux?: boolean) => void;
   onClearMaster: () => void;
   onOpenPath: (
@@ -72,6 +73,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
     onSelectSession,
     onOrganize,
     onReloadTranscript,
+    onPromoteToTmux,
     onArchiveSession,
     onClearMaster,
     onOpenPath,
@@ -322,6 +324,19 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                       </>
                     )}
                     <MenuDivider />
+                    {session.harnessGroup === 'claude' &&
+                      session.dispatchMode !== 'tmux-send' &&
+                      onPromoteToTmux && (
+                        <MenuItem
+                          icon={<Terminal className="w-3.5 h-3.5 text-emerald-300" />}
+                          onClick={() => {
+                            onPromoteToTmux();
+                            setMenuOpen(false);
+                          }}
+                        >
+                          Move to tmux + Remote
+                        </MenuItem>
+                      )}
                     <MenuItem
                       icon={<RefreshCw className="w-3.5 h-3.5" />}
                       onClick={() => {

@@ -430,6 +430,14 @@ function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle('sh:promote-tmux', async (_ev, sessionId: string) => {
+    const res = await dispatcher.promoteToTmux(sessionId);
+    if (res.ok) {
+      setTimeout(() => void refreshAndBroadcast(), 1500);
+    }
+    return res;
+  });
+
   ipcMain.handle('sh:update-settings', async (_ev, patch: Partial<SuperHarnessSettings>) => {
     const next = store.updateSettings(patch);
     void refreshAndBroadcast();

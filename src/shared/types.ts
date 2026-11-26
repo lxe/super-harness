@@ -464,6 +464,9 @@ export interface SuperHarnessApi {
     sessionId: string,
     opts?: { killTmux?: boolean }
   ) => Promise<{ ok: boolean; method?: string; error?: string }>;
+  promoteToTmux: (
+    sessionId: string
+  ) => Promise<{ ok: boolean; tmuxSession?: string; error?: string }>;
   updateSettings: (
     patch: Partial<SuperHarnessSettings>
   ) => Promise<SuperHarnessState>;

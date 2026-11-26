@@ -901,6 +901,19 @@ export const SessionPane: React.FC<Props> = ({
         onSelectSession={onSelectSession}
         onOrganize={onOrganize}
         onReloadTranscript={handleReloadTranscript}
+        onPromoteToTmux={
+          session.harnessGroup === 'claude' && session.dispatchMode !== 'tmux-send'
+            ? () => {
+                void window.superHarness.promoteToTmux(session.id).then((res) => {
+                  if (res.ok) {
+                    setDispatchNote(`Moved to tmux (${res.tmuxSession || 'live'})`);
+                  } else {
+                    setStreamError(res.error || 'Failed to move session to tmux');
+                  }
+                });
+              }
+            : undefined
+        }
         onArchiveSession={onArchiveSession}
         onClearMaster={onClearMaster}
         onOpenPath={onOpenPath}

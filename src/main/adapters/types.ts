@@ -124,6 +124,12 @@ export interface HarnessDriver {
   /** Optional hook to sync section moves natively with the harness daemon (e.g., Codex `thread/section/move`). */
   moveSection?(session: UnifiedSession, sectionName: string | null): Promise<boolean>;
 
+  /** Optional hook to promote a Claude session into a live tmux + Remote Control session. */
+  promoteToTmux?(
+    session: UnifiedSession,
+    ctx: DispatchContext
+  ): Promise<{ ok: boolean; tmuxSession?: string; error?: string }>;
+
   /** Optional cleanup hook called on app quit (e.g., closing persistent ACP/app-server connections). */
   shutdown?(): void;
 }

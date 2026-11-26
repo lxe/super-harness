@@ -45,6 +45,8 @@ const api: SuperHarnessApi = {
   organize: (actions: OrganizeAction[]) => ipcRenderer.invoke('sh:organize', actions),
   archiveSession: (sessionId: string, opts?: { killTmux?: boolean }) =>
     ipcRenderer.invoke('sh:archive-session', sessionId, opts),
+  promoteToTmux: (sessionId: string) =>
+    ipcRenderer.invoke('sh:promote-tmux', sessionId),
   updateSettings: (patch: Partial<SuperHarnessSettings>) =>
     ipcRenderer.invoke('sh:update-settings', patch),
   clearMasterHistory: () => ipcRenderer.invoke('sh:clear-master'),

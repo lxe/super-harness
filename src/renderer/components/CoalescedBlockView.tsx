@@ -73,6 +73,56 @@ interface TraceGroupProps {
   onOpenSessionLink?: (href: string) => void;
 }
 
+const CoalescedTerminalGroup: React.FC<{
+  commands: Array<Extract<UnifiedBlock, { type: 'command' }>>;
+}> = ({ commands }) => {
+  const firstCmd = commands[0]?.command || '';
+  const failedCount = commands.filter(
+    (c) => c.exitCode !== undefined && c.exitCode !== null && c.exitCode !== 0
+  ).length;
+
+  return (
+    <CollapsibleCard
+      variant="plain"
+      icon={<Terminal className="w-3 h-3 text-ink-faint" />}
+      title={
+        <span className="font-mono font-normal text-ink-secondary">
+          {commands.length} commands
+        </span>
+      }
+      preview={<code className="font-mono text-ink-faint">{firstCmd}</code>}
+      meta={
+        failedCount > 0 ? (
+          <Badge tone="danger" mono>
+            {failedCount} failed
+          </Badge>
+        ) : undefined
+      }
+    >
+      <div className="rounded-lg bg-surface-code/85 px-3 py-2 space-y-2.5 max-h-72 overflow-y-auto font-mono text-micro">
+        {commands.map((cmd, idx) => (
+          <div key={idx} className={idx > 0 ? 'pt-2 border-t border-line-hairline/60 space-y-1' : 'space-y-1'}>
+            <div className="flex items-center gap-2 text-ink-secondary">
+              <span className="text-ink-faint select-none">$</span>
+              <code className="break-all flex-1">{cmd.command}</code>
+              {cmd.exitCode !== undefined && cmd.exitCode !== null && cmd.exitCode !== 0 && (
+                <Badge tone="danger" mono>
+                  exit {cmd.exitCode}
+                </Badge>
+              )}
+            </div>
+            {cmd.output?.trim() && (
+              <pre className="text-ink-muted whitespace-pre-wrap break-all pl-3">
+                {cmd.output.trim()}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+    </CollapsibleCard>
+  );
+};
+
 export const CollapsedTraceGroup: React.FC<TraceGroupProps> = React.memo(({ blocks, onOpenPath, onOpenSessionLink }) => {
   const summary = useMemo(() => {
     let thinkCount = 0;
@@ -99,16 +149,46 @@ export const CollapsedTraceGroup: React.FC<TraceGroupProps> = React.memo(({ bloc
     return parts.join(' · ');
   }, [blocks]);
 
+  // Coalesce all terminal commands in this trace group into one unified terminal block
+  const renderItems = useMemo(() => {
+    const allCommands = blocks.filter(
+      (b): b is Extract<UnifiedBlock, { type: 'command' }> => b.type === 'command'
+    );
+    if (allCommands.length <= 1) {
+      return blocks.map((b, i) => ({ kind: 'block' as const, key: `b-${i}`, block: b }));
+    }
+    const items: Array<
+      | { kind: 'block'; key: string; block: UnifiedBlock }
+      | { kind: 'commands'; key: string; commands: Array<Extract<UnifiedBlock, { type: 'command' }>> }
+    > = [];
+    let insertedCommands = false;
+    blocks.forEach((b, i) => {
+      if (b.type === 'command') {
+        if (!insertedCommands) {
+          insertedCommands = true;
+          items.push({ kind: 'commands', key: `cmds-${i}`, commands: allCommands });
+        }
+        return;
+      }
+      items.push({ kind: 'block', key: `b-${i}`, block: b });
+    });
+    return items;
+  }, [blocks]);
+
   return (
     <DisclosureRow label={summary}>
-      {blocks.map((b, i) => (
-        <CoalescedBlockView
-          key={i}
-          block={b}
-          onOpenPath={onOpenPath}
-          onOpenSessionLink={onOpenSessionLink}
-        />
-      ))}
+      {renderItems.map((item) =>
+        item.kind === 'commands' ? (
+          <CoalescedTerminalGroup key={item.key} commands={item.commands} />
+        ) : (
+          <CoalescedBlockView
+            key={item.key}
+            block={item.block}
+            onOpenPath={onOpenPath}
+            onOpenSessionLink={onOpenSessionLink}
+          />
+        )
+      )}
     </DisclosureRow>
   );
 });
@@ -417,12 +497,12 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
     const preview = (block.summary || block.text).replace(/\s+/g, ' ').slice(0, 90);
     return (
       <CollapsibleCard
-        variant="subtle"
+        variant="plain"
         title="Thought"
         preview={preview}
         bodyClassName="max-h-72 overflow-y-auto"
       >
-        <div className="text-caption text-ink-muted whitespace-pre-wrap font-mono leading-relaxed">
+        <div className="text-caption text-ink-muted whitespace-pre-wrap leading-relaxed">
           {block.text}
         </div>
       </CollapsibleCard>
@@ -432,7 +512,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
   if (block.type === 'command') {
     return (
       <CollapsibleCard
-        variant="recessed"
+        variant="plain"
         icon={<Terminal className="w-3 h-3 text-ink-faint" />}
         title={<code className="font-mono font-normal text-ink-secondary">{block.command}</code>}
         meta={
@@ -442,9 +522,8 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
             </Badge>
           ) : undefined
         }
-        bodyClassName="max-h-64 overflow-y-auto"
       >
-        <pre className="text-micro text-ink-muted font-mono whitespace-pre-wrap break-all">
+        <pre className="rounded-lg bg-surface-code/85 px-3 py-2 max-h-64 overflow-y-auto text-micro text-ink-muted font-mono whitespace-pre-wrap break-all">
           {block.output?.trim() || '(no output)'}
         </pre>
       </CollapsibleCard>
@@ -458,7 +537,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
         : `${block.changes.length} files modified`;
     return (
       <CollapsibleCard
-        variant="recessed"
+        variant="plain"
         icon={<FileCode2 className="w-3 h-3 text-ink-faint" />}
         title={<span className="font-mono font-normal text-ink-secondary">{label}</span>}
         bodyClassName="space-y-2 max-h-72 overflow-y-auto"
@@ -473,7 +552,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
               {ch.path}
             </button>
             {ch.diff && (
-              <pre className="text-micro font-mono bg-black/30 p-2 rounded overflow-x-auto leading-relaxed">
+              <pre className="text-micro font-mono bg-surface-code/85 p-2.5 rounded-lg overflow-x-auto leading-relaxed">
                 {ch.diff.split('\n').map((line, i) => {
                   const cls = line.startsWith('+')
                     ? 'text-emerald-300/90 block'
@@ -497,7 +576,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
   if (block.type === 'tool_call') {
     return (
       <CollapsibleCard
-        variant="recessed"
+        variant="plain"
         icon={<Wrench className="w-3 h-3 text-ink-faint" />}
         title={
           <span className="font-mono font-normal text-ink-secondary">
@@ -507,15 +586,19 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
         }
         bodyClassName="space-y-2 max-h-64 overflow-y-auto"
       >
-        {block.args && (
-          <pre className="text-micro font-mono text-ink-muted whitespace-pre-wrap break-all">
-            {block.args}
-          </pre>
-        )}
-        {block.output && (
-          <pre className="text-micro font-mono text-ink-secondary border-t border-line-hairline pt-2 whitespace-pre-wrap break-all">
-            {block.output}
-          </pre>
+        {(block.args || block.output) && (
+          <div className="rounded-lg bg-surface-code/85 px-3 py-2 space-y-2">
+            {block.args && (
+              <pre className="text-micro font-mono text-ink-muted whitespace-pre-wrap break-all">
+                {block.args}
+              </pre>
+            )}
+            {block.output && (
+              <pre className="text-micro font-mono text-ink-secondary border-t border-line-hairline pt-2 whitespace-pre-wrap break-all">
+                {block.output}
+              </pre>
+            )}
+          </div>
         )}
       </CollapsibleCard>
     );

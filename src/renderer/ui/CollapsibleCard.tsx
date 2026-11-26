@@ -10,7 +10,7 @@ export interface CollapsibleCardProps {
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  variant?: 'default' | 'recessed' | 'subtle';
+  variant?: 'default' | 'recessed' | 'subtle' | 'plain';
   bodyClassName?: string;
   className?: string;
   children: React.ReactNode;
@@ -20,6 +20,7 @@ const VARIANT_CLASSES = {
   default: 'rounded-xl border border-line-hairline bg-surface-subtle/90',
   recessed: 'rounded-lg border border-line-hairline bg-surface-code',
   subtle: 'rounded-lg border border-line-hairline bg-white/[0.02]',
+  plain: 'rounded-lg bg-transparent',
 };
 
 export const CollapsibleCard: React.FC<CollapsibleCardProps> = ({
@@ -50,7 +51,12 @@ export const CollapsibleCard: React.FC<CollapsibleCardProps> = ({
         type="button"
         onClick={toggle}
         aria-expanded={isOpen}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
+        className={cn(
+          'w-full flex items-center gap-2 text-left transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none',
+          variant === 'plain'
+            ? 'px-1.5 py-1 rounded-md hover:bg-white/[0.04]'
+            : 'px-3 py-2 hover:bg-white/[0.03] focus-visible:bg-white/[0.05]'
+        )}
       >
         {isOpen ? (
           <ChevronDown className="w-3.5 h-3.5 text-ink-faint shrink-0" />
@@ -71,7 +77,9 @@ export const CollapsibleCard: React.FC<CollapsibleCardProps> = ({
       {isOpen && (
         <div
           className={cn(
-            'border-t border-line-hairline px-3.5 py-2.5',
+            variant === 'plain'
+              ? 'pl-6 pr-2 py-1.5'
+              : 'border-t border-line-hairline px-3.5 py-2.5',
             bodyClassName
           )}
         >
@@ -113,7 +121,7 @@ export const DisclosureRow: React.FC<DisclosureRowProps> = ({
         )}
       </button>
       {open && (
-        <div className="mt-2 space-y-1.5 pl-3 border-l border-line-subtle">{children}</div>
+        <div className="mt-1.5 space-y-0.5">{children}</div>
       )}
     </div>
   );

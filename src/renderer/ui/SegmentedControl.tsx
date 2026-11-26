@@ -110,12 +110,25 @@ export function SegmentedControl<T extends string>({
               )}
             >
               <span className="relative inline-flex items-center justify-center w-8 h-8">
-                {/* Radial gauge track + progress arc + exact-thickness shimmer arc */}
+                {/* Radial gauge track + underneath popping shimmer arc + progress arc on top */}
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 36 36"
-                  className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                  className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none overflow-visible"
                 >
+                  <defs>
+                    <linearGradient
+                      id={`sh-gauge-grad-${item.id}`}
+                      x1="0%"
+                      y1="0%"
+                      x2="100%"
+                      y2="100%"
+                    >
+                      <stop offset="0%" stopColor={palette.shimmer} stopOpacity="0.05" />
+                      <stop offset="55%" stopColor={palette.shimmer} stopOpacity="0.55" />
+                      <stop offset="100%" stopColor="#ffffff" stopOpacity="0.92" />
+                    </linearGradient>
+                  </defs>
                   <circle
                     cx="18"
                     cy="18"
@@ -124,6 +137,26 @@ export function SegmentedControl<T extends string>({
                     stroke={active ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.08)'}
                     strokeWidth="2.3"
                   />
+                  {item.working && (
+                    <g
+                      className="sh-gauge-shimmer"
+                      style={{
+                        transformOrigin: '18px 18px',
+                        filter: `drop-shadow(0 0 3px ${palette.stroke})`,
+                      }}
+                    >
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r={GAUGE_RADIUS}
+                        fill="none"
+                        stroke={`url(#sh-gauge-grad-${item.id})`}
+                        strokeWidth="2.3"
+                        strokeLinecap="round"
+                        strokeDasharray={`26 ${GAUGE_CIRCUMFERENCE}`}
+                      />
+                    </g>
+                  )}
                   {displayPct > 0 && (
                     <circle
                       cx="18"
@@ -131,7 +164,7 @@ export function SegmentedControl<T extends string>({
                       r={GAUGE_RADIUS}
                       fill="none"
                       stroke={palette.stroke}
-                      strokeOpacity={item.progress?.estimated ? 0.72 : 0.95}
+                      strokeOpacity={item.progress?.estimated ? 0.78 : 0.96}
                       strokeWidth="2.3"
                       strokeLinecap="round"
                       strokeDasharray={GAUGE_CIRCUMFERENCE}
@@ -139,29 +172,14 @@ export function SegmentedControl<T extends string>({
                       className="transition-[stroke-dashoffset] duration-300 ease-out"
                     />
                   )}
-                  {item.working && (
-                    <g className="sh-gauge-shimmer" style={{ transformOrigin: '18px 18px' }}>
-                      <circle
-                        cx="18"
-                        cy="18"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke={palette.shimmer}
-                        strokeOpacity="0.45"
-                        strokeWidth="2.3"
-                        strokeLinecap="round"
-                        strokeDasharray={`22 ${GAUGE_CIRCUMFERENCE}`}
-                      />
-                    </g>
-                  )}
                 </svg>
 
-                {/* Centered icon (or compact 'All' glyph for the unified tab) */}
+                {/* Centered icon (or compact 'All' glyph shifted 1px left for optical balance) */}
                 <span className="relative z-10 inline-flex items-center justify-center">
                   {item.icon ? (
                     item.icon
                   ) : (
-                    <span className="text-[10.5px] font-semibold tracking-tight leading-none">
+                    <span className="text-[10.5px] font-semibold tracking-tight leading-none -translate-x-[1px]">
                       {item.label}
                     </span>
                   )}

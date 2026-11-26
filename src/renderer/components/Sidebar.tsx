@@ -1027,7 +1027,13 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 {
                   id: 'muse',
                   label: 'Muse',
-                  icon: <HarnessLogo harness="muse" size={tabLogoSize} />,
+                  icon: (
+                    <HarnessLogo
+                      harness="muse"
+                      size={16}
+                      className="-translate-x-[1px] -translate-y-[1px]"
+                    />
+                  ),
                   working: workingByHarness.muse,
                   progress: {
                     value: usage?.muse?.barPercent ?? null,

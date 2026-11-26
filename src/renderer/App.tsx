@@ -485,6 +485,45 @@ export const App: React.FC = () => {
   }, []);
 
   const handleOrganize = useCallback(async (actions: OrganizeAction[]) => {
+    // Apply instant optimistic UI update for sidebar section/folder moves so drag-and-drop feels immediate
+    const sectionMoves = new Map<string, { section: string; order: number }>();
+    const folderMoves = new Map<string, string | null>();
+    for (const act of actions) {
+      if (act.type === 'move_section' && act.sessionId) {
+        const sec =
+          act.sectionName && act.sectionName.trim() && act.sectionName.trim() !== 'Ungrouped'
+            ? act.sectionName.trim()
+            : 'Ungrouped';
+        sectionMoves.set(act.sessionId, {
+          section: sec,
+          order: sec === 'Ungrouped' ? 9999 : (act.sectionOrder ?? 500),
+        });
+      } else if (act.type === 'assign_folder' && act.sessionId) {
+        folderMoves.set(act.sessionId, act.folderId ?? null);
+      }
+    }
+    if (sectionMoves.size > 0 || folderMoves.size > 0) {
+      setSessions((prev) =>
+        prev.map((s) => {
+          const secMove = sectionMoves.get(s.id);
+          const fldMove = folderMoves.has(s.id) ? folderMoves.get(s.id) : undefined;
+          if (!secMove && fldMove === undefined) return s;
+          return {
+            ...s,
+            ...(secMove
+              ? {
+                  nativeSection: secMove.section,
+                  nativeSectionOrder: secMove.order,
+                  pinned: false,
+                  pinnedToTop: false,
+                }
+              : {}),
+            ...(fldMove !== undefined ? { folderId: fldMove } : {}),
+          };
+        })
+      );
+    }
+
     const next = await window.superHarness.organize(actions);
     setState(next);
   }, []);

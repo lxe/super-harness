@@ -175,11 +175,28 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const [renameDraft, setRenameDraft] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [anchorId, setAnchorId] = useState<string | null>(null);
-  const [dragState, setDragState] = useState<{
+  const [activeDrag, setActiveDrag] = useState<{
+    sessions: UnifiedSession[];
+    harnessGroup: HarnessGroup;
+    x: number;
+    y: number;
+    overTargetId: string | null;
+    overValid: boolean;
+    overLabel: string | null;
+  } | null>(null);
+  const activeDragRef = useRef<typeof activeDrag>(null);
+  activeDragRef.current = activeDrag;
+  const pendingDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
     sessions: UnifiedSession[];
     harnessGroup: HarnessGroup;
   } | null>(null);
-  const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const onOrganizeRef = useRef(onOrganize);
+  onOrganizeRef.current = onOrganize;
   const [hoveredUsage, setHoveredUsage] = useState<{
     target: HarnessGroup | 'all';
     rect: { left: number; bottom: number; width: number };
@@ -311,6 +328,200 @@ export const Sidebar: React.FC<Props> = React.memo(({
     [filtered, groupBy, folders, filter]
   );
 
+  // Map every droppable section container ID to its DragSectionTarget metadata
+  const dropTargetMap = useMemo(() => {
+    const map = new Map<string, DragSectionTarget>();
+    for (const grp of topGroups) {
+      if (grp.headless) continue;
+      if (grp.sections) {
+        for (const sec of grp.sections) {
+          map.set(sec.id, {
+            kind: 'native-section',
+            sectionLabel: sec.label,
+            harnessGroup: sec.harnessGroup,
+            sectionOrder: sec.order,
+          });
+        }
+      } else if (grp.harnessGroup) {
+        map.set(grp.id, {
+          kind: 'native-section',
+          sectionLabel: grp.label,
+          harnessGroup: grp.harnessGroup,
+          sectionOrder: grp.sectionOrder,
+        });
+      } else if (grp.folderId !== undefined) {
+        map.set(grp.id, {
+          kind: 'folder',
+          sectionLabel: grp.label,
+          folderId: grp.folderId,
+        });
+      }
+    }
+    return map;
+  }, [topGroups]);
+  const dropTargetMapRef = useRef(dropTargetMap);
+  dropTargetMapRef.current = dropTargetMap;
+
+  // Pointer-event drag-and-drop (avoids Chromium/Electron Wayland Ozone HTML5 DnD hangs)
+  useEffect(() => {
+    const clearDragVisuals = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    const resolveHitTarget = (
+      clientX: number,
+      clientY: number,
+      draggedSessions: UnifiedSession[]
+    ): { id: string | null; valid: boolean; label: string | null } => {
+      if (typeof document.elementsFromPoint !== 'function') {
+        return { id: null, valid: false, label: null };
+      }
+      const els = document.elementsFromPoint(clientX, clientY);
+      for (const el of els) {
+        const htmlEl = el as HTMLElement;
+        if (htmlEl.closest?.('[data-harness-separator="true"]')) {
+          return { id: null, valid: false, label: null };
+        }
+        const dropEl = htmlEl.closest?.('[data-drop-section-id]') as HTMLElement | null;
+        if (!dropEl) continue;
+        const id = dropEl.getAttribute('data-drop-section-id');
+        if (!id) continue;
+        const target = dropTargetMapRef.current.get(id);
+        if (!target) continue;
+        const valid = draggedSessions.some((s) => canDropSessionIntoSection(s, target));
+        return { id, valid, label: target.sectionLabel };
+      }
+      return { id: null, valid: false, label: null };
+    };
+
+    const cancelDrag = () => {
+      pendingDragRef.current = null;
+      if (activeDragRef.current) {
+        activeDragRef.current = null;
+        setActiveDrag(null);
+      }
+      clearDragVisuals();
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.buttons === 0) {
+        cancelDrag();
+        return;
+      }
+      const pending = pendingDragRef.current;
+      let current = activeDragRef.current;
+
+      if (!current) {
+        if (!pending || e.pointerId !== pending.pointerId) return;
+        const dist = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
+        if (dist < 6) return;
+        document.body.style.userSelect = 'none';
+        current = {
+          sessions: pending.sessions,
+          harnessGroup: pending.harnessGroup,
+          x: e.clientX,
+          y: e.clientY,
+          overTargetId: null,
+          overValid: false,
+          overLabel: null,
+        };
+      }
+
+      // Gentle edge auto-scroll inside the sidebar list while dragging
+      const scroller = scrollContainerRef.current;
+      if (scroller) {
+        const rect = scroller.getBoundingClientRect();
+        if (e.clientY < rect.top + 36 && e.clientY >= rect.top - 20) {
+          scroller.scrollTop -= 10;
+        } else if (e.clientY > rect.bottom - 36 && e.clientY <= rect.bottom + 20) {
+          scroller.scrollTop += 10;
+        }
+      }
+
+      const hit = resolveHitTarget(e.clientX, e.clientY, current.sessions);
+      document.body.style.cursor = hit.id ? (hit.valid ? 'grabbing' : 'not-allowed') : 'grabbing';
+
+      const next = {
+        ...current,
+        x: e.clientX,
+        y: e.clientY,
+        overTargetId: hit.id,
+        overValid: hit.valid,
+        overLabel: hit.label,
+      };
+      activeDragRef.current = next;
+      setActiveDrag(next);
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      const pending = pendingDragRef.current;
+      const current = activeDragRef.current;
+      if (pending && e.pointerId !== pending.pointerId && !current) return;
+
+      pendingDragRef.current = null;
+      clearDragVisuals();
+
+      if (!current) return;
+
+      suppressNextClickRef.current = true;
+      window.setTimeout(() => {
+        suppressNextClickRef.current = false;
+      }, 120);
+
+      const hit = resolveHitTarget(e.clientX, e.clientY, current.sessions);
+      const target = hit.id ? dropTargetMapRef.current.get(hit.id) : undefined;
+      if (hit.id && hit.valid && target) {
+        const movable = current.sessions.filter((d) => canDropSessionIntoSection(d, target));
+        if (movable.length > 0) {
+          if (target.kind === 'native-section') {
+            onOrganizeRef.current(
+              movable.map((d) => ({
+                type: 'move_section',
+                sessionId: d.id,
+                sectionName: target.sectionLabel,
+                sectionOrder: target.sectionOrder,
+              }))
+            );
+          } else {
+            onOrganizeRef.current(
+              movable.map((d) => ({
+                type: 'assign_folder',
+                sessionId: d.id,
+                folderId: target.folderId ?? null,
+              }))
+            );
+          }
+          const targetId = hit.id;
+          setCollapsed((prev) => (prev[targetId] ? { ...prev, [targetId]: false } : prev));
+        }
+      }
+
+      activeDragRef.current = null;
+      setActiveDrag(null);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && (pendingDragRef.current || activeDragRef.current)) {
+        cancelDrag();
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', cancelDrag);
+    window.addEventListener('blur', cancelDrag);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', cancelDrag);
+      window.removeEventListener('blur', cancelDrag);
+      window.removeEventListener('keydown', onKeyDown);
+      clearDragVisuals();
+    };
+  }, []);
+
   // Flat list of currently visible session IDs in exact rendered top-to-bottom order (for Shift+Click range select)
   const visibleOrderedSessions = useMemo(
     () => flattenVisibleSessions(topGroups, collapsed, globalPinnedSessions),
@@ -383,6 +594,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
   }, [activeSessionId, sessions.length, workerSessions, globalPinnedSessions, filter, topGroups, collapsed]);
 
   const handleRowClick = (e: React.MouseEvent, s: UnifiedSession) => {
+    if (suppressNextClickRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (e.shiftKey) {
       e.preventDefault();
       const ids = visibleOrderedSessions.map((x) => x.id);
@@ -509,8 +725,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
     ) : undefined;
 
     const recencyOpacity = computeThreadRecencyOpacity(s.updatedAt);
-    const isDraggable = s.harnessGroup !== 'master';
-    const isBeingDragged = Boolean(dragState?.sessions.some((d) => d.id === s.id));
+    const isBeingDragged = Boolean(activeDrag?.sessions.some((d) => d.id === s.id));
 
     return (
       <NavRow
@@ -524,28 +739,23 @@ export const Sidebar: React.FC<Props> = React.memo(({
         secondaryActive={isSplit}
         selected={isMultiSelected}
         working={s.status === 'running'}
-        draggable={isDraggable}
         className={isBeingDragged ? 'opacity-45' : undefined}
-        onDragStart={(e) => {
-          if (s.harnessGroup === 'master') return;
+        onPointerDown={(e) => {
+          if (e.button !== 0 || s.harnessGroup === 'master') return;
+          if ((e.target as HTMLElement | null)?.closest('button, input, textarea')) return;
           const draggedSessions =
             selectedIds.size > 1 && selectedIds.has(s.id)
               ? visibleOrderedSessions.filter(
                   (x) => selectedIds.has(x.id) && x.harnessGroup === s.harnessGroup
                 )
               : [s];
-          const safeDragged = draggedSessions.length > 0 ? draggedSessions : [s];
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('application/x-super-harness-session', s.id);
-          e.dataTransfer.setData('text/plain', s.title);
-          setDragState({
-            sessions: safeDragged,
+          pendingDragRef.current = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            sessions: draggedSessions.length > 0 ? draggedSessions : [s],
             harnessGroup: s.harnessGroup,
-          });
-        }}
-        onDragEnd={() => {
-          setDragState(null);
-          setDragOverTargetId(null);
+          };
         }}
         meta={
           s.harness === 'claude-tmux' ? (
@@ -911,7 +1121,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
       )}
 
       {/* Structured Conversation Tree with Sticky Two-Tier Headers */}
-      <div className="flex-1 overflow-y-auto px-2.5 pb-4 border-t border-line-hairline">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-2.5 pb-4 border-t border-line-hairline"
+      >
         {/* Inline unsent draft conversations (? when harness undecided, or harness logo when chosen) */}
         {draftConversations.length > 0 && (
           <div className="pt-2 pb-1 space-y-0.5 border-b border-line-hairline mb-2">
@@ -996,73 +1209,22 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 ...(grp.sections ? grp.sections.flatMap((sec) => sec.items) : grp.items ?? []),
               ];
 
-              const topDropTarget: DragSectionTarget | null =
-                !grp.sections && grp.harnessGroup
-                  ? {
-                      kind: 'native-section',
-                      sectionLabel: grp.label,
-                      harnessGroup: grp.harnessGroup,
-                      sectionOrder: grp.sectionOrder,
-                    }
-                  : !grp.sections && grp.folderId !== undefined
-                    ? {
-                        kind: 'folder',
-                        sectionLabel: grp.label,
-                        folderId: grp.folderId,
-                      }
-                    : null;
-
-              const canDropOnTop = Boolean(
-                topDropTarget &&
-                  dragState?.sessions.some((d) => canDropSessionIntoSection(d, topDropTarget))
+              const isTopDroppable = !grp.sections && (Boolean(grp.harnessGroup) || grp.folderId !== undefined);
+              const isTopDragOver = Boolean(
+                isTopDroppable &&
+                  activeDrag?.overValid &&
+                  activeDrag.overTargetId === grp.id
               );
-              const isTopDragOver = Boolean(canDropOnTop && dragOverTargetId === grp.id);
               const isOtherHarnessWhileDragging = Boolean(
-                dragState &&
-                  ((grp.harnessLogo && grp.harnessLogo !== dragState.harnessGroup) ||
-                    (grp.harnessGroup && grp.harnessGroup !== dragState.harnessGroup))
+                activeDrag &&
+                  ((grp.harnessLogo && grp.harnessLogo !== activeDrag.harnessGroup) ||
+                    (grp.harnessGroup && grp.harnessGroup !== activeDrag.harnessGroup))
               );
-
-              const handleDropOnTarget = (
-                e: React.DragEvent,
-                targetId: string,
-                target: DragSectionTarget
-              ) => {
-                if (!dragState) return;
-                const movable = dragState.sessions.filter((d) =>
-                  canDropSessionIntoSection(d, target)
-                );
-                if (movable.length === 0) return;
-                e.preventDefault();
-                e.stopPropagation();
-                if (target.kind === 'native-section') {
-                  onOrganize(
-                    movable.map((d) => ({
-                      type: 'move_section',
-                      sessionId: d.id,
-                      sectionName: target.sectionLabel,
-                      sectionOrder: target.sectionOrder,
-                    }))
-                  );
-                } else {
-                  onOrganize(
-                    movable.map((d) => ({
-                      type: 'assign_folder',
-                      sessionId: d.id,
-                      folderId: target.folderId ?? null,
-                    }))
-                  );
-                }
-                setCollapsed((prev) =>
-                  prev[targetId] ? { ...prev, [targetId]: false } : prev
-                );
-                setDragState(null);
-                setDragOverTargetId(null);
-              };
 
               return (
                 <div
                   key={grp.id}
+                  data-drop-section-id={isTopDroppable ? grp.id : undefined}
                   className={`relative rounded-lg transition-opacity ${
                     isOtherHarnessWhileDragging ? 'opacity-40' : ''
                   } ${
@@ -1070,25 +1232,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                       ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-400/45'
                       : ''
                   }`}
-                  onDragOver={(e) => {
-                    if (!topDropTarget || !dragState) return;
-                    if (canDropOnTop) {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = 'move';
-                      if (dragOverTargetId !== grp.id) setDragOverTargetId(grp.id);
-                    } else {
-                      e.dataTransfer.dropEffect = 'none';
-                      if (dragOverTargetId === grp.id) setDragOverTargetId(null);
-                    }
-                  }}
-                  onDragLeave={(e) => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                      if (dragOverTargetId === grp.id) setDragOverTargetId(null);
-                    }
-                  }}
-                  onDrop={(e) => {
-                    if (topDropTarget) handleDropOnTarget(e, grp.id, topDropTarget);
-                  }}
                 >
                   <SectionHeader
                     level={1}
@@ -1145,52 +1288,19 @@ export const Sidebar: React.FC<Props> = React.memo(({
                           ) : (
                             <Folder className="w-3.5 h-3.5 text-ink-secondary" />
                           );
-                          const secDropTarget: DragSectionTarget = {
-                            kind: 'native-section',
-                            sectionLabel: sec.label,
-                            harnessGroup: sec.harnessGroup,
-                            sectionOrder: sec.order,
-                          };
-                          const canDropOnSec = Boolean(
-                            dragState?.sessions.some((d) =>
-                              canDropSessionIntoSection(d, secDropTarget)
-                            )
-                          );
                           const isSecDragOver = Boolean(
-                            canDropOnSec && dragOverTargetId === sec.id
+                            activeDrag?.overValid && activeDrag.overTargetId === sec.id
                           );
 
                           return (
                             <div
                               key={sec.id}
+                              data-drop-section-id={sec.id}
                               className={`relative rounded-lg transition-colors ${
                                 isSecDragOver
                                   ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-400/45'
                                   : ''
                               }`}
-                              onDragOver={(e) => {
-                                if (!dragState) return;
-                                if (canDropOnSec) {
-                                  e.preventDefault();
-                                  e.dataTransfer.dropEffect = 'move';
-                                  if (dragOverTargetId !== sec.id) {
-                                    setDragOverTargetId(sec.id);
-                                  }
-                                } else {
-                                  e.dataTransfer.dropEffect = 'none';
-                                  if (dragOverTargetId === sec.id) {
-                                    setDragOverTargetId(null);
-                                  }
-                                }
-                              }}
-                              onDragLeave={(e) => {
-                                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                  if (dragOverTargetId === sec.id) {
-                                    setDragOverTargetId(null);
-                                  }
-                                }
-                              }}
-                              onDrop={(e) => handleDropOnTarget(e, sec.id, secDropTarget)}
                             >
                               <SectionHeader
                                 level={2}
@@ -1258,6 +1368,29 @@ export const Sidebar: React.FC<Props> = React.memo(({
           <span>Settings</span>
         </button>
       </div>
+
+      {/* Floating Pointer-Drag Preview Pill */}
+      {activeDrag && (
+        <div
+          style={{
+            left: Math.min(activeDrag.x + 14, window.innerWidth - 240),
+            top: Math.min(activeDrag.y + 12, window.innerHeight - 48),
+          }}
+          className="fixed z-[9999] pointer-events-none max-w-[230px] flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-raised/95 border border-line-strong shadow-xl backdrop-blur-md text-caption text-ink-primary"
+        >
+          <HarnessLogo harness={activeDrag.harnessGroup} size={13} />
+          <span className="truncate font-medium">
+            {activeDrag.sessions.length > 1
+              ? `${activeDrag.sessions.length} conversations`
+              : activeDrag.sessions[0]?.title}
+          </span>
+          {activeDrag.overTargetId && activeDrag.overValid && activeDrag.overLabel && (
+            <span className="shrink-0 text-micro px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-200 border border-indigo-400/30">
+              → {activeDrag.overLabel}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Right-Click / Triple-Dot Context Menu */}
       {ctxMenu && (

@@ -40,6 +40,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   if (variant === 'separator') {
     return (
       <div
+        data-harness-separator="true"
         onContextMenu={onContextMenu}
         className={cn(
           'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-8 flex items-center gap-1 bg-surface-rail/95 backdrop-blur-md border-y border-line-hairline/75 hover:bg-white/[0.035] transition-colors select-none',

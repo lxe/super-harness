@@ -142,7 +142,7 @@ describe('Sidebar section drag-and-drop restrictions', () => {
     expect(codexOnly[0]?.label).toBe('DSX');
   });
 
-  it('keeps section headers free of chat counts and hover-reveals the plus button', () => {
+  it('keeps section headers free of chat counts, hover-reveals the plus button, and avoids Wayland-hanging HTML5 DnD', () => {
     const sidebarSrc = fs.readFileSync(
       path.resolve(__dirname, '../src/renderer/components/Sidebar.tsx'),
       'utf8'
@@ -155,5 +155,12 @@ describe('Sidebar section drag-and-drop restrictions', () => {
     expect(sidebarSrc).not.toMatch(/count=\{totalInGroup\}/);
     expect(sidebarSrc).not.toMatch(/count=\{sec\.items\.length\}/);
     expect(listRowSrc).toContain('opacity-0 pointer-events-none group-hover:opacity-100');
+
+    // Never use native HTML5 draggable/onDragStart in Sidebar (hangs Chromium/Electron Ozone Wayland)
+    expect(sidebarSrc).not.toMatch(/\bdraggable\s*=/);
+    expect(sidebarSrc).not.toMatch(/\bonDragStart\s*=/);
+    expect(sidebarSrc).toContain('onPointerDown');
+    expect(sidebarSrc).toContain('data-drop-section-id');
+    expect(sidebarSrc).toContain('if (e.buttons === 0)');
   });
 });

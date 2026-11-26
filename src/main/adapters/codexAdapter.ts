@@ -29,6 +29,7 @@ import {
 } from '../utils/system';
 import {
   createUniqueIdGenerator,
+  extractAttachedImagesFromText,
   formatPromptWithImagePaths,
   type DaemonControlAction,
   type DispatchContext,
@@ -396,38 +397,174 @@ export async function detectCodex(
   return { detection, sessions };
 }
 
-function parseCodexItemToBlock(itemType: string, raw: Record<string, unknown>): {
+function parseCodexImageContentItem(
+  obj: Record<string, unknown>
+): Extract<UnifiedBlock, { type: 'image' }> | null {
+  const t = String(obj.type || '');
+  if (
+    t !== 'localImage' &&
+    t !== 'local_image' &&
+    t !== 'image' &&
+    t !== 'input_image'
+  ) {
+    return null;
+  }
+
+  const rawPath =
+    typeof obj.path === 'string'
+      ? obj.path
+      : typeof obj.image_path === 'string'
+        ? obj.image_path
+        : '';
+  const rawUrl =
+    typeof obj.image_url === 'string'
+      ? obj.image_url
+      : typeof obj.url === 'string'
+        ? obj.url
+        : typeof obj.image_url === 'object' && obj.image_url !== null && typeof (obj.image_url as Record<string, unknown>).url === 'string'
+          ? String((obj.image_url as Record<string, unknown>).url)
+          : '';
+
+  if (rawPath && rawPath.trim()) {
+    const clean = rawPath.trim();
+    return {
+      type: 'image',
+      path: clean,
+      name: path.basename(clean),
+    };
+  }
+  if (rawUrl && (rawUrl.startsWith('data:image/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
+    if (rawUrl.length > 10_000_000) return null;
+    return {
+      type: 'image',
+      path: '',
+      dataUrl: rawUrl,
+      name: 'Attached image',
+    };
+  }
+  return null;
+}
+
+function extractCodexContentBlocks(content: unknown, fallbackText?: string): UnifiedBlock[] {
+  const images: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
+  const seenImages = new Set<string>();
+  const textParts: string[] = [];
+
+  const pushImage = (img: Extract<UnifiedBlock, { type: 'image' }>) => {
+    const key = img.path || img.dataUrl || '';
+    if (!key || seenImages.has(key)) return;
+    seenImages.add(key);
+    images.push(img);
+  };
+
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      if (typeof c === 'string') {
+        textParts.push(c);
+        continue;
+      }
+      if (!c || typeof c !== 'object') continue;
+      const obj = c as Record<string, unknown>;
+      const img = parseCodexImageContentItem(obj);
+      if (img) {
+        pushImage(img);
+        continue;
+      }
+      if (typeof obj.text === 'string') {
+        textParts.push(obj.text);
+      }
+    }
+  } else if (typeof content === 'string') {
+    textParts.push(content);
+  } else if (typeof fallbackText === 'string') {
+    textParts.push(fallbackText);
+  }
+
+  const rawJoined = textParts.filter(Boolean).join('\n');
+  const extracted = extractAttachedImagesFromText(rawJoined);
+  for (const img of extracted.images) {
+    pushImage(img);
+  }
+
+  // Strip Codex Desktop's redundant "# Files mentioned by the user" image-attachment preamble
+  // when matching localImage entries were already extracted into visual thumbnails.
+  let cleanText = extracted.text;
+  if (images.length > 0 && cleanText.includes('Image attachment: true')) {
+    cleanText = cleanText
+      .replace(/^# Files mentioned by the user:\s*/gm, '')
+      .replace(/^## [^\n]+?:\s*[^\n]+\nImage attachment: true\s*/gm, '')
+      .trim();
+  }
+
+  const blocks: UnifiedBlock[] = [...images];
+  if (cleanText.trim()) {
+    blocks.push({ type: 'text', text: cleanText });
+  }
+  return blocks;
+}
+
+function parseCodexItemToBlocks(itemType: string, raw: Record<string, unknown>): {
   role: 'user' | 'assistant' | 'system';
-  block: UnifiedBlock | null;
+  blocks: UnifiedBlock[];
 } {
   if (itemType === 'userMessage') {
-    const content = raw.content;
-    let text = '';
-    if (Array.isArray(content)) {
-      text = content
-        .map((c) => {
-          if (typeof c === 'string') return c;
-          if (c && typeof c === 'object') {
-            const obj = c as Record<string, unknown>;
-            if (typeof obj.text === 'string') return obj.text;
-          }
-          return '';
-        })
-        .filter(Boolean)
-        .join('\n');
-    } else if (typeof content === 'string') {
-      text = content;
-    } else if (typeof raw.text === 'string') {
-      text = raw.text;
-    }
-    if (!text.trim()) return { role: 'user', block: null };
-    return { role: 'user', block: { type: 'text', text } };
+    const blocks = extractCodexContentBlocks(
+      raw.content,
+      typeof raw.text === 'string' ? raw.text : undefined
+    );
+    return { role: 'user', blocks };
   }
 
   if (itemType === 'agentMessage') {
     const text = typeof raw.text === 'string' ? raw.text : '';
-    if (!text.trim()) return { role: 'assistant', block: null };
-    return { role: 'assistant', block: { type: 'text', text } };
+    if (!text.trim()) return { role: 'assistant', blocks: [] };
+    return { role: 'assistant', blocks: [{ type: 'text', text }] };
+  }
+
+  if (itemType === 'imageView') {
+    const imgPath = typeof raw.path === 'string' ? raw.path.trim() : '';
+    if (!imgPath) return { role: 'assistant', blocks: [] };
+    return {
+      role: 'assistant',
+      blocks: [
+        {
+          type: 'image',
+          path: imgPath,
+          name: path.basename(imgPath),
+        },
+      ],
+    };
+  }
+
+  if (itemType === 'imageGeneration') {
+    const savedPath = typeof raw.savedPath === 'string' ? raw.savedPath.trim() : '';
+    const result = typeof raw.result === 'string' ? raw.result : '';
+    if (savedPath && (fs.existsSync(savedPath) || !result)) {
+      return {
+        role: 'assistant',
+        blocks: [
+          {
+            type: 'image',
+            path: savedPath,
+            name: path.basename(savedPath),
+          },
+        ],
+      };
+    }
+    if (result && result.length <= 10_000_000) {
+      return {
+        role: 'assistant',
+        blocks: [
+          {
+            type: 'image',
+            path: savedPath,
+            dataUrl: result.startsWith('data:') ? result : `data:image/png;base64,${result}`,
+            name: savedPath ? path.basename(savedPath) : 'Generated image',
+          },
+        ],
+      };
+    }
+    return { role: 'assistant', blocks: [] };
   }
 
   if (itemType === 'reasoning') {
@@ -442,10 +579,10 @@ function parseCodexItemToBlock(itemType: string, raw: Record<string, unknown>): 
       .filter(Boolean)
       .join('\n');
     const body = content || summary;
-    if (!body.trim()) return { role: 'assistant', block: null };
+    if (!body.trim()) return { role: 'assistant', blocks: [] };
     return {
       role: 'assistant',
-      block: { type: 'thinking', text: body, summary: summary || undefined },
+      blocks: [{ type: 'thinking', text: body, summary: summary || undefined }],
     };
   }
 
@@ -457,15 +594,17 @@ function parseCodexItemToBlock(itemType: string, raw: Record<string, unknown>): 
         : undefined;
     return {
       role: 'assistant',
-      block: {
-        type: 'command',
-        command,
-        cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined,
-        output,
-        exitCode: typeof raw.exitCode === 'number' ? raw.exitCode : null,
-        durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : undefined,
-        status: typeof raw.status === 'string' ? raw.status : undefined,
-      },
+      blocks: [
+        {
+          type: 'command',
+          command,
+          cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined,
+          output,
+          exitCode: typeof raw.exitCode === 'number' ? raw.exitCode : null,
+          durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : undefined,
+          status: typeof raw.status === 'string' ? raw.status : undefined,
+        },
+      ],
     };
   }
 
@@ -486,14 +625,16 @@ function parseCodexItemToBlock(itemType: string, raw: Record<string, unknown>): 
         diff: typeof obj.diff === 'string' ? obj.diff.slice(0, 10000) : undefined,
       };
     });
-    if (changes.length === 0) return { role: 'assistant', block: null };
+    if (changes.length === 0) return { role: 'assistant', blocks: [] };
     return {
       role: 'assistant',
-      block: {
-        type: 'file_change',
-        changes,
-        status: typeof raw.status === 'string' ? raw.status : undefined,
-      },
+      blocks: [
+        {
+          type: 'file_change',
+          changes,
+          status: typeof raw.status === 'string' ? raw.status : undefined,
+        },
+      ],
     };
   }
 
@@ -517,15 +658,17 @@ function parseCodexItemToBlock(itemType: string, raw: Record<string, unknown>): 
     }
     return {
       role: 'assistant',
-      block: {
-        type: 'tool_call',
-        name,
-        server,
-        args,
-        output,
-        status: typeof raw.status === 'string' ? raw.status : undefined,
-        durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : undefined,
-      },
+      blocks: [
+        {
+          type: 'tool_call',
+          name,
+          server,
+          args,
+          output,
+          status: typeof raw.status === 'string' ? raw.status : undefined,
+          durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : undefined,
+        },
+      ],
     };
   }
 
@@ -533,32 +676,34 @@ function parseCodexItemToBlock(itemType: string, raw: Record<string, unknown>): 
     const query = typeof raw.query === 'string' ? raw.query : '';
     const action = raw.action as Record<string, unknown> | undefined;
     const url = typeof action?.url === 'string' ? action.url : undefined;
-    if (!query && !url) return { role: 'assistant', block: null };
+    if (!query && !url) return { role: 'assistant', blocks: [] };
     return {
       role: 'assistant',
-      block: { type: 'web_search', query: query || url || 'Web search', url },
+      blocks: [{ type: 'web_search', query: query || url || 'Web search', url }],
     };
   }
 
   if (itemType === 'contextCompaction') {
     return {
       role: 'system',
-      block: { type: 'notice', title: 'Context compacted' },
+      blocks: [{ type: 'notice', title: 'Context compacted' }],
     };
   }
 
   if (itemType === 'subAgentActivity') {
     return {
       role: 'assistant',
-      block: {
-        type: 'notice',
-        title: 'Subagent activity',
-        detail: JSON.stringify(raw).slice(0, 300),
-      },
+      blocks: [
+        {
+          type: 'notice',
+          title: 'Subagent activity',
+          detail: JSON.stringify(raw).slice(0, 300),
+        },
+      ],
     };
   }
 
-  return { role: 'assistant', block: null };
+  return { role: 'assistant', blocks: [] };
 }
 
 export interface CodexTranscriptDbPaths {
@@ -617,6 +762,7 @@ export function coalesceCodexItemRows(rowsAsc: CodexItemRow[]): UnifiedMessage[]
   const uniqueId = createUniqueIdGenerator();
 
   let currentAssistant: UnifiedMessage | null = null;
+  let lastUserImagePaths = new Set<string>();
   for (const r of rowsAsc) {
     let parsed: Record<string, unknown>;
     try {
@@ -624,17 +770,22 @@ export function coalesceCodexItemRows(rowsAsc: CodexItemRow[]): UnifiedMessage[]
     } catch {
       continue;
     }
-    const { role, block } = parseCodexItemToBlock(r.item_type, parsed);
-    if (!block) continue;
+    const { role, blocks } = parseCodexItemToBlocks(r.item_type, parsed);
+    if (blocks.length === 0) continue;
     const ts = normalizeTimestamp(r.created_at_ms);
 
     if (role === 'user') {
       currentAssistant = null;
+      lastUserImagePaths = new Set(
+        blocks
+          .filter((b): b is Extract<UnifiedBlock, { type: 'image' }> => b.type === 'image' && Boolean(b.path))
+          .map((b) => b.path)
+      );
       messages.push({
         id: uniqueId(r.item_id || `u-${r.rollout_ordinal}`),
         role: 'user',
         timestamp: ts,
-        blocks: [block],
+        blocks,
         harnessMeta: { turnId: r.turn_id },
       });
     } else if (role === 'system') {
@@ -643,20 +794,29 @@ export function coalesceCodexItemRows(rowsAsc: CodexItemRow[]): UnifiedMessage[]
         id: uniqueId(r.item_id || `s-${r.rollout_ordinal}`),
         role: 'system',
         timestamp: ts,
-        blocks: [block],
+        blocks,
       });
     } else {
+      // Avoid duplicating the user's own attached image when Codex immediately calls imageView on it
+      const filteredBlocks =
+        r.item_type === 'imageView'
+          ? blocks.filter(
+              (b) => !(b.type === 'image' && b.path && lastUserImagePaths.has(b.path))
+            )
+          : blocks;
+      if (filteredBlocks.length === 0) continue;
+
       if (!currentAssistant || currentAssistant.harnessMeta?.turnId !== r.turn_id) {
         currentAssistant = {
           id: uniqueId(r.item_id || `a-${r.rollout_ordinal}`),
           role: 'assistant',
           timestamp: ts,
-          blocks: [block],
+          blocks: [...filteredBlocks],
           harnessMeta: { turnId: r.turn_id },
         };
         messages.push(currentAssistant);
       } else {
-        currentAssistant.blocks.push(block);
+        currentAssistant.blocks.push(...filteredBlocks);
         currentAssistant.timestamp = ts;
       }
     }
@@ -680,22 +840,15 @@ function parseCodexRolloutLines(lines: string[]): UnifiedMessage[] {
     if (obj.type === 'response_item') {
       const pl = (obj.payload ?? {}) as Record<string, unknown>;
       if (pl.type === 'message' && (pl.role === 'user' || pl.role === 'assistant')) {
-        const contentArr = Array.isArray(pl.content) ? pl.content : [];
-        const txt = contentArr
-          .map((c) => {
-            const o = c as Record<string, unknown>;
-            return typeof o?.text === 'string' ? o.text : '';
-          })
-          .filter(Boolean)
-          .join('\n');
-        if (!txt.trim()) continue;
+        const blocks = extractCodexContentBlocks(pl.content);
+        if (blocks.length === 0) continue;
         if (pl.role === 'user') {
           currentAssistant = null;
           messages.push({
             id: `jsonl-u-${idx++}`,
             role: 'user',
             timestamp: ts,
-            blocks: [{ type: 'text', text: txt }],
+            blocks,
           });
         } else {
           if (!currentAssistant) {
@@ -703,11 +856,11 @@ function parseCodexRolloutLines(lines: string[]): UnifiedMessage[] {
               id: `jsonl-a-${idx++}`,
               role: 'assistant',
               timestamp: ts,
-              blocks: [{ type: 'text', text: txt }],
+              blocks: [...blocks],
             };
             messages.push(currentAssistant);
           } else {
-            currentAssistant.blocks.push({ type: 'text', text: txt });
+            currentAssistant.blocks.push(...blocks);
           }
         }
       } else if (pl.type === 'function_call' || pl.type === 'custom_tool_call') {

@@ -11,6 +11,7 @@ import {
   Globe,
   HelpCircle,
   History,
+  ImageOff,
   RotateCcw,
   Terminal,
   Wrench,
@@ -125,6 +126,7 @@ interface Props {
 
 export const CoalescedBlockView: React.FC<Props> = React.memo(
   ({ block, onQuickReply, onOpenPath, onPreviewImage }) => {
+  const [imageBroken, setImageBroken] = useState(false);
   const textContent = block.type === 'text' ? block.text : '';
   const renderedHtml = useMemo(() => {
     if (!textContent) return '';
@@ -164,6 +166,14 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
 
   if (block.type === 'image') {
     const src = block.dataUrl || mediaUrlForPath(block.path);
+    if (imageBroken) {
+      return (
+        <div className="my-1.5 inline-flex items-center gap-2 rounded-xl border border-line-hairline bg-surface-subtle/60 px-3 py-2 text-caption text-ink-faint">
+          <ImageOff className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate max-w-[260px]">{block.name || 'Image unavailable'}</span>
+        </div>
+      );
+    }
     return (
       <div className="my-1.5">
         <button
@@ -179,6 +189,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
             alt={block.name || 'Attached image'}
             loading="lazy"
             decoding="async"
+            onError={() => setImageBroken(true)}
             className="max-h-64 max-w-full object-contain block"
           />
         </button>
@@ -498,6 +509,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
   ({ msg, onOpenPath, onPreviewImage, onRetryFailed, onDismissFailed }) => {
     const [expanded, setExpanded] = useState(false);
     const [showErrorDetail, setShowErrorDetail] = useState(false);
+    const [brokenThumbs, setBrokenThumbs] = useState<Record<string, boolean>>({});
     const info = useMemo(() => classifyUserMessage(msg), [msg]);
 
     const imageBlocks = useMemo(
@@ -524,23 +536,43 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
     const renderThumbnailStrip = () =>
       previewItems.length > 0 ? (
         <div className="flex flex-wrap justify-end gap-2 max-w-[82%]">
-          {previewItems.map((img, idx) => (
-            <button
-              key={`${img.src}-${idx}`}
-              type="button"
-              onClick={() => onPreviewImage?.(previewItems, idx)}
-              title={img.name ? `Preview ${img.name}` : 'Preview image'}
-              className="group relative w-[72px] h-[72px] rounded-xl overflow-hidden border border-line-subtle bg-black/40 hover:border-line-strong hover:brightness-110 transition-all shrink-0 cursor-pointer"
-            >
-              <img
-                src={img.src}
-                alt={img.name || `Attachment ${idx + 1}`}
-                loading="lazy"
-                decoding="async"
-                className="w-full h-full object-cover"
-              />
-            </button>
-          ))}
+          {previewItems.map((img, idx) => {
+            const thumbKey = `${img.src}-${idx}`;
+            if (brokenThumbs[thumbKey]) {
+              return (
+                <div
+                  key={thumbKey}
+                  title={img.name ? `${img.name} (file moved or removed)` : 'Image unavailable'}
+                  className="w-[72px] h-[72px] rounded-xl border border-line-hairline bg-surface-subtle/60 flex flex-col items-center justify-center gap-1 px-1.5 text-ink-faint shrink-0"
+                >
+                  <ImageOff className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] leading-tight truncate max-w-full">
+                    {img.name || 'Missing'}
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <button
+                key={thumbKey}
+                type="button"
+                onClick={() => onPreviewImage?.(previewItems, idx)}
+                title={img.name ? `Preview ${img.name}` : 'Preview image'}
+                className="group relative w-[72px] h-[72px] rounded-xl overflow-hidden border border-line-subtle bg-black/40 hover:border-line-strong hover:brightness-110 transition-all shrink-0 cursor-pointer"
+              >
+                <img
+                  src={img.src}
+                  alt={img.name || `Attachment ${idx + 1}`}
+                  loading="lazy"
+                  decoding="async"
+                  onError={() =>
+                    setBrokenThumbs((prev) => (prev[thumbKey] ? prev : { ...prev, [thumbKey]: true }))
+                  }
+                  className="w-full h-full object-cover"
+                />
+              </button>
+            );
+          })}
         </div>
       ) : null;
 

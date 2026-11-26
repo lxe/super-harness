@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import type {
   HarnessDetection,
   HarnessGroup,
@@ -7,6 +8,7 @@ import type {
   SessionTranscriptResult,
   StartSessionRequest,
   StreamEvent,
+  UnifiedBlock,
   UnifiedSession,
 } from '../../shared/types';
 import type { ProcessRow } from '../utils/system';
@@ -160,6 +162,45 @@ export function formatPromptWithImagePaths(
   return prompt.trim()
     ? `${refs}\n\n${prompt}`
     : `${refs}\n\nPlease inspect the attached image(s).`;
+}
+
+/**
+ * Extracts `[Attached image: /abs/path/to/file.png]` lines emitted by
+ * `formatPromptWithImagePaths` into structured `image` blocks and returns
+ * the remaining clean prompt text.
+ */
+export function extractAttachedImagesFromText(rawText: string): {
+  text: string;
+  images: Array<Extract<UnifiedBlock, { type: 'image' }>>;
+} {
+  if (!rawText || !rawText.includes('[Attached image:')) {
+    return { text: rawText, images: [] };
+  }
+  const images: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
+  const seen = new Set<string>();
+  const keptLines: string[] = [];
+
+  for (const line of rawText.split('\n')) {
+    const m = line.match(/^\s*\[Attached image:\s*(.+?)\]\s*$/i);
+    if (m) {
+      const imgPath = m[1].trim();
+      if (imgPath && !seen.has(imgPath)) {
+        seen.add(imgPath);
+        images.push({
+          type: 'image',
+          path: imgPath,
+          name: path.basename(imgPath),
+        });
+      }
+      continue;
+    }
+    keptLines.push(line);
+  }
+
+  return {
+    text: keptLines.join('\n').trim(),
+    images,
+  };
 }
 
 /**

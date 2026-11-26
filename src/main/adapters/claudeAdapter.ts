@@ -32,6 +32,7 @@ import {
 import {
   computeFileFingerprint,
   createUniqueIdGenerator,
+  extractAttachedImagesFromText,
   formatPromptWithImagePaths,
   type DaemonControlAction,
   type DispatchContext,
@@ -766,6 +767,60 @@ export async function detectClaude(
   return { detection, sessions: allSessions };
 }
 
+function parseClaudeImageBlock(
+  b: Record<string, unknown>
+): Extract<UnifiedBlock, { type: 'image' }> | null {
+  if (b.type !== 'image') return null;
+  const source = (b.source && typeof b.source === 'object'
+    ? (b.source as Record<string, unknown>)
+    : undefined);
+
+  if (source) {
+    const srcType = String(source.type || '');
+    if (srcType === 'base64' && typeof source.data === 'string' && source.data.length > 0) {
+      if (source.data.length > 10_000_000) return null;
+      const mimeType =
+        typeof source.media_type === 'string' && source.media_type
+          ? source.media_type
+          : 'image/png';
+      return {
+        type: 'image',
+        path: '',
+        dataUrl: source.data.startsWith('data:')
+          ? source.data
+          : `data:${mimeType};base64,${source.data}`,
+        name: 'Attached image',
+      };
+    }
+    if (srcType === 'url' && typeof source.url === 'string' && source.url.trim()) {
+      return {
+        type: 'image',
+        path: '',
+        dataUrl: source.url.trim(),
+        name: 'Attached image',
+      };
+    }
+    if (typeof source.path === 'string' && source.path.trim()) {
+      const p = source.path.trim();
+      return {
+        type: 'image',
+        path: p,
+        name: path.basename(p),
+      };
+    }
+  }
+
+  if (typeof b.path === 'string' && b.path.trim()) {
+    const p = b.path.trim();
+    return {
+      type: 'image',
+      path: p,
+      name: path.basename(p),
+    };
+  }
+  return null;
+}
+
 export function parseClaudeJsonlLines(
   lines: string[],
   sessionId: string,
@@ -884,17 +939,33 @@ export function parseClaudeJsonlLines(
         return undefined;
       };
 
-      const pushUserOrLocalCommand = (rawText: string) => {
-        const trimmed = rawText.trim();
-        if (!trimmed) return;
+      const pushUserOrLocalCommand = (
+        rawText: string,
+        extraImages: Array<Extract<UnifiedBlock, { type: 'image' }>> = []
+      ) => {
+        const extracted = extractAttachedImagesFromText(rawText);
+        const allImages: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
+        const seenImgs = new Set<string>();
+        for (const img of [...extraImages, ...extracted.images]) {
+          const key = img.path || img.dataUrl || '';
+          if (!key || seenImgs.has(key)) continue;
+          seenImgs.add(key);
+          allImages.push(img);
+        }
+
+        const trimmed = extracted.text.trim();
+        if (!trimmed && allImages.length === 0) return;
 
         // Hide Claude Code's internal local-command-caveat boilerplate
-        if (trimmed.startsWith('<local-command-caveat>')) {
+        if (allImages.length === 0 && trimmed.startsWith('<local-command-caveat>')) {
           return;
         }
 
         // Render local slash commands (/effort, /model, /compact, etc.) as quiet system notices
-        if (trimmed.startsWith('<command-name>') || trimmed.startsWith('<command-message>')) {
+        if (
+          allImages.length === 0 &&
+          (trimmed.startsWith('<command-name>') || trimmed.startsWith('<command-message>'))
+        ) {
           const cmdName =
             extractTagContent(trimmed, 'command-name') ||
             extractTagContent(trimmed, 'command-message') ||
@@ -913,8 +984,9 @@ export function parseClaudeJsonlLines(
 
         // Attach local command output to the preceding command notice when possible
         if (
-          trimmed.startsWith('<local-command-stdout>') ||
-          trimmed.startsWith('<local-command-stderr>')
+          allImages.length === 0 &&
+          (trimmed.startsWith('<local-command-stdout>') ||
+            trimmed.startsWith('<local-command-stderr>'))
         ) {
           const out =
             extractTagContent(trimmed, 'local-command-stdout') ||
@@ -936,25 +1008,40 @@ export function parseClaudeJsonlLines(
           return;
         }
 
+        const userBlocks: UnifiedBlock[] = [...allImages];
+        if (trimmed) {
+          userBlocks.push({ type: 'text', text: extracted.text });
+        }
+
         currentAssistant = null;
         messages.push({
           id: uniqueId(String(obj.uuid || `cu-${seq++}`)),
           role: 'user',
           timestamp: ts,
-          blocks: [{ type: 'text', text: rawText }],
-          harnessMeta: buildUserMeta(trimmed),
+          blocks: userBlocks,
+          harnessMeta: trimmed ? buildUserMeta(trimmed) : undefined,
         });
       };
 
       // Check if this is purely a tool_result reply from Claude's agent loop
       if (Array.isArray(content)) {
         const nonToolTexts: string[] = [];
+        const userImages: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
         for (const item of content) {
           if (!item || typeof item !== 'object') continue;
           const b = item as Record<string, unknown>;
           if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
             pendingToolNames.delete(b.tool_use_id);
             const target = toolBlockById.get(b.tool_use_id);
+            const toolImages: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
+            if (Array.isArray(b.content)) {
+              for (const x of b.content) {
+                if (x && typeof x === 'object') {
+                  const img = parseClaudeImageBlock(x as Record<string, unknown>);
+                  if (img) toolImages.push(img);
+                }
+              }
+            }
             const resultText =
               typeof b.content === 'string'
                 ? b.content
@@ -984,12 +1071,19 @@ export function parseClaudeJsonlLines(
                   .trim();
               }
             }
+            // Surface screenshots / read images returned by tool_result inline in the assistant turn
+            if (toolImages.length > 0 && currentAssistant) {
+              currentAssistant.blocks.push(...toolImages);
+            }
+          } else if (b.type === 'image') {
+            const img = parseClaudeImageBlock(b);
+            if (img) userImages.push(img);
           } else if (b.type === 'text' && typeof b.text === 'string') {
             nonToolTexts.push(b.text);
           }
         }
         const joined = nonToolTexts.join('\n').trim();
-        if (joined) pushUserOrLocalCommand(joined);
+        if (joined || userImages.length > 0) pushUserOrLocalCommand(joined, userImages);
       } else if (typeof content === 'string' && content.trim()) {
         pushUserOrLocalCommand(content);
       }
@@ -1006,6 +1100,9 @@ export function parseClaudeJsonlLines(
         const b = item as Record<string, unknown>;
         if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
           blocks.push({ type: 'text', text: b.text });
+        } else if (b.type === 'image') {
+          const img = parseClaudeImageBlock(b);
+          if (img) blocks.push(img);
         } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
           blocks.push({ type: 'thinking', text: b.thinking });
         } else if (b.type === 'tool_use') {

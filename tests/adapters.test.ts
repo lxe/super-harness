@@ -14,11 +14,13 @@ import {
   parseClaudeJsonlLines,
 } from '../src/main/adapters/claudeAdapter';
 import {
+  coalesceCodexItemRows,
   getCodexTranscriptFingerprint,
   isCodexActiveWriterError,
   loadCodexTranscriptFromPaths,
   parseCodexQueuedPayload,
 } from '../src/main/adapters/codexAdapter';
+import { extractAttachedImagesFromText } from '../src/main/adapters/types';
 import { isTranscriptEquivalent } from '../src/renderer/utils/transcriptCache';
 import { closeSqlitePool } from '../src/main/utils/sqlite';
 import {
@@ -854,5 +856,176 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     };
     expect(isTranscriptEquivalent(base, base)).toBe(true);
     expect(isTranscriptEquivalent(base, changed)).toBe(false);
+  });
+
+  it('extracts [Attached image: ...] lines into structured image blocks', () => {
+    const res = extractAttachedImagesFromText(
+      '[Attached image: /tmp/shot-1.png]\n[Attached image: /tmp/shot-2.jpg]\n\nPlease inspect these.'
+    );
+    expect(res.text).toBe('Please inspect these.');
+    expect(res.images).toEqual([
+      { type: 'image', path: '/tmp/shot-1.png', name: 'shot-1.png' },
+      { type: 'image', path: '/tmp/shot-2.jpg', name: 'shot-2.jpg' },
+    ]);
+  });
+
+  it('renders Codex user [Attached image], localImage, assistant imageView (deduped), and imageGeneration blocks', () => {
+    const rows = [
+      {
+        turn_id: 't1',
+        item_id: 'u1',
+        item_type: 'userMessage',
+        item_json: JSON.stringify({
+          type: 'userMessage',
+          content: [
+            {
+              type: 'text',
+              text: '[Attached image: /tmp/user-shot.png]\n\nI still have a whole bunch of them.',
+            },
+          ],
+        }),
+        created_at_ms: 1000,
+        rollout_ordinal: 1,
+      },
+      // Duplicate imageView of the exact user attachment should be suppressed
+      {
+        turn_id: 't1',
+        item_id: 'iv1',
+        item_type: 'imageView',
+        item_json: JSON.stringify({ type: 'imageView', path: '/tmp/user-shot.png' }),
+        created_at_ms: 1001,
+        rollout_ordinal: 2,
+      },
+      // Assistant viewing a new screenshot SHOULD appear
+      {
+        turn_id: 't1',
+        item_id: 'iv2',
+        item_type: 'imageView',
+        item_json: JSON.stringify({ type: 'imageView', path: '/tmp/assistant-capture.png' }),
+        created_at_ms: 1002,
+        rollout_ordinal: 3,
+      },
+      // Generated image SHOULD appear
+      {
+        turn_id: 't1',
+        item_id: 'ig1',
+        item_type: 'imageGeneration',
+        item_json: JSON.stringify({
+          type: 'imageGeneration',
+          savedPath: '/tmp/generated-art.png',
+        }),
+        created_at_ms: 1003,
+        rollout_ordinal: 4,
+      },
+      // Native Codex Desktop localImage + preamble
+      {
+        turn_id: 't2',
+        item_id: 'u2',
+        item_type: 'userMessage',
+        item_json: JSON.stringify({
+          type: 'userMessage',
+          content: [
+            {
+              type: 'text',
+              text: '# Files mentioned by the user:\n\n## clip.png: /tmp/clip.png\nImage attachment: true\n\nCheck this layout',
+            },
+            { type: 'localImage', path: '/tmp/clip.png' },
+          ],
+        }),
+        created_at_ms: 2000,
+        rollout_ordinal: 5,
+      },
+    ];
+
+    const msgs = coalesceCodexItemRows(rows);
+    expect(msgs).toHaveLength(3);
+    expect(msgs[0].role).toBe('user');
+    expect(msgs[0].blocks).toEqual([
+      { type: 'image', path: '/tmp/user-shot.png', name: 'user-shot.png' },
+      { type: 'text', text: 'I still have a whole bunch of them.' },
+    ]);
+    expect(msgs[1].role).toBe('assistant');
+    expect(msgs[1].blocks).toEqual([
+      { type: 'image', path: '/tmp/assistant-capture.png', name: 'assistant-capture.png' },
+      { type: 'image', path: '/tmp/generated-art.png', name: 'generated-art.png' },
+    ]);
+    expect(msgs[2].role).toBe('user');
+    expect(msgs[2].blocks).toEqual([
+      { type: 'image', path: '/tmp/clip.png', name: 'clip.png' },
+      { type: 'text', text: 'Check this layout' },
+    ]);
+  });
+
+  it('renders Claude base64 user images, [Attached image] text paths, and tool_result screenshots', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-b64',
+        timestamp: '2026-11-26T00:01:00Z',
+        message: {
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/jpeg', data: 'AQID' },
+            },
+            { type: 'text', text: 'Look at this screenshot' },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'a-tool',
+        timestamp: '2026-11-26T00:02:00Z',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/tmp/out.png' } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-tool-res',
+        timestamp: '2026-11-26T00:02:01Z',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tool-1',
+              content: [
+                {
+                  type: 'image',
+                  source: { type: 'base64', media_type: 'image/png', data: 'BAUG' },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-attached',
+        timestamp: '2026-11-26T00:03:00Z',
+        message: {
+          content: '[Attached image: /tmp/from-super-harness.png]\n\nSecond check',
+        },
+      }),
+    ];
+
+    const parsed = parseClaudeJsonlLines(lines, 'claude:img-test', Date.now(), 40);
+    expect(parsed.messages).toHaveLength(3);
+    expect(parsed.messages[0].blocks).toEqual([
+      {
+        type: 'image',
+        path: '',
+        dataUrl: 'data:image/jpeg;base64,AQID',
+        name: 'Attached image',
+      },
+      { type: 'text', text: 'Look at this screenshot' },
+    ]);
+    expect(parsed.messages[1].blocks.some((b) => b.type === 'image' && b.dataUrl === 'data:image/png;base64,BAUG')).toBe(true);
+    expect(parsed.messages[2].blocks).toEqual([
+      { type: 'image', path: '/tmp/from-super-harness.png', name: 'from-super-harness.png' },
+      { type: 'text', text: 'Second check' },
+    ]);
   });
 });

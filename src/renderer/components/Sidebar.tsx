@@ -947,14 +947,18 @@ export const Sidebar: React.FC<Props> = React.memo(({
         )}
       </div>
 
-      {/* Top Harness Switcher Bar (All | Antigravity | Codex | Claude | Muse) with bottom usage bars */}
+      {/* Top Harness Switcher Bar (All | Antigravity | Codex | Claude | Muse) with circular radial gauges */}
       {(() => {
-        const compactTabs = width < 405;
-        const tabLogoSize = compactTabs ? 15 : 13;
+        const tabLogoSize = 15;
+        const anyWorking =
+          workingByHarness.antigravity ||
+          workingByHarness.codex ||
+          workingByHarness.claude ||
+          workingByHarness.muse;
         return (
           <div className="px-2.5 pb-3">
             <SegmentedControl<FilterTab>
-              iconOnly={compactTabs}
+              variant="gauge"
               value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
               onChange={(tab) => {
                 setFilter(tab);
@@ -973,6 +977,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 {
                   id: 'all',
                   label: 'All',
+                  working: anyWorking,
                   progress: {
                     value: usage
                       ? Math.max(

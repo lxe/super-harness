@@ -301,3 +301,31 @@ body,
   color: transparent;
   animation: sh-working-sweep 2.6s ease-in-out infinite;
 }
+
+@keyframes sh-gauge-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sh-gauge-pulse {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.sh-gauge-shimmer {
+  animation: sh-gauge-spin 2.2s linear infinite;
+  will-change: transform;
+}
+
+.sh-gauge-halo {
+  animation: sh-gauge-pulse 2.4s ease-in-out infinite;
+}

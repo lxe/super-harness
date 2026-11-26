@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parseClaudeJsonlLines } from '../src/main/adapters/claudeAdapter';
 import {
   buildClaudeStreamUserMessage,
   buildClaudeStreamWorkerArgs,
@@ -102,5 +103,31 @@ describe('Claude persistent stream-json worker message & args builders', () => {
       '--permission-mode',
       'auto',
     ]);
+  });
+
+  it('clears stale unresolved Bash tool_use on assistant end_turn so Working · Running Bash never sticks', () => {
+    const now = Date.now();
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: now - 5000,
+        message: {
+          stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: 'toolu_orphan_bash', name: 'Bash', input: { command: 'ls' } }],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: now - 1000,
+        message: {
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: "I'm not running anything now." }],
+        },
+      }),
+    ];
+
+    const res = parseClaudeJsonlLines(lines, 'claude:test-stale', now, 50);
+    expect(res.liveActivity?.isWorking).toBe(false);
+    expect(res.liveActivity?.focus).toBeUndefined();
   });
 });

@@ -274,6 +274,7 @@ function inspectClaudeTranscriptActivity(
       }
 
       const type = obj.type;
+      if (obj.isSidechain === true) continue;
       if (type === 'api-request') {
         turnState = 'working';
       } else if (type === 'system') {
@@ -304,7 +305,11 @@ function inspectClaudeTranscriptActivity(
           stopReason === 'stop_sequence' ||
           stopReason === 'max_tokens'
         ) {
-          turnState = pendingTools.size > 0 ? 'working' : 'idle';
+          // A final assistant message with no tool_use concludes the turn;
+          // drop any orphaned/background tool_use IDs from earlier turns so
+          // "Working · Running Bash" never gets stuck after Claude finishes.
+          pendingTools.clear();
+          turnState = 'idle';
         } else {
           turnState = 'working';
         }
@@ -341,6 +346,7 @@ function inspectClaudeTranscriptActivity(
           origin?.kind !== 'task-notification' &&
           !isClaudeLocalCommandText(rawUserText)
         ) {
+          pendingTools.clear();
           turnState = 'working';
         }
       }
@@ -956,6 +962,14 @@ export function parseClaudeJsonlLines(
       continue;
     }
 
+    if (type === 'system') {
+      const sub = obj.subtype;
+      if (sub === 'stop_hook_summary' || sub === 'turn_duration') {
+        pendingToolNames.clear();
+      }
+      continue;
+    }
+
     if (type !== 'user' && type !== 'assistant') continue;
     if (obj.isSidechain === true) continue;
     const msg = obj.message as Record<string, unknown> | undefined;
@@ -1084,6 +1098,9 @@ export function parseClaudeJsonlLines(
         }
 
         currentAssistant = null;
+        if (!isMeta && !isCompactSummary && originKind !== 'task-notification') {
+          pendingToolNames.clear();
+        }
         if (allImages.length > 0) {
           lastUserImagePaths = new Set(allImages.map((i) => i.path).filter(Boolean));
         } else if (!isMeta) {
@@ -1169,6 +1186,8 @@ export function parseClaudeJsonlLines(
     }
 
     // Assistant message
+    const stopReason = msg.stop_reason;
+    let sawAssistantToolUse = false;
     const blocks: UnifiedBlock[] = [];
     if (typeof content === 'string' && content.trim()) {
       blocks.push({ type: 'text', text: content });
@@ -1184,6 +1203,7 @@ export function parseClaudeJsonlLines(
         } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
           blocks.push({ type: 'thinking', text: b.thinking });
         } else if (b.type === 'tool_use') {
+          sawAssistantToolUse = true;
           const name = String(b.name || 'tool');
           const input = (b.input ?? {}) as Record<string, unknown>;
           const toolUseId = typeof b.id === 'string' ? b.id : undefined;
@@ -1255,6 +1275,15 @@ export function parseClaudeJsonlLines(
       }
     }
 
+    if (
+      !sawAssistantToolUse &&
+      (stopReason === 'end_turn' ||
+        stopReason === 'stop_sequence' ||
+        stopReason === 'max_tokens')
+    ) {
+      pendingToolNames.clear();
+    }
+
     if (blocks.length > 0) {
       if (!currentAssistant) {
         currentAssistant = {
@@ -1285,7 +1314,7 @@ export function parseClaudeJsonlLines(
     .map((entry) => entry.item);
   const liveActivity: LiveActivityState = {
     isWorking,
-    focus: activeTool ? `Running ${activeTool}` : undefined,
+    focus: isWorking && activeTool ? `Running ${activeTool}` : undefined,
     steps: latestSteps,
     queuedMessages: visibleNativeQueue.length > 0 ? visibleNativeQueue : undefined,
     lastEventAt: sourceMtimeMs,

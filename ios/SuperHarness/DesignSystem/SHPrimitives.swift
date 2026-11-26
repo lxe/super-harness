@@ -689,32 +689,18 @@ public struct SHRadialGauge<Center: View>: View {
         return Color(hue: hsb.hue, saturation: hsb.sat * 0.82, brightness: min(1, hsb.bright * 1.3 + 0.08))
     }
 
-    /// A comet: a long tail rising to full colour at the head, then a quick fade.
-    static func pulseGradient(color: Color) -> AngularGradient {
-        AngularGradient(
-            gradient: Gradient(stops: [
-                .init(color: color.opacity(0), location: 0.0),
-                .init(color: color.opacity(0.35), location: 60.0 / 360.0),
-                .init(color: color, location: 112.0 / 360.0),
-                .init(color: color.opacity(0), location: 130.0 / 360.0),
-                .init(color: color.opacity(0), location: 1.0),
-            ]),
-            center: .center
-        )
-    }
-
-    /// A short bright bead at the comet's head.
-    static func beadGradient(color: Color) -> AngularGradient {
-        AngularGradient(
-            gradient: Gradient(stops: [
-                .init(color: color.opacity(0), location: 0.0),
-                .init(color: color.opacity(0), location: 98.0 / 360.0),
-                .init(color: color, location: 112.0 / 360.0),
-                .init(color: color.opacity(0), location: 124.0 / 360.0),
-                .init(color: color.opacity(0), location: 1.0),
-            ]),
-            center: .center
-        )
+    /// A soft swell of colour: it rises smoothly from nothing to full strength and falls
+    /// away just as smoothly (a raised-cosine curve over `spanDegrees`), so no point on the
+    /// ring jumps from dark to bright.
+    static func pulseGradient(color: Color, spanDegrees: Double = 200) -> AngularGradient {
+        let steps = 16
+        var stops: [Gradient.Stop] = (0...steps).map { i in
+            let u = Double(i) / Double(steps)
+            let strength = 0.5 - 0.5 * cos(2 * Double.pi * u)
+            return Gradient.Stop(color: color.opacity(strength), location: u * spanDegrees / 360.0)
+        }
+        stops.append(Gradient.Stop(color: color.opacity(0), location: 1.0))
+        return AngularGradient(gradient: Gradient(stops: stops), center: .center)
     }
 
     @ViewBuilder
@@ -740,9 +726,9 @@ public struct SHRadialGauge<Center: View>: View {
                         .animation(.easeOut(duration: 0.3), value: displayFraction)
                 }
 
-                // 3. Working: a pulse of the gauge's own colour travels round the ring. It is
-                // drawn in the arc's hue (never white), so the colour gets brighter where the
-                // pulse passes instead of being washed out.
+                // 3. Working: a soft swell of the gauge's own colour travels round the ring. It
+                // is drawn in the arc's hue (never white), so the colour gets brighter where it
+                // passes instead of being washed out, and it fades in and out with no hard edge.
                 if isWorking {
                     // Over the empty track the pulse is a faint tint of the same hue.
                     Circle()
@@ -760,17 +746,12 @@ public struct SHRadialGauge<Center: View>: View {
                             .blur(radius: size * 0.055)
                             .blendMode(.plusLighter)
                             .mask(arcShape(lineWidth: lineWidth * 2.2).blur(radius: size * 0.045))
-                        // The pulse itself, with a slightly thicker bead at its head.
+                        // The brightened arc itself.
                         Circle()
                             .inset(by: ringInset)
                             .stroke(Self.pulseGradient(color: bright), lineWidth: lineWidth)
                             .rotationEffect(.degrees(sweepDeg))
                             .mask(arcShape(lineWidth: lineWidth))
-                        Circle()
-                            .inset(by: ringInset)
-                            .stroke(Self.beadGradient(color: bright), lineWidth: lineWidth * 1.3)
-                            .rotationEffect(.degrees(sweepDeg))
-                            .mask(arcShape(lineWidth: lineWidth * 1.3))
                     }
                 }
             }

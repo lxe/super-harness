@@ -343,11 +343,21 @@ const controlServer = new ControlServer(
       }
       return catalogService.getCatalog(sessions, force);
     },
-    sendMessage: async (sessionId, prompt, attachments) => {
+    sendMessage: async (sessionId, prompt, attachments, opts) => {
       if (sessionId === 'master:root' && masterEngineRef) {
         return masterEngineRef.handlePrompt(prompt, attachments);
       }
-      return dispatcher.sendToSession(sessionId, prompt, attachments);
+      return dispatcher.sendToSession(sessionId, prompt, attachments, opts);
+    },
+    onMessageSent: (sessionId) => {
+      if (!sessionId.startsWith('master:')) {
+        liveWorkingSessionIds.add(sessionId);
+        broadcastActivityIfChanged();
+      }
+      if (liveSyncRef) {
+        setTimeout(() => liveSyncRef?.notifyExternalActivity(sessionId), 400);
+        setTimeout(() => liveSyncRef?.notifyExternalActivity(sessionId), 1500);
+      }
     },
     abortRun: async (sessionId) => {
       if (sessionId === 'master:root' && masterEngineRef) {

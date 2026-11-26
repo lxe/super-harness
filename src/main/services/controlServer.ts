@@ -28,8 +28,10 @@ export interface ControlServerHooks {
   sendMessage?: (
     sessionId: string,
     prompt: string,
-    attachments?: ImageAttachment[]
+    attachments?: ImageAttachment[],
+    opts?: { force?: boolean }
   ) => Promise<SendMessageResult>;
+  onMessageSent?: (sessionId: string) => void;
   abortRun?: (sessionId: string) => Promise<{ ok: boolean }>;
   saveAttachment?: (dataUrl: string, filename?: string) => Promise<ImageAttachment>;
   readFilePreview?: (
@@ -515,13 +517,75 @@ export class ControlServer {
         if (req.method === 'POST' && url.pathname === '/api/send') {
           const body = await readBody();
           const sessionId = String(body.sessionId || '');
-          const message = String(body.message || '');
+          const message = String(body.message ?? body.prompt ?? '');
           const attachments = Array.isArray(body.attachments)
             ? (body.attachments as ImageAttachment[])
             : undefined;
+          const opts =
+            typeof body.force === 'boolean' ? { force: body.force } : undefined;
           const result = this.hooks.sendMessage
-            ? await this.hooks.sendMessage(sessionId, message, attachments)
-            : await this.dispatcher.sendToSession(sessionId, message, attachments);
+            ? await this.hooks.sendMessage(sessionId, message, attachments, opts)
+            : await this.dispatcher.sendToSession(sessionId, message, attachments, opts);
+
+          if (result.ok && sessionId) {
+            // Ensure liveSync is actively watching this session and immediately push
+            // a fresh transcript snapshot (with an optimistic user turn if the harness
+            // hasn't flushed to disk yet) so mobile composers see submitted turns right away.
+            void this.hooks.watchSession?.('mobile-active', sessionId, 80).catch(() => {});
+            this.hooks.onMessageSent?.(sessionId);
+            void (async () => {
+              try {
+                const tr = await this.registry.getTranscript(sessionId, 80);
+                const trimmed = message.trim();
+                const lastUser = [...tr.messages].reverse().find((m) => m.role === 'user');
+                const lastUserText = lastUser?.blocks
+                  .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                  .map((b) => b.text.trim())
+                  .join('\n')
+                  .trim();
+                const alreadyPersisted = Boolean(trimmed && lastUserText === trimmed);
+                const now = Date.now();
+                const messages = alreadyPersisted
+                  ? tr.messages
+                  : [
+                      ...tr.messages,
+                      {
+                        id: `mobile-opt-${now}`,
+                        role: 'user' as const,
+                        timestamp: now,
+                        blocks: [
+                          ...(attachments ?? []).map((a) => ({
+                            type: 'image' as const,
+                            path: a.path,
+                            name: a.name,
+                            dataUrl: a.previewDataUrl,
+                          })),
+                          ...(trimmed ? [{ type: 'text' as const, text: trimmed }] : []),
+                        ],
+                      },
+                    ];
+                const nextTranscript = {
+                  ...tr,
+                  messages,
+                  totalCount: alreadyPersisted ? tr.totalCount : tr.totalCount + 1,
+                  liveActivity: {
+                    ...(tr.liveActivity ?? { isWorking: true }),
+                    isWorking: true,
+                    lastEventAt: now,
+                  },
+                };
+                this.broadcastEvent('transcript', nextTranscript);
+                this.broadcastEvent('transcript_updated', {
+                  sessionId: nextTranscript.sessionId,
+                  totalCount: nextTranscript.totalCount,
+                  liveActivity: nextTranscript.liveActivity,
+                });
+              } catch {
+                // best-effort optimistic push; liveSync follow-ups will still deliver
+              }
+            })();
+          }
+
           sendJson(result);
           return;
         }

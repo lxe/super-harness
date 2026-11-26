@@ -340,18 +340,34 @@ public final class AppStore {
         self.snapshotFileURL = snapshotFileURL ?? (client == nil ? MobileSnapshotDiskStore.defaultFileURL : nil)
 
         // Hydrate synchronously from on-disk Caches snapshot for instant zero-skeleton cold launch.
+        // Always scrub stale running/isWorking flags from cached disk data so reopening after idle
+        // never shows a ghost spinner before live bootstrap confirms what is actively working now.
         if self.connectionMode == .live,
            let snap = MobileSnapshotDiskStore.load(from: self.snapshotFileURL),
            snap.hostURL == self.hostURLString,
            !snap.sessions.isEmpty {
             self.harnesses = snap.harnesses
-            self.sessions = snap.sessions
+            self.sessions = snap.sessions.map { item in
+                var copy = item
+                if copy.status == .running { copy.status = .idle }
+                return copy
+            }
             self.folders = snap.state.folders
             self.settings = snap.state.settings
             self.usage = snap.usage
             self.catalog = snap.catalog
             self.recentTranscriptOrder = snap.recentTranscriptOrder
-            self.transcriptsBySessionId = snap.recentTranscripts
+            var scrubbed: [String: SessionTranscriptResult] = [:]
+            for (sid, tr) in snap.recentTranscripts {
+                var copy = tr
+                if var la = copy.liveActivity, la.isWorking {
+                    la.isWorking = false
+                    la.focus = nil
+                    copy.liveActivity = la
+                }
+                scrubbed[sid] = copy
+            }
+            self.transcriptsBySessionId = scrubbed
             self.hasBootstrapped = true
         }
 
@@ -436,6 +452,7 @@ public final class AppStore {
             let payload = try await client.fetchBootstrap()
             applyBootstrap(payload)
             hasBootstrapped = true
+            clearStaleTranscriptActivity()
             scheduleSnapshotPersist()
             lastError = nil
             if connectionMode == .live {
@@ -786,6 +803,7 @@ public final class AppStore {
             if hostWorkingSessionIds != nextWorking {
                 hostWorkingSessionIds = nextWorking
             }
+            clearStaleTranscriptActivity()
         case .transcript(let tr):
             applyTranscriptUpdate(tr)
         case .usage(let snapshot):
@@ -1460,11 +1478,40 @@ public final class AppStore {
         if streamingMessagesBySessionId[sessionId] != nil { return true }
         if pendingOutgoingBySessionId[sessionId]?.contains(where: { $0.state == .sending }) == true { return true }
         if hostWorkingSessionIds.contains(sessionId) { return true }
-        if transcriptsBySessionId[sessionId]?.liveActivity?.isWorking == true { return true }
+        // Only trust cached transcript liveActivity for the actively watched session;
+        // unwatched sessions do not receive live transcript pushes so their cached
+        // liveActivity.isWorking can remain stale after the agent goes idle.
+        if selectedSessionId == sessionId,
+           transcriptsBySessionId[sessionId]?.liveActivity?.isWorking == true {
+            return true
+        }
         if let session = sessions.first(where: { $0.id == sessionId }), !session.isMaster, session.isWorking {
             return true
         }
         return false
+    }
+
+    /// Clears stale `liveActivity.isWorking` on cached transcripts when the host explicitly
+    /// reports the session is no longer working (prevents frozen spinners on unwatched rows
+    /// and when re-opening a previously running thread).
+    private func clearStaleTranscriptActivity() {
+        let workingByStatus = Set(sessions.filter { !$0.isMaster && $0.isWorking }.map(\.id))
+        let activeIds = hostWorkingSessionIds.union(workingByStatus)
+        for (sid, tr) in transcriptsBySessionId {
+            guard tr.liveActivity?.isWorking == true else { continue }
+            guard !activeIds.contains(sid),
+                  streamingMessagesBySessionId[sid] == nil,
+                  pendingOutgoingBySessionId[sid]?.contains(where: { $0.state == .sending }) != true else {
+                continue
+            }
+            var updated = tr
+            if var la = updated.liveActivity {
+                la.isWorking = false
+                la.focus = nil
+                updated.liveActivity = la
+            }
+            transcriptsBySessionId[sid] = updated
+        }
     }
 
     /// Synchronously appends an optimistic user message, clears the draft, and dispatches

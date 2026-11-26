@@ -794,4 +794,34 @@ final class AppStoreTests: XCTestCase {
         XCTAssertNotNil(coldStore.transcriptsBySessionId["codex:cx-control-server"])
         XCTAssertFalse(coldStore.messages(for: "codex:cx-control-server").isEmpty)
     }
+
+    func testUnwatchedIdleSessionDoesNotStaySpinningFromStaleTranscriptLiveActivity() async throws {
+        let suite = "sh.test.idle.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("live", forKey: "sh.connectionMode")
+        defaults.set("http://127.0.0.1:47890", forKey: "sh.hostURL")
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, defaults: defaults, environment: [:])
+        await store.bootstrap(quiet: true)
+
+        let sid = "codex:cx-control-server"
+        // Simulate visiting the session while it was actively running
+        store.selectedSessionId = sid
+        let workingTr = SessionTranscriptResult(
+            sessionId: sid,
+            messages: [UnifiedMessage(id: "m1", role: .user, timestamp: 1000, blocks: [.text(text: "hi")])],
+            hasMore: false,
+            sourceMtimeMs: 1000,
+            liveActivity: LiveActivityState(isWorking: true, focus: "Running tests")
+        )
+        store.applyTranscriptUpdate(workingTr)
+        XCTAssertTrue(store.isSessionBusy(sid))
+
+        // Navigate back to the session list (unwatched) and receive host activity = [] (idle)
+        store.selectedSessionId = nil
+        store.hostWorkingSessionIds = []
+        await store.bootstrap(quiet: true)
+        XCTAssertFalse(store.isSessionBusy(sid), "Unwatched idle session must never stay spinning from stale cached transcript liveActivity")
+        XCTAssertEqual(store.transcriptsBySessionId[sid]?.liveActivity?.isWorking, false)
+    }
 }

@@ -41,6 +41,7 @@ describe('session config vocabulary', () => {
     expect(detectClaudeTuiMode('...\n❯ \n  ⏵⏵ bypass permissions on (shift+tab to cycle)')).toBe('bypassPermissions');
     expect(detectClaudeTuiMode('  ⏸ manual mode on · ? for shortcuts')).toBe('manual');
     expect(detectClaudeTuiMode('nothing here')).toBeUndefined();
+    expect(detectClaudeTuiMode('❯ \n  ⏸ plan mode on (shift+tab to cycle)\n' + '\n'.repeat(20))).toBe('plan');
   });
 });
 

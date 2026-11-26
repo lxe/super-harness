@@ -1931,7 +1931,13 @@ export const CLAUDE_TUI_MODE_LABELS: Record<string, string> = {
 
 /** Current permission mode read from the bottom of a captured Claude TUI pane. */
 export function detectClaudeTuiMode(paneText: string): string | undefined {
-  const tail = paneText.split('\n').slice(-10).join('\n').toLowerCase();
+  // The pane is padded with blank rows below short content; look at the last real lines.
+  const tail = paneText
+    .split('\n')
+    .filter((l) => l.trim())
+    .slice(-6)
+    .join('\n')
+    .toLowerCase();
   for (const [mode, label] of Object.entries(CLAUDE_TUI_MODE_LABELS)) {
     if (tail.includes(label)) return mode;
   }

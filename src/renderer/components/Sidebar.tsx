@@ -83,6 +83,7 @@ interface ContextMenuState {
   x: number;
   y: number;
   sessions: UnifiedSession[];
+  sectionLabel?: string;
 }
 
 function resolveGroupCwd(items: UnifiedSession[], isUngrouped = false): string | undefined {
@@ -357,6 +358,30 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const commitRename = (sessionId: string) => {
     onOrganize([{ type: 'rename_session', sessionId, title: renameDraft }]);
     setRenamingId(null);
+  };
+
+  const openSectionMenu = (
+    sectionLabel: string,
+    sectionSessions: UnifiedSession[],
+    x: number,
+    y: number
+  ) => {
+    const seen = new Set<string>();
+    const unique: UnifiedSession[] = [];
+    for (const item of sectionSessions) {
+      if (item.harness === 'master' || seen.has(item.id)) continue;
+      seen.add(item.id);
+      unique.push(item);
+    }
+    if (unique.length === 0) return;
+    const maxY = window.innerHeight - 220;
+    const maxX = window.innerWidth - 230;
+    setCtxMenu({
+      x: Math.max(8, Math.min(x, maxX)),
+      y: Math.max(8, Math.min(y, maxY)),
+      sessions: unique,
+      sectionLabel,
+    });
   };
 
   const renderSessionRow = (
@@ -868,6 +893,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 <FolderGit2 className="w-4 h-4 text-ink-secondary" />
               );
 
+              const allGroupSessions: UnifiedSession[] = [
+                ...(grp.pinnedItems ?? []),
+                ...(grp.sections ? grp.sections.flatMap((sec) => sec.items) : grp.items ?? []),
+              ];
+
               return (
                 <div key={grp.id} className="relative">
                   <SectionHeader
@@ -875,6 +905,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     variant={isHarnessDivider ? 'separator' : 'tree'}
                     collapsed={isTopClosed}
                     onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openSectionMenu(grp.label, allGroupSessions, e.clientX, e.clientY);
+                    }}
                     onAdd={
                       grp.harnessLogo
                         ? () => onNewSession(grp.harnessLogo!)
@@ -928,6 +963,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                 onToggle={() =>
                                   setCollapsed((p) => ({ ...p, [sec.id]: !p[sec.id] }))
                                 }
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  openSectionMenu(sec.label, sec.items, e.clientX, e.clientY);
+                                }}
                                 onAdd={() =>
                                   onNewSession(grp.harnessLogo || filter, {
                                     cwd: resolveGroupCwd(sec.items, isSecUngrouped),
@@ -990,6 +1030,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
           x={ctxMenu.x}
           y={ctxMenu.y}
           targets={ctxMenu.sessions}
+          sectionLabel={ctxMenu.sectionLabel}
           onClose={() => setCtxMenu(null)}
           onClearSelection={() => setSelectedIds(new Set())}
           onOpenInSplit={onOpenInSplit}

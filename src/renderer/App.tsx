@@ -341,16 +341,6 @@ export const App: React.FC = () => {
         return;
       }
       const targetIds = new Set(targets.map((t) => t.id));
-      const results = await Promise.all(
-        targets.map((t) => window.superHarness.archiveSession(t.id, { killTmux }))
-      );
-      const okCount = results.filter((r) => r.ok).length;
-      const failCount = results.length - okCount;
-      showToast(
-        failCount > 0
-          ? `Archived ${okCount}/${results.length} sessions (${failCount} failed)`
-          : `Archived ${okCount} sessions`
-      );
       if (targetIds.has(activeSessionId)) {
         const next = sessions.find(
           (s) => !targetIds.has(s.id) && !s.isSubagent && s.harness !== 'master'
@@ -360,6 +350,32 @@ export const App: React.FC = () => {
       if (splitSessionId && targetIds.has(splitSessionId)) {
         setSplitSessionId(null);
       }
+
+      showToast(`Archiving ${targets.length} sessions…`);
+      // Serialize Codex CLI archive calls to avoid SQLite write lock contention;
+      // run non-Codex archives in small batches.
+      const results: Array<{ ok: boolean }> = [];
+      const codexTargets = targets.filter((t) => t.harness === 'codex');
+      const otherTargets = targets.filter((t) => t.harness !== 'codex');
+
+      for (const t of codexTargets) {
+        results.push(await window.superHarness.archiveSession(t.id, { killTmux }));
+      }
+      for (let i = 0; i < otherTargets.length; i += 4) {
+        const batch = otherTargets.slice(i, i + 4);
+        const batchRes = await Promise.all(
+          batch.map((t) => window.superHarness.archiveSession(t.id, { killTmux }))
+        );
+        results.push(...batchRes);
+      }
+
+      const okCount = results.filter((r) => r.ok).length;
+      const failCount = results.length - okCount;
+      showToast(
+        failCount > 0
+          ? `Archived ${okCount}/${results.length} sessions (${failCount} failed)`
+          : `Archived ${okCount} sessions`
+      );
       void handleRefresh();
     },
     [activeSessionId, splitSessionId, sessions, handleArchiveSession, showToast, handleRefresh]

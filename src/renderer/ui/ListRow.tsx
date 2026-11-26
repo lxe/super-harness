@@ -16,6 +16,7 @@ export interface SectionHeaderProps {
   count?: number;
   working?: boolean;
   sticky?: boolean;
+  onContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
   className?: string;
 }
 
@@ -31,11 +32,13 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   count,
   working = false,
   sticky = true,
+  onContextMenu,
   className,
 }) => {
   if (variant === 'separator') {
     return (
       <div
+        onContextMenu={onContextMenu}
         className={cn(
           'group w-[calc(100%+1.25rem)] -mx-2.5 px-3 h-8 flex items-center gap-1 bg-surface-rail/95 backdrop-blur-md border-y border-line-hairline/75 hover:bg-white/[0.035] transition-colors select-none',
           sticky && 'sticky top-0 z-20',
@@ -83,6 +86,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
   return (
     <div
+      onContextMenu={onContextMenu}
       className={cn(
         'group w-full flex items-center gap-1 px-2 bg-surface-rail/95 backdrop-blur-sm hover:bg-surface-subtle rounded-md transition-colors select-none',
         level === 1

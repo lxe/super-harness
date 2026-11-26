@@ -7,6 +7,8 @@ export interface SidebarContextMenuProps {
   x: number;
   y: number;
   targets: UnifiedSession[];
+  /** When opened by right-clicking a section header (e.g. "Muse"), enables section-level actions. */
+  sectionLabel?: string;
   onClose: () => void;
   onClearSelection: () => void;
   onOpenInSplit: (sessionId: string) => void;
@@ -16,13 +18,14 @@ export interface SidebarContextMenuProps {
 }
 
 /**
- * Shared floating action menu opened by both right-click and the `···` button
- * on sidebar conversation rows (supports single-row and multi-select batch actions).
+ * Shared floating action menu opened by right-click or `···` on sidebar
+ * conversation rows, multi-selections, or entire section headers.
  */
 export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   x,
   y,
   targets,
+  sectionLabel,
   onClose,
   onClearSelection,
   onOpenInSplit,
@@ -32,10 +35,80 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
 }) => {
   if (targets.length === 0) return null;
 
-  const isMulti = targets.length > 1;
+  const isSection = Boolean(sectionLabel);
+  const isMulti = !isSection && targets.length > 1;
   const single = targets[0];
   const hasTmux = targets.some((t) => t.harness === 'claude-tmux' && t.tmuxSessionName);
   const allPinnedTop = targets.every((t) => t.pinnedToTop);
+
+  if (isSection) {
+    return (
+      <PopoverSurface
+        width="md"
+        onClose={onClose}
+        style={{ left: x, top: y }}
+        onClick={(e) => e.stopPropagation()}
+        className="fixed z-50 space-y-0.5"
+      >
+        <MenuHeader>
+          <span className="truncate">{sectionLabel}</span>
+          <span className="ml-auto text-micro tabular-nums text-ink-faint shrink-0">
+            {targets.length}
+          </span>
+        </MenuHeader>
+
+        <MenuItem
+          tone="warning"
+          icon={<Archive className="w-3.5 h-3.5" />}
+          onClick={() => {
+            onClearSelection();
+            onClose();
+            onArchiveMany(targets, false);
+          }}
+        >
+          {targets.length === 1
+            ? 'Archive section (1 session)'
+            : `Archive section (${targets.length})`}
+        </MenuItem>
+
+        {hasTmux && (
+          <MenuItem
+            tone="danger"
+            icon={<Trash2 className="w-3.5 h-3.5" />}
+            onClick={() => {
+              onClearSelection();
+              onClose();
+              onArchiveMany(targets, true);
+            }}
+          >
+            Kill tmux & Archive ({targets.length})
+          </MenuItem>
+        )}
+
+        <MenuDivider />
+        <MenuItem
+          icon={
+            <Pin
+              className={`w-3.5 h-3.5 ${allPinnedTop ? 'text-amber-400' : 'text-ink-muted'}`}
+            />
+          }
+          onClick={() => {
+            onOrganize(
+              targets.map((t) => ({
+                type: allPinnedTop ? 'unpin_top' : 'pin_top',
+                sessionId: t.id,
+              }))
+            );
+            onClose();
+          }}
+        >
+          {allPinnedTop
+            ? `Unpin all (${targets.length}) from top`
+            : `Pin all (${targets.length}) to top`}
+        </MenuItem>
+      </PopoverSurface>
+    );
+  }
 
   return (
     <PopoverSurface

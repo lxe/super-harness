@@ -1025,7 +1025,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
     <aside
       ref={asideRef}
       style={{ width }}
-      className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail shadow-[4px_0_12px_rgba(0,0,0,0.18)] select-none"
+      className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail shadow-[2px_0_6px_rgba(0,0,0,0.22)] select-none"
     >
       {/* Top Bar (draggable window region) */}
       <div className="sh-drag-region h-12 px-3.5 flex items-center justify-between">
@@ -1184,15 +1184,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
         )}
       </div>
 
-      {/* Top Harness Switcher Bar (All | Antigravity | Codex | Claude | Muse) with circular radial gauges */}
+      {/* Top Harness Switcher Bar (Antigravity | Codex | Claude | Muse | Pi) with toggle-to-deselect */}
       {(() => {
         const tabLogoSize = 14;
-        const anyWorking =
-          workingByHarness.antigravity ||
-          workingByHarness.codex ||
-          workingByHarness.claude ||
-          workingByHarness.muse ||
-          workingByHarness.pi;
         return (
           <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-gradient-to-t before:from-black/22 before:to-transparent after:pointer-events-none after:content-[''] after:absolute after:inset-x-0 after:-bottom-2.5 after:h-2.5 after:bg-gradient-to-b after:from-black/26 after:to-transparent">
             <SegmentedControl<FilterTab>
@@ -1200,7 +1194,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
               className="bg-transparent shadow-none rounded-none !p-0"
               value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
               onChange={(tab) => {
-                setFilter(tab);
+                setFilter((prev) => (prev === tab ? 'all' : tab));
                 dismissUsageHover();
               }}
               onItemMouseEnter={(id, el) => {
@@ -1213,24 +1207,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
               }}
               onItemMouseLeave={scheduleCloseUsageHover}
               items={orderGaugeItems([
-                {
-                  id: 'all',
-                  label: 'All',
-                  working: anyWorking,
-                  progress: {
-                    value: usage
-                      ? Math.max(
-                          usage.claude?.barPercent ?? 0,
-                          usage.codex?.barPercent ?? 0,
-                          usage.antigravity?.barPercent ?? 0,
-                          usage.muse?.barPercent ?? 0,
-                          usage.pi?.barPercent ?? 0
-                        )
-                      : null,
-                    tone: 'neutral',
-                    estimated: true,
-                  },
-                },
                 {
                   id: 'antigravity',
                   label: 'AGY',

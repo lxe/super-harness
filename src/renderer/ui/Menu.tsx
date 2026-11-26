@@ -76,7 +76,7 @@ export const PopoverSurface = React.forwardRef<HTMLDivElement, PopoverSurfacePro
         ref={setRefs}
         className={cn(
           'sh-no-drag rounded-2xl bg-[#1e2027]/98 backdrop-blur-md p-1.5 text-caption select-none',
-          'shadow-[0_2px_6px_rgba(0,0,0,0.26),0_10px_24px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.06)]',
+          'shadow-[0_2px_6px_rgba(0,0,0,0.32),0_6px_14px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)]',
           WIDTH_CLASSES[width],
           className
         )}

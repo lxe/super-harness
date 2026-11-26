@@ -56,7 +56,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           : 'h-7 px-2 bg-surface-rail/95 hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary backdrop-blur-sm',
         sticky &&
           (isTopLevel
-            ? "sticky top-2 z-20 before:content-[''] before:absolute before:-top-2 before:inset-x-[-10px] before:h-2 before:bg-surface-rail before:pointer-events-none"
+            ? "sticky top-2 z-20 before:content-[''] before:absolute before:-top-[9px] before:inset-x-[-10px] before:h-2 before:bg-surface-rail before:pointer-events-none"
             : 'sticky top-10 z-10'),
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className

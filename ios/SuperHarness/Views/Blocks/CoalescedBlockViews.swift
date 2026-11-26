@@ -833,7 +833,7 @@ struct CommandFirstLineText: View {
 
     static let font = Font.system(size: 11.5, design: .monospaced)
     /// Longest command that reliably fits a phone-width row at `font`.
-    static let fittingCharacterCount = 38
+    nonisolated static let fittingCharacterCount = 38
 
     nonisolated static func firstLine(of command: String) -> String {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)

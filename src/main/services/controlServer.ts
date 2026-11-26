@@ -38,6 +38,7 @@ export interface ControlServerHooks {
     endLine?: number
   ) => Promise<FilePreviewData>;
   watchSession?: (paneId: string, sessionId: string | null, limit?: number) => Promise<void>;
+  getActiveWorkingSessionIds?: () => string[];
   restartApp?: (opts?: { build?: boolean }) => Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -366,7 +367,19 @@ export class ControlServer {
         }
 
         if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
-          const { harnesses, sessions } = await this.registry.discover();
+          const { harnesses, sessions: rawSessions } = await this.registry.discover();
+          const activeSet = new Set(this.hooks.getActiveWorkingSessionIds?.() ?? []);
+          const sessions = rawSessions.map((s) =>
+            !s.id.startsWith('master:') && activeSet.has(s.id) ? { ...s, status: 'running' as const } : s
+          );
+          const activeWorkingSessionIds = Array.from(
+            new Set([
+              ...activeSet,
+              ...sessions
+                .filter((s) => !s.id.startsWith('master:') && s.status === 'running')
+                .map((s) => s.id),
+            ])
+          ).sort();
           const [usage, catalog] = await Promise.all([
             this.hooks.getUsage ? this.hooks.getUsage(false).catch(() => undefined) : Promise.resolve(undefined),
             this.hooks.getCatalog ? this.hooks.getCatalog(false).catch(() => undefined) : Promise.resolve(undefined),
@@ -376,6 +389,7 @@ export class ControlServer {
             seq: this.eventSeq,
             harnesses,
             sessions,
+            activeWorkingSessionIds,
             state: this.store.getState(),
             usage,
             catalog,
@@ -428,7 +442,19 @@ export class ControlServer {
         }
 
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
-          const { harnesses, sessions } = await this.registry.discover();
+          const { harnesses, sessions: rawSessions } = await this.registry.discover();
+          const activeSet = new Set(this.hooks.getActiveWorkingSessionIds?.() ?? []);
+          const sessions = rawSessions.map((s) =>
+            !s.id.startsWith('master:') && activeSet.has(s.id) ? { ...s, status: 'running' as const } : s
+          );
+          const activeWorkingSessionIds = Array.from(
+            new Set([
+              ...activeSet,
+              ...sessions
+                .filter((s) => !s.id.startsWith('master:') && s.status === 'running')
+                .map((s) => s.id),
+            ])
+          ).sort();
           const q = (url.searchParams.get('q') || '').toLowerCase();
           const harness = url.searchParams.get('harness') || '';
           const liveOnly = url.searchParams.get('live') === 'true';
@@ -451,6 +477,7 @@ export class ControlServer {
             count: filtered.length,
             harnesses,
             sessions: filtered.slice(0, 200),
+            activeWorkingSessionIds,
           });
           return;
         }

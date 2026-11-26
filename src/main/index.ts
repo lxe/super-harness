@@ -256,9 +256,37 @@ let controlServerRef: ControlServer | null = null;
 let masterEngineRef: MasterEngine | null = null;
 let liveSyncRef: LiveSyncService | null = null;
 
+const activeStreamingSessionIds = new Set<string>();
+const liveWorkingSessionIds = new Set<string>();
+let lastBroadcastWorkingKey = '';
+
+function getActiveWorkingSessionIds(): string[] {
+  const merged = new Set<string>([...activeStreamingSessionIds, ...liveWorkingSessionIds]);
+  for (const s of registry.getCached().sessions) {
+    if (!s.id.startsWith('master:') && s.status === 'running') {
+      merged.add(s.id);
+    }
+  }
+  return Array.from(merged).sort();
+}
+
+function broadcastActivityIfChanged(): void {
+  const workingSessionIds = getActiveWorkingSessionIds();
+  const key = workingSessionIds.join(',');
+  if (key === lastBroadcastWorkingKey) return;
+  lastBroadcastWorkingKey = key;
+  controlServerRef?.broadcastEvent('activity', { workingSessionIds });
+}
+
 const emitStream = (ev: StreamEvent) => {
+  if (ev.kind === 'start' || ev.kind === 'delta' || ev.kind === 'block') {
+    activeStreamingSessionIds.add(ev.sessionId);
+  } else if (ev.kind === 'done' || ev.kind === 'error') {
+    activeStreamingSessionIds.delete(ev.sessionId);
+  }
   broadcastToRenderer('sh:stream', ev);
   controlServerRef?.broadcastEvent('stream', ev);
+  broadcastActivityIfChanged();
 };
 
 let refreshInFlight: Promise<{
@@ -271,9 +299,23 @@ async function refreshAndBroadcast() {
   refreshInFlight = registry
     .discover()
     .then((result) => {
-      broadcastToRenderer('sh:sessions-updated', result);
-      controlServerRef?.broadcastEvent('sessions', result);
-      return result;
+      const activeSet = new Set<string>([...activeStreamingSessionIds, ...liveWorkingSessionIds]);
+      const sessions = result.sessions.map((s) =>
+        !s.id.startsWith('master:') && activeSet.has(s.id) ? { ...s, status: 'running' as const } : s
+      );
+      const activeWorkingSessionIds = Array.from(
+        new Set([
+          ...activeSet,
+          ...sessions
+            .filter((s) => !s.id.startsWith('master:') && s.status === 'running')
+            .map((s) => s.id),
+        ])
+      ).sort();
+      const decorated = { ...result, sessions };
+      broadcastToRenderer('sh:sessions-updated', decorated);
+      controlServerRef?.broadcastEvent('sessions', { ...decorated, activeWorkingSessionIds });
+      lastBroadcastWorkingKey = activeWorkingSessionIds.join(',');
+      return decorated;
     })
     .finally(() => {
       refreshInFlight = null;
@@ -321,6 +363,7 @@ const controlServer = new ControlServer(
         await liveSyncRef.watchPane(paneId, sessionId, limit ?? 80);
       }
     },
+    getActiveWorkingSessionIds: () => getActiveWorkingSessionIds(),
     restartApp: async (opts) => scheduleDetachedRestart(opts),
   }
 );
@@ -332,6 +375,14 @@ const liveSync = new LiveSyncService(
     void refreshAndBroadcast();
   },
   (transcript) => {
+    if (typeof transcript.liveActivity?.isWorking === 'boolean') {
+      if (transcript.liveActivity.isWorking) {
+        liveWorkingSessionIds.add(transcript.sessionId);
+      } else {
+        liveWorkingSessionIds.delete(transcript.sessionId);
+      }
+      broadcastActivityIfChanged();
+    }
     broadcastToRenderer('sh:transcript-updated', transcript);
     controlServer.broadcastEvent('transcript', transcript);
     controlServer.broadcastEvent('transcript_updated', {
@@ -342,6 +393,9 @@ const liveSync = new LiveSyncService(
   }
 );
 liveSyncRef = liveSync;
+for (const driver of registry.getDrivers()) {
+  driver.setActivitySink?.((sessionId) => liveSync.notifyExternalActivity(sessionId));
+}
 
 const masterEngine = new MasterEngine(
   store,

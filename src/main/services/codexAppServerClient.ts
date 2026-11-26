@@ -563,6 +563,14 @@ export class CodexAppServerClient {
   ): Promise<boolean> {
     try {
       await this.ensureConnected();
+      if (!this.resumedThreads.has(nativeThreadId)) {
+        try {
+          await this.request('thread/resume', { threadId: nativeThreadId }, 5_000);
+          this.resumedThreads.add(nativeThreadId);
+        } catch {
+          // Proceed to thread/read + turn/steer anyway
+        }
+      }
       let expectedTurnId = this.activeTurns.get(nativeThreadId)?.turnId;
       if (!expectedTurnId) {
         // Also support steering turns started externally (e.g. from Codex Desktop)

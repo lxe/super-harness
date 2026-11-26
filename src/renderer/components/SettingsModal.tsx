@@ -114,6 +114,20 @@ function formatScannedAgo(ts: number): string {
   return `${Math.floor(sec / 60)}m ago`;
 }
 
+const HARNESS_DISPLAY_NAMES: Record<HarnessGroup, string> = {
+  codex: 'OpenAI Codex',
+  claude: 'Claude',
+  antigravity: 'Google Antigravity',
+};
+
+function formatHarnessVersion(raw?: string | null): string | null {
+  if (!raw) return null;
+  const verMatch = raw.match(/\d+\.\d+(?:\.\d+)?/);
+  if (verMatch) return verMatch[0];
+  const first = raw.split(' ')[0]?.trim();
+  return first && !/^(codex|claude|agy)/i.test(first) ? first : null;
+}
+
 function shortenHome(p: string): string {
   return p.replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
 }
@@ -285,9 +299,9 @@ export const SettingsModal: React.FC<Props> = ({
         className="w-[880px] max-w-[92vw] h-[640px] max-h-[86vh] rounded-2xl border border-line-subtle bg-surface-canvas shadow-[0_24px_64px_-12px_rgba(0,0,0,0.8)] flex overflow-hidden select-none"
       >
         {/* Left Navigation Rail */}
-        <aside className="w-56 shrink-0 bg-surface-rail border-r border-line-hairline flex flex-col">
-          <div className="p-3">
-            <div className="h-8 px-2.5 rounded-lg bg-surface-subtle border border-line-hairline focus-within:border-line-subtle flex items-center gap-2">
+        <aside className="w-60 shrink-0 bg-surface-rail border-r border-line-hairline flex flex-col">
+          <div className="px-4 pt-6 pb-4">
+            <div className="h-9 px-3 rounded-lg bg-surface-subtle border border-line-hairline focus-within:border-line-subtle flex items-center gap-2">
               <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" />
               <input
                 ref={searchInputRef}
@@ -300,10 +314,10 @@ export const SettingsModal: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => setNavSearch('')}
-                  className="text-ink-faint hover:text-ink-primary cursor-pointer"
+                  className="text-ink-faint hover:text-ink-primary cursor-pointer focus:outline-none focus-visible:shadow-none"
                   aria-label="Clear search"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               ) : (
                 <kbd className="text-[11px] font-mono text-ink-faint">/</kbd>
@@ -311,12 +325,12 @@ export const SettingsModal: React.FC<Props> = ({
             </div>
           </div>
 
-          <nav className="flex-1 px-2.5 pb-3 space-y-4 overflow-y-auto">
+          <nav className="flex-1 px-3 pb-4 space-y-5 overflow-y-auto">
             {(['General', 'Agents'] as const).map((section) => {
               const items = filteredNavItems.filter((n) => n.section === section);
               if (items.length === 0) return null;
               return (
-                <div key={section} className="space-y-0.5">
+                <div key={section} className="space-y-1">
                   <div className="px-2.5 pb-1 text-micro font-medium text-ink-faint">
                     {section}
                   </div>
@@ -327,7 +341,7 @@ export const SettingsModal: React.FC<Props> = ({
                         key={id}
                         type="button"
                         onClick={() => setTab(id)}
-                        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-label transition-colors cursor-pointer ${
+                        className={`w-full h-9 flex items-center gap-2.5 px-2.5 rounded-lg text-label transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none ${
                           active
                             ? 'bg-white/[0.1] text-ink-primary font-medium'
                             : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.05]'
@@ -352,7 +366,7 @@ export const SettingsModal: React.FC<Props> = ({
             })}
           </nav>
 
-          <div className="px-4 py-3 border-t border-line-hairline text-micro text-ink-faint space-y-1">
+          <div className="px-4 py-4 border-t border-line-hairline text-micro text-ink-faint space-y-1.5">
             <div className="flex items-center justify-between">
               <span>API</span>
               <span className="font-mono text-ink-muted">:{controlPort}</span>
@@ -366,19 +380,19 @@ export const SettingsModal: React.FC<Props> = ({
 
         {/* Right Content Pane */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Pane Header */}
-          <div className="h-14 px-7 flex items-center justify-between gap-4 shrink-0">
-            <div className="min-w-0">
-              <h3 className="text-[18px] font-semibold text-ink-primary tracking-tight leading-tight">
+          {/* Pane Header — equalized 24px top / 32px horizontal breathing room */}
+          <div className="px-8 pt-6 pb-5 flex items-start justify-between gap-4 shrink-0">
+            <div className="min-w-0 pt-0.5">
+              <h3 className="text-[19px] font-semibold text-ink-primary tracking-tight leading-tight">
                 {activeMeta.label}
               </h3>
               {tab === 'harnesses' && (
-                <p className="text-micro text-ink-faint mt-0.5">
+                <p className="text-caption text-ink-faint mt-1">
                   {installedCount} detected · scanned {formatScannedAgo(scannedAt)}
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2.5 shrink-0">
               {tab === 'harnesses' && (
                 <Button
                   size="sm"
@@ -392,14 +406,19 @@ export const SettingsModal: React.FC<Props> = ({
                   Rescan
                 </Button>
               )}
-              <IconButton label="Close settings (Esc)" onClick={onClose}>
+              <IconButton
+                size="md"
+                label="Close settings (Esc)"
+                onClick={onClose}
+                className="-mr-1.5"
+              >
                 <X className="w-4 h-4" />
               </IconButton>
             </div>
           </div>
 
           {/* Scrollable Body */}
-          <div className="flex-1 overflow-y-auto px-7 pb-8 pt-2 space-y-7">
+          <div className="flex-1 overflow-y-auto px-8 pb-8 pt-0 space-y-8">
             {actionMsg && (
               <div className="rounded-xl border border-line-subtle bg-surface-subtle px-3.5 py-2.5 text-caption text-ink-secondary font-mono flex items-center justify-between gap-2">
                 <span className="truncate">{actionMsg}</span>
@@ -653,13 +672,14 @@ export const SettingsModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* HARNESSES — Flat hairline-divided rows, expandable inline details, zero nested cards */}
+            {/* HARNESSES — Flat hairline-divided rows, uniform 2-line geometry, expandable inline details */}
             {tab === 'harnesses' && (
               <div className="divide-y divide-line-hairline border-t border-line-hairline">
                 {harnesses.map((h) => {
                   const enabled = settings.enabledHarnesses[h.id];
                   const isExpanded = Boolean(expandedHarness[h.id]);
-                  const shortVer = h.version?.split(' ')[0];
+                  const shortVer = formatHarnessVersion(h.version);
+                  const displayName = HARNESS_DISPLAY_NAMES[h.id] || h.name;
                   const runtimeBits = [
                     shortVer,
                     h.desktopAppRunning
@@ -690,7 +710,7 @@ export const SettingsModal: React.FC<Props> = ({
                             h.installed &&
                             setExpandedHarness((prev) => ({ ...prev, [h.id]: !prev[h.id] }))
                           }
-                          className={`flex items-center gap-3.5 min-w-0 flex-1 text-left focus:outline-none focus-visible:shadow-none ${
+                          className={`flex items-center gap-4 min-w-0 flex-1 text-left focus:outline-none focus-visible:shadow-none ${
                             h.installed ? 'cursor-pointer group' : 'cursor-default'
                           }`}
                         >
@@ -698,18 +718,20 @@ export const SettingsModal: React.FC<Props> = ({
                             <HarnessLogo harness={h.id} size={18} />
                           </div>
                           <div className="min-w-0">
-                            <div className="flex items-baseline gap-2 flex-wrap">
-                              <span className="text-body font-semibold text-ink-primary group-hover:text-white transition-colors">
-                                {h.name}
+                            <div className="flex items-baseline gap-2 min-w-0">
+                              <span className="text-body font-semibold text-ink-primary group-hover:text-white transition-colors truncate">
+                                {displayName}
                               </span>
                               {runtimeBits && (
-                                <span className="text-micro text-ink-faint">{runtimeBits}</span>
+                                <span className="text-micro text-ink-faint shrink-0">
+                                  {runtimeBits}
+                                </span>
                               )}
                               {h.installed &&
                                 (isExpanded ? (
-                                  <ChevronDown className="w-3.5 h-3.5 text-ink-faint self-center" />
+                                  <ChevronDown className="w-3.5 h-3.5 text-ink-faint self-center shrink-0" />
                                 ) : (
-                                  <ChevronRight className="w-3.5 h-3.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity self-center" />
+                                  <ChevronRight className="w-3.5 h-3.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity self-center shrink-0" />
                                 ))}
                             </div>
                             <div className="text-caption text-ink-muted mt-0.5 truncate">
@@ -719,10 +741,10 @@ export const SettingsModal: React.FC<Props> = ({
                         </button>
 
                         {/* Compact inline right controls: remote state + single action + switch */}
-                        <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex items-center gap-3.5 shrink-0">
                           {h.installed && (
                             <>
-                              <span className="inline-flex items-center gap-1.5 text-caption text-ink-muted">
+                              <span className="inline-flex items-center gap-1.5 text-caption text-ink-muted whitespace-nowrap">
                                 <span
                                   className={`w-1.5 h-1.5 rounded-full ${
                                     h.remoteControlEnabled ? 'bg-emerald-400' : 'bg-zinc-600'
@@ -770,7 +792,7 @@ export const SettingsModal: React.FC<Props> = ({
                           <Switch
                             checked={enabled}
                             disabled={!h.installed}
-                            label={`Enable ${h.name}`}
+                            label={`Enable ${displayName}`}
                             onChange={(next) =>
                               onUpdateSettings({
                                 enabledHarnesses: {
@@ -783,9 +805,9 @@ export const SettingsModal: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      {/* Progressive disclosure: clean key-value details without nested cards */}
+                      {/* Progressive disclosure: clean key-value details aligned under title */}
                       {h.installed && isExpanded && (
-                        <div className="pl-[50px] pb-4 space-y-2 text-caption">
+                        <div className="pl-[52px] pb-4 pt-0.5 space-y-2 text-caption">
                           {h.notes && (
                             <div className="grid grid-cols-[96px_1fr] gap-3 items-baseline">
                               <span className="text-ink-faint">Sessions</span>

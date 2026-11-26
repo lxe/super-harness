@@ -214,9 +214,9 @@ export const SettingsGroup: React.FC<SettingsGroupProps> = ({
   const isExpanded = collapsible ? open : true;
 
   return (
-    <section className={cn('space-y-1', className)}>
+    <section className={cn('space-y-1.5', className)}>
       {(title || description || action) && (
-        <div className="flex items-center justify-between gap-3 pb-1.5">
+        <div className="flex items-center justify-between gap-3 pb-1">
           <div className="min-w-0">
             {title &&
               (collapsible ? (
@@ -269,7 +269,7 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
 }) => (
   <div
     className={cn(
-      'py-3.5',
+      'py-4',
       stacked ? 'space-y-2.5' : 'flex items-center justify-between gap-6',
       className
     )}

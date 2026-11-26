@@ -24,6 +24,8 @@ export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentedItem } from './SegmentedControl';
 export { SectionHeader, NavRow } from './ListRow';
 export type { SectionHeaderProps, NavRowProps } from './ListRow';
+export { RecencyClock, computeRecencyVisual } from './RecencyClock';
+export type { RecencyClockProps, RecencyTier, RecencyVisual } from './RecencyClock';
 export {
   Switch,
   Checkbox,

@@ -98,7 +98,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
     const vis = getHarnessVisual(session.harness);
 
     return (
-      <header className="sh-drag-region h-11 px-4 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0 relative">
+      <header className="sh-drag-region h-12 px-5 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0 relative">
         <div className="flex items-center gap-2.5 min-w-0">
           {session.isSubagent && session.parentSessionId && (
             <Button

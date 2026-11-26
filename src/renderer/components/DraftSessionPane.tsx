@@ -312,7 +312,7 @@ export const DraftSessionPane: React.FC<Props> = ({
   return (
     <section className="flex-1 min-w-0 h-full flex flex-col bg-surface-canvas">
       {/* Header */}
-      <header className="sh-drag-region h-11 px-4 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0">
+      <header className="sh-drag-region h-12 px-5 border-b border-line-hairline flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           {selectedGroup ? (
             <HarnessLogo harness={selectedGroup} size={16} />

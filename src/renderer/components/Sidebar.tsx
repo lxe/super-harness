@@ -35,10 +35,10 @@ import {
   MenuSectionLabel,
   NavRow,
   PopoverSurface,
+  RecencyClock,
   SectionHeader,
   SegmentedControl,
 } from '../ui';
-import { formatRelativeTime } from '../utils/format';
 import {
   filterSidebarSessions,
   flattenVisibleSessions,
@@ -403,9 +403,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
         working={s.status === 'running'}
         meta={
           <>
-            {showPin && showLogo && (
-              <Pin className="w-3 h-3 text-amber-400/80 shrink-0" aria-label="Pinned" />
-            )}
             {s.harness === 'claude-tmux' && (
               <span
                 title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'remote'}`}
@@ -414,11 +411,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 <Laptop className="w-3.5 h-3.5" />
               </span>
             )}
-            {s.status !== 'running' && (
-              <span className="text-caption text-ink-faint">
-                {formatRelativeTime(s.updatedAt)}
-              </span>
-            )}
+            {s.status !== 'running' && <RecencyClock updatedAt={s.updatedAt} />}
           </>
         }
         hoverActions={
@@ -583,9 +576,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
         )}
 
         {globalPinnedSessions.length > 0 && (
-          <div className="pt-0.5 space-y-0.5 max-h-[32vh] overflow-y-auto">
+          <div className="space-y-0.5 max-h-[32vh] overflow-y-auto">
             {globalPinnedSessions.map((s) =>
-              renderSessionRow(s, { showLogo: true, showPin: true })
+              renderSessionRow(s, { showLogo: true, showPin: false })
             )}
           </div>
         )}

@@ -922,7 +922,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             No conversations found
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className={`space-y-3 ${topGroups[0]?.harnessLogo ? '' : 'pt-2'}`}>
             {topGroups.map((grp, grpIdx) => {
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
@@ -931,7 +931,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 return (
                   <div
                     key={grp.id}
-                    className={`pt-1.5 space-y-0.5 ${
+                    className={`space-y-0.5 ${
                       grpIdx < topGroups.length - 1 ? 'pb-2 border-b border-line-hairline/60' : ''
                     }`}
                   >

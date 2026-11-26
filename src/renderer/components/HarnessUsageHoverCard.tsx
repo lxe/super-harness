@@ -205,7 +205,7 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
             : 'bg-ink-primary';
 
   return (
-    <div className="rounded-xl bg-[#14161b] shadow-[inset_0_1px_2px_rgba(0,0,0,0.38)] px-3.5 py-3 space-y-2.5">
+    <div className="rounded-xl bg-black/[0.16] shadow-[inset_0_1px_1px_rgba(0,0,0,0.22)] px-3.5 py-3 space-y-2.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-caption font-medium text-ink-secondary">
           API-equivalent value <span className="text-ink-faint font-normal">(est.)</span>

@@ -99,7 +99,7 @@ const CoalescedTerminalGroup: React.FC<{
         ) : undefined
       }
     >
-      <div className="rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] px-3.5 py-2.5 space-y-2.5 max-h-72 overflow-y-auto font-mono text-micro">
+      <div className="rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] px-3.5 py-2.5 space-y-2.5 max-h-72 overflow-y-auto font-mono text-micro">
         {commands.map((cmd, idx) => (
           <div key={idx} className={idx > 0 ? 'pt-2.5 border-t border-white/[0.05] space-y-1.5' : 'space-y-1.5'}>
             <div className="flex items-start gap-2 text-ink-secondary leading-relaxed">
@@ -523,7 +523,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
           ) : undefined
         }
       >
-        <pre className="rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] px-3.5 py-2.5 max-h-64 overflow-y-auto text-micro text-ink-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
+        <pre className="rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] px-3.5 py-2.5 max-h-64 overflow-y-auto text-micro text-ink-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
           {block.output?.trim() || '(no output)'}
         </pre>
       </CollapsibleCard>
@@ -552,7 +552,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
               {ch.path}
             </button>
             {ch.diff && (
-              <pre className="text-micro font-mono rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] p-3 overflow-x-auto leading-relaxed">
+              <pre className="text-micro font-mono rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] p-3 overflow-x-auto leading-relaxed">
                 {ch.diff.split('\n').map((line, i) => {
                   const cls = line.startsWith('+')
                     ? 'text-emerald-300/90 block'
@@ -587,7 +587,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
         bodyClassName="space-y-2 max-h-64 overflow-y-auto"
       >
         {(block.args || block.output) && (
-          <div className="rounded-xl bg-[#111318] shadow-[inset_0_1px_3px_rgba(0,0,0,0.48)] px-3.5 py-2.5 space-y-2">
+          <div className="rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.28)] px-3.5 py-2.5 space-y-2">
             {block.args && (
               <pre className="text-micro font-mono text-ink-muted whitespace-pre-wrap break-all">
                 {block.args}
@@ -1134,7 +1134,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
                       }
                     : undefined
                 }
-                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary transition-colors ${
+                className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary shadow-[0_4px_14px_-5px_rgba(0,0,0,0.30),0_1px_3px_-1px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.07),inset_0_0_0_1px_rgba(255,255,255,0.03)] transition-colors ${
                   !expanded ? 'cursor-pointer hover:bg-[#272a33]' : ''
                 } ${msg.error ? 'ring-1 ring-rose-500/35' : ''}`}
               >
@@ -1197,7 +1197,7 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
           <div className="flex items-center justify-end gap-2 w-full">
             {renderFailedBadge()}
             <div
-              className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary space-y-2 ${
+              className={`max-w-[82%] rounded-2xl bg-surface-bubble px-4 py-3 text-body text-ink-primary shadow-[0_4px_14px_-5px_rgba(0,0,0,0.30),0_1px_3px_-1px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.07),inset_0_0_0_1px_rgba(255,255,255,0.03)] space-y-2 ${
                 msg.error ? 'ring-1 ring-rose-500/35' : ''
               }`}
             >

@@ -803,13 +803,65 @@ private struct MasterSessionRow: View {
 private struct HarnessSwitcherStrip: View {
     @Bindable var store: AppStore
 
+    /// A gauge being dragged: which harness, and where the finger is inside the strip.
+    private struct DragState: Equatable {
+        var harness: HarnessGroup
+        var x: CGFloat
+    }
+
+    @GestureState private var drag: DragState?
+    @State private var stripWidth: CGFloat = 0
+    /// Lifting the finger at the end of a drag also ends a touch on the gauge's button; taps
+    /// are ignored until this time so a reorder does not change the selected harness.
+    @State private var ignoreTapsUntil: Date = .distantPast
+    /// Set when a gauge was held and released without being dragged: shows its shortcuts.
+    @State private var shortcutsHarness: HarnessGroup?
+    @State private var isAllShortcutsPresented: Bool = false
+
+    private static let cellSpacing: CGFloat = 4
+    private static let stripPadding: CGFloat = 6
+    private static let stripSpace = "harnessStrip"
+
+    private var cellWidth: CGFloat {
+        max(1, (stripWidth - Self.stripPadding * 2 - Self.cellSpacing * 4) / 5)
+    }
+
+    /// Centre of the cell at `slot` (0 is "All", 1...4 are the harnesses), in strip coordinates.
+    private func cellCenter(slot: Int) -> CGFloat {
+        Self.stripPadding + cellWidth / 2 + CGFloat(slot) * (cellWidth + Self.cellSpacing)
+    }
+
     var body: some View {
         // Five equal cells that always fit the row width; no horizontal scrolling.
-        HStack(spacing: 4) {
+        // Hold a harness gauge briefly, then drag it sideways to reorder; "All" stays first.
+        HStack(spacing: Self.cellSpacing) {
             allChip
-            ForEach(HarnessGroup.allCases) { group in
+            ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
+                let isDragged = drag?.harness == group
                 harnessChip(group)
+                    .scaleEffect(isDragged ? 1.14 : 1)
+                    .shadow(color: .black.opacity(isDragged ? 0.45 : 0), radius: 8, y: 3)
+                    .offset(x: isDragged ? (drag?.x ?? 0) - cellCenter(slot: index + 1) : 0)
+                    .zIndex(isDragged ? 1 : 0)
+                    .simultaneousGesture(reorderGesture(for: group))
             }
+        }
+        .animation(.easeInOut(duration: 0.18), value: store.harnessOrder)
+        .animation(.easeOut(duration: 0.15), value: drag?.harness)
+        .onChange(of: drag) { _, state in
+            ignoreTapsUntil = Date().addingTimeInterval(0.5)
+            guard let state else { return }
+            // The harness slot under the finger takes the dragged gauge.
+            let raw = Int(((state.x - Self.stripPadding) / (cellWidth + Self.cellSpacing)).rounded(.down))
+            let targetIndex = min(max(raw - 1, 0), store.harnessOrder.count - 1)
+            let target = store.harnessOrder[targetIndex]
+            if target != state.harness {
+                store.moveHarness(state.harness, onto: target)
+                triggerSelectionHaptic()
+            }
+        }
+        .onChange(of: drag?.harness) { old, new in
+            if old == nil, new != nil { triggerSelectionHaptic() }
         }
         .padding(6)
         .background(SHColor.surfaceSubtle)
@@ -818,13 +870,54 @@ private struct HarnessSwitcherStrip: View {
                 .stroke(SHColor.lineHairline, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: SHRadius.xl, style: .continuous))
+        .coordinateSpace(name: Self.stripSpace)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
+        .confirmationDialog(
+            shortcutsHarness?.title ?? "",
+            isPresented: Binding(get: { shortcutsHarness != nil }, set: { if !$0 { shortcutsHarness = nil } }),
+            titleVisibility: .visible,
+            presenting: shortcutsHarness
+        ) { group in
+            Button("New \(group.title) Session") { store.openDraftChat(for: group) }
+            Button("\(group.title) Usage") { store.openUsageSheet(for: group) }
+        } message: { _ in
+            Text("Hold and drag a gauge to reorder the harnesses.")
+        }
         .padding(.vertical, 2)
+    }
+
+    /// Hold for a moment, then drag. Holding still for longer opens the gauge's menu as before;
+    /// a plain tap still selects the harness.
+    private func reorderGesture(for group: HarnessGroup) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.28)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.stripSpace)))
+            .updating($drag) { value, state, _ in
+                if case .second(true, let dragValue) = value, let dragValue {
+                    state = DragState(harness: group, x: dragValue.location.x)
+                }
+            }
+            .onEnded { value in
+                // Held and let go in place: offer the gauge's shortcuts (this replaces the
+                // long-press context menu, which cannot share the press with dragging).
+                guard case .second(true, let dragValue) = value else { return }
+                let moved = dragValue.map { abs($0.translation.width) + abs($0.translation.height) } ?? 0
+                if moved < 10 {
+                    shortcutsHarness = group
+                }
+            }
+    }
+
+    private func triggerSelectionHaptic() {
+        #if canImport(UIKit)
+        UISelectionFeedbackGenerator().selectionChanged()
+        #endif
     }
 
     private var allChip: some View {
         let isSelected = store.selectedHarnessFilter == nil
         let working = HarnessGroup.allCases.contains { store.isAnyWorking(for: $0) }
         return Button {
+            guard Date() >= ignoreTapsUntil else { return }
             withAnimation(.easeInOut(duration: 0.16)) {
                 store.selectedHarnessFilter = nil
             }
@@ -847,12 +940,17 @@ private struct HarnessSwitcherStrip: View {
         .accessibilityLabel("All harnesses")
         .accessibilityValue(gaugeAccessibilityValue(percent: peakBarPercent, working: working))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .contextMenu {
-            Button {
-                store.openUsageSheet(for: nil)
-            } label: {
-                Label("Usage", systemImage: "chart.bar")
+        // No .contextMenu here: inside a List row SwiftUI applies it to the whole row, which
+        // would swallow the long press on every harness gauge. Holding "All" shows its shortcut
+        // the same way the harness gauges do.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                ignoreTapsUntil = Date().addingTimeInterval(0.5)
+                isAllShortcutsPresented = true
             }
+        )
+        .confirmationDialog("All Harnesses", isPresented: $isAllShortcutsPresented, titleVisibility: .visible) {
+            Button("Usage") { store.openUsageSheet(for: nil) }
         }
     }
 
@@ -863,6 +961,7 @@ private struct HarnessSwitcherStrip: View {
         let working = store.isAnyWorking(for: group)
 
         return Button {
+            guard Date() >= ignoreTapsUntil else { return }
             withAnimation(.easeInOut(duration: 0.16)) {
                 store.selectedHarnessFilter = isSelected ? nil : group
             }
@@ -884,19 +983,6 @@ private struct HarnessSwitcherStrip: View {
         .accessibilityLabel(group.title)
         .accessibilityValue(gaugeAccessibilityValue(percent: barPct, working: working))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        // The chip no longer carries its own '+'; long-press keeps the per-harness shortcuts.
-        .contextMenu {
-            Button {
-                store.openDraftChat(for: group)
-            } label: {
-                Label("New \(group.title) Session", systemImage: "plus")
-            }
-            Button {
-                store.openUsageSheet(for: group)
-            } label: {
-                Label("\(group.title) Usage", systemImage: "chart.bar")
-            }
-        }
     }
 
     private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {

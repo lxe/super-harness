@@ -338,6 +338,40 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(SHShimmerText.bandCenter(at: 2.6 * 7 + 1.3, period: 2.6), 0.5, accuracy: 0.0001, "repeats")
     }
 
+    func testHarnessOrderNormalizesAndMoves() throws {
+        XCTAssertEqual(HarnessOrder.normalized(nil), [.antigravity, .codex, .claude, .muse])
+        XCTAssertEqual(HarnessOrder.normalized(["claude", "codex"]), [.claude, .codex, .antigravity, .muse])
+        XCTAssertEqual(HarnessOrder.normalized(["Muse", "bogus", "muse", "claude"]), [.muse, .claude, .antigravity, .codex])
+
+        let order: [HarnessGroup] = [.antigravity, .codex, .claude, .muse]
+        XCTAssertEqual(HarnessOrder.moving(.muse, onto: .antigravity, in: order), [.muse, .antigravity, .codex, .claude])
+        XCTAssertEqual(HarnessOrder.moving(.antigravity, onto: .claude, in: order), [.codex, .claude, .antigravity, .muse])
+        XCTAssertEqual(HarnessOrder.moving(.codex, onto: .codex, in: order), order)
+
+        let withOrder = try JSONDecoder().decode(SuperHarnessSettings.self, from: Data("{\"harnessOrder\":[\"codex\",\"claude\"]}".utf8))
+        XCTAssertEqual(withOrder.harnessOrder ?? [], ["codex", "claude"])
+        XCTAssertNil(try JSONDecoder().decode(SuperHarnessSettings.self, from: Data("{}".utf8)).harnessOrder)
+    }
+
+    @MainActor
+    func testMovingAHarnessReordersSectionsAndPersists() async {
+        let suite = "HarnessOrderTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+        await store.bootstrap()
+        XCTAssertEqual(store.harnessOrder, [.antigravity, .codex, .claude, .muse])
+
+        store.moveHarness(.claude, onto: .antigravity)
+        XCTAssertEqual(store.harnessOrder, [.claude, .antigravity, .codex, .muse])
+        XCTAssertEqual(defaults.stringArray(forKey: "sh.harnessOrder") ?? [], ["claude", "antigravity", "codex", "muse"])
+
+        // A second store on the same defaults starts with the saved order.
+        let reopened = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { reopened.stopEventStream() }
+        XCTAssertEqual(reopened.harnessOrder, [.claude, .antigravity, .codex, .muse])
+    }
+
     func testDecodesAllUnifiedBlockVariantsIncludingVideoAndUnknownFallback() throws {
         let json = """
         {

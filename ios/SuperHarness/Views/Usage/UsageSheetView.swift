@@ -87,7 +87,7 @@ public struct UsageSheetView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: SHSpacing.sm) {
                 targetPill(title: "All", group: nil)
-                ForEach(HarnessGroup.allCases) { group in
+                ForEach(store.harnessOrder) { group in
                     targetPill(title: group.title, group: group)
                 }
             }
@@ -273,7 +273,10 @@ public struct UsageSheetView: View {
 
     @ViewBuilder
     private func allHarnessesBody(_ usage: UsageSnapshot) -> some View {
-        let summaries = usage.allSummaries
+        let order = store.harnessOrder
+        let summaries = usage.allSummaries.sorted {
+            (order.firstIndex(of: $0.harness) ?? order.count) < (order.firstIndex(of: $1.harness) ?? order.count)
+        }
         let total5h = summaries.reduce(0) { $0 + $1.spend5hUsd }
         let total24h = summaries.reduce(0) { $0 + $1.spend24hUsd }
         let total7d = summaries.reduce(0) { $0 + $1.spend7dUsd }

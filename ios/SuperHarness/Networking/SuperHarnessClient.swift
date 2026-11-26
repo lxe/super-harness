@@ -67,6 +67,7 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func organize(actions: [OrganizeAction]) async throws -> OrganizeResponse
     func fetchFolders() async throws -> FoldersResponse
     func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings?
+    func updateSettings(harnessOrder: [String]) async throws -> SuperHarnessSettings?
     func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse
     func setSessionUnread(sessionId: String, unread: Bool) async throws
     func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse
@@ -98,6 +99,7 @@ public extension SuperHarnessClientProtocol {
     func sendTestPush() async throws -> Bool { false }
     func fetchFolders() async throws -> FoldersResponse { FoldersResponse() }
     func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings? { nil }
+    func updateSettings(harnessOrder: [String]) async throws -> SuperHarnessSettings? { nil }
 }
 
 private final class LockedEventIdBox: @unchecked Sendable {
@@ -484,6 +486,16 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             path: "/api/settings",
             method: "POST",
             body: SettingsBody(sidebarGroupBy: sidebarGroupBy.rawValue)
+        )
+        return res.settings
+    }
+
+    public func updateSettings(harnessOrder: [String]) async throws -> SuperHarnessSettings? {
+        struct SettingsBody: Encodable { let harnessOrder: [String] }
+        let res: UpdateSettingsResponse = try await request(
+            path: "/api/settings",
+            method: "POST",
+            body: SettingsBody(harnessOrder: harnessOrder)
         )
         return res.settings
     }

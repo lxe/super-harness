@@ -941,6 +941,11 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         return settings
     }
 
+    public func updateSettings(harnessOrder: [String]) async throws -> SuperHarnessSettings? {
+        settings.harnessOrder = harnessOrder
+        return settings
+    }
+
     public func organize(actions: [OrganizeAction]) async throws -> OrganizeResponse {
         for action in actions {
             switch action.type {

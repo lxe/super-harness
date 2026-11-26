@@ -142,6 +142,7 @@ public final class AppStore {
         static let dictationTokenAccount = "yapyap-dictation-token"
         static let pushEnabled = "sh.pushEnabled"
         static let allowExtremeReasoning = "sh.allowExtremeReasoning"
+        static let harnessOrder = "sh.harnessOrder"
         static let pushRelayURL = "sh.pushRelayURL"
     }
 
@@ -170,6 +171,10 @@ public final class AppStore {
     public var dictationStatus: DictationStatusResponse?
     public var isCheckingDictation: Bool = false
     public var pushNotificationsEnabled: Bool = true
+    /// Order of the harness gauges, the harness sections in the All view and the usage pills.
+    /// Kept on the phone and shared through the host's `settings.harnessOrder`.
+    public private(set) var harnessOrder: [HarnessGroup] = HarnessGroup.allCases
+
     /// Off by default: "max" and "ultra" thinking effort are offered only after the person enables them.
     public var allowExtremeReasoning: Bool = false {
         didSet { defaults.set(allowExtremeReasoning, forKey: StorageKey.allowExtremeReasoning) }
@@ -253,6 +258,7 @@ public final class AppStore {
     private var isSceneActive: Bool = true
     private var mediaCache: [String: Data] = [:]
     private var mediaFailedKeys: Set<String> = []
+    private var harnessOrderSyncTask: Task<Void, Never>?
     private let snapshotFileURL: URL?
     private var recentTranscriptOrder: [String] = []
     private var saveSnapshotTask: Task<Void, Never>?
@@ -327,6 +333,7 @@ public final class AppStore {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
         self.allowExtremeReasoning = defaults.bool(forKey: StorageKey.allowExtremeReasoning)
+        self.harnessOrder = HarnessOrder.normalized(defaults.stringArray(forKey: StorageKey.harnessOrder))
         let savedRelay = defaults.string(forKey: StorageKey.pushRelayURL)
         if savedRelay == "https://super-harness-push.lxe.workers.dev" || savedRelay?.isEmpty == true {
             self.pushRelayURL = PushNotificationCoordinator.defaultRelayURL
@@ -731,6 +738,7 @@ public final class AppStore {
         }
         if let st = payload.state {
             let hostGroupChanged = settings.sidebarGroupBy != st.settings.sidebarGroupBy
+            adoptHostHarnessOrder(st.settings)
             if settings != st.settings {
                 settings = st.settings
             }
@@ -847,6 +855,7 @@ public final class AppStore {
             }
         case .state(let state):
             let hostGroupChanged = settings.sidebarGroupBy != state.settings.sidebarGroupBy
+            adoptHostHarnessOrder(state.settings)
             if settings != state.settings {
                 settings = state.settings
             }
@@ -1286,7 +1295,7 @@ public final class AppStore {
             return [SessionListSection(id: "recent", title: "Recent", sessions: sorted)]
 
         case .harness:
-            return HarnessGroup.allCases.compactMap { group in
+            return harnessOrder.compactMap { group in
                 let items = sorted.filter { $0.harness.harnessGroup == group }
                 guard !items.isEmpty else { return nil }
                 return SessionListSection(
@@ -1353,7 +1362,7 @@ public final class AppStore {
             if let harnessFilter = selectedHarnessFilter {
                 return buildNativeSections(for: harnessFilter, items: regular, isAllView: false)
             } else {
-                return HarnessGroup.allCases.flatMap { group -> [SessionListSection] in
+                return harnessOrder.flatMap { group -> [SessionListSection] in
                     let items = regular.filter { $0.harness.harnessGroup == group }
                     guard !items.isEmpty else { return [] }
                     return buildNativeSections(for: group, items: items, isAllView: true)
@@ -1460,6 +1469,35 @@ public final class AppStore {
         "#F59E0B",
         "#EC4899",
     ]
+
+    /// Takes the host's harness order when it sends one, unless a local reorder is still on its way there.
+    private func adoptHostHarnessOrder(_ hostSettings: SuperHarnessSettings) {
+        guard harnessOrderSyncTask == nil, let raw = hostSettings.harnessOrder else { return }
+        let next = HarnessOrder.normalized(raw)
+        if next != harnessOrder {
+            harnessOrder = next
+            defaults.set(next.map(\.rawValue), forKey: StorageKey.harnessOrder)
+        }
+    }
+
+    /// Moves a harness to another harness's position (called while a gauge is dragged). The
+    /// order is saved on the phone at once and sent to the host shortly after the last move.
+    public func moveHarness(_ dragged: HarnessGroup, onto target: HarnessGroup) {
+        let next = HarnessOrder.moving(dragged, onto: target, in: harnessOrder)
+        guard next != harnessOrder else { return }
+        harnessOrder = next
+        let names = next.map(\.rawValue)
+        defaults.set(names, forKey: StorageKey.harnessOrder)
+        settings.harnessOrder = names
+        harnessOrderSyncTask?.cancel()
+        harnessOrderSyncTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard !Task.isCancelled, let self else { return }
+            // Hosts that do not know the field yet ignore it; the order still holds on this phone.
+            _ = try? await self.client.updateSettings(harnessOrder: names)
+            if !Task.isCancelled { self.harnessOrderSyncTask = nil }
+        }
+    }
 
     public func setGroupBy(_ mode: SidebarGroupBy) async {
         groupBy = mode

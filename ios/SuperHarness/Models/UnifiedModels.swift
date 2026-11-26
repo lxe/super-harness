@@ -1076,6 +1076,8 @@ public struct SuperHarnessSettings: Codable, Sendable, Equatable {
     public var enabledHarnesses: [String: Bool]?
     public var defaultNewSessionCwd: String
     public var mobileApi: MobileApiSettings?
+    /// Order of the harness gauges and of the harness sections in the All view, shared by clients.
+    public var harnessOrder: [String]?
 
     public init(
         sidebarGroupBy: SidebarGroupBy = .native,
@@ -1101,6 +1103,7 @@ public struct SuperHarnessSettings: Codable, Sendable, Equatable {
         enabledHarnesses = try? c.decodeIfPresent([String: Bool].self, forKey: .enabledHarnesses)
         defaultNewSessionCwd = try c.decodeIfPresent(String.self, forKey: .defaultNewSessionCwd) ?? "~"
         mobileApi = try? c.decodeIfPresent(MobileApiSettings.self, forKey: .mobileApi)
+        harnessOrder = try? c.decodeIfPresent([String].self, forKey: .harnessOrder)
     }
 }
 
@@ -2101,5 +2104,35 @@ public enum ReasoningEffortPolicy {
             return match
         }
         return allowed.last ?? levels.first
+    }
+}
+
+// MARK: - Harness Order
+
+public enum HarnessOrder {
+    /// A complete order from a stored or host-sent list: unknown names and repeats are dropped,
+    /// and any harness missing from the list follows in the default order.
+    public static func normalized(_ raw: [String]?) -> [HarnessGroup] {
+        var result: [HarnessGroup] = []
+        for name in raw ?? [] {
+            if let group = HarnessGroup(rawValue: name.lowercased()), !result.contains(group) {
+                result.append(group)
+            }
+        }
+        for group in HarnessGroup.allCases where !result.contains(group) {
+            result.append(group)
+        }
+        return result
+    }
+
+    /// Moves `dragged` to the position `target` currently has, shifting the others.
+    public static func moving(_ dragged: HarnessGroup, onto target: HarnessGroup, in order: [HarnessGroup]) -> [HarnessGroup] {
+        guard dragged != target,
+              let from = order.firstIndex(of: dragged),
+              let to = order.firstIndex(of: target) else { return order }
+        var next = order
+        next.remove(at: from)
+        next.insert(dragged, at: to)
+        return next
     }
 }

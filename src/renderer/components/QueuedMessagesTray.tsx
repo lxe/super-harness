@@ -35,11 +35,13 @@ export const QueuedMessagesTray: React.FC<Props> = ({
         className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer select-none"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-caption font-semibold text-ink-secondary">Queued Messages</span>
+          <span className="text-caption font-semibold text-ink-secondary leading-[1.35] pt-[1px]">
+            Queued Messages
+          </span>
           <Badge tone="neutral" mono>
             {items.length}
           </Badge>
-          <span className="text-micro text-ink-faint truncate">
+          <span className="text-micro text-ink-faint leading-[1.35] pt-[1px] truncate">
             Sends after agent finishes working
           </span>
         </div>

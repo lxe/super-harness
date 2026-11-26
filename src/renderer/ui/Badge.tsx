@@ -20,8 +20,8 @@ const TONE_CLASSES: Record<BadgeTone, string> = {
 };
 
 const SIZE_CLASSES: Record<BadgeSize, string> = {
-  xs: 'px-1.5 py-0.5 text-[10px] leading-none rounded-md gap-1',
-  sm: 'px-2 py-0.5 text-micro rounded-md gap-1.5',
+  xs: 'h-[18px] min-w-[18px] px-1.5 text-[11px] leading-none rounded-md gap-1',
+  sm: 'h-5 px-2 text-micro leading-none rounded-md gap-1.5',
 };
 
 export const Badge: React.FC<BadgeProps> = ({
@@ -36,16 +36,16 @@ export const Badge: React.FC<BadgeProps> = ({
   return (
     <span
       className={cn(
-        'inline-flex items-center border font-medium whitespace-nowrap select-none',
+        'inline-flex items-center justify-center border font-medium whitespace-nowrap select-none',
         TONE_CLASSES[tone],
         SIZE_CLASSES[size],
-        mono && 'font-mono',
+        mono && 'font-mono tabular-nums',
         className
       )}
       {...rest}
     >
-      {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-      <span>{children}</span>
+      {icon && <span className="shrink-0 inline-flex items-center">{icon}</span>}
+      <span className="leading-none translate-y-[0.5px]">{children}</span>
     </span>
   );
 };

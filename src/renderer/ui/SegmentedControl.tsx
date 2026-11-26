@@ -109,7 +109,97 @@ export function SegmentedControl<T extends string>({
   const hasAnyProgress = items.some((i) => i.progress !== undefined);
   const [dragId, setDragId] = React.useState<T | null>(null);
   const [overId, setOverId] = React.useState<T | null>(null);
+  const dragIdRef = React.useRef<T | null>(null);
+  const overIdRef = React.useRef<T | null>(null);
+  const pendingDragRef = React.useRef<{ id: T; startX: number; startY: number; pointerId: number } | null>(null);
+  const suppressClickRef = React.useRef(false);
+  const onReorderRef = React.useRef(onReorder);
+  const canReorderRef = React.useRef(canReorder);
+  const onItemMouseLeaveRef = React.useRef(onItemMouseLeave);
+  onReorderRef.current = onReorder;
+  canReorderRef.current = canReorder;
+  onItemMouseLeaveRef.current = onItemMouseLeave;
+
   const reorderable = (id: T) => Boolean(onReorder) && (canReorder ? canReorder(id) : true);
+
+  // Pointer-event drag-to-reorder (never HTML5 draggable, which deadlocks Electron on Wayland)
+  React.useEffect(() => {
+    if (variant !== 'gauge') return;
+    const isReorderableId = (id: T) =>
+      Boolean(onReorderRef.current) && (canReorderRef.current ? canReorderRef.current(id) : true);
+
+    const findTargetAtPoint = (x: number, y: number): T | null => {
+      const container = gaugeContainerRef.current;
+      if (!container) return null;
+      const buttons = container.querySelectorAll<HTMLElement>('[data-gauge-id]');
+      for (const btn of buttons) {
+        const rect = btn.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top - 12 && y <= rect.bottom + 12) {
+          const id = btn.dataset.gaugeId as T | undefined;
+          if (id && isReorderableId(id)) return id;
+        }
+      }
+      return null;
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const pending = pendingDragRef.current;
+      if (!pending || e.pointerId !== pending.pointerId) return;
+      if (!dragIdRef.current) {
+        const dist = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
+        if (dist < 5) return;
+        dragIdRef.current = pending.id;
+        setDragId(pending.id);
+        onItemMouseLeaveRef.current?.(pending.id);
+      }
+      const target = findTargetAtPoint(e.clientX, e.clientY);
+      if (target !== overIdRef.current) {
+        overIdRef.current = target;
+        setOverId(target);
+      }
+    };
+
+    const finishDrag = (commit: boolean) => {
+      const dragged = dragIdRef.current;
+      const target = overIdRef.current;
+      pendingDragRef.current = null;
+      if (dragged) {
+        suppressClickRef.current = true;
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+        if (commit && target && target !== dragged && isReorderableId(target)) {
+          onReorderRef.current?.(dragged, target);
+        }
+      }
+      dragIdRef.current = null;
+      overIdRef.current = null;
+      setDragId(null);
+      setOverId(null);
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      const pending = pendingDragRef.current;
+      if (!pending || e.pointerId !== pending.pointerId) return;
+      finishDrag(true);
+    };
+
+    const onPointerCancel = () => {
+      if (!pendingDragRef.current && !dragIdRef.current) return;
+      finishDrag(false);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('blur', onPointerCancel);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('blur', onPointerCancel);
+    };
+  }, [variant, gaugeContainerRef]);
 
   if (variant === 'gauge') {
     return (
@@ -140,43 +230,33 @@ export function SegmentedControl<T extends string>({
           return (
             <button
               key={item.id}
+              data-gauge-id={item.id}
               role="tab"
               aria-selected={active}
               aria-label={item.label}
               title={!onItemMouseEnter ? item.label : undefined}
               type="button"
-              onClick={() => onChange(item.id)}
-              onMouseEnter={(e) => onItemMouseEnter?.(item.id, e.currentTarget)}
+              onClick={() => {
+                if (suppressClickRef.current) return;
+                onChange(item.id);
+              }}
+              onMouseEnter={(e) => {
+                if (dragIdRef.current) return;
+                onItemMouseEnter?.(item.id, e.currentTarget);
+              }}
               onMouseLeave={() => onItemMouseLeave?.(item.id)}
-              draggable={reorderable(item.id)}
-              onDragStart={(e) => {
-                if (!reorderable(item.id)) return;
-                setDragId(item.id);
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', item.id);
-                onItemMouseLeave?.(item.id);
-              }}
-              onDragOver={(e) => {
-                if (!dragId || !reorderable(item.id)) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (overId !== item.id) setOverId(item.id);
-              }}
-              onDragLeave={() => {
-                if (overId === item.id) setOverId(null);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragId && dragId !== item.id && reorderable(item.id)) onReorder?.(dragId, item.id);
-                setDragId(null);
-                setOverId(null);
-              }}
-              onDragEnd={() => {
-                setDragId(null);
-                setOverId(null);
+              onPointerDown={(e) => {
+                if (e.button !== 0 || !reorderable(item.id)) return;
+                pendingDragRef.current = {
+                  id: item.id,
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  pointerId: e.pointerId,
+                };
               }}
               className={cn(
-                'relative h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer select-none focus:outline-none focus-visible:shadow-none',
+                'relative h-10 rounded-xl flex items-center justify-center transition-colors select-none focus:outline-none focus-visible:shadow-none',
+                dragId ? 'cursor-grabbing' : reorderable(item.id) ? 'cursor-grab' : 'cursor-pointer',
                 dragId === item.id && 'opacity-40',
                 overId === item.id && dragId !== item.id && 'ring-1 ring-white/25',
                 active

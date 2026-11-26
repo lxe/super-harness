@@ -1548,6 +1548,43 @@ export function resolveClaudeDispatchGuard(owners: LiveClaudeOwner[]): ClaudeDis
   return { action: 'resume' };
 }
 
+const VALID_CLAUDE_PERM_MODES = new Set([
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+  'manual',
+  'dontAsk',
+  'plan',
+]);
+
+const VALID_CLAUDE_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+export function buildClaudeResumeArgs(
+  session: Pick<UnifiedSession, 'nativeId' | 'permissionMode' | 'model' | 'reasoningEffort'>,
+  promptWithImages: string
+): string[] {
+  const args = [
+    '--resume',
+    session.nativeId,
+    '-p',
+    promptWithImages,
+    '--output-format',
+    'stream-json',
+    '--verbose',
+  ];
+  if (session.model?.trim()) {
+    args.push('--model', session.model.trim());
+  }
+  const effort = session.reasoningEffort?.trim().toLowerCase();
+  if (effort && VALID_CLAUDE_EFFORTS.has(effort)) {
+    args.push('--effort', effort);
+  }
+  if (session.permissionMode && VALID_CLAUDE_PERM_MODES.has(session.permissionMode)) {
+    args.push('--permission-mode', session.permissionMode);
+  }
+  return args;
+}
+
 export function createClaudeDriver(): HarnessDriver {
   const startClaudeSession = async (
     req: StartSessionRequest,
@@ -1732,26 +1769,7 @@ export function createClaudeDriver(): HarnessDriver {
 
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');
-      const args = [
-        '--resume',
-        session.nativeId,
-        '-p',
-        promptWithImages,
-        '--output-format',
-        'stream-json',
-        '--verbose',
-      ];
-      const VALID_PERM_MODES = new Set([
-        'acceptEdits',
-        'auto',
-        'bypassPermissions',
-        'manual',
-        'dontAsk',
-        'plan',
-      ]);
-      if (session.permissionMode && VALID_PERM_MODES.has(session.permissionMode)) {
-        args.push('--permission-mode', session.permissionMode);
-      }
+      const args = buildClaudeResumeArgs(session, promptWithImages);
       ctx.spawnStreaming({
         sessionId: session.id,
         runId,

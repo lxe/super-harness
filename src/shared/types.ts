@@ -49,6 +49,7 @@ export interface UnifiedSession {
   projectName: string;
   gitBranch?: string;
   model?: string;
+  reasoningEffort?: string;
   status: SessionStatus;
   isLive: boolean;
   isRemote: boolean;
@@ -231,6 +232,8 @@ export interface SessionOverride {
   folderId?: string | null;
   nativeSection?: string | null;
   nativeSectionOrder?: number;
+  model?: string;
+  reasoningEffort?: string;
   pinned?: boolean;
   pinnedToTop?: boolean;
   tags?: string[];
@@ -353,6 +356,7 @@ export interface OrganizeAction {
     | 'reorder_folders'
     | 'assign_folder'
     | 'move_section'
+    | 'set_model'
     | 'pin'
     | 'unpin'
     | 'pin_top'
@@ -367,6 +371,8 @@ export interface OrganizeAction {
   folderIds?: string[];
   sectionName?: string | null;
   sectionOrder?: number;
+  model?: string;
+  reasoningEffort?: string;
   sessionId?: string;
   title?: string;
   tags?: string[];

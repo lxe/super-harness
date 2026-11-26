@@ -95,6 +95,7 @@ class AcpConnection {
   private nextId = 1;
   private pending = new Map<number, PendingRpc>();
   private resumedSessions = new Set<string>();
+  private lastAppliedModel = new Map<string, string>();
   private lastTranscriptMtime = new Map<string, number>();
   private activeRuns = new Map<string, ActivePromptRun>(); // nativeSessionId -> run
   private stdoutBuf = '';
@@ -162,6 +163,7 @@ class AcpConnection {
         this.initialized = false;
         this.initPromise = null;
         this.resumedSessions.clear();
+        this.lastAppliedModel.clear();
         const err = new Error(
           `Antigravity ACP (${this.appDataDir}) exited (${code ?? 'signal'}): ${this.stderrTail.trim()}`
         );
@@ -306,6 +308,7 @@ class AcpConnection {
     if (model) {
       try {
         await this.request('session/set_model', { sessionId: sid, modelId: model });
+        this.lastAppliedModel.set(sid, model);
       } catch {
         // Ignore if the ACP server doesn't expose session/set_model for this model
       }
@@ -322,7 +325,8 @@ class AcpConnection {
     attachments: ImageAttachment[] | undefined,
     runId: string,
     onEvent: (ev: StreamEvent) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    model?: string
   ): Promise<void> {
     if (this.activeRuns.has(nativeSessionId)) {
       throw new Error(
@@ -362,6 +366,15 @@ class AcpConnection {
         mcpServers: [],
       });
       this.resumedSessions.add(nativeSessionId);
+    }
+
+    if (model && this.lastAppliedModel.get(nativeSessionId) !== model) {
+      try {
+        await this.request('session/set_model', { sessionId: nativeSessionId, modelId: model });
+        this.lastAppliedModel.set(nativeSessionId, model);
+      } catch {
+        // Ignore if the ACP server rejects session/set_model for this slug
+      }
     }
 
     const promptBlocks: Array<Record<string, unknown>> = [];
@@ -439,6 +452,7 @@ class AcpConnection {
     this.proc = null;
     this.initialized = false;
     this.resumedSessions.clear();
+    this.lastAppliedModel.clear();
     this.activeRuns.clear();
   }
 }
@@ -464,7 +478,8 @@ export class AgyAcpPool {
     attachments: ImageAttachment[] | undefined,
     runId: string,
     onEvent: (ev: StreamEvent) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    model?: string
   ): Promise<void> {
     const dir: AppDataDirName = originApp === 'antigravity-cli' ? 'antigravity-cli' : 'antigravity';
     await this.getConn(dir).sendPrompt(
@@ -475,7 +490,8 @@ export class AgyAcpPool {
       attachments,
       runId,
       onEvent,
-      onComplete
+      onComplete,
+      model
     );
   }
 

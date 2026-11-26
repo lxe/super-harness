@@ -485,9 +485,10 @@ export const App: React.FC = () => {
   }, []);
 
   const handleOrganize = useCallback(async (actions: OrganizeAction[]) => {
-    // Apply instant optimistic UI update for sidebar section/folder moves so drag-and-drop feels immediate
+    // Apply instant optimistic UI updates for sidebar section/folder/model changes
     const sectionMoves = new Map<string, { section: string; order: number }>();
     const folderMoves = new Map<string, string | null>();
+    const modelChanges = new Map<string, { model?: string; reasoningEffort?: string }>();
     for (const act of actions) {
       if (act.type === 'move_section' && act.sessionId) {
         const sec =
@@ -500,14 +501,22 @@ export const App: React.FC = () => {
         });
       } else if (act.type === 'assign_folder' && act.sessionId) {
         folderMoves.set(act.sessionId, act.folderId ?? null);
+      } else if (act.type === 'set_model' && act.sessionId) {
+        modelChanges.set(act.sessionId, {
+          ...(act.model !== undefined ? { model: act.model.trim() || undefined } : {}),
+          ...(act.reasoningEffort !== undefined
+            ? { reasoningEffort: act.reasoningEffort.trim().toLowerCase() || undefined }
+            : {}),
+        });
       }
     }
-    if (sectionMoves.size > 0 || folderMoves.size > 0) {
+    if (sectionMoves.size > 0 || folderMoves.size > 0 || modelChanges.size > 0) {
       setSessions((prev) =>
         prev.map((s) => {
           const secMove = sectionMoves.get(s.id);
           const fldMove = folderMoves.has(s.id) ? folderMoves.get(s.id) : undefined;
-          if (!secMove && fldMove === undefined) return s;
+          const mdlChange = modelChanges.get(s.id);
+          if (!secMove && fldMove === undefined && !mdlChange) return s;
           return {
             ...s,
             ...(secMove
@@ -519,6 +528,14 @@ export const App: React.FC = () => {
                 }
               : {}),
             ...(fldMove !== undefined ? { folderId: fldMove } : {}),
+            ...(mdlChange
+              ? {
+                  ...('model' in mdlChange ? { model: mdlChange.model } : {}),
+                  ...('reasoningEffort' in mdlChange
+                    ? { reasoningEffort: mdlChange.reasoningEffort }
+                    : {}),
+                }
+              : {}),
           };
         })
       );
@@ -929,6 +946,7 @@ export const App: React.FC = () => {
             session={activeSession}
             subagents={activeSubagents}
             folders={folders}
+            catalog={catalog}
             draft={drafts[activeSessionId] ?? EMPTY_DRAFT}
             onDraftChange={handleDraftChange}
             queuedMessages={queuedBySession[activeSessionId] ?? EMPTY_QUEUE}
@@ -949,6 +967,7 @@ export const App: React.FC = () => {
             session={splitSession}
             subagents={splitSubagents}
             folders={folders}
+            catalog={catalog}
             draft={drafts[splitSessionId] ?? EMPTY_DRAFT}
             onDraftChange={handleDraftChange}
             queuedMessages={queuedBySession[splitSessionId] ?? EMPTY_QUEUE}

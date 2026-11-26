@@ -290,6 +290,18 @@ export class ConfigStore {
           };
           break;
         }
+        case 'set_model': {
+          if (!act.sessionId) break;
+          const prev = this.state.overrides[act.sessionId] ?? {};
+          this.state.overrides[act.sessionId] = {
+            ...prev,
+            ...(act.model !== undefined ? { model: act.model.trim() || undefined } : {}),
+            ...(act.reasoningEffort !== undefined
+              ? { reasoningEffort: act.reasoningEffort.trim().toLowerCase() || undefined }
+              : {}),
+          };
+          break;
+        }
         case 'pin': {
           if (!act.sessionId) break;
           this.state.overrides[act.sessionId] = {

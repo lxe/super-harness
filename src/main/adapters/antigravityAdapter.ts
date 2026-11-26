@@ -1142,7 +1142,8 @@ export function createAntigravityDriver(): HarnessDriver {
           () => {
             ctx.triggerRefresh(500);
             ctx.triggerRefresh(2000);
-          }
+          },
+          session.model
         );
         return {
           ok: true,

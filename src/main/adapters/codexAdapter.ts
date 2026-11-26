@@ -1259,11 +1259,50 @@ export function buildCodexStartArgs(req: StartSessionRequest, cwd: string): stri
 export function buildCodexQueueArgs(
   nativeThreadId: string,
   promptWithImages: string,
-  useDaemon: boolean
+  useDaemon: boolean,
+  opts?: { model?: string; reasoningEffort?: string }
 ): string[] {
   const args = ['queue'];
   if (useDaemon) args.push('--remote', 'unix://');
+  if (opts?.model) args.push('-c', `model="${opts.model}"`);
+  if (opts?.reasoningEffort) {
+    args.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
+  }
   args.push('--thread', nativeThreadId, '--message', promptWithImages, '--resume');
+  return args;
+}
+
+export function buildCodexResumeArgs(
+  nativeThreadId: string,
+  prompt: string,
+  attachments: ImageAttachment[] | undefined,
+  useDaemon: boolean,
+  opts?: { model?: string; reasoningEffort?: string }
+): string[] {
+  const hasImages = Boolean(attachments && attachments.length > 0);
+  const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
+  const args = ['exec', 'resume'];
+  if (useDaemon) {
+    args.push('--remote', 'unix://', '--skip-git-repo-check', '--json');
+    if (opts?.model) args.push('-m', opts.model);
+    if (opts?.reasoningEffort) {
+      args.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
+    }
+    args.push(nativeThreadId, promptWithImages);
+  } else {
+    args.push('--skip-git-repo-check', '--json');
+    if (opts?.model) args.push('-m', opts.model);
+    if (opts?.reasoningEffort) {
+      args.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
+    }
+    if (hasImages) {
+      for (const att of attachments!) {
+        args.push('-i', att.path);
+      }
+      args.push('--');
+    }
+    args.push(nativeThreadId, prompt.trim() || 'Inspect the attached image(s).');
+  }
   return args;
 }
 
@@ -1357,26 +1396,10 @@ export function createCodexDriver(): HarnessDriver {
       // to avoid `thread already has an active writer` conflicts. Because `--remote` + `-i`
       // hits an upstream clap parsing bug, pass image paths inline in daemon mode and use
       // `-i <path> --` in standalone CLI mode.
-      const args = ['exec', 'resume'];
-      if (useDaemon) {
-        args.push(
-          '--remote',
-          'unix://',
-          '--skip-git-repo-check',
-          '--json',
-          session.nativeId,
-          promptWithImages
-        );
-      } else {
-        args.push('--skip-git-repo-check', '--json');
-        if (hasImages) {
-          for (const att of attachments!) {
-            args.push('-i', att.path);
-          }
-          args.push('--');
-        }
-        args.push(session.nativeId, prompt.trim() || 'Inspect the attached image(s).');
-      }
+      const args = buildCodexResumeArgs(session.nativeId, prompt, attachments, useDaemon, {
+        model: session.model,
+        reasoningEffort: session.reasoningEffort,
+      });
 
       killActiveRun(session.id);
       const child = spawn(bin, args, {
@@ -1432,7 +1455,10 @@ export function createCodexDriver(): HarnessDriver {
           // Another Codex client (e.g. Codex Desktop) holds the active writer lock on this thread.
           // Route seamlessly through `codex queue --resume` so the active writer receives and runs
           // the message directly with zero error banner.
-          const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon);
+          const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon, {
+            model: session.model,
+            reasoningEffort: session.reasoningEffort,
+          });
           execFile(bin, queueArgs, { cwd, timeout: 15_000 }, (qErr, _qOut, qStderr) => {
             if (qErr) {
               ctx.emitStream({
@@ -1490,7 +1516,10 @@ export function createCodexDriver(): HarnessDriver {
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const useDaemon = hasCodexDaemonSocket();
       const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
-      const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon);
+      const queueArgs = buildCodexQueueArgs(session.nativeId, promptWithImages, useDaemon, {
+        model: session.model,
+        reasoningEffort: session.reasoningEffort,
+      });
 
       try {
         await execFileAsync(bin, queueArgs, { cwd, timeout: 15_000 });

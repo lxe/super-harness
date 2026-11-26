@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText, Loader2, Terminal } from 'lucide-react';
 import type {
+  HarnessCatalog,
   ImageAttachment,
   LiveActivityState,
   OrganizeAction,
@@ -101,6 +102,7 @@ interface Props {
   session: UnifiedSession | undefined;
   subagents: UnifiedSession[];
   folders: SessionFolder[];
+  catalog?: HarnessCatalog | null;
   draft: ComposerDraft;
   onDraftChange: (
     sessionId: string,
@@ -141,6 +143,7 @@ export const SessionPane: React.FC<Props> = ({
   session,
   subagents,
   folders,
+  catalog,
   draft,
   onDraftChange,
   queuedMessages,
@@ -1046,6 +1049,19 @@ export const SessionPane: React.FC<Props> = ({
           <SessionComposer
             session={session}
             isMaster={isMaster}
+            catalog={catalog}
+            onChangeModel={(patch) => {
+              onOrganize([
+                {
+                  type: 'set_model',
+                  sessionId: session.id,
+                  ...(patch.model !== undefined ? { model: patch.model } : {}),
+                  ...(patch.reasoningEffort !== undefined
+                    ? { reasoningEffort: patch.reasoningEffort }
+                    : {}),
+                },
+              ]);
+            }}
             input={input}
             attachments={attachments}
             sending={sending}

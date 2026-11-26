@@ -1246,7 +1246,7 @@ export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.m
             />
           )
         )}
-        {msg.streaming && <WorkingIndicator tone="master" />}
+        {msg.streaming && <WorkingIndicator tone="master" startedAt={msg.timestamp} />}
         {msg.error && (
           <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3.5 py-2.5 text-caption text-rose-300 font-mono">
             {msg.error}

@@ -1065,10 +1065,20 @@ export const SessionPane: React.FC<Props> = ({
               const hasTasks = tasks.length > 0;
               if (!showWorking && !hasTasks) return null;
 
+              const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user' && m.timestamp);
+              const turnStartedAt =
+                lastUserMsg?.timestamp && Date.now() - lastUserMsg.timestamp < 2 * 60 * 60 * 1000
+                  ? lastUserMsg.timestamp
+                  : undefined;
+
               return (
                 <div className="pt-0.5 space-y-1.5">
                   {showWorking && (
-                    <WorkingIndicator tone={session.harnessGroup} focus={liveActivity?.focus} />
+                    <WorkingIndicator
+                      tone={session.harnessGroup}
+                      focus={liveActivity?.focus}
+                      startedAt={turnStartedAt}
+                    />
                   )}
                   {hasTasks && (
                     <div>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { HarnessGroup, UsageSnapshot } from '../../shared/types';
 import { cn } from './cn';
 
@@ -159,27 +159,66 @@ export interface WorkingIndicatorProps {
   focus?: string;
   label?: string;
   size?: 'sm' | 'md';
+  /** Epoch ms when the current working turn began (defaults to mount time). */
+  startedAt?: number;
+  showTimer?: boolean;
   className?: string;
+}
+
+function formatWorkingElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  const remSec = s % 60;
+  if (mins < 60) return `${mins}m ${String(remSec).padStart(2, '0')}s`;
+  const hrs = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  return `${hrs}h ${String(remMin).padStart(2, '0')}m`;
 }
 
 /**
  * Cohesive working status row combining the kinetic WorkingOrb with a subtle
- * shimmering text sweep.
+ * shimmering text sweep and live elapsed timer.
  */
 export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
   tone = 'master',
   focus,
   label,
   size = 'md',
+  startedAt,
+  showTimer = true,
   className,
-}) => (
-  <span
-    className={cn(
-      'inline-flex items-center gap-2 text-caption font-medium select-none',
-      className
-    )}
-  >
-    <WorkingOrb tone={tone} size={size} />
-    <span className="sh-working-shimmer">{focus || label || 'Working'}</span>
-  </span>
-);
+}) => {
+  const mountTimeRef = useRef<number>(Date.now());
+  const originMs = startedAt && startedAt > 0 && startedAt <= Date.now() ? startedAt : mountTimeRef.current;
+  const [elapsedSec, setElapsedSec] = useState<number>(() =>
+    Math.max(0, Math.floor((Date.now() - originMs) / 1000))
+  );
+
+  useEffect(() => {
+    if (!showTimer) return;
+    const update = () => {
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - originMs) / 1000)));
+    };
+    update();
+    const id = window.setInterval(update, 1000);
+    return () => window.clearInterval(id);
+  }, [originMs, showTimer]);
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-2 text-caption font-medium select-none',
+        className
+      )}
+    >
+      <WorkingOrb tone={tone} size={size} />
+      <span className="sh-working-shimmer">{focus || label || 'Working'}</span>
+      {showTimer && (
+        <span className="text-micro font-mono font-normal tabular-nums text-ink-faint">
+          {formatWorkingElapsed(elapsedSec)}
+        </span>
+      )}
+    </span>
+  );
+};

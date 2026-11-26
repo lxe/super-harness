@@ -43,10 +43,15 @@ body,
   app-region: no-drag;
 }
 
-/* Ultra-subtle scrollbars */
+/* Ultra-subtle scrollbars (no native arrow buttons) */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
+}
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -60,16 +65,14 @@ body,
 }
 
 /* Hover-only hairline scrollbar for compact menus and popovers */
-.sh-scroll-hover {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-.sh-scroll-hover:hover {
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
-}
 .sh-scroll-hover::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
+}
+.sh-scroll-hover::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .sh-scroll-hover::-webkit-scrollbar-track {
   background: transparent;

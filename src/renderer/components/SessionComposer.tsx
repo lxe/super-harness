@@ -16,7 +16,14 @@ import type {
   ImageAttachment,
   UnifiedSession,
 } from '../../shared/types';
-import { IconButton, PopoverSurface } from '../ui';
+import {
+  Badge,
+  IconButton,
+  MenuDivider,
+  MenuItem,
+  MenuSectionLabel,
+  PopoverSurface,
+} from '../ui';
 import { getHarnessVisual, mediaUrlForPath } from '../utils/format';
 import {
   formatEffortLabel,
@@ -295,16 +302,16 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
 
                   {modelMenuOpen && (
                     <PopoverSurface
-                      width="auto"
+                      width="md"
                       onClose={() => {
                         setModelMenuOpen(false);
                         setModelSearch('');
                       }}
                       ignoreRef={modelTriggerRef}
-                      className="absolute left-0 bottom-full mb-2 z-50 w-[280px] p-0 overflow-hidden"
+                      className="absolute left-0 bottom-full mb-2 z-50 w-64"
                     >
                       {modelControls.models.length > 6 && (
-                        <div className="px-3 h-9 flex items-center gap-2 border-b border-line-hairline bg-white/[0.015]">
+                        <div className="mb-1.5 flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code/80 border border-line-hairline focus-within:border-line-subtle transition-colors">
                           <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
                           <input
                             autoFocus
@@ -318,7 +325,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                               }
                             }}
                             placeholder="Filter models…"
-                            className="flex-1 min-w-0 bg-transparent text-[12.5px] leading-none text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+                            className="flex-1 min-w-0 bg-transparent text-caption text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
                           />
                           {modelSearch && (
                             <button
@@ -333,59 +340,38 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                         </div>
                       )}
 
-                      <div className="max-h-[268px] overflow-y-auto sh-scroll-hover p-1.5 space-y-0.5">
+                      <div className="max-h-64 overflow-y-auto sh-scroll-hover space-y-0.5">
                         {filteredModels.length === 0 ? (
-                          <div className="px-3 py-5 text-center text-[12px] text-ink-muted">
+                          <div className="px-2.5 py-4 text-center text-caption text-ink-muted">
                             No matching models
                           </div>
                         ) : (
                           groupedModels.map(({ group, items }, gIdx) => (
-                            <div
-                              key={group || 'all'}
-                              className={gIdx > 0 ? 'pt-1.5 mt-1 border-t border-line-hairline space-y-0.5' : 'space-y-0.5'}
-                            >
-                              {group && (
-                                <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-faint">
-                                  {group}
-                                </div>
-                              )}
+                            <div key={group || 'all'} className="space-y-0.5">
+                              {gIdx > 0 && <MenuDivider />}
+                              {group && <MenuSectionLabel>{group}</MenuSectionLabel>}
                               {items.map((m) => {
                                 const isSelected = m.id === activeModelId;
                                 return (
-                                  <button
+                                  <MenuItem
                                     key={m.id}
-                                    type="button"
+                                    active={isSelected}
+                                    title={m.id}
                                     onClick={() => handleSelectModel(m.id)}
-                                    className={`w-full px-2.5 py-[7px] rounded-lg text-left flex items-center justify-between gap-2.5 transition-colors cursor-pointer ${
-                                      isSelected
-                                        ? 'bg-white/[0.08] text-ink-primary'
-                                        : 'text-ink-secondary hover:bg-white/[0.045] hover:text-ink-primary'
-                                    }`}
-                                  >
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="text-[12.5px] font-medium leading-[1.3] tracking-[-0.006em] truncate">
-                                          {m.label}
-                                        </span>
-                                        {m.isDefault && (
-                                          <span className="shrink-0 text-[10px] font-medium leading-none tracking-[0.01em] px-1.5 py-[3px] rounded bg-white/[0.06] text-ink-muted">
-                                            Default
-                                          </span>
+                                    rightSlot={
+                                      <span className="inline-flex items-center gap-1.5">
+                                        {m.isDefault && <Badge tone="neutral">Default</Badge>}
+                                        {isSelected && (
+                                          <Check
+                                            className="w-3.5 h-3.5 text-ink-primary"
+                                            strokeWidth={2}
+                                          />
                                         )}
-                                      </div>
-                                      {m.label !== m.id && (
-                                        <div className="mt-0.5 text-[11px] leading-[1.25] text-ink-faint truncate">
-                                          {m.id}
-                                        </div>
-                                      )}
-                                    </div>
-                                    {isSelected && (
-                                      <Check
-                                        className="w-3.5 h-3.5 text-ink-primary shrink-0"
-                                        strokeWidth={2}
-                                      />
-                                    )}
-                                  </button>
+                                      </span>
+                                    }
+                                  >
+                                    <span className="truncate font-medium">{m.label}</span>
+                                  </MenuItem>
                                 );
                               })}
                             </div>
@@ -426,54 +412,46 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
 
                     {thinkingMenuOpen && (
                       <PopoverSurface
-                        width="auto"
+                        width="md"
                         onClose={() => setThinkingMenuOpen(false)}
                         ignoreRef={thinkingTriggerRef}
-                        className="absolute left-0 bottom-full mb-2 z-50 w-[232px] p-0 overflow-hidden"
+                        className="absolute left-0 bottom-full mb-2 z-50 w-56"
                       >
-                        <div className="px-3 py-2 border-b border-line-hairline text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-faint">
-                          Thinking effort
-                        </div>
-                        <div className="p-1.5 space-y-0.5">
+                        <MenuSectionLabel>Thinking effort</MenuSectionLabel>
+                        <div className="space-y-0.5 mt-0.5">
                           {modelControls.thinkingLevels.map((lvl) => {
                             const isSelected = modelControls.activeEffort === lvl;
                             const isDefault = modelControls.defaultEffort === lvl;
                             const hint = getEffortHint(lvl);
                             return (
-                              <button
+                              <MenuItem
                                 key={lvl}
-                                type="button"
+                                active={isSelected}
+                                title={hint || undefined}
                                 onClick={() => handleSelectThinking(lvl)}
-                                className={`w-full px-2.5 py-[7px] rounded-lg text-left flex items-center justify-between gap-2.5 transition-colors cursor-pointer ${
-                                  isSelected
-                                    ? 'bg-white/[0.08] text-ink-primary'
-                                    : 'text-ink-secondary hover:bg-white/[0.045] hover:text-ink-primary'
-                                }`}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[12.5px] font-medium leading-[1.3] tracking-[-0.006em]">
-                                      {formatEffortLabel(lvl)}
-                                    </span>
-                                    {isDefault && (
-                                      <span className="shrink-0 text-[10px] font-medium leading-none tracking-[0.01em] px-1.5 py-[3px] rounded bg-white/[0.06] text-ink-muted">
-                                        Default
-                                      </span>
+                                rightSlot={
+                                  <span className="inline-flex items-center gap-1.5">
+                                    {isDefault && <Badge tone="neutral">Default</Badge>}
+                                    {isSelected && (
+                                      <Check
+                                        className="w-3.5 h-3.5 text-ink-primary"
+                                        strokeWidth={2}
+                                      />
                                     )}
+                                  </span>
+                                }
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-medium leading-snug">
+                                    {formatEffortLabel(lvl)}
                                   </div>
                                   {hint && (
-                                    <div className="mt-0.5 text-[11px] leading-[1.25] text-ink-faint truncate">
+                                    <div className="text-micro text-ink-faint truncate leading-tight">
                                       {hint}
                                     </div>
                                   )}
                                 </div>
-                                {isSelected && (
-                                  <Check
-                                    className="w-3.5 h-3.5 text-ink-primary shrink-0"
-                                    strokeWidth={2}
-                                  />
-                                )}
-                              </button>
+                              </MenuItem>
                             );
                           })}
                         </div>

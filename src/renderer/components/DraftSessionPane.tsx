@@ -8,6 +8,7 @@ import {
   FolderOpen,
   FolderPlus,
   HelpCircle,
+  ImagePlus,
   Loader2,
   Radio,
   Search,
@@ -19,10 +20,13 @@ import type {
   HarnessCatalog,
   HarnessGroup,
   HarnessModelOption,
+  ImageAttachment,
   StartSessionRequest,
 } from '../../shared/types';
 import { Badge, Button, IconButton, MenuDivider, PopoverSurface } from '../ui';
+import { mediaUrlForPath } from '../utils/format';
 import { HarnessLogo } from './HarnessLogo';
+import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
 
 export interface DraftConversation {
   id: string;
@@ -32,6 +36,7 @@ export interface DraftConversation {
   reasoningEffort?: string;
   remoteControl: boolean;
   prompt: string;
+  attachments?: ImageAttachment[];
   createdAt: number;
 }
 
@@ -84,6 +89,13 @@ export const DraftSessionPane: React.FC<Props> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [highlightPicker, setHighlightPicker] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [lightbox, setLightbox] = useState<{ images: PreviewImageItem[]; index: number } | null>(
+    null
+  );
+  const attachments = draft.attachments ?? [];
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   // Remember preferred Claude launch mode (defaults to idiomatic tmux + remote-control)
   const [claudeMode, setClaudeMode] = useState<'claude-tmux' | 'claude-cli'>(
@@ -271,6 +283,95 @@ export const DraftSessionPane: React.FC<Props> = ({
     onRefreshCatalog?.();
   };
 
+  const appendAttachments = (nextItems: ImageAttachment[]) => {
+    if (nextItems.length === 0) return;
+    const prev = draftRef.current.attachments ?? [];
+    onUpdateDraft({ attachments: [...prev, ...nextItems] });
+  };
+
+  const handleRemoveAttachment = (id: string) => {
+    const prev = draftRef.current.attachments ?? [];
+    onUpdateDraft({ attachments: prev.filter((a) => a.id !== id) });
+  };
+
+  const ingestFiles = async (files: FileList | File[]) => {
+    const all = Array.from(files);
+    const savedImages: ImageAttachment[] = [];
+    const nonImagePaths: string[] = [];
+
+    for (const file of all) {
+      if (file.type.startsWith('image/')) {
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
+        if (!dataUrl) continue;
+        const saved = await window.superHarness.saveAttachment(dataUrl, file.name || undefined);
+        savedImages.push(saved);
+      } else {
+        const filePath = (file as File & { path?: string }).path;
+        if (filePath) nonImagePaths.push(filePath);
+      }
+    }
+
+    if (savedImages.length > 0) {
+      appendAttachments(savedImages);
+    }
+    if (nonImagePaths.length > 0) {
+      const curPrompt = draftRef.current.prompt;
+      const suffix = nonImagePaths.join('\n');
+      onUpdateDraft({
+        prompt: curPrompt.trim() ? `${curPrompt}\n${suffix}` : suffix,
+      });
+    }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files: File[] = [];
+    const seen = new Set<string>();
+    const pushFile = (f: File | null) => {
+      if (!f) return;
+      const key = `${f.name}:${f.size}:${f.type}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      files.push(f);
+    };
+
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (const item of Array.from(items)) {
+        if (item.kind === 'file') pushFile(item.getAsFile());
+      }
+    }
+    if (files.length === 0 && e.clipboardData?.files?.length) {
+      for (const f of Array.from(e.clipboardData.files)) pushFile(f);
+    }
+
+    if (files.length > 0) {
+      e.preventDefault();
+      await ingestFiles(files);
+      return;
+    }
+
+    // Fallback for Wayland/Electron clipboards where clipboardData omits image items
+    const plainText = e.clipboardData?.getData('text/plain') || '';
+    if (!plainText) {
+      const nativeImg = await window.superHarness.readClipboardImage();
+      if (nativeImg) {
+        appendAttachments([nativeImg]);
+      }
+    }
+  };
+
+  const handlePickImages = async () => {
+    const picked = await window.superHarness.pickImageFiles();
+    if (picked.length > 0) {
+      appendAttachments(picked);
+    }
+  };
+
   const handleLaunch = async () => {
     if (!draft.harness) {
       setHighlightPicker(true);
@@ -287,6 +388,7 @@ export const DraftSessionPane: React.FC<Props> = ({
         model: draft.model.trim() || undefined,
         reasoningEffort: draft.reasoningEffort?.trim() || undefined,
         prompt: draft.prompt.trim() || undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
         remoteControl: draft.remoteControl,
       });
       if (!res.ok) {
@@ -533,12 +635,76 @@ export const DraftSessionPane: React.FC<Props> = ({
           )}
 
           {/* Inline Composer */}
-          <div className="rounded-2xl border border-line-subtle focus-within:border-line-strong bg-surface-subtle transition-colors">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (e.dataTransfer.files?.length) {
+                void ingestFiles(e.dataTransfer.files);
+              }
+            }}
+            className={`rounded-2xl border bg-surface-subtle transition-colors ${
+              dragOver
+                ? 'border-line-strong bg-surface-raised'
+                : 'border-line-subtle focus-within:border-line-strong'
+            }`}
+          >
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3.5 pt-3">
+                {attachments.map((att, idx) => (
+                  <div
+                    key={att.id}
+                    className="relative group rounded-lg overflow-hidden border border-line-subtle bg-black/40 w-16 h-16"
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLightbox({
+                          images: attachments.map((a) => ({
+                            src: a.previewDataUrl || mediaUrlForPath(a.path),
+                            name: a.name,
+                            path: a.path,
+                          })),
+                          index: idx,
+                        })
+                      }
+                      title={`Preview ${att.name}`}
+                      className="w-full h-full block cursor-pointer"
+                    >
+                      <img
+                        src={att.previewDataUrl || mediaUrlForPath(att.path)}
+                        alt={att.name}
+                        className="w-full h-full object-cover hover:brightness-110 transition-all"
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveAttachment(att.id);
+                      }}
+                      title="Remove image"
+                      aria-label="Remove image"
+                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/80 text-ink-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               rows={2}
               value={draft.prompt}
               onChange={(e) => onUpdateDraft({ prompt: e.target.value })}
+              onPaste={(e) => void handlePaste(e)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -547,14 +713,20 @@ export const DraftSessionPane: React.FC<Props> = ({
               }}
               placeholder={
                 headerTitle
-                  ? `Message ${headerTitle}…`
-                  : 'Select a harness above, then type your message…'
+                  ? `Message ${headerTitle}, paste screenshots (Ctrl+V), or drop files…`
+                  : 'Select a harness above, then type or paste screenshots (Ctrl+V)…'
               }
               className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-body text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none max-h-60 overflow-y-auto leading-relaxed"
             />
 
             <div className="px-3 pb-3 pt-1 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <IconButton
+                  label="Attach image (or Ctrl+V to paste)"
+                  onClick={() => void handlePickImages()}
+                >
+                  <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                </IconButton>
                 {/* Project Selector Popover */}
                 <div className="relative">
                   <button
@@ -927,6 +1099,14 @@ export const DraftSessionPane: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </section>
   );
 };

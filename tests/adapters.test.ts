@@ -138,8 +138,9 @@ describe('Claude transcript parsing & tail parity', () => {
     ];
 
     const res = parseClaudeJsonlLines(lines, 'claude-desktop:test', 2000, 60);
-    // 1 system notice + 1 user + 1 coalesced assistant
-    expect(res.messages).toHaveLength(3);
+    // 1 system notice + 1 user + 1 coalesced assistant + 1 mid-turn steer still pending
+    expect(res.messages).toHaveLength(4);
+    expect(res.messages[3]).toMatchObject({ role: 'user', blocks: [{ type: 'text', text: 'Second queued' }] });
     // Unique IDs even with duplicate uuid
     const ids = res.messages.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -163,8 +164,7 @@ describe('Claude transcript parsing & tail parity', () => {
       expect(q.questions[0].answer).toBe('Blue');
     }
 
-    expect(res.liveActivity?.queuedMessages).toHaveLength(1);
-    expect(res.liveActivity?.queuedMessages?.[0].text).toBe('Second queued');
+    expect(res.liveActivity?.queuedMessages).toBeUndefined();
   });
 
   it('matches tail messages identically on multi-MB truncated Claude JSONL', async () => {
@@ -813,9 +813,28 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
       }),
     ];
     const parsed = parseClaudeJsonlLines(lines, 'claude:test-q', Date.now(), 40);
-    expect(parsed.liveActivity?.queuedMessages?.map((q) => q.text)).toEqual([
-      'Still queued follow-up',
-    ]);
+    // Claude delivers mid-turn messages into the running turn, so pending ones render
+    // in the chat as steers, never in the queue tray.
+    expect(parsed.liveActivity?.queuedMessages).toBeUndefined();
+    expect(
+      parsed.messages.filter((m) => m.role === 'user').map((m) => (m.blocks[0] as { text: string }).text)
+    ).toEqual(['Still queued follow-up']);
+  });
+
+  it('renders a delivered queued_command at its delivery point exactly once', () => {
+    const lines = [
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: '2026-11-26T00:01:00Z', content: 'steer me' }),
+      JSON.stringify({
+        type: 'attachment',
+        uuid: 'a1',
+        timestamp: '2026-11-26T00:01:00Z',
+        attachment: { type: 'queued_command', prompt: 'steer me', commandMode: 'prompt' },
+      }),
+      JSON.stringify({ type: 'queue-operation', operation: 'remove', timestamp: '2026-11-26T00:01:05Z', content: 'steer me' }),
+    ];
+    const parsed = parseClaudeJsonlLines(lines, 'claude:test-q2', Date.now(), 40);
+    expect(parsed.messages.map((m) => m.role)).toEqual(['user']);
+    expect(parsed.liveActivity?.queuedMessages).toBeUndefined();
   });
 
   it('detects queued message content changes in isTranscriptEquivalent even at equal queue length', () => {

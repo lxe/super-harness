@@ -21,6 +21,7 @@ import type {
 } from '../../shared/types';
 import { ClaudeStreamPool } from '../services/claudeStreamClient';
 import { readProgressiveJsonlTail } from '../utils/tailReader';
+import { RemoteClaudeMirror } from './remoteClaude';
 import {
   cleanTextPreview,
   getBinaryVersion,
@@ -145,6 +146,8 @@ interface ActiveClaudeSessionJson {
   hostSessionId?: string;
   tmux?: string;
   name?: string;
+  /** 'derived' = Claude Code's placeholder (e.g. `lxe-73`); anything else was chosen by a person. */
+  nameSource?: string;
   status?: string;
   bridgeSessionId?: string;
 }
@@ -426,6 +429,137 @@ function readJsonlHeadMeta(filePath: string): {
   }
 }
 
+const titleTailCache = new Map<
+  string,
+  { mtimeMs: number; size: number; meta: { customTitle?: string; aiTitle?: string } }
+>();
+
+/**
+ * Latest `custom-title` / `ai-title` records in a Claude transcript. Claude Code appends
+ * (and re-appends) these after turns, so they live near the end of the file, not the head.
+ */
+export function readJsonlTitleMeta(filePath: string): { customTitle?: string; aiTitle?: string } {
+  try {
+    const st = fs.statSync(filePath);
+    const cached = titleTailCache.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.meta;
+    const len = Math.min(st.size, 262144);
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      fs.readSync(fd, buf, 0, len, st.size - len);
+    } finally {
+      fs.closeSync(fd);
+    }
+    const meta: { customTitle?: string; aiTitle?: string } = {};
+    for (const line of buf.toString('utf8').split('\n')) {
+      const isCustom = line.includes('"custom-title"');
+      const isAi = !isCustom && line.includes('"ai-title"');
+      if (!isCustom && !isAi) continue;
+      try {
+        const obj = JSON.parse(line) as Record<string, unknown>;
+        if (obj.type === 'custom-title' && typeof obj.customTitle === 'string' && obj.customTitle.trim()) {
+          meta.customTitle = obj.customTitle;
+        } else if (obj.type === 'ai-title' && typeof obj.aiTitle === 'string' && obj.aiTitle.trim()) {
+          meta.aiTitle = obj.aiTitle;
+        }
+      } catch {
+        // partial first line of the window
+      }
+    }
+    titleTailCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, meta });
+    return meta;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Title precedence for a Claude transcript: a name a person chose (Desktop title, `--name`,
+ * `/rename`) beats Claude's AI title, which beats a derived placeholder name like `lxe-73`.
+ */
+export function pickClaudeTitle(parts: {
+  desktopTitle?: string;
+  name?: string;
+  nameSource?: string;
+  headTitle?: string;
+  customTitle?: string;
+  aiTitle?: string;
+  tmuxSessionName?: string;
+  preview?: string;
+}): string | undefined {
+  const derived = parts.nameSource === 'derived';
+  return (
+    parts.desktopTitle ||
+    (!derived ? parts.name : undefined) ||
+    parts.customTitle ||
+    parts.headTitle ||
+    parts.aiTitle ||
+    parts.preview ||
+    parts.name ||
+    parts.tmuxSessionName ||
+    undefined
+  );
+}
+
+/**
+ * Sessions Super Harness just launched in tmux but Claude has not yet registered in
+ * ~/.claude/sessions. Discovery reports them right away so a new thread appears once
+ * and stays put, instead of popping in and out while Claude starts up.
+ */
+const pendingClaudeStarts = new Map<string, { session: UnifiedSession; expiresAt: number }>();
+
+export function registerPendingClaudeStart(p: {
+  nativeId: string;
+  cwd: string;
+  title: string;
+  tmuxSessionName: string;
+  remoteControl: boolean;
+  model?: string;
+}): void {
+  const now = Date.now();
+  pendingClaudeStarts.set(p.nativeId, {
+    expiresAt: now + 30000,
+    session: {
+      id: `claude:${p.nativeId}`,
+      nativeId: p.nativeId,
+      harness: 'claude-tmux',
+      harnessGroup: 'claude',
+      title: p.title,
+      preview: p.title,
+      cwd: p.cwd,
+      projectName: projectNameFromCwd(p.cwd),
+      nativeSection: 'Ungrouped',
+      nativeSectionOrder: 9999,
+      model: p.model || undefined,
+      status: 'running',
+      isLive: true,
+      isRemote: false,
+      tmuxTarget: p.tmuxSessionName,
+      tmuxSessionName: p.tmuxSessionName,
+      createdAt: now,
+      updatedAt: now,
+      pinned: false,
+      folderId: null,
+      tags: ['tmux', ...(p.remoteControl ? ['remote-control'] : [])],
+      hidden: false,
+      dispatchMode: 'tmux-send',
+      liveOwner: 'tmux',
+    },
+  });
+}
+
+/** Pending starts that Claude has not registered yet; drops registered or expired ones. */
+export function takePendingClaudeStarts(registeredNativeIds: Set<string>): UnifiedSession[] {
+  const now = Date.now();
+  const out: UnifiedSession[] = [];
+  for (const [id, p] of pendingClaudeStarts) {
+    if (registeredNativeIds.has(id) || now > p.expiresAt) pendingClaudeStarts.delete(id);
+    else out.push(p.session);
+  }
+  return out;
+}
+
 export async function detectClaude(
   processes: ProcessRow[],
   maxSessions: number,
@@ -566,13 +700,19 @@ export async function detectClaude(
         const transcriptPath = findClaudeTranscriptPath(data.sessionId, cwd);
         const headMeta = transcriptPath ? readJsonlHeadMeta(transcriptPath) : {};
         const tmuxSessionName = data.tmux ? data.tmux.split(':')[0] : undefined;
+        const tailTitles = transcriptPath ? readJsonlTitleMeta(transcriptPath) : {};
         const title =
           cleanTextPreview(
-            desktopMatch?.data.title ||
-              data.name ||
-              headMeta.title ||
-              tmuxSessionName ||
-              headMeta.preview,
+            pickClaudeTitle({
+              desktopTitle: desktopMatch?.data.title,
+              name: data.name,
+              nameSource: data.nameSource,
+              headTitle: headMeta.title,
+              customTitle: tailTitles.customTitle,
+              aiTitle: tailTitles.aiTitle,
+              tmuxSessionName,
+              preview: headMeta.preview,
+            }),
             90
           ) || `Claude (${projectNameFromCwd(cwd)})`;
         const localId = data.hostSessionId || desktopMatch?.localId;
@@ -730,8 +870,17 @@ export async function detectClaude(
       seenCliIds.add(jf.nativeId);
       const meta = readJsonlHeadMeta(jf.file);
       const cwd = meta.cwd || os.homedir();
+      const tailTitles = readJsonlTitleMeta(jf.file);
       const title =
-        cleanTextPreview(meta.title || meta.preview, 90) ||
+        cleanTextPreview(
+          pickClaudeTitle({
+            headTitle: meta.title,
+            customTitle: tailTitles.customTitle,
+            aiTitle: tailTitles.aiTitle,
+            preview: meta.preview,
+          }),
+          90
+        ) ||
         `Claude CLI (${projectNameFromCwd(cwd)})`;
       const activity = inspectClaudeTranscriptActivity(jf.file, claudeProcs.length > 0);
       cliSessions.push({
@@ -760,6 +909,8 @@ export async function detectClaude(
       });
     }
   }
+
+  liveTmuxSessions.push(...takePendingClaudeStarts(new Set(liveBySessionId.keys())));
 
   const allSessions = [...liveTmuxSessions, ...desktopSessions, ...cliSessions].sort((a, b) => {
     if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
@@ -924,7 +1075,8 @@ export function parseClaudeJsonlLines(
     if (
       !line.includes('"user"') &&
       !line.includes('"assistant"') &&
-      !line.includes('"queue-operation"')
+      !line.includes('"queue-operation"') &&
+      !line.includes('"queued_command"')
     ) {
       continue;
     }
@@ -957,6 +1109,32 @@ export function parseClaudeJsonlLines(
         const target = obj.content.trim();
         const idx = rawNativeQueue.findIndex((q) => q.item.text === target);
         if (idx >= 0) rawNativeQueue.splice(idx, 1);
+      }
+      continue;
+    }
+
+    // A message typed while Claude was busy, delivered into the running turn at a tool
+    // boundary. It steered that turn, so it belongs in the chat at this point.
+    if (type === 'attachment') {
+      const att = obj.attachment as Record<string, unknown> | undefined;
+      const prompt = typeof att?.prompt === 'string' ? att.prompt.trim() : '';
+      if (att?.type === 'queued_command' && att.commandMode === 'prompt' && prompt) {
+        const qIdx = rawNativeQueue.findIndex((q) => q.item.text === prompt);
+        if (qIdx >= 0) rawNativeQueue.splice(qIdx, 1);
+        if (!isInternalClaudeQueueContent(prompt)) {
+          const extracted = extractAttachedImagesFromText(stripPastedContentWrappers(prompt));
+          const blocks: UnifiedBlock[] = [...extracted.images];
+          if (extracted.text.trim()) blocks.push({ type: 'text', text: extracted.text });
+          if (blocks.length > 0) {
+            currentAssistant = null;
+            messages.push({
+              id: uniqueId(String(obj.uuid || `cq-${seq++}`)),
+              role: 'user',
+              timestamp: normalizeTimestamp(obj.timestamp),
+              blocks,
+            });
+          }
+        }
       }
       continue;
     }
@@ -1022,7 +1200,7 @@ export function parseClaudeJsonlLines(
         rawText: string,
         extraImages: Array<Extract<UnifiedBlock, { type: 'image' }>> = []
       ) => {
-        const extracted = extractAttachedImagesFromText(rawText);
+        const extracted = extractAttachedImagesFromText(stripPastedContentWrappers(rawText));
         const allImages: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
         const seenImgs = new Set<string>();
         for (const img of [...extraImages, ...extracted.images]) {
@@ -1308,9 +1486,23 @@ export function parseClaudeJsonlLines(
     tailActivity.working ||
     (Date.now() - sourceMtimeMs < 30_000 &&
       (pendingToolNames.size > 0 || Boolean(latestSteps?.some((s) => s.status === 'in_progress'))));
-  const visibleNativeQueue = rawNativeQueue
-    .filter((entry) => !entry.isInternal)
-    .map((entry) => entry.item);
+  // Claude delivers every message typed during a turn into that same turn at the next tool
+  // call, which is steering, so show those messages in the chat at once instead of in a
+  // queue tray that they would leave seconds later.
+  for (const entry of rawNativeQueue) {
+    if (entry.isInternal) continue;
+    const extracted = extractAttachedImagesFromText(stripPastedContentWrappers(entry.item.text));
+    const blocks: UnifiedBlock[] = [...extracted.images];
+    if (extracted.text.trim()) blocks.push({ type: 'text', text: extracted.text });
+    if (blocks.length === 0) continue;
+    messages.push({
+      id: uniqueId(`claude-steer-${entry.item.createdAt}`),
+      role: 'user',
+      timestamp: entry.item.createdAt,
+      blocks,
+    });
+  }
+  const visibleNativeQueue: QueuedMessageItem[] = [];
   const liveActivity: LiveActivityState = {
     isWorking,
     focus: isWorking && activeTool ? `Running ${activeTool}` : undefined,
@@ -1620,7 +1812,50 @@ export function buildClaudeResumeArgs(
   return args;
 }
 
+/**
+ * Split text into the keystroke steps `typeIntoClaudeTmux` sends: literal chunks of at most
+ * `chunk` chars, with '\n' as its own step (typed as Ctrl+J, Claude's newline key).
+ */
+export function claudeTmuxTypingSteps(text: string, chunk = 100): string[] {
+  const steps: string[] = [];
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  lines.forEach((line, i) => {
+    if (i > 0) steps.push('\n');
+    for (let at = 0; at < line.length; at += chunk) steps.push(line.slice(at, at + chunk));
+  });
+  return steps;
+}
+
+/**
+ * Type a prompt into a Claude TUI as keystrokes. A bracketed paste (or one big burst of
+ * keys) makes Claude Code record the message as `<pasted_content>` / `[Pasted text #1]`,
+ * which shows up in the transcript and tells the model the text was pasted from elsewhere.
+ * Short chunks with small gaps stay below the paste detector; Ctrl+J inserts newlines.
+ */
+export async function typeIntoClaudeTmux(target: string, text: string, tmuxBin = 'tmux'): Promise<void> {
+  for (const step of claudeTmuxTypingSteps(text)) {
+    if (step === '\n') {
+      await execFileAsync(tmuxBin, ['send-keys', '-t', target, 'C-j'], { timeout: 4000 });
+    } else {
+      await execFileAsync(tmuxBin, ['send-keys', '-t', target, '-l', step], { timeout: 4000 });
+    }
+    await new Promise((r) => setTimeout(r, 30));
+  }
+}
+
+/**
+ * Claude Code records a bracketed paste as `<pasted_content id="N">…</pasted_content id="N">`.
+ * Show the text a person sent, without the wrapper.
+ */
+export function stripPastedContentWrappers(text: string): string {
+  if (!text.includes('<pasted_content')) return text;
+  return text
+    .replace(/<pasted_content\b[^>]*>\n?/g, '')
+    .replace(/\n?<\/pasted_content\b[^>]*>/g, '');
+}
+
 export function createClaudeDriver(): HarnessDriver {
+  const remote = new RemoteClaudeMirror();
   const streamPool = new ClaudeStreamPool((sid, rid, line, gotAny, emit) =>
     parseClaudeStreamLine(sid, rid, line, gotAny, emit)
   );
@@ -1653,21 +1888,35 @@ export function createClaudeDriver(): HarnessDriver {
       if (req.reasoningEffort) flags.push('--effort', req.reasoningEffort);
       if (req.title) flags.push('--name', req.title);
 
-      const cmd = [claudeBin, ...flags].map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+      const quote = (a: string) => `'${a.replace(/'/g, `'\\''`)}'`;
+      const initialPrompt = formatPromptWithImagePaths(req.prompt?.trim() || '', req.attachments);
+      // Claude submits a positional prompt as the first turn the moment it starts, so the
+      // task begins immediately with no typing race. tmux caps a command near 16 KB; longer
+      // prompts are typed in once the TUI is up.
+      const baseCmd = [claudeBin, ...flags].map(quote).join(' ');
+      const promptInArgv = Boolean(initialPrompt) && initialPrompt.length <= 8000;
+      const cmd = promptInArgv ? `${baseCmd} -- ${quote(initialPrompt)}` : baseCmd;
 
       try {
         await execFileAsync(tmuxBin, ['new-session', '-d', '-s', rawName, '-c', cwd, cmd], {
           timeout: 5000,
         });
-        if (req.prompt?.trim()) {
+        if (initialPrompt && !promptInArgv) {
           setTimeout(() => {
-            execFile(tmuxBin, ['send-keys', '-t', rawName, '-l', req.prompt!.trim()], () => {
-              setTimeout(() => {
-                execFile(tmuxBin, ['send-keys', '-t', rawName, 'C-m'], () => {});
-              }, 150);
-            });
+            void typeIntoClaudeTmux(rawName, initialPrompt, tmuxBin)
+              .then(() => execFileAsync(tmuxBin, ['send-keys', '-t', rawName, 'C-m'], { timeout: 4000 }))
+              .catch(() => {});
           }, 2500);
         }
+        registerPendingClaudeStart({
+          nativeId,
+          cwd,
+          title: req.title || cleanTextPreview(initialPrompt, 90) || `Claude (${projectNameFromCwd(cwd)})`,
+          tmuxSessionName: rawName,
+          remoteControl: req.remoteControl !== false,
+          model: req.model,
+        });
+        ctx.triggerRefresh(0);
         ctx.triggerRefresh(1000);
         ctx.triggerRefresh(2800);
         ctx.triggerRefresh(5000);
@@ -1709,17 +1958,45 @@ export function createClaudeDriver(): HarnessDriver {
     id: 'claude',
     displayName: 'Claude (Desktop + tmux CLI)',
 
-    detect(processes, maxSessions, showArchived) {
-      return detectClaude(processes, maxSessions, showArchived);
+    async detect(processes, maxSessions, showArchived) {
+      const [local, remoteSessions] = await Promise.all([
+        detectClaude(processes, maxSessions, showArchived),
+        remote.sessions().catch(() => [] as UnifiedSession[]),
+      ]);
+      const localIds = new Set(local.sessions.map((s) => s.id));
+      const extra = remoteSessions.filter((s) => !localIds.has(s.id));
+      if (extra.length === 0) return local;
+      return {
+        detection: {
+          ...local.detection,
+          activeSessionCount: local.detection.activeSessionCount + extra.length,
+          totalSessionCount: local.detection.totalSessionCount + extra.length,
+        },
+        sessions: [...extra, ...local.sessions],
+      };
+    },
+
+    setActivitySink(sink) {
+      remote.setActivitySink(sink);
     },
 
     async getTranscriptFingerprint(session) {
+      const remoteFp = remote.fingerprint(session.id);
+      if (remoteFp) return remoteFp;
       const resolved =
         session.transcriptPath || resolveClaudeTranscriptPath(session.nativeId, session.cwd);
       return computeFileFingerprint(resolved);
     },
 
-    loadTranscript(session, limit) {
+    async loadTranscript(session, limit) {
+      // Right after launch a transcript request can beat the first SSH poll of remote hosts.
+      if (!remote.isRemote(session.id) && session.tags?.includes('remote-host')) {
+        await remote.sessions();
+      }
+      if (remote.isRemote(session.id)) {
+        const res = await remote.loadTranscript(session.id, limit);
+        if (res) return res;
+      }
       const resolved =
         session.transcriptPath || resolveClaudeTranscriptPath(session.nativeId, session.cwd);
       return loadClaudeTranscript(session.id, session.nativeId, resolved, session.cwd, limit);
@@ -1751,6 +2028,7 @@ export function createClaudeDriver(): HarnessDriver {
 
     getSessionWatchFiles(session: UnifiedSession): string[] {
       const files: string[] = [];
+      if (remote.isRemote(session.id)) return files; // polled over SSH instead
       if (session.transcriptPath) files.push(session.transcriptPath);
       if (session.pid) {
         files.push(path.join(CLAUDE_SESSIONS_DIR, `${session.pid}.json`));
@@ -1765,15 +2043,14 @@ export function createClaudeDriver(): HarnessDriver {
       ctx: DispatchContext,
       opts?: { force?: boolean }
     ): Promise<SendMessageResult> {
+      if (remote.isRemote(session.id)) {
+        return remote.sendMessage(session.id, prompt, attachments);
+      }
       const promptWithImages = formatPromptWithImagePaths(prompt, attachments);
 
       const sendViaTmux = async (target: string): Promise<SendMessageResult> => {
         try {
-          await execFileAsync(
-            'tmux',
-            ['send-keys', '-t', target, '-l', promptWithImages],
-            { timeout: 4000 }
-          );
+          await typeIntoClaudeTmux(target, promptWithImages);
           await new Promise((r) => setTimeout(r, 150));
           await execFileAsync('tmux', ['send-keys', '-t', target, 'C-m'], {
             timeout: 4000,

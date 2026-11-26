@@ -363,3 +363,44 @@ export function flattenVisibleSessions(
   }
   return list;
 }
+
+/** How threads are ordered inside each sidebar group. 'native' keeps each harness's own order. */
+export type SidebarSortBy = 'native' | 'active' | 'created';
+
+export const SIDEBAR_SORT_OPTIONS: Array<[SidebarSortBy, string]> = [
+  ['native', 'Native order'],
+  ['active', 'Last active'],
+  ['created', 'Newest first'],
+];
+
+/**
+ * Reorder grouped sidebar threads by last activity or creation time. Sections and groups
+ * move too, ordered by their newest thread; headless pinned rows stay on top.
+ */
+export function sortSidebarGroups(groups: TopGroup[], sortBy: SidebarSortBy): TopGroup[] {
+  if (sortBy === 'native') return groups;
+  const key = (s: UnifiedSession) => (sortBy === 'active' ? s.updatedAt : s.createdAt) || 0;
+  const sortItems = (items: UnifiedSession[]) => [...items].sort((a, b) => key(b) - key(a));
+  const newest = (items: UnifiedSession[]) => items.reduce((m, s) => Math.max(m, key(s)), 0);
+
+  const sorted = groups.map((g) => {
+    const sections = g.sections
+      ?.map((sec) => ({ ...sec, items: sortItems(sec.items) }))
+      .sort((a, b) => newest(b.items) - newest(a.items));
+    return {
+      ...g,
+      items: g.items ? sortItems(g.items) : undefined,
+      pinnedItems: g.pinnedItems ? sortItems(g.pinnedItems) : undefined,
+      sections,
+    };
+  });
+  const groupNewest = (g: TopGroup) =>
+    Math.max(
+      newest(g.items ?? []),
+      newest(g.pinnedItems ?? []),
+      ...(g.sections ?? []).map((sec) => newest(sec.items))
+    );
+  const headless = sorted.filter((g) => g.headless);
+  const rest = sorted.filter((g) => !g.headless).sort((a, b) => groupNewest(b) - groupNewest(a));
+  return [...headless, ...rest];
+}

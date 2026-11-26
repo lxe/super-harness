@@ -47,6 +47,9 @@ import {
   getGlobalPinnedSessions,
   groupSessionsForSidebar,
   isSingleHarnessFilter,
+  SIDEBAR_SORT_OPTIONS,
+  sortSidebarGroups,
+  type SidebarSortBy,
   type DragSectionTarget,
   type SidebarFilterTab,
 } from '../utils/sidebarGrouping';
@@ -139,6 +142,22 @@ export const Sidebar: React.FC<Props> = React.memo(({
     }
     return 'all';
   });
+  const [sortBy, setSortBy] = useState<SidebarSortBy>(() => {
+    try {
+      const saved = localStorage.getItem('sh:sidebarSort') as SidebarSortBy | null;
+      if (saved && SIDEBAR_SORT_OPTIONS.some(([v]) => v === saved)) return saved;
+    } catch {
+      // ignore
+    }
+    return 'native';
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('sh:sidebarSort', sortBy);
+    } catch {
+      // ignore
+    }
+  }, [sortBy]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
@@ -327,8 +346,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
   );
 
   const topGroups = useMemo(
-    () => groupSessionsForSidebar(filtered, groupBy, folders, filter),
-    [filtered, groupBy, folders, filter]
+    () => sortSidebarGroups(groupSessionsForSidebar(filtered, groupBy, folders, filter), sortBy),
+    [filtered, groupBy, folders, filter, sortBy]
   );
 
   // Map every droppable section container ID to its DragSectionTarget metadata
@@ -857,6 +876,21 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   active={groupBy === m}
                   onClick={() => {
                     onChangeGroupBy(m);
+                    setShowFilterMenu(false);
+                  }}
+                >
+                  {lbl}
+                </MenuItem>
+              ))}
+
+              <MenuDivider />
+              <MenuSectionLabel>Sort by</MenuSectionLabel>
+              {SIDEBAR_SORT_OPTIONS.map(([m, lbl]) => (
+                <MenuItem
+                  key={m}
+                  active={sortBy === m}
+                  onClick={() => {
+                    setSortBy(m);
                     setShowFilterMenu(false);
                   }}
                 >

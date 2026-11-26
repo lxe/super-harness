@@ -137,6 +137,13 @@ export interface HarnessDriver {
 
   /** Optional cleanup hook called on app quit (e.g., closing persistent ACP/app-server connections). */
   shutdown?(): void;
+
+  /**
+   * Optional sink for native push activity (e.g. Codex app-server daemon
+   * notifications for turns Super Harness did not start). LiveSyncService
+   * uses it to push transcript refreshes without FS polling.
+   */
+  setActivitySink?(sink: ((sessionId: string) => void) | null): void;
 }
 
 /**

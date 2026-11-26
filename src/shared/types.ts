@@ -327,6 +327,7 @@ export interface StartSessionRequest {
   cwd: string;
   title?: string;
   prompt?: string;
+  attachments?: ImageAttachment[];
   model?: string;
   /** Optional thinking / reasoning effort level (e.g. low, medium, high, xhigh, max, ultra). */
   reasoningEffort?: string;

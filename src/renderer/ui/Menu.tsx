@@ -151,19 +151,21 @@ export const MenuItem: React.FC<MenuItemProps> = ({
           ? 'text-ink-primary bg-white/[0.08] font-medium'
           : 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.07]';
 
-  return (
-    <button
-      type={type}
-      className={cn(
-        'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-caption transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed',
-        toneCls,
-        className
-      )}
-      {...rest}
-    >
-      {icon && <span className="shrink-0 inline-flex text-ink-muted">{icon}</span>}
-      <span className="truncate flex-1">{children}</span>
-      {rightSlot && <span className="shrink-0 inline-flex text-ink-faint">{rightSlot}</span>}
-    </button>
-  );
+    return (
+      <button
+        type={type}
+        className={cn(
+          'w-full h-8 flex items-center gap-2 px-2.5 rounded-lg text-left text-caption transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:shadow-none',
+          toneCls,
+          className
+        )}
+        {...rest}
+      >
+        {icon && <span className="shrink-0 inline-flex items-center text-ink-muted">{icon}</span>}
+        <span className="truncate flex-1 leading-[1.35] pt-[1px]">{children}</span>
+        {rightSlot && (
+          <span className="shrink-0 inline-flex items-center text-ink-faint">{rightSlot}</span>
+        )}
+      </button>
+    );
 };

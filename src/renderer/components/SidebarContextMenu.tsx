@@ -2,7 +2,6 @@ import React from 'react';
 import { Archive, Columns2, Pin, SquarePen, Trash2 } from 'lucide-react';
 import type { OrganizeAction, UnifiedSession } from '../../shared/types';
 import { MenuDivider, MenuHeader, MenuItem, PopoverSurface } from '../ui';
-import { HarnessLogo } from './HarnessLogo';
 
 export interface SidebarContextMenuProps {
   x: number;
@@ -41,15 +40,16 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   return (
     <PopoverSurface
       width="md"
+      onClose={onClose}
       style={{ left: x, top: y }}
       onClick={(e) => e.stopPropagation()}
       className="fixed z-50 space-y-0.5"
     >
-      <MenuHeader
-        icon={!isMulti ? <HarnessLogo harness={single.harness} size={13} /> : undefined}
-      >
-        {isMulti ? `${targets.length} sessions selected` : single.title}
-      </MenuHeader>
+      {isMulti && (
+        <MenuHeader>
+          {targets.length} sessions selected
+        </MenuHeader>
+      )}
 
       {!isMulti && (
         <MenuItem

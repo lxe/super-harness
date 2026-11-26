@@ -435,6 +435,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
           <IconButton
             size="xs"
             label="Conversation actions"
+            className="focus-visible:shadow-none"
             onClick={(e) => {
               e.stopPropagation();
               const rect = e.currentTarget.getBoundingClientRect();
@@ -565,10 +566,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
         <button
           type="button"
           onClick={() => onNewSession(filter)}
-          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-ink-secondary hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer"
+          className="w-full h-9 flex items-center gap-2.5 px-2.5 rounded-lg text-body text-ink-secondary hover:text-ink-primary hover:bg-white/[0.06] transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
         >
           <SquarePen className="w-4 h-4 text-ink-muted shrink-0" />
-          <span>New Conversation</span>
+          <span className="leading-[1.35] pt-[1px]">New Conversation</span>
         </button>
 
         {masterSession && (

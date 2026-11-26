@@ -152,35 +152,35 @@ export const NavRow: React.FC<NavRowProps> = ({
   ...rest
 }) => {
   return (
-    <div
-      className={cn(
-        'group relative flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors select-none',
-        selected
-          ? 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/40'
-          : active
-            ? 'bg-white/[0.1] text-ink-primary font-medium'
-            : secondaryActive
-              ? 'bg-white/[0.06] text-ink-primary'
-              : 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.05]',
-        className
-      )}
-      {...rest}
-    >
-      {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-      <span className="text-body leading-snug truncate flex-1">{title}</span>
-      {meta && (
-        <span className="shrink-0 inline-flex items-center gap-1.5 group-hover:opacity-0 transition-opacity">
-          {meta}
-        </span>
-      )}
-      {working && (
-        <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-secondary shrink-0" />
-      )}
-      {hoverActions && (
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 absolute right-1.5 bg-surface-raised/95 rounded-md p-0.5 transition-opacity">
-          {hoverActions}
-        </div>
-      )}
-    </div>
+      <div
+        className={cn(
+          'group relative h-9 flex items-center gap-2.5 px-2.5 rounded-lg cursor-pointer transition-colors select-none',
+          selected
+            ? 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/40'
+            : active
+              ? 'bg-white/[0.1] text-ink-primary font-medium'
+              : secondaryActive
+                ? 'bg-white/[0.06] text-ink-primary'
+                : 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.05]',
+          className
+        )}
+        {...rest}
+      >
+        {icon && <span className="shrink-0 inline-flex items-center">{icon}</span>}
+        <span className="text-body leading-[1.35] pt-[1px] truncate flex-1">{title}</span>
+        {meta && (
+          <span className="shrink-0 inline-flex items-center gap-1.5 group-hover:opacity-0 transition-opacity">
+            {meta}
+          </span>
+        )}
+        {working && (
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-secondary shrink-0" />
+        )}
+        {hoverActions && (
+          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 absolute right-1.5 top-1/2 -translate-y-1/2 bg-surface-raised/95 rounded-md p-0.5 transition-opacity">
+            {hoverActions}
+          </div>
+        )}
+      </div>
   );
 };

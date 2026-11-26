@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { ORCHESTRATOR_MEMORY_PATH, readOrchestratorMemory, writeOrchestratorMemory } from './orchestratorMemory';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -883,6 +884,19 @@ export class ControlServer {
           await this.triggerRefresh();
           sendJson(result);
           return;
+        }
+
+        if (url.pathname === '/api/orchestrator/memory') {
+          if (req.method === 'GET') {
+            sendJson({ path: ORCHESTRATOR_MEMORY_PATH, content: readOrchestratorMemory() });
+            return;
+          }
+          if (req.method === 'POST' || req.method === 'PUT') {
+            const body = await readBody();
+            const result = writeOrchestratorMemory(String(body.content ?? ''));
+            sendJson({ ...result, path: ORCHESTRATOR_MEMORY_PATH }, result.ok ? 200 : 400);
+            return;
+          }
         }
 
         if (req.method === 'POST' && url.pathname === '/api/session-config') {

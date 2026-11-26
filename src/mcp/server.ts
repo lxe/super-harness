@@ -181,6 +181,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'sh_read_memory',
+    description:
+      "Read the Master Orchestrator's memory (~/.config/super-harness/orchestrator/MEMORY.md): the running markdown summary of what's going on, open threads, lxe's decisions and next steps. Read it when a conversation starts or after a harness switch.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'sh_write_memory',
+    description:
+      "Replace the Master Orchestrator's memory file with an updated markdown summary (under 64 KB; a summary, not a log). Update it whenever something worth remembering changes: new work started or finished, a decision from lxe, an owner of a task. Keep the headings: What's going on / Open threads and who owns them / Decisions and preferences from lxe / Next steps.",
+    inputSchema: {
+      type: 'object',
+      required: ['content'],
+      properties: { content: { type: 'string', description: 'The complete new MEMORY.md content.' } },
+    },
+  },
+  {
     name: 'sh_restart_app',
     description:
       'Safely restart Super Harness via a detached watchdog (optionally running npm run build first) so the app comes back cleanly without dying mid-shutdown.',
@@ -248,6 +264,10 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       return apiRequest('POST', '/api/control-harness', args);
     case 'sh_update_session':
       return apiRequest('POST', '/api/session-config', args);
+    case 'sh_read_memory':
+      return apiRequest('GET', '/api/orchestrator/memory');
+    case 'sh_write_memory':
+      return apiRequest('POST', '/api/orchestrator/memory', args);
     case 'sh_restart_app':
       return apiRequest('POST', '/api/restart', args);
     default:

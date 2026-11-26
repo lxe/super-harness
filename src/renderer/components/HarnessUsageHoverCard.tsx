@@ -348,38 +348,38 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
 
             return (
               <div key={h.harness} className="space-y-1.5">
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-x-2">
                   {primaryLink ? (
                     <button
                       type="button"
                       onClick={() => void window.superHarness.openExternalUrl(primaryLink.url)}
                       title={`Open ${HARNESS_TITLES[h.harness]} ${primaryLink.label}`}
-                      className="flex items-center gap-1.5 text-label text-ink-primary hover:text-white font-medium transition-colors group cursor-pointer"
+                      className="flex items-center gap-1.5 min-w-0 text-label text-ink-primary hover:text-white font-medium transition-colors group cursor-pointer"
                     >
                       <HarnessLogo harness={h.harness} size={14} />
-                      <span>{HARNESS_TITLES[h.harness]}</span>
-                      <ExternalLink className="w-2.5 h-2.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <span className="truncate">{HARNESS_TITLES[h.harness]}</span>
+                      <ExternalLink className="w-2.5 h-2.5 text-ink-faint opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                     </button>
                   ) : (
-                    <div className="flex items-center gap-1.5 text-label text-ink-primary font-medium">
+                    <div className="flex items-center gap-1.5 min-w-0 text-label text-ink-primary font-medium">
                       <HarnessLogo harness={h.harness} size={14} />
-                      <span>{HARNESS_TITLES[h.harness]}</span>
+                      <span className="truncate">{HARNESS_TITLES[h.harness]}</span>
                     </div>
                   )}
-                  <div className="flex items-baseline gap-1.5 tabular-nums text-caption">
-                    {pct !== null ? (
-                      <>
-                        <span className={`font-semibold ${pctToneClass(pct)}`}>{pct}%</span>
-                        <span className="text-micro text-ink-faint truncate max-w-[140px]">
-                          {resetStr || hero?.label}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-micro text-ink-faint">
-                        {formatUsd(h.spend7dUsd)} / 7d
+                  {pct !== null ? (
+                    <>
+                      <span className="text-micro text-ink-faint text-right truncate max-w-[130px]">
+                        {resetStr || hero?.label}
                       </span>
-                    )}
-                  </div>
+                      <span className={`text-caption font-semibold tabular-nums text-right ${pctToneClass(pct)}`}>
+                        {pct}%
+                      </span>
+                    </>
+                  ) : (
+                    <span className="col-span-2 text-micro text-ink-faint tabular-nums text-right">
+                      {formatUsd(h.spend7dUsd)} / 7d
+                    </span>
+                  )}
                 </div>
                 <ProgressBar
                   value={hero ? hero.usedPercent : h.barPercent}
@@ -449,7 +449,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
       onMouseLeave={onMouseLeave}
       className="fixed z-50 w-[336px] p-4 space-y-4"
     >
-      {/* Header: Harness identity + quiet metadata */}
+      {/* Header: Harness identity + hero reset time */}
       <div className="flex items-baseline justify-between gap-2.5">
         <div className="flex items-center gap-2 shrink-0">
           <HarnessLogo harness={target} size={15} />
@@ -457,29 +457,21 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
             {harnessTitle}
           </span>
         </div>
-        <span
-          title={
-            planShort
-              ? `${planShort} · updated ${formatUpdatedAgo(info.updatedAt)}`
-              : `updated ${formatUpdatedAgo(info.updatedAt)}`
-          }
-          className="text-micro text-ink-faint min-w-0 truncate text-right"
-        >
-          {planShort ? `${planShort} · ` : ''}
-          updated {formatUpdatedAgo(info.updatedAt)}
-        </span>
+        {(heroReset || (heroPct === 0 && hero) || planShort) && (
+          <span
+            title={`Updated ${formatUpdatedAgo(info.updatedAt)}`}
+            className="text-micro text-ink-faint min-w-0 truncate text-right"
+          >
+            {heroReset || (heroPct === 0 ? 'fresh window' : planShort)}
+          </span>
+        )}
       </div>
 
-      {/* Hero Limit: the single most important answer ("am I close to cutoff, when does it reset?") */}
+      {/* Hero Limit: the single most important answer ("am I close to cutoff?") */}
       {hero && heroPct !== null ? (
         <div className="space-y-3.5">
           <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-caption font-medium text-ink-secondary">{hero.label}</span>
-              <span className="text-micro text-ink-muted">
-                {heroReset || (heroPct === 0 ? 'fresh window' : '')}
-              </span>
-            </div>
+            <span className="block text-caption font-medium text-ink-secondary">{hero.label}</span>
 
             <div className="flex items-baseline gap-2.5 flex-wrap">
               <span
@@ -506,15 +498,9 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
               pacePercent={heroPace?.elapsedPercent}
               size="md"
             />
-
-            {heroPace && (
-              <p className="text-[11px] text-ink-faint leading-snug">
-                Tick marks {Math.round(heroPace.elapsedPercent)}% through the {heroPace.windowWord}
-              </p>
-            )}
           </div>
 
-          {/* Secondary limits: quieter colorway bars, always paired with reset or denominator */}
+          {/* Secondary limits: aligned 3-column layout (label | reset | %) */}
           {secondary.length > 0 && (
             <div className="space-y-2.5 pt-0.5">
               {secondary.map((w) => {
@@ -522,11 +508,15 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
                 const ctx = secondaryContextLabel(w);
                 return (
                   <div key={w.id} className="space-y-1.5">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-caption text-ink-secondary">{w.label}</span>
-                      <span className="text-caption tabular-nums text-right">
-                        <span className={`font-semibold ${pctToneClass(pct)}`}>{pct}%</span>
-                        {ctx && <span className="text-micro text-ink-faint"> · {ctx}</span>}
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-x-2">
+                      <span className="text-caption text-ink-secondary truncate">{w.label}</span>
+                      <span className="text-micro text-ink-faint text-right truncate">
+                        {ctx || ''}
+                      </span>
+                      <span
+                        className={`text-caption font-semibold tabular-nums text-right ${pctToneClass(pct)}`}
+                      >
+                        {pct}%
                       </span>
                     </div>
                     <ProgressBar value={w.usedPercent} tone={target} muted size="sm" />
@@ -563,9 +553,9 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
         />
       )}
 
-      {/* Quiet footer text links instead of heavy full-width buttons */}
+      {/* Quiet footer text links (no horizontal rule) */}
       {accountLinks.length > 0 && (
-        <div className="pt-3 border-t border-line-hairline flex items-center justify-between gap-3">
+        <div className="pt-0.5 flex items-center justify-between gap-3">
           {accountLinks.map((link) => (
             <button
               key={link.url}

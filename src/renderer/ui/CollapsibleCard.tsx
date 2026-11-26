@@ -103,7 +103,7 @@ export const DisclosureRow: React.FC<DisclosureRowProps> = ({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors py-0.5 px-1 -ml-1 rounded cursor-pointer"
+        className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors py-0.5 px-1 -ml-1 rounded cursor-pointer focus:outline-none focus-visible:shadow-none"
       >
         <span>{label}</span>
         {open ? (

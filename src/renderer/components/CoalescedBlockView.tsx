@@ -17,7 +17,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { MessageSourceKind, UnifiedBlock, UnifiedMessage } from '../../shared/types';
-import { Badge, Button, CollapsibleCard, DisclosureRow } from '../ui';
+import { Badge, Button, CollapsibleCard, DisclosureRow, WorkingIndicator } from '../ui';
 import { mediaUrlForPath, renderMarkdownHtml } from '../utils/format';
 import type { PreviewImageItem } from './ImageLightbox';
 
@@ -799,7 +799,7 @@ export const AssistantMessageView: React.FC<AssistantMessageViewProps> = React.m
             />
           )
         )}
-        {msg.streaming && <div className="text-caption text-ink-muted pt-1">Working…</div>}
+        {msg.streaming && <WorkingIndicator tone="master" />}
         {msg.error && (
           <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-3.5 py-2.5 text-caption text-rose-300 font-mono">
             {msg.error}

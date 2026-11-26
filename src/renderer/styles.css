@@ -149,3 +149,61 @@ body,
   background: rgba(255, 255, 255, 0.03);
   font-weight: 600;
 }
+
+/* 3D WorkingOrb animations (GPU-composited transform & opacity only) */
+@keyframes sh-orb-spin {
+  from {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+  }
+  to {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes sh-orb-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes sh-working-sweep {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -40% 0;
+  }
+}
+
+.sh-orb-swirl {
+  animation: sh-orb-spin 3.2s linear infinite;
+  will-change: transform;
+}
+
+.sh-orb-halo {
+  animation: sh-orb-breathe 2.4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.sh-working-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(161, 166, 179, 0.72) 0%,
+    rgba(244, 245, 247, 0.96) 50%,
+    rgba(161, 166, 179, 0.72) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sh-working-sweep 2.6s ease-in-out infinite;
+}

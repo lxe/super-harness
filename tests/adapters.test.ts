@@ -12,6 +12,7 @@ import {
   createClaudeDriver,
   loadClaudeTranscript,
   parseClaudeJsonlLines,
+  parseClaudeStreamLine,
 } from '../src/main/adapters/claudeAdapter';
 import {
   coalesceCodexItemRows,
@@ -1118,5 +1119,33 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     );
     expect(postFlush.showBlocks).toEqual([]);
     expect(postFlush.showText).toBe('');
+  });
+
+  it('classifies Claude stream-json Bash and Edit tool_use blocks identically to persisted transcripts', () => {
+    const blocks: Array<{ type: string; command?: string; name?: string }> = [];
+    const emit = (ev: { kind: string; block?: { type: string; command?: string; name?: string } }) => {
+      if (ev.kind === 'block' && ev.block) blocks.push(ev.block);
+    };
+
+    parseClaudeStreamLine(
+      'claude:1',
+      'r1',
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', name: 'Bash', input: { command: 'ls -la' } },
+            { type: 'tool_use', name: 'Edit', input: { file_path: '/tmp/a.ts' } },
+            { type: 'tool_use', name: 'Read', input: { file_path: '/tmp/b.ts' } },
+          ],
+        },
+      }),
+      false,
+      emit as never
+    );
+
+    expect(blocks.map((b) => b.type)).toEqual(['command', 'file_change', 'tool_call']);
+    expect(blocks[0].command).toBe('ls -la');
+    expect(blocks[2].name).toBe('Read');
   });
 });

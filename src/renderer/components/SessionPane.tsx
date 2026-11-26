@@ -11,7 +11,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
-import { Badge, Button } from '../ui';
+import { Badge, Button, WorkingIndicator } from '../ui';
 import {
   captureStreamTurnBaseline,
   DEFAULT_TRANSCRIPT_LIMIT,
@@ -865,22 +865,13 @@ export const SessionPane: React.FC<Props> = ({
                 {visibleStreaming.showText && (
                   <CoalescedBlockView block={{ type: 'text', text: visibleStreaming.showText }} />
                 )}
-                <div className="flex items-center gap-2 text-caption text-ink-muted pt-1">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Working</span>
-                </div>
+                <WorkingIndicator tone={session.harnessGroup} focus={liveActivity?.focus} />
               </div>
             )}
 
             {/* Quiet live Working indicator */}
             {!isMaster && !isStreaming && liveActivity?.isWorking && (
-              <div className="flex items-center gap-2 text-caption text-ink-muted pt-1">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Working</span>
-                {liveActivity.focus && (
-                  <span className="text-ink-faint truncate">· {liveActivity.focus}</span>
-                )}
-              </div>
+              <WorkingIndicator tone={session.harnessGroup} focus={liveActivity.focus} />
             )}
 
             {/* Running background tasks indicator (Antigravity parity) */}

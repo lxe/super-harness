@@ -1302,7 +1302,7 @@ export async function captureTmuxPane(target: string): Promise<TmuxCaptureResult
 /**
  * Parses one JSONL stdout line emitted by `claude --output-format stream-json --verbose`.
  */
-function parseClaudeStreamLine(
+export function parseClaudeStreamLine(
   sessionId: string,
   runId: string,
   line: string,
@@ -1340,17 +1340,44 @@ function parseClaudeStreamLine(
             block: { type: 'thinking', text: p.thinking },
           });
         } else if (p.type === 'tool_use') {
-          emitStream({
-            sessionId,
-            runId,
-            kind: 'block',
-            block: {
-              type: 'tool_call',
-              name: String(p.name ?? 'tool'),
-              args: JSON.stringify(p.input ?? {}, null, 2).slice(0, 2000),
-              status: 'running',
-            },
-          });
+          const name = String(p.name ?? 'tool');
+          const input = (p.input ?? {}) as Record<string, unknown>;
+          if (name === 'Bash' || name === 'bash' || name === 'run_command') {
+            emitStream({
+              sessionId,
+              runId,
+              kind: 'block',
+              block: {
+                type: 'command',
+                command: String(input.command ?? input.cmd ?? JSON.stringify(input)),
+                status: 'running',
+              },
+            });
+          } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
+            const filePath = String(input.file_path ?? input.path ?? 'file');
+            emitStream({
+              sessionId,
+              runId,
+              kind: 'block',
+              block: {
+                type: 'file_change',
+                changes: [{ path: filePath, kind: name.toLowerCase() }],
+                status: 'running',
+              },
+            });
+          } else if (name !== 'TodoWrite') {
+            emitStream({
+              sessionId,
+              runId,
+              kind: 'block',
+              block: {
+                type: 'tool_call',
+                name,
+                args: JSON.stringify(input, null, 2).slice(0, 2000),
+                status: 'running',
+              },
+            });
+          }
         }
       }
     }

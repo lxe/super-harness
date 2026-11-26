@@ -190,10 +190,10 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
             onDropFiles(e.dataTransfer.files);
           }
         }}
-        className={`relative rounded-2xl border bg-surface-subtle transition-colors ${
+        className={`relative rounded-2xl transition-all ${
           dragOver
-            ? 'border-line-strong bg-surface-raised'
-            : 'border-line-subtle focus-within:border-line-strong'
+            ? 'bg-surface-raised ring-1 ring-inset ring-white/15 shadow-[0_12px_34px_-8px_rgba(0,0,0,0.65)]'
+            : 'bg-[#1c1e24] shadow-[0_10px_30px_-8px_rgba(0,0,0,0.58),0_2px_8px_-2px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.06)] focus-within:bg-[#1e2027] focus-within:shadow-[0_12px_34px_-8px_rgba(0,0,0,0.65),0_2px_10px_-2px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.10)]'
         }`}
       >
         {attachments.length > 0 && (

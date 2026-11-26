@@ -35,7 +35,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
       : null;
 
   return (
-    <div className="rounded-2xl border border-line-subtle bg-surface-subtle overflow-hidden">
+    <div className="rounded-2xl bg-[#1a1c22] shadow-[0_8px_24px_-6px_rgba(0,0,0,0.52),0_2px_6px_-2px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.05)] overflow-hidden">
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
@@ -63,7 +63,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
       </button>
 
       {!collapsed && (
-        <div className="border-t border-line-hairline divide-y divide-line-hairline max-h-48 overflow-y-auto">
+        <div className="border-t border-white/[0.04] divide-y divide-white/[0.04] max-h-48 overflow-y-auto">
           {items.map((item) => {
             const itemImages: PreviewImageItem[] = (item.attachments ?? []).map((att) => ({
               src: att.previewDataUrl || mediaUrlForPath(att.path),

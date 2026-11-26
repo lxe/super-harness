@@ -194,6 +194,9 @@ const MEDIA_MIME_TYPES: Record<string, string> = {
  * replay buffer, resync_required signaling on gap, per-client `/api/watch`
  * liveSync bindings, and authenticated `/api/media` streaming.
  */
+
+/** Media files modified more recently than this are treated as still being written. */
+const MEDIA_SETTLE_MS = 2000;
 export class ControlServer {
   private server: http.Server | null = null;
   private mobileServer: http.Server | null = null;
@@ -679,6 +682,15 @@ export class ControlServer {
             return;
           }
 
+          // A file changed in the last two seconds is probably still being written (e.g. an
+          // image generator flushing a PNG). Ask the client to retry instead of handing it a
+          // truncated body that it might cache.
+          if (Date.now() - stat.mtimeMs < MEDIA_SETTLE_MS) {
+            res.writeHead(503, { 'Retry-After': '2', 'Cache-Control': 'no-store', 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Media is still being written; retry shortly' }));
+            return;
+          }
+
           const rawRequested = url.searchParams.get('raw') === '1';
           const widthParam = Number(url.searchParams.get('w') || '0');
           const hasExplicitWidth = Number.isFinite(widthParam) && widthParam > 0;
@@ -706,7 +718,9 @@ export class ControlServer {
           res.writeHead(200, {
             'Content-Type': contentType,
             'Content-Length': String(stat.size),
-            'Cache-Control': 'private, max-age=300',
+            // Transcoding was wanted but failed (often a damaged or partial image): don't let
+            // clients cache this body.
+            'Cache-Control': shouldCompressWebp ? 'no-store' : 'private, max-age=300',
           });
           fs.createReadStream(filePath).pipe(res);
           return;

@@ -124,9 +124,9 @@ export const HarnessLogo: React.FC<Props> = ({ harness, size = 15, className = '
             <stop offset="100%" stopColor="#A855F7" />
           </linearGradient>
         </defs>
-        <circle cx="12" cy="12" r="7.5" stroke={`url(#${museGrad})`} strokeWidth="2.2" />
-        <circle cx="12" cy="12" r="2.9" fill={`url(#${museGrad})`} />
-        <circle cx="17.3" cy="6.7" r="1.55" fill="#F0ABFC" />
+        <circle cx="12" cy="12" r="9.6" stroke={`url(#${museGrad})`} strokeWidth="2.4" />
+        <circle cx="12" cy="12" r="3.6" fill={`url(#${museGrad})`} />
+        <circle cx="18.8" cy="5.2" r="1.9" fill="#F0ABFC" />
       </svg>
     );
   }

@@ -28,54 +28,22 @@ export interface SegmentedControlProps<T extends string> {
   className?: string;
 }
 
-const GAUGE_COLORS: Record<ProgressTone, { stroke: string; shimmer: string; halo: string }> = {
-  antigravity: {
-    stroke: '#60a5fa',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(147,197,253,0.95) 55deg, rgba(96,165,250,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(96, 165, 250, 0.24)',
-  },
-  codex: {
-    stroke: '#10a37f',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(110,231,183,0.95) 55deg, rgba(16,163,127,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(16, 163, 127, 0.24)',
-  },
-  claude: {
-    stroke: '#d97757',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(253,186,116,0.95) 55deg, rgba(217,119,87,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(217, 119, 87, 0.24)',
-  },
-  muse: {
-    stroke: '#a855f7',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(232,121,249,0.95) 55deg, rgba(168,85,247,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(168, 85, 247, 0.24)',
-  },
-  warning: {
-    stroke: '#fbbf24',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(253,224,71,0.95) 55deg, rgba(251,191,36,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(251, 191, 36, 0.24)',
-  },
-  danger: {
-    stroke: '#fb7185',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(253,164,175,0.95) 55deg, rgba(251,113,133,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(251, 113, 133, 0.24)',
-  },
-  neutral: {
-    stroke: '#d4d4d8',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(244,244,245,0.9) 55deg, rgba(161,161,170,0.4) 125deg, transparent 190deg)',
-    halo: 'rgba(212, 212, 216, 0.18)',
-  },
-  auto: {
-    stroke: '#818cf8',
-    shimmer: 'conic-gradient(from 0deg, transparent 0deg, rgba(199,210,254,0.95) 55deg, rgba(129,140,248,0.45) 125deg, transparent 190deg)',
-    halo: 'rgba(129, 140, 248, 0.24)',
-  },
+const GAUGE_COLORS: Record<ProgressTone, { stroke: string; shimmer: string }> = {
+  antigravity: { stroke: '#60a5fa', shimmer: '#bfdbfe' },
+  codex: { stroke: '#10a37f', shimmer: '#a7f3d0' },
+  claude: { stroke: '#d97757', shimmer: '#fed7aa' },
+  muse: { stroke: '#a855f7', shimmer: '#f0abfc' },
+  warning: { stroke: '#fbbf24', shimmer: '#fef08a' },
+  danger: { stroke: '#fb7185', shimmer: '#fecdd3' },
+  neutral: { stroke: '#d4d4d8', shimmer: '#ffffff' },
+  auto: { stroke: '#818cf8', shimmer: '#c7d2fe' },
 };
 
 function resolveGaugePalette(
   value: number | null,
   tone: ProgressTone,
   estimated?: boolean
-): { stroke: string; shimmer: string; halo: string } {
+): { stroke: string; shimmer: string } {
   if (value !== null && !estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse')) {
     if (value >= 95) return GAUGE_COLORS.danger;
     if (value >= 80) return GAUGE_COLORS.warning;
@@ -142,18 +110,7 @@ export function SegmentedControl<T extends string>({
               )}
             >
               <span className="relative inline-flex items-center justify-center w-8 h-8">
-                {/* Soft ambient halo when actively working */}
-                {item.working && (
-                  <span
-                    aria-hidden="true"
-                    className="sh-gauge-halo absolute inset-[-3px] rounded-full pointer-events-none"
-                    style={{
-                      background: `radial-gradient(circle, ${palette.halo} 0%, transparent 70%)`,
-                    }}
-                  />
-                )}
-
-                {/* Radial gauge track + progress arc */}
+                {/* Radial gauge track + progress arc + exact-thickness shimmer arc */}
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 36 36"
@@ -182,22 +139,22 @@ export function SegmentedControl<T extends string>({
                       className="transition-[stroke-dashoffset] duration-300 ease-out"
                     />
                   )}
+                  {item.working && (
+                    <g className="sh-gauge-shimmer" style={{ transformOrigin: '18px 18px' }}>
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r={GAUGE_RADIUS}
+                        fill="none"
+                        stroke={palette.shimmer}
+                        strokeOpacity="0.45"
+                        strokeWidth="2.3"
+                        strokeLinecap="round"
+                        strokeDasharray={`22 ${GAUGE_CIRCUMFERENCE}`}
+                      />
+                    </g>
+                  )}
                 </svg>
-
-                {/* Orbiting luminous shimmer around the gauge ring itself when working */}
-                {item.working && (
-                  <span
-                    aria-hidden="true"
-                    className="sh-gauge-shimmer absolute inset-[1px] rounded-full pointer-events-none"
-                    style={{
-                      background: palette.shimmer,
-                      WebkitMaskImage:
-                        'radial-gradient(farthest-side, transparent calc(100% - 2.6px), black calc(100% - 2.2px), black 100%)',
-                      maskImage:
-                        'radial-gradient(farthest-side, transparent calc(100% - 2.6px), black calc(100% - 2.2px), black 100%)',
-                    }}
-                  />
-                )}
 
                 {/* Centered icon (or compact 'All' glyph for the unified tab) */}
                 <span className="relative z-10 inline-flex items-center justify-center">

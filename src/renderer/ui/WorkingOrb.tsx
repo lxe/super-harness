@@ -230,12 +230,14 @@ export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
       )}
     >
       <WorkingOrb tone={tone} size={size} />
-      <span className="sh-working-shimmer">{focus || label || 'Working'}</span>
-      {showTimer && (
-        <span className="text-micro font-mono font-normal tabular-nums text-ink-faint">
-          {formatWorkingElapsed(elapsedSec)}
-        </span>
-      )}
+      <span className="inline-flex items-baseline gap-2">
+        <span className="sh-working-shimmer">{focus || label || 'Working'}</span>
+        {showTimer && (
+          <span className="text-micro font-mono font-normal tabular-nums text-ink-faint">
+            {formatWorkingElapsed(elapsedSec)}
+          </span>
+        )}
+      </span>
     </span>
   );
 };

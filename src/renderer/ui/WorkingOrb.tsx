@@ -90,14 +90,6 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
       }
       className={cn('relative inline-flex items-center justify-center shrink-0', className)}
     >
-      {/* Subtle ambient depth glow behind orbiting spheres */}
-      <span
-        className="absolute inset-[-3px] rounded-full pointer-events-none"
-        style={{
-          background: `radial-gradient(circle, ${palette.halo} 0%, transparent 72%)`,
-        }}
-      />
-
       {[0, 1, 2].map((idx) => (
         <span
           key={idx}
@@ -106,7 +98,7 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
             width: dotPx,
             height: dotPx,
             background: sphereBg,
-            boxShadow: `0 0 4px ${palette.glow}, inset -1px -1px 1.5px rgba(0,0,0,0.45)`,
+            boxShadow: 'inset -1px -1px 1.5px rgba(0,0,0,0.45)',
             animationDelay: `${(-idx * 1.5) / 3}s`,
           }}
         />

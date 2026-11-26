@@ -326,10 +326,10 @@ body,
 @keyframes sh-gauge-arc-glow {
   0%,
   100% {
-    filter: brightness(1.06);
+    filter: brightness(1);
   }
   50% {
-    filter: brightness(1.42);
+    filter: brightness(1.14);
   }
 }
 
@@ -372,11 +372,11 @@ body,
 }
 
 .sh-gauge-aurora {
-  animation: sh-gauge-aurora-sweep 1.7s linear infinite;
+  animation: sh-gauge-aurora-sweep 2.6s linear infinite;
   will-change: transform;
 }
 
 .sh-gauge-arc-shimmer {
-  animation: sh-gauge-arc-glow 1.6s ease-in-out infinite;
+  animation: sh-gauge-arc-glow 2.4s ease-in-out infinite;
   will-change: filter;
 }

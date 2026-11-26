@@ -158,29 +158,19 @@ export function SegmentedControl<T extends string>({
                   />
                 </svg>
 
-                {/* 2. Liquid-light sweeping aurora & breathing outer bloom when harness is actively working */}
+                {/* 2. Calm track-width highlight travelling along the ring when actively working */}
                 {item.working && (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      className="sh-gauge-halo absolute inset-[-7px] rounded-full pointer-events-none"
-                      style={{
-                        background: `radial-gradient(circle, ${palette.stroke}8c 0%, ${palette.stroke}3d 44%, transparent 72%)`,
-                      }}
-                    />
-                    <span
-                      aria-hidden="true"
-                      className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
-                      style={{
-                        background: `conic-gradient(from 0deg, transparent 0deg, ${palette.stroke}aa 65deg, #ffffff 115deg, ${palette.stroke}cc 165deg, transparent 225deg)`,
-                        WebkitMaskImage:
-                          'radial-gradient(farthest-side, transparent calc(100% - 3.6px), #000 calc(100% - 3.1px))',
-                        maskImage:
-                          'radial-gradient(farthest-side, transparent calc(100% - 3.6px), #000 calc(100% - 3.1px))',
-                        filter: `drop-shadow(0 0 6px ${palette.stroke})`,
-                      }}
-                    />
-                  </>
+                  <span
+                    aria-hidden="true"
+                    className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
+                    style={{
+                      background: `conic-gradient(from 0deg, transparent 0deg, ${palette.stroke}55 55deg, ${palette.stroke}99 100deg, transparent 160deg)`,
+                      WebkitMaskImage:
+                        'radial-gradient(farthest-side, transparent calc(100% - 3.2px), #000 calc(100% - 2.9px))',
+                      maskImage:
+                        'radial-gradient(farthest-side, transparent calc(100% - 3.2px), #000 calc(100% - 2.9px))',
+                    }}
+                  />
                 )}
 
                 {/* 3. Colored usage gauge arc on top */}
@@ -194,7 +184,7 @@ export function SegmentedControl<T extends string>({
                     )}
                     style={
                       item.working
-                        ? { filter: `drop-shadow(0 0 4px ${palette.stroke})` }
+                        ? { filter: `drop-shadow(0 0 2px ${palette.stroke}66)` }
                         : undefined
                     }
                   >

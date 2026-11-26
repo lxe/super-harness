@@ -91,10 +91,36 @@ body,
 .sh-markdown ol {
   margin: 0.5rem 0;
   padding-left: 1.35rem;
+  list-style-position: outside;
 }
 .sh-markdown ul { list-style-type: disc; }
 .sh-markdown ol { list-style-type: decimal; }
 .sh-markdown li { margin: 0.25rem 0; }
+.sh-markdown li::marker {
+  color: rgba(161, 166, 179, 0.55);
+}
+
+/* Compact markdown variant inside collapsible system / task / agent cards */
+.sh-markdown-compact {
+  font-size: 0.8125rem;
+  line-height: 1.58;
+  color: var(--sh-ink-secondary);
+}
+.sh-markdown-compact p {
+  margin: 0.35rem 0;
+}
+.sh-markdown-compact ul,
+.sh-markdown-compact ol {
+  margin: 0.35rem 0;
+  padding-left: 1.25rem;
+}
+.sh-markdown-compact li {
+  margin: 0.2rem 0;
+}
+.sh-markdown-compact > li {
+  margin-left: 1.15rem;
+  list-style-type: disc;
+}
 .sh-markdown strong {
   color: #f4f5f7;
   font-weight: 600;
@@ -150,28 +176,56 @@ body,
   font-weight: 600;
 }
 
-/* 3D WorkingOrb animations (GPU-composited transform & opacity only) */
+/* Kinetic WorkingOrb animations (GPU-composited transform & opacity only) */
 @keyframes sh-orb-spin {
   from {
-    transform: rotate(0deg) scale(1);
-  }
-  50% {
-    transform: rotate(180deg) scale(1.08);
+    transform: rotate(0deg);
   }
   to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sh-orb-counter-spin {
+  0% {
     transform: rotate(360deg) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: rotate(180deg) scale(0.92);
+    opacity: 0.9;
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+    opacity: 0.55;
+  }
+}
+
+@keyframes sh-orb-core-drift {
+  0%,
+  100% {
+    transform: translate(-0.4px, -0.3px) scale(0.82);
+    opacity: 0.58;
+  }
+  33% {
+    transform: translate(0.5px, -0.2px) scale(1.06);
+    opacity: 0.95;
+  }
+  66% {
+    transform: translate(-0.2px, 0.5px) scale(0.92);
+    opacity: 0.72;
   }
 }
 
 @keyframes sh-orb-breathe {
   0%,
   100% {
-    opacity: 0.55;
-    transform: scale(0.92);
+    opacity: 0.35;
+    transform: scale(0.88);
   }
   50% {
-    opacity: 1;
-    transform: scale(1.18);
+    opacity: 0.85;
+    transform: scale(1.16);
   }
 }
 
@@ -185,12 +239,22 @@ body,
 }
 
 .sh-orb-swirl {
-  animation: sh-orb-spin 3.2s linear infinite;
+  animation: sh-orb-spin 1.85s cubic-bezier(0.45, 0.08, 0.55, 0.92) infinite;
   will-change: transform;
 }
 
+.sh-orb-counter {
+  animation: sh-orb-counter-spin 3.1s linear infinite;
+  will-change: transform, opacity;
+}
+
+.sh-orb-core {
+  animation: sh-orb-core-drift 2.3s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 .sh-orb-halo {
-  animation: sh-orb-breathe 2.4s ease-in-out infinite;
+  animation: sh-orb-breathe 2.6s ease-in-out infinite;
   will-change: transform, opacity;
 }
 

@@ -21,7 +21,12 @@ import {
 } from 'lucide-react';
 import type { MessageSourceKind, UnifiedBlock, UnifiedMessage } from '../../shared/types';
 import { Badge, Button, CollapsibleCard, DisclosureRow, WorkingIndicator } from '../ui';
-import { mediaUrlForPath, renderMarkdownHtml } from '../utils/format';
+import {
+  mediaUrlForPath,
+  parseTaskNotification,
+  renderMarkdownHtml,
+  unwrapSystemEnvelope,
+} from '../utils/format';
 import type { PreviewImageItem } from './ImageLightbox';
 
 export type TraceBlock = Extract<
@@ -697,22 +702,142 @@ export const UserMessageView: React.FC<UserMessageViewProps> = React.memo(
             ? 'text-status-warning/80'
             : 'text-ink-faint';
 
+      const fullRawText = msg.blocks
+        .filter((b): b is Extract<UnifiedBlock, { type: 'text' }> => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim();
+
+      const parsedTask = info.kind === 'task' ? parseTaskNotification(fullRawText) : null;
+      const nonTextBlocks = msg.blocks.filter((b) => b.type !== 'text');
+
+      const taskStatusTone =
+        parsedTask?.status === 'completed' || parsedTask?.status === 'done'
+          ? 'success'
+          : parsedTask?.status === 'failed' || parsedTask?.status === 'error'
+            ? 'danger'
+            : parsedTask?.status === 'stopped' || parsedTask?.status === 'killed'
+              ? 'warning'
+              : 'neutral';
+
+      const handleSystemMarkdownClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        const anchor = (e.target as HTMLElement | null)?.closest('a');
+        if (!anchor) return;
+        const href = anchor.getAttribute('href') || '';
+        if (!href) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const parsedFile = parseFileLinkHref(href);
+        if (parsedFile) {
+          onOpenPath?.(parsedFile.filePath, {
+            startLine: parsedFile.startLine,
+            endLine: parsedFile.endLine,
+          });
+          return;
+        }
+        if (href.startsWith('http://') || href.startsWith('https://')) {
+          void window.superHarness.openExternalUrl(href);
+        }
+      };
+
       return (
         <CollapsibleCard
           icon={<Icon className={`w-3.5 h-3.5 ${iconClass}`} />}
           title={info.label}
-          preview={info.preview}
+          preview={
+            parsedTask
+              ? (parsedTask.summary || parsedTask.result || info.preview)
+                  .replace(/^[-*•]\s+/, '')
+                  .replace(/\s+/g, ' ')
+                  .slice(0, 96)
+              : info.preview
+          }
           meta={info.sizeLabel}
-          bodyClassName="text-body text-ink-secondary space-y-2 max-h-[520px] overflow-y-auto"
+          bodyClassName="text-caption text-ink-secondary space-y-2.5 max-h-[520px] overflow-y-auto px-4 py-3"
         >
-          {msg.blocks.map((b, i) => (
-            <CoalescedBlockView
-              key={i}
-              block={b}
-              onOpenPath={onOpenPath}
-              onPreviewImage={onPreviewImage}
-            />
-          ))}
+          {parsedTask ? (
+            <div className="space-y-2.5" onClick={handleSystemMarkdownClick}>
+              {(parsedTask.status || parsedTask.taskIds.length > 0 || parsedTask.outputFile) && (
+                <div className="flex flex-wrap items-center gap-1.5 pb-1.5 border-b border-line-hairline/70">
+                  {parsedTask.status && (
+                    <Badge tone={taskStatusTone}>{parsedTask.status}</Badge>
+                  )}
+                  {parsedTask.taskIds.map((tid) => (
+                    <span
+                      key={tid}
+                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-white/[0.05] border border-line-hairline text-micro font-mono text-ink-muted"
+                    >
+                      {tid}
+                    </span>
+                  ))}
+                  {parsedTask.outputFile && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenPath?.(parsedTask.outputFile!)}
+                      className="ml-auto inline-flex items-center gap-1 text-micro font-mono text-ink-muted hover:text-ink-primary transition-colors cursor-pointer truncate max-w-[260px]"
+                      title={parsedTask.outputFile}
+                    >
+                      <FileText className="w-3 h-3 shrink-0" />
+                      <span className="truncate">
+                        {parsedTask.outputFile.split('/').pop() || parsedTask.outputFile}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {parsedTask.summary && (
+                <div
+                  className="sh-markdown sh-markdown-compact"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(parsedTask.summary) }}
+                />
+              )}
+
+              {parsedTask.result && (
+                <div
+                  className="sh-markdown sh-markdown-compact"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(parsedTask.result) }}
+                />
+              )}
+
+              {parsedTask.extraText && (
+                <div
+                  className="sh-markdown sh-markdown-compact text-ink-muted"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(parsedTask.extraText) }}
+                />
+              )}
+
+              {nonTextBlocks.map((b, i) => (
+                <CoalescedBlockView
+                  key={i}
+                  block={b}
+                  onOpenPath={onOpenPath}
+                  onPreviewImage={onPreviewImage}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2" onClick={handleSystemMarkdownClick}>
+              {msg.blocks.map((b, i) =>
+                b.type === 'text' ? (
+                  <div
+                    key={i}
+                    className="sh-markdown sh-markdown-compact"
+                    dangerouslySetInnerHTML={{
+                      __html: renderMarkdownHtml(unwrapSystemEnvelope(b.text)),
+                    }}
+                  />
+                ) : (
+                  <CoalescedBlockView
+                    key={i}
+                    block={b}
+                    onOpenPath={onOpenPath}
+                    onPreviewImage={onPreviewImage}
+                  />
+                )
+              )}
+            </div>
+          )}
         </CollapsibleCard>
       );
     }

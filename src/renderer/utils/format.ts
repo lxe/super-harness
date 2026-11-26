@@ -94,3 +94,78 @@ export function formatClock(ts: number): string {
     return '';
   }
 }
+
+export interface ParsedTaskNotification {
+  status?: string;
+  taskIds: string[];
+  summary?: string;
+  result?: string;
+  outputFile?: string;
+  extraText?: string;
+}
+
+function extractXmlTag(src: string, tag: string): string | undefined {
+  const m = src.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return m?.[1]?.trim() || undefined;
+}
+
+/**
+ * Parses Claude's XML `<task-notification>` envelopes into clean structured fields
+ * so they never collapse into smashed single-line raw tags or misaligned bullets.
+ */
+export function parseTaskNotification(raw: string): ParsedTaskNotification | null {
+  const match = raw.match(/<task-notification\b[^>]*>([\s\S]*?)<\/task-notification>/i);
+  if (!match) return null;
+
+  const inner = match[1];
+  const status = extractXmlTag(inner, 'status');
+  const rawTaskId = extractXmlTag(inner, 'task-id');
+  const rawSummary = extractXmlTag(inner, 'summary');
+  const rawResult = extractXmlTag(inner, 'result');
+  const outputFile = extractXmlTag(inner, 'output-file');
+
+  const taskIds = (rawTaskId || '')
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter((s) => Boolean(s) && !s.startsWith('__orphan_summary__'));
+
+  const summary =
+    rawSummary && !rawSummary.startsWith('__orphan_summary__') ? rawSummary : undefined;
+
+  // Preserve any plain prose outside the XML envelope
+  const remainder = raw
+    .replace(/<task-notification\b[^>]*>[\s\S]*?<\/task-notification>/gi, '')
+    .trim();
+
+  // If neither summary nor result was in named tags, strip remaining tags cleanly
+  const fallbackBody =
+    !summary && !rawResult
+      ? inner
+          .replace(/<(?:task-id|tool-use-id|status|output-file)[^>]*>[\s\S]*?<\/(?:task-id|tool-use-id|status|output-file)>/gi, '')
+          .replace(/<\/?[a-z0-9_-]+[^>]*>/gi, '')
+          .trim()
+      : undefined;
+
+  return {
+    status,
+    taskIds,
+    summary,
+    result: rawResult || fallbackBody || undefined,
+    outputFile,
+    extraText: remainder || undefined,
+  };
+}
+
+/**
+ * Strips known XML system/agent envelope tags so markdown lists and paragraphs
+ * inside collapsible system cards parse and indent cleanly.
+ */
+export function unwrapSystemEnvelope(raw: string): string {
+  return raw
+    .replace(
+      /<\/?(?:task-notification|cross-session-message|teammate-message|subagent[_-]notification|system-reminder|environment_context|local-command-caveat|turn_aborted|INSTRUCTIONS|SYSTEM_MESSAGE)\b[^>]*>/gi,
+      '\n'
+    )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}

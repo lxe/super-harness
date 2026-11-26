@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   Pencil,
   Pin,
+  PinOff,
   RefreshCw,
   Terminal,
   Trash2,
@@ -275,6 +276,22 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                     >
                       {session.pinnedToTop ? 'Unpin from top' : 'Pin to Super Harness top'}
                     </MenuItem>
+                    {session.pinned && (
+                      <MenuItem
+                        icon={<PinOff className="w-3.5 h-3.5 text-amber-400" />}
+                        onClick={() => {
+                          onOrganize([{ type: 'unpin', sessionId: session.id }]);
+                          setMenuOpen(false);
+                        }}
+                      >
+                        Unpin from{' '}
+                        {session.harnessGroup === 'codex'
+                          ? 'Codex'
+                          : session.harnessGroup === 'claude'
+                            ? 'Claude'
+                            : 'Antigravity'}
+                      </MenuItem>
+                    )}
                     {folders.length > 0 && (
                       <>
                         <MenuDivider />

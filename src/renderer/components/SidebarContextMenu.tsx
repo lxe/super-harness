@@ -1,7 +1,14 @@
 import React from 'react';
-import { Archive, Columns2, Pin, SquarePen, Trash2 } from 'lucide-react';
+import { Archive, Columns2, Pin, PinOff, SquarePen, Trash2 } from 'lucide-react';
 import type { OrganizeAction, UnifiedSession } from '../../shared/types';
 import { MenuDivider, MenuHeader, MenuItem, PopoverSurface } from '../ui';
+
+function harnessLabelForPin(session: UnifiedSession): string {
+  if (session.harnessGroup === 'codex') return 'Codex';
+  if (session.harnessGroup === 'claude') return 'Claude';
+  if (session.harnessGroup === 'antigravity') return 'Antigravity';
+  return 'harness';
+}
 
 export interface SidebarContextMenuProps {
   x: number;
@@ -40,6 +47,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   const single = targets[0];
   const hasTmux = targets.some((t) => t.harness === 'claude-tmux' && t.tmuxSessionName);
   const allPinnedTop = targets.every((t) => t.pinnedToTop);
+  const harnessPinnedTargets = targets.filter((t) => t.pinned);
 
   if (isSection) {
     return (
@@ -106,6 +114,23 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
             ? `Unpin all (${targets.length}) from top`
             : `Pin all (${targets.length}) to top`}
         </MenuItem>
+
+        {harnessPinnedTargets.length > 0 && (
+          <MenuItem
+            icon={<PinOff className="w-3.5 h-3.5 text-amber-400" />}
+            onClick={() => {
+              onOrganize(
+                harnessPinnedTargets.map((t) => ({
+                  type: 'unpin',
+                  sessionId: t.id,
+                }))
+              );
+              onClose();
+            }}
+          >
+            Unpin harness pins ({harnessPinnedTargets.length})
+          </MenuItem>
+        )}
       </PopoverSurface>
     );
   }
@@ -161,6 +186,26 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
             ? 'Unpin from top'
             : 'Pin to Super Harness top'}
       </MenuItem>
+
+      {harnessPinnedTargets.length > 0 && (
+        <MenuItem
+          icon={<PinOff className="w-3.5 h-3.5 text-amber-400" />}
+          onClick={() => {
+            onOrganize(
+              harnessPinnedTargets.map((t) => ({
+                type: 'unpin',
+                sessionId: t.id,
+              }))
+            );
+            if (isMulti) onClearSelection();
+            onClose();
+          }}
+        >
+          {isMulti
+            ? `Unpin ${harnessPinnedTargets.length} harness pins`
+            : `Unpin from ${harnessLabelForPin(single)}`}
+        </MenuItem>
+      )}
 
       {!isMulti && (
         <MenuItem

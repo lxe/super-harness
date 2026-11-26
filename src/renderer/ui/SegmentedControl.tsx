@@ -28,22 +28,54 @@ export interface SegmentedControlProps<T extends string> {
   className?: string;
 }
 
-const GAUGE_COLORS: Record<ProgressTone, { stroke: string; shimmer: string }> = {
-  antigravity: { stroke: '#60a5fa', shimmer: '#bfdbfe' },
-  codex: { stroke: '#10a37f', shimmer: '#a7f3d0' },
-  claude: { stroke: '#d97757', shimmer: '#fed7aa' },
-  muse: { stroke: '#a855f7', shimmer: '#f0abfc' },
-  warning: { stroke: '#fbbf24', shimmer: '#fef08a' },
-  danger: { stroke: '#fb7185', shimmer: '#fecdd3' },
-  neutral: { stroke: '#d4d4d8', shimmer: '#ffffff' },
-  auto: { stroke: '#818cf8', shimmer: '#c7d2fe' },
+const GAUGE_COLORS: Record<ProgressTone, { stroke: string; comet: string }> = {
+  antigravity: {
+    stroke: '#60a5fa',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(96,165,250,0.16) 195deg, rgba(147,197,253,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
+  codex: {
+    stroke: '#10a37f',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(16,163,127,0.16) 195deg, rgba(110,231,183,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
+  claude: {
+    stroke: '#d97757',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(217,119,87,0.16) 195deg, rgba(253,186,116,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
+  muse: {
+    stroke: '#a855f7',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(168,85,247,0.18) 195deg, rgba(232,121,249,0.65) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
+  warning: {
+    stroke: '#fbbf24',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(251,191,36,0.16) 195deg, rgba(253,224,71,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
+  danger: {
+    stroke: '#fb7185',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(251,113,133,0.16) 195deg, rgba(253,164,175,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
+  neutral: {
+    stroke: '#d4d4d8',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(212,212,216,0.14) 195deg, rgba(244,244,245,0.55) 295deg, rgba(255,255,255,0.9) 348deg, transparent 360deg)',
+  },
+  auto: {
+    stroke: '#818cf8',
+    comet:
+      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(129,140,248,0.16) 195deg, rgba(199,210,254,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
+  },
 };
 
 function resolveGaugePalette(
   value: number | null,
   tone: ProgressTone,
   estimated?: boolean
-): { stroke: string; shimmer: string } {
+): { stroke: string; comet: string } {
   if (value !== null && !estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse')) {
     if (value >= 95) return GAUGE_COLORS.danger;
     if (value >= 80) return GAUGE_COLORS.warning;
@@ -110,11 +142,11 @@ export function SegmentedControl<T extends string>({
               )}
             >
               <span className="relative inline-flex items-center justify-center w-8 h-8">
-                {/* Radial gauge track + underneath comet chaser + progress arc on top */}
+                {/* 1. Recessed circular track (bottom layer) */}
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 36 36"
-                  className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none overflow-visible"
+                  className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
                 >
                   <circle
                     cx="18"
@@ -124,64 +156,30 @@ export function SegmentedControl<T extends string>({
                     stroke={active ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.08)'}
                     strokeWidth="2.3"
                   />
-                  {item.working && (
-                    <g
-                      className="sh-gauge-shimmer"
-                      style={{ transformOrigin: '18px 18px' }}
-                    >
-                      {/* Smooth 4-stage clockwise comet: faded tail -> bright luminous head */}
-                      <circle
-                        cx="18"
-                        cy="18"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke={palette.shimmer}
-                        strokeOpacity="0.18"
-                        strokeWidth="2.3"
-                        strokeLinecap="round"
-                        strokeDasharray={`34 ${GAUGE_CIRCUMFERENCE}`}
-                        strokeDashoffset="0"
-                      />
-                      <circle
-                        cx="18"
-                        cy="18"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke={palette.shimmer}
-                        strokeOpacity="0.38"
-                        strokeWidth="2.3"
-                        strokeLinecap="round"
-                        strokeDasharray={`22 ${GAUGE_CIRCUMFERENCE}`}
-                        strokeDashoffset="-12"
-                      />
-                      <circle
-                        cx="18"
-                        cy="18"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke={palette.shimmer}
-                        strokeOpacity="0.72"
-                        strokeWidth="2.3"
-                        strokeLinecap="round"
-                        strokeDasharray={`11 ${GAUGE_CIRCUMFERENCE}`}
-                        strokeDashoffset="-23"
-                      />
-                      <circle
-                        cx="18"
-                        cy="18"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke="#ffffff"
-                        strokeOpacity="0.96"
-                        strokeWidth="2.3"
-                        strokeLinecap="round"
-                        strokeDasharray={`4 ${GAUGE_CIRCUMFERENCE}`}
-                        strokeDashoffset="-30"
-                        style={{ filter: `drop-shadow(0 0 2.5px ${palette.stroke})` }}
-                      />
-                    </g>
-                  )}
-                  {displayPct > 0 && (
+                </svg>
+
+                {/* 2. Full smooth conic-gradient chaser (WorkingOrb-style, exact gauge ring thickness, underneath progress arc) */}
+                {item.working && (
+                  <span
+                    aria-hidden="true"
+                    className="sh-gauge-shimmer absolute inset-0 rounded-full pointer-events-none"
+                    style={{
+                      background: palette.comet,
+                      WebkitMaskImage:
+                        'radial-gradient(circle, transparent 0%, transparent 75.5%, black 77%, black 89.5%, transparent 91%)',
+                      maskImage:
+                        'radial-gradient(circle, transparent 0%, transparent 75.5%, black 77%, black 89.5%, transparent 91%)',
+                    }}
+                  />
+                )}
+
+                {/* 3. Colored usage gauge arc on top of the chaser */}
+                {displayPct > 0 && (
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 36 36"
+                    className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                  >
                     <circle
                       cx="18"
                       cy="18"
@@ -195,8 +193,8 @@ export function SegmentedControl<T extends string>({
                       strokeDashoffset={dashOffset}
                       className="transition-[stroke-dashoffset] duration-300 ease-out"
                     />
-                  )}
-                </svg>
+                  </svg>
+                )}
 
                 {/* Centered icon (or compact 'All' glyph for the unified tab) */}
                 <span className="relative z-10 inline-flex items-center justify-center">

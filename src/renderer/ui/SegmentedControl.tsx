@@ -263,7 +263,7 @@ export function SegmentedControl<T extends string>({
                   : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.05]'
               )}
             >
-              <span className="relative inline-flex items-center justify-center w-8 h-8">
+              <span className="relative inline-flex items-center justify-center w-8 h-8 isolate">
                 {/* 1. Recessed circular track (bottom layer) — thicker refined 3.0 stroke */}
                 <svg
                   aria-hidden="true"
@@ -280,30 +280,12 @@ export function SegmentedControl<T extends string>({
                   />
                 </svg>
 
-                {/* 2. Calm track-width highlight travelling along the ring when actively working */}
-                {item.working && (
-                  <span
-                    aria-hidden="true"
-                    className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
-                    style={{
-                      background: `conic-gradient(from 0deg, transparent 0deg, ${palette.stroke}55 55deg, ${palette.stroke}99 100deg, transparent 160deg)`,
-                      WebkitMaskImage:
-                        'radial-gradient(farthest-side, transparent calc(100% - 3.2px), #000 calc(100% - 2.9px))',
-                      maskImage:
-                        'radial-gradient(farthest-side, transparent calc(100% - 3.2px), #000 calc(100% - 2.9px))',
-                    }}
-                  />
-                )}
-
-                {/* 3. Colored usage gauge arc on top (compositor-only opacity pulse when working) */}
+                {/* 2. Colored usage gauge arc */}
                 {displayPct > 0 && (
                   <svg
                     aria-hidden="true"
                     viewBox="0 0 36 36"
-                    className={cn(
-                      'absolute inset-0 w-full h-full -rotate-90 pointer-events-none',
-                      item.working && 'sh-gauge-arc-shimmer'
-                    )}
+                    className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
                   >
                     <circle
                       cx="18"
@@ -319,6 +301,23 @@ export function SegmentedControl<T extends string>({
                       className="transition-[stroke-dashoffset] duration-300 ease-out"
                     />
                   </svg>
+                )}
+
+                {/* 3. Pure luminosity shimmer wave sweeping over both grey track & colored arc */}
+                {item.working && (
+                  <span
+                    aria-hidden="true"
+                    className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
+                    style={{
+                      background:
+                        'conic-gradient(from 0deg, transparent 0deg, rgba(255,255,255,0.06) 35deg, rgba(255,255,255,0.44) 80deg, rgba(255,255,255,0.06) 125deg, transparent 160deg)',
+                      mixBlendMode: 'screen',
+                      WebkitMaskImage:
+                        'radial-gradient(farthest-side, transparent calc(100% - 3.1px), #000 calc(100% - 2.8px))',
+                      maskImage:
+                        'radial-gradient(farthest-side, transparent calc(100% - 3.1px), #000 calc(100% - 2.8px))',
+                    }}
+                  />
                 )}
 
                 {/* Centered icon (or compact 'All' glyph for the unified tab) */}

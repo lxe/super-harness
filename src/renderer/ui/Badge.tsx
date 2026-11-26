@@ -12,16 +12,16 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  neutral: 'bg-white/[0.06] text-ink-secondary border-line-hairline',
-  accent: 'bg-indigo-500/15 text-indigo-200 border-indigo-400/25',
-  success: 'bg-emerald-500/12 text-emerald-300 border-emerald-400/25',
-  warning: 'bg-amber-500/12 text-amber-300 border-amber-400/25',
-  danger: 'bg-rose-500/12 text-rose-300 border-rose-400/25',
+  neutral: 'bg-white/[0.08] text-ink-secondary',
+  accent: 'bg-indigo-500/18 text-indigo-200',
+  success: 'bg-emerald-500/15 text-emerald-300',
+  warning: 'bg-amber-500/15 text-amber-300',
+  danger: 'bg-rose-500/15 text-rose-300',
 };
 
 const SIZE_CLASSES: Record<BadgeSize, string> = {
-  xs: 'h-[18px] min-w-[18px] px-1.5 text-[11px] leading-none rounded-md gap-1',
-  sm: 'h-5 px-2 text-micro leading-none rounded-md gap-1.5',
+  xs: 'h-[19px] min-w-[19px] px-1.5 text-[11px] leading-none rounded-[7px] gap-1',
+  sm: 'h-5 px-2 text-micro leading-none rounded-[7px] gap-1.5',
 };
 
 export const Badge: React.FC<BadgeProps> = ({
@@ -36,7 +36,7 @@ export const Badge: React.FC<BadgeProps> = ({
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center border font-medium whitespace-nowrap select-none',
+        'inline-flex items-center justify-center font-medium whitespace-nowrap select-none',
         TONE_CLASSES[tone],
         SIZE_CLASSES[size],
         mono && 'font-mono tabular-nums',

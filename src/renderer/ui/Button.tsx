@@ -15,15 +15,15 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    'bg-ink-primary text-surface-rail font-medium hover:bg-white disabled:opacity-35',
+    'bg-ink-primary text-surface-rail font-medium hover:bg-white shadow-[0_1px_3px_rgba(0,0,0,0.28)] disabled:opacity-35',
   secondary:
-    'bg-surface-raised text-ink-primary border border-line-subtle hover:bg-white/[0.1] hover:border-line-strong disabled:opacity-40',
+    'bg-surface-raised text-ink-primary hover:bg-white/[0.12] shadow-[0_1px_3px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)] disabled:opacity-40',
   subtle:
-    'bg-white/[0.05] text-ink-secondary border border-line-hairline hover:bg-white/[0.09] hover:text-ink-primary disabled:opacity-40',
+    'bg-white/[0.06] text-ink-secondary hover:bg-white/[0.10] hover:text-ink-primary disabled:opacity-40',
   ghost:
     'bg-transparent text-ink-muted hover:text-ink-primary hover:bg-white/[0.06] disabled:opacity-40',
   danger:
-    'bg-rose-500/12 text-rose-300 border border-rose-500/25 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40',
+    'bg-rose-500/14 text-rose-300 hover:bg-rose-500/22 hover:text-rose-200 disabled:opacity-40',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

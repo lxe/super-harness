@@ -324,20 +324,30 @@ export class ControlServer {
             })}\n\n`
           );
 
-          if (Number.isFinite(lastSeq) && lastSeq > 0 && lastSeq < this.eventSeq) {
-            const oldestSeq = this.eventBuffer[0]?.seq ?? this.eventSeq + 1;
-            if (lastSeq + 1 < oldestSeq) {
+          if (Number.isFinite(lastSeq) && lastSeq > 0) {
+            if (lastSeq > this.eventSeq) {
               res.write(
                 `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
-                  reason: 'buffer_gap',
+                  reason: 'host_restarted',
                   lastSeq,
                   currentSeq: this.eventSeq,
                 })}\n\n`
               );
-            } else {
-              for (const item of this.eventBuffer) {
-                if (item.seq > lastSeq) {
-                  res.write(item.frame);
+            } else if (lastSeq < this.eventSeq) {
+              const oldestSeq = this.eventBuffer[0]?.seq ?? this.eventSeq + 1;
+              if (lastSeq + 1 < oldestSeq) {
+                res.write(
+                  `id: ${this.eventSeq}\nevent: resync_required\ndata: ${JSON.stringify({
+                    reason: 'buffer_gap',
+                    lastSeq,
+                    currentSeq: this.eventSeq,
+                  })}\n\n`
+                );
+              } else {
+                for (const item of this.eventBuffer) {
+                  if (item.seq > lastSeq) {
+                    res.write(item.frame);
+                  }
                 }
               }
             }

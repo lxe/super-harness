@@ -74,7 +74,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
     sending,
     isStreaming,
     isAgentBusy,
-    dispatchNote,
+    dispatchNote: _dispatchNote,
     textareaRef,
     onInputChange,
     onRemoveAttachment,
@@ -459,19 +459,12 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                     )}
                   </div>
                 )}
-
-                {dispatchNote && (
-                  <span className="text-micro text-ink-faint leading-none translate-y-[0.5px] truncate pl-1">
-                    · {dispatchNote}
-                  </span>
-                )}
               </>
             ) : (
               <div className="flex items-center gap-2 min-w-0 pl-1">
                 <HarnessLogo harness={session.harness} size={14} />
                 <span className="text-caption text-ink-muted truncate">
                   {session.model || vis.label}
-                  {dispatchNote ? ` · ${dispatchNote}` : ''}
                 </span>
               </div>
             )}

@@ -103,7 +103,9 @@ export const MasterEngineMenu: React.FC<MasterEngineMenuProps> = ({ config, cata
           width="md"
           onClose={close}
           ignoreRef={triggerRef}
-          className="absolute left-0 bottom-full mb-2 z-50 w-64"
+          // The shared popover shadow reads heavy on this tall menu over the composer; use the
+          // tight card elevation token instead.
+          className="absolute left-0 bottom-full mb-2 z-50 w-64 sh-shadow-card"
         >
           <MenuSectionLabel>Harness</MenuSectionLabel>
           <div className="space-y-0.5">
@@ -130,7 +132,6 @@ export const MasterEngineMenu: React.FC<MasterEngineMenuProps> = ({ config, cata
           </div>
 
           <MenuDivider />
-          <MenuSectionLabel>{HARNESS_TITLES[config.harness]} model</MenuSectionLabel>
 
           {controls.models.length > 6 && (
             <div className="mb-1.5 flex items-center gap-2 px-2.5 h-8 rounded-lg bg-surface-code/80 border border-line-hairline focus-within:border-line-subtle transition-colors">

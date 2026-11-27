@@ -908,30 +908,9 @@ private struct HarnessSwitcherStrip: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .background(
-            Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.09), Color.white.opacity(0.02), Color.clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-        )
+        // The same plain Liquid Glass capsule as the top bar's pills: no added sheen, rim or
+        // drop shadow.
         .modifier(SHGlassSurfaceModifier(shape: Capsule()))
-        .overlay(
-            Capsule()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.26), Color.white.opacity(0.06), Color.white.opacity(0.12)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 0.75
-                )
-                .allowsHitTesting(false)
-        )
-        .shadow(color: Color.black.opacity(0.26), radius: 12, y: 4)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         .onChange(of: drag) { _, state in
             ignoreTapsUntil = Date().addingTimeInterval(0.5)
@@ -977,7 +956,7 @@ private struct HarnessSwitcherStrip: View {
         // hold-to-drag recognizer attached around it would never see the press.
         let tint = SHColor.harness(group)
         return Group {
-            chipCell(isSelected: isSelected, tint: tint) {
+            chipCell(isSelected: isSelected) {
                 SHRadialGauge(
                     value: barPct,
                     tint: tint,
@@ -1005,40 +984,16 @@ private struct HarnessSwitcherStrip: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func chipCell<Content: View>(isSelected: Bool, tint: Color, @ViewBuilder content: () -> Content) -> some View {
+    private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {
         content()
             .frame(
                 minWidth: needsHorizontalScroll ? Self.scrollableCellWidth : nil,
                 maxWidth: needsHorizontalScroll ? Self.scrollableCellWidth : .infinity
             )
             .frame(height: 52)
-            .background {
-                if isSelected {
-                    ZStack {
-                        Capsule().fill(tint.opacity(0.16))
-                        Capsule().fill(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.22), Color.white.opacity(0.10)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                    }
-                }
-            }
-            .overlay {
-                if isSelected {
-                    Capsule()
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.32), tint.opacity(0.28)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 0.75
-                        )
-                }
-            }
+            // Selected: a flat neutral fill, like a pressed control in the top bar. No harness
+            // tint (a selected Muse gauge read as a purple pill) and no gradient or rim.
+            .background(isSelected ? Color.white.opacity(0.14) : Color.clear)
             .clipShape(Capsule())
             .contentShape(Capsule())
     }

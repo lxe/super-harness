@@ -1240,10 +1240,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
         </div>
       </div>
 
-      {/* Inline Search — right below the top bar */}
+      {/* Inline Search — right below the top bar, raised composer-like squircle surface */}
       {(showSearch || query) && (
         <div className="px-2.5 pb-2">
-          <div className="h-9 flex items-center gap-2 px-3 rounded-xl bg-surface-code shadow-[inset_0_1px_2px_rgba(0,0,0,0.34)] focus-within:bg-surface-canvas/70 transition-colors">
+          <div className="h-9 flex items-center gap-2 px-3 rounded-xl bg-surface-popover sh-shadow-card focus-within:bg-surface-raised/85 focus-within:sh-shadow-card-focus transition-all">
             <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
             <input
               ref={searchInputRef}

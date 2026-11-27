@@ -32,6 +32,10 @@ public enum SHColor {
     /// The app's accent for text buttons, links in chrome and progress marks: a neutral
     /// near-white.
     public static let accentPrimary = Color(hex: 0xE4E6EC)
+    /// The blue for links, in-progress marks, diff hunk headers and informational notices. It is
+    /// the same blue as Antigravity's brand colour; use this name wherever the meaning is
+    /// "information", and `brandAntigravity` only for the harness itself.
+    public static let accentInfo = brandAntigravity
     /// The white of the Superharness porcelain mark.
     public static let porcelain = Color(hex: 0xF1F2F5)
     /// The "on" colour of every switch.
@@ -99,6 +103,10 @@ public enum SHRadius {
     public static let md: CGFloat = 10
     public static let lg: CGFloat = 14
     public static let xl: CGFloat = 18
+    /// The user's message bubble and the pairing hero tile.
+    public static let bubble: CGFloat = 20
+    /// The composer and floating panels.
+    public static let panel: CGFloat = 22
     public static let pill: CGFloat = 999
 }
 
@@ -248,25 +256,6 @@ public struct HarnessLogoView: View {
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
             .accessibilityHidden(true)
-    }
-}
-
-public struct HarnessIconView: View {
-    public let kind: HarnessKind
-    public var size: CGFloat = 14
-
-    public init(kind: HarnessKind, size: CGFloat = 14) {
-        self.kind = kind
-        self.size = size
-    }
-
-    public init(group: HarnessGroup, size: CGFloat = 14) {
-        self.kind = group.defaultKind
-        self.size = size
-    }
-
-    public var body: some View {
-        HarnessLogoView(harness: kind, size: size)
     }
 }
 

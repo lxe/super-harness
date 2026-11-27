@@ -3,106 +3,19 @@ import SwiftUI
 import UIKit
 #endif
 
-// MARK: - Consistent Mobile Density Rhythm
+// MARK: - Layout Measurements
 
 public enum SHLayout {
+    /// Side margin of a chat's scroll content.
     public static let screenPad: CGFloat = 14
-    public static let messageGap: CGFloat = 16
-    public static let blockGap: CGFloat = 8
+    /// Gap between stacked step rows.
     public static let itemGap: CGFloat = 6
+    /// Attachment thumbnail in a message.
     public static let thumbSize: CGFloat = 76
+    /// Attachment thumbnail in the composer.
     public static let composerThumbSize: CGFloat = 56
-    public static let headerHeight: CGFloat = 52
-}
-
-// MARK: - Liquid Glass Floating Chrome Primitives
-
-/// Circular frosted glass button matching iOS 26 overlay chrome.
-public struct SHGlassCircleButton: View {
-    public let systemImage: String
-    public let accessibilityLabel: String
-    public let action: () -> Void
-
-    public init(systemImage: String, accessibilityLabel: String, action: @escaping () -> Void) {
-        self.systemImage = systemImage
-        self.accessibilityLabel = accessibilityLabel
-        self.action = action
-    }
-
-    public var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(SHColor.inkPrimary)
-                .frame(width: 38, height: 38)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-                .shadow(color: Color.black.opacity(0.32), radius: 8, y: 3)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-/// Compact centered Liquid Glass header pill matching the exact 38pt height of the left/right chrome pills.
-/// Uses the harness icon on the left + crisp single-line title for balanced horizontal symmetry.
-public struct SHFloatingTitlePill: View {
-    public let title: String
-    public let subtitle: String?
-    public let harness: HarnessKind?
-    public var onTap: (() -> Void)? = nil
-
-    public init(title: String, subtitle: String? = nil, harness: HarnessKind? = nil, onTap: (() -> Void)? = nil) {
-        self.title = title
-        self.subtitle = subtitle
-        self.harness = harness
-        self.onTap = onTap
-    }
-
-    public var body: some View {
-        let content = HStack(spacing: 7) {
-            if let harness {
-                HarnessLogoView(harness: harness, size: 14)
-            }
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(SHColor.inkPrimary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 13)
-        .frame(height: 38)
-        .frame(maxWidth: 225)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-        .shadow(color: Color.black.opacity(0.32), radius: 8, y: 3)
-
-        if let onTap {
-            Button(action: onTap) { content }
-                .buttonStyle(.plain)
-        } else {
-            content
-        }
-    }
-}
-
-// MARK: - Bespoke Session Row Status Badges
-
-/// Compact amber `?` badge for sessions awaiting user input or approval.
-public struct SHQuestionBadge: View {
-    public init() {}
-
-    public var body: some View {
-        ZStack {
-            Circle()
-                .fill(SHColor.statusWarning)
-                .frame(width: 15, height: 15)
-            Image(systemName: "questionmark")
-                .font(.system(size: 8.5, weight: .black))
-                .foregroundStyle(Color(hex: 0x16171B))
-        }
-        .overlay(Circle().stroke(SHColor.surfaceSubtle, lineWidth: 1.75))
-        .shadow(color: Color.black.opacity(0.35), radius: 2, y: 1)
-    }
+    /// Diameter of the composer's round controls and height of its model menu.
+    public static let controlSize: CGFloat = 38
 }
 
 // MARK: - Synchronous In-Memory Media Image Cache (Zero-Flash Handoff)
@@ -134,47 +47,6 @@ public final class SHMediaImageCache {
     #endif
 }
 
-/// Right-side Liquid Glass capsule combining an optional live activity ring and a menu button.
-public struct SHGlassActionCapsule<MenuContent: View>: View {
-    public let isBusy: Bool
-    public let accentColor: Color
-    @ViewBuilder public let menuContent: () -> MenuContent
-
-    public init(
-        isBusy: Bool,
-        accentColor: Color,
-        @ViewBuilder menuContent: @escaping () -> MenuContent
-    ) {
-        self.isBusy = isBusy
-        self.accentColor = accentColor
-        self.menuContent = menuContent
-    }
-
-    public var body: some View {
-        HStack(spacing: 10) {
-            if isBusy {
-                SHActivityPulse(tint: accentColor, size: 14)
-                    .frame(width: 20, height: 20)
-            }
-            Menu {
-                menuContent()
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(SHColor.inkPrimary)
-                    .frame(width: 26, height: 26)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Session actions")
-        }
-        .padding(.horizontal, isBusy ? 12 : 6)
-        .frame(height: 38)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-        .shadow(color: Color.black.opacity(0.32), radius: 8, y: 3)
-    }
-}
-
 // MARK: - Grounded Composer Surface
 
 /// Tactile elevated dark surface matching desktop's borderless 22px squircle composer.
@@ -187,7 +59,7 @@ public struct SHComposerSurface<Content: View>: View {
 
     public var body: some View {
         content()
-            .shRaisedSurface(SHColor.surfaceRaised, cornerRadius: 22, elevation: .card)
+            .shRaisedSurface(SHColor.surfaceRaised, cornerRadius: SHRadius.panel, elevation: .card)
     }
 }
 
@@ -516,92 +388,6 @@ private struct SHAttachmentThumbTile: View {
 }
 
 
-// MARK: - Combined Superharness Logo + Live Status Core
-
-/// Renders the official Superharness 3-arm geometric logo with its center core dynamically
-/// tinted to reflect live host connection health (green = live, amber = connecting, red = error).
-public struct SuperHarnessStatusLogo: View {
-    public let statusColor: Color
-    public var size: CGFloat = 22
-
-    public init(statusColor: Color, size: CGFloat = 22) {
-        self.statusColor = statusColor
-        self.size = size
-    }
-
-    public var body: some View {
-        Canvas { ctx, sz in
-            let sx = sz.width / 24.0
-            let sy = sz.height / 24.0
-            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
-
-            var topArm = Path()
-            topArm.move(to: pt(12, 2.2))
-            topArm.addLine(to: pt(20.4, 7.05))
-            topArm.addLine(to: pt(17.4, 8.8))
-            topArm.addLine(to: pt(12, 5.65))
-            topArm.addLine(to: pt(6.6, 8.8))
-            topArm.addLine(to: pt(3.6, 7.05))
-            topArm.closeSubpath()
-            ctx.fill(
-                topArm,
-                with: .linearGradient(
-                    Gradient(colors: [Color(hex: 0x818CF8), Color(hex: 0x60A5FA)]),
-                    startPoint: pt(3, 3),
-                    endPoint: pt(21, 12)
-                )
-            )
-
-            var leftArm = Path()
-            leftArm.move(to: pt(3.6, 8.95))
-            leftArm.addLine(to: pt(6.6, 10.7))
-            leftArm.addLine(to: pt(6.6, 16.2))
-            leftArm.addLine(to: pt(11.15, 18.85))
-            leftArm.addLine(to: pt(11.15, 22.3))
-            leftArm.addLine(to: pt(3.6, 17.95))
-            leftArm.closeSubpath()
-            ctx.fill(
-                leftArm,
-                with: .linearGradient(
-                    Gradient(colors: [Color(hex: 0x60A5FA), Color(hex: 0x10A37F)]),
-                    startPoint: pt(4, 8),
-                    endPoint: pt(12, 21)
-                )
-            )
-
-            var rightArm = Path()
-            rightArm.move(to: pt(20.4, 8.95))
-            rightArm.addLine(to: pt(20.4, 17.95))
-            rightArm.addLine(to: pt(12.85, 22.3))
-            rightArm.addLine(to: pt(12.85, 18.85))
-            rightArm.addLine(to: pt(17.4, 16.2))
-            rightArm.addLine(to: pt(17.4, 10.7))
-            rightArm.closeSubpath()
-            ctx.fill(
-                rightArm,
-                with: .linearGradient(
-                    Gradient(colors: [Color(hex: 0xD97757), Color(hex: 0x818CF8)]),
-                    startPoint: pt(20, 8),
-                    endPoint: pt(12, 21)
-                )
-            )
-
-            // Live status core inside the logo
-            var core = Path()
-            core.move(to: pt(12, 8.4))
-            core.addLine(to: pt(15.35, 10.35))
-            core.addLine(to: pt(15.35, 14.25))
-            core.addLine(to: pt(12, 16.2))
-            core.addLine(to: pt(8.65, 14.25))
-            core.addLine(to: pt(8.65, 10.35))
-            core.closeSubpath()
-            ctx.fill(core, with: .color(statusColor))
-        }
-        .frame(width: size, height: size)
-        .shadow(color: statusColor.opacity(0.35), radius: 4, x: 0, y: 0)
-    }
-}
-
 // MARK: - Radial Quota Gauge (harness switcher; mirrors desktop SegmentedControl `gauge` variant)
 
 /// Circular quota ring drawn around a centered glyph. While `isWorking`, a conic "chaser"
@@ -807,5 +593,315 @@ public struct SHActivityPulse: View {
         }
         #endif
         return (0.62, 0.55, 0.90)
+    }
+}
+
+// MARK: - Liquid Glass Surface
+
+/// Liquid Glass for floating chrome: the dock, the header pills, the New Chat button. Before
+/// iOS 26 it falls back to a thin material with a light edge.
+private struct SHGlassSurfaceModifier<S: Shape>: ViewModifier {
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.75))
+        }
+    }
+}
+
+public extension View {
+    /// Floating Liquid Glass chrome in `shape`. Content inside the scroll area uses
+    /// `shRaisedSurface` and `shRecessedWell` instead.
+    func shGlassSurface<S: Shape>(in shape: S) -> some View {
+        modifier(SHGlassSurfaceModifier(shape: shape))
+    }
+}
+
+// MARK: - Working Title Shimmer
+
+/// A one-line title that shows activity by itself: while `isActive`, a soft band of light
+/// sweeps across the letters. It matches the desktop `.sh-working-shimmer` (muted grey to
+/// near-white and back, one sweep every 2.6 seconds, eased in and out).
+struct SHShimmerText: View {
+    let text: String
+    let font: Font
+    let isActive: Bool
+    var period: Double = 2.6
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let dim = Color(red: 161 / 255, green: 166 / 255, blue: 179 / 255).opacity(0.72)
+    private static let bright = Color(red: 244 / 255, green: 245 / 255, blue: 247 / 255).opacity(0.96)
+
+    /// Centre of the bright band at `time`, in units of the text width. It travels from just
+    /// left of the text to just right of it, eased in and out, then starts again.
+    nonisolated static func bandCenter(at time: Double, period: Double) -> Double {
+        let linear = (time / period).truncatingRemainder(dividingBy: 1)
+        let progress = linear < 0 ? linear + 1 : linear
+        let eased = 0.5 - 0.5 * cos(progress * .pi)
+        return -0.6 + eased * 2.2
+    }
+
+    var body: some View {
+        if isActive && !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                let center = Self.bandCenter(at: context.date.timeIntervalSinceReferenceDate, period: period)
+                label.foregroundStyle(
+                    LinearGradient(
+                        colors: [Self.dim, Self.bright, Self.dim],
+                        startPoint: UnitPoint(x: center - 0.6, y: 0.5),
+                        endPoint: UnitPoint(x: center + 0.6, y: 0.5)
+                    )
+                )
+            }
+            .accessibilityLabel("\(text), working")
+        } else {
+            label.foregroundStyle(SHColor.inkPrimary)
+        }
+    }
+
+    private var label: some View {
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+}
+
+// MARK: - Toolbar Logo
+
+/// The Superharness mark shown in the middle of the session list's top bar.
+struct SHToolbarLogo: View {
+    var body: some View {
+        // The porcelain mark, a single-colour template tinted porcelain white.
+        Image("SuperHarnessLogo")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(SHColor.porcelain)
+            .frame(width: 26, height: 26)
+            .accessibilityLabel("Superharness")
+            .accessibilityIdentifier("header.logo")
+    }
+}
+
+// MARK: - Round Control
+
+/// The face of a round control in the composer: quiet for secondary actions (attach, mic),
+/// prominent for the one main action (send, stop).
+public struct SHRoundControlLabel: View {
+    public let systemImage: String
+    public var symbolSize: CGFloat = 16
+    public var weight: Font.Weight = .semibold
+    public var isProminent: Bool = false
+
+    public init(systemImage: String, symbolSize: CGFloat = 16, weight: Font.Weight = .semibold, isProminent: Bool = false) {
+        self.systemImage = systemImage
+        self.symbolSize = symbolSize
+        self.weight = weight
+        self.isProminent = isProminent
+    }
+
+    public var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: symbolSize, weight: weight))
+            .foregroundStyle(isProminent ? SHColor.surfaceRail : SHColor.inkSecondary)
+            .frame(width: SHLayout.controlSize, height: SHLayout.controlSize)
+            .background(isProminent ? SHColor.inkPrimary : SHColor.surfaceBubble, in: Circle())
+    }
+}
+
+// MARK: - Section Cards (Settings, Usage)
+
+/// Measurements shared by every row in a section card, so icons, labels and dividers line up.
+public enum SHCardMetrics {
+    public static let iconColumn: CGFloat = 28
+    public static let iconGap: CGFloat = 12
+    public static let rowInset: CGFloat = 14
+    public static var labelInset: CGFloat { rowInset + iconColumn + iconGap }
+}
+
+/// A quiet title above one raised card of rows.
+public struct SHSectionCard<Content: View>: View {
+    public let title: String
+    @ViewBuilder public let content: () -> Content
+
+    public init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SHColor.inkMuted)
+                .padding(.leading, 6)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.lg, elevation: .card)
+        }
+    }
+}
+
+/// A hairline between card rows, starting at the label so it lines up in every card.
+public struct SHCardDivider: View {
+    public init() {}
+
+    public var body: some View {
+        Rectangle()
+            .fill(SHColor.lineHairline)
+            .frame(height: 1)
+            .padding(.leading, SHCardMetrics.labelInset)
+    }
+}
+
+public struct SHCardRowPadding: ViewModifier {
+    public init() {}
+
+    public func body(content: Content) -> some View {
+        content
+            .frame(minHeight: 40)
+            .padding(.horizontal, SHCardMetrics.rowInset)
+            .padding(.vertical, 6)
+    }
+}
+
+/// Title with one optional quiet line under it.
+public struct SHCardRowLabel: View {
+    public let title: String
+    public var detail: String? = nil
+    public var tint: Color = SHColor.inkPrimary
+    public var detailColor: Color = SHColor.inkMuted
+
+    public init(title: String, detail: String? = nil, tint: Color = SHColor.inkPrimary, detailColor: Color = SHColor.inkMuted) {
+        self.title = title
+        self.detail = detail
+        self.tint = tint
+        self.detailColor = detailColor
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(SHTypography.caption)
+                    .foregroundStyle(detailColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+    }
+}
+
+/// Icon in the fixed leading column, then the label.
+public struct SHCardIconLabel: View {
+    public let icon: String
+    public let title: String
+    public var detail: String? = nil
+    public var tint: Color = SHColor.inkPrimary
+    public var detailColor: Color = SHColor.inkMuted
+
+    public init(icon: String, title: String, detail: String? = nil, tint: Color = SHColor.inkPrimary, detailColor: Color = SHColor.inkMuted) {
+        self.icon = icon
+        self.title = title
+        self.detail = detail
+        self.tint = tint
+        self.detailColor = detailColor
+    }
+
+    public var body: some View {
+        HStack(spacing: SHCardMetrics.iconGap) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(tint == SHColor.inkPrimary ? SHColor.inkSecondary : tint)
+                .frame(width: SHCardMetrics.iconColumn, height: SHCardMetrics.iconColumn)
+            SHCardRowLabel(title: title, detail: detail, tint: tint, detailColor: detailColor)
+        }
+    }
+}
+
+/// The one card row layout: icon column, label, optional trailing content.
+public struct SHCardRow<Trailing: View>: View {
+    public let icon: String
+    public let title: String
+    public var detail: String? = nil
+    public var tint: Color = SHColor.inkPrimary
+    public var detailColor: Color = SHColor.inkMuted
+    @ViewBuilder public let trailing: () -> Trailing
+
+    public init(
+        icon: String,
+        title: String,
+        detail: String? = nil,
+        tint: Color = SHColor.inkPrimary,
+        detailColor: Color = SHColor.inkMuted,
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.icon = icon
+        self.title = title
+        self.detail = detail
+        self.tint = tint
+        self.detailColor = detailColor
+        self.trailing = trailing
+    }
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            SHCardIconLabel(icon: icon, title: title, detail: detail, tint: tint, detailColor: detailColor)
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .modifier(SHCardRowPadding())
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Choice Bar
+
+/// A full-height row of choices, one selected: the same job as a segmented control, at a size
+/// that is comfortable to tap and read.
+struct SHChoiceBar<Value: Hashable>: View {
+    let options: [(value: Value, label: String)]
+    @Binding var selection: Value
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                let isSelected = option.value == selection
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { selection = option.value }
+                } label: {
+                    Text(option.label)
+                        .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(
+                            isSelected ? Color.white.opacity(0.14) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }

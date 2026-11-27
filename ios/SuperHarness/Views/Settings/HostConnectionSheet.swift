@@ -24,10 +24,10 @@ public struct HostConnectionSheet: View {
     }
 
     /// Width of the leading icon column and the gap after it. Dividers start at the label.
-    private static let iconColumn: CGFloat = 28
-    private static let iconGap: CGFloat = 12
-    private static let rowInset: CGFloat = 14
-    private static var labelInset: CGFloat { rowInset + iconColumn + iconGap }
+    private static let iconColumn = SHCardMetrics.iconColumn
+    private static let iconGap = SHCardMetrics.iconGap
+    fileprivate static let rowInset = SHCardMetrics.rowInset
+    private static var labelInset: CGFloat { SHCardMetrics.labelInset }
 
     public var body: some View {
         NavigationStack {
@@ -379,125 +379,38 @@ public struct HostConnectionSheet: View {
         }
     }
 
-    // MARK: - Building blocks
+    // MARK: - Building blocks (thin names for the shared card pieces)
 
-    /// A quiet title above one raised card.
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(SHColor.inkMuted)
-                .padding(.leading, 6)
-                .accessibilityAddTraits(.isHeader)
-            VStack(spacing: 0) {
-                content()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.lg, elevation: .card)
-        }
+    private func section<Content: View>(_ title: String, @ViewBuilder content: @escaping () -> Content) -> some View {
+        SHSectionCard(title, content: content)
     }
 
-    /// A hairline between rows, starting at the label so it lines up in every card.
-    private var divider: some View {
-        Rectangle()
-            .fill(SHColor.lineHairline)
-            .frame(height: 1)
-            .padding(.leading, Self.labelInset)
-    }
+    private var divider: some View { SHCardDivider() }
 
-    private struct RowPadding: ViewModifier {
-        func body(content: Content) -> some View {
-            content
-                .frame(minHeight: 40)
-                .padding(.horizontal, HostConnectionSheet.rowInset)
-                .padding(.vertical, 6)
-        }
-    }
+    private typealias RowPadding = SHCardRowPadding
 
-    /// Title with one optional quiet line under it.
     private func rowLabel(_ title: String, detail: String?, tint: Color = SHColor.inkPrimary, detailColor: Color = SHColor.inkMuted) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-            if let detail, !detail.isEmpty {
-                Text(detail)
-                    .font(SHTypography.caption)
-                    .foregroundStyle(detailColor)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
+        SHCardRowLabel(title: title, detail: detail, tint: tint, detailColor: detailColor)
     }
 
-    /// Icon in the fixed leading column, then the label.
     private func iconLabel(icon: String, title: String, detail: String? = nil, tint: Color = SHColor.inkPrimary, detailColor: Color = SHColor.inkMuted) -> some View {
-        HStack(spacing: Self.iconGap) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(tint == SHColor.inkPrimary ? SHColor.inkSecondary : tint)
-                .frame(width: Self.iconColumn, height: Self.iconColumn)
-            rowLabel(title, detail: detail, tint: tint, detailColor: detailColor)
-        }
+        SHCardIconLabel(icon: icon, title: title, detail: detail, tint: tint, detailColor: detailColor)
     }
 
-    /// The one row layout: icon column, label, optional trailing content.
     private func row<Trailing: View>(
         icon: String,
         title: String,
         detail: String? = nil,
         tint: Color = SHColor.inkPrimary,
         detailColor: Color = SHColor.inkMuted,
-        @ViewBuilder trailing: () -> Trailing
+        @ViewBuilder trailing: @escaping () -> Trailing
     ) -> some View {
-        HStack(spacing: 8) {
-            iconLabel(icon: icon, title: title, detail: detail, tint: tint, detailColor: detailColor)
-            Spacer(minLength: 8)
-            trailing()
-        }
-        .modifier(RowPadding())
-        .contentShape(Rectangle())
+        SHCardRow(icon: icon, title: title, detail: detail, tint: tint, detailColor: detailColor, trailing: trailing)
     }
 
     private func runConnectionTest() async {
         isTesting = true
         defer { isTesting = false }
         testResult = await store.testHostConnection(urlString: store.hostURLString, token: store.bearerToken)
-    }
-}
-
-/// A full-height row of choices, one selected: the same job as a segmented control, at a size
-/// that is comfortable to tap and read.
-struct SHChoiceBar<Value: Hashable>: View {
-    let options: [(value: Value, label: String)]
-    @Binding var selection: Value
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                let isSelected = option.value == selection
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { selection = option.value }
-                } label: {
-                    Text(option.label)
-                        .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(
-                            isSelected ? Color.white.opacity(0.14) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }

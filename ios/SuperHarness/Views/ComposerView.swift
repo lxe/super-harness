@@ -228,7 +228,7 @@ public struct ComposerView: View {
     }
 
     /// Height of every control in the composer's bottom row (and the width of the round ones).
-    static let controlSize: CGFloat = 38
+    static let controlSize: CGFloat = SHLayout.controlSize
 
     public var body: some View {
         SHComposerSurface {
@@ -353,11 +353,7 @@ public struct ComposerView: View {
                 Label("Paste", systemImage: "doc.on.clipboard")
             }
         } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 16.5, weight: .semibold))
-                .foregroundStyle(SHColor.inkSecondary)
-                .frame(width: Self.controlSize, height: Self.controlSize)
-                .background(SHColor.surfaceBubble, in: Circle())
+            SHRoundControlLabel(systemImage: "plus", symbolSize: 16.5)
         }
         .accessibilityLabel("Attach media or file")
         .accessibilityIdentifier("composer.attach")
@@ -468,7 +464,7 @@ public struct ComposerView: View {
             .accessibilityIdentifier("composer.mic")
 
         case .transcribing:
-            SHActivityPulse(tint: SHColor.brandAntigravity, size: 12)
+            SHActivityPulse(tint: SHColor.accentInfo, size: 12)
                 .frame(width: Self.controlSize, height: Self.controlSize)
                 .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityLabel("Transcribing voice dictation")
@@ -517,11 +513,7 @@ public struct ComposerView: View {
                 triggerHaptic(.medium)
                 onAbort()
             } label: {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(SHColor.surfaceRail)
-                    .frame(width: Self.controlSize, height: Self.controlSize)
-                    .background(SHColor.inkPrimary, in: Circle())
+                SHRoundControlLabel(systemImage: "stop.fill", symbolSize: 13, weight: .bold, isProminent: true)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop agent")
@@ -966,7 +958,7 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
         tv.backgroundColor = .clear
         tv.font = UIFont.preferredFont(forTextStyle: .body)
         tv.textColor = UIColor(SHColor.inkPrimary)
-        tv.tintColor = UIColor(SHColor.brandAntigravity)
+        tv.tintColor = UIColor(SHColor.accentInfo)
         tv.keyboardAppearance = .dark
         tv.textContainerInset = .zero
         tv.textContainer.lineFragmentPadding = 0

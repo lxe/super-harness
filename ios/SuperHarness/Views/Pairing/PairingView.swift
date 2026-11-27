@@ -62,7 +62,7 @@ public struct PairingView: View {
                         .foregroundStyle(SHColor.inkSecondary)
                         .padding(.horizontal, 18)
                         .frame(height: 40)
-                        .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: 20, elevation: .tile)
+                        .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.bubble, elevation: .tile)
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens the app with sample chats. No desktop needed.")

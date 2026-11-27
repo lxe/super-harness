@@ -450,7 +450,7 @@ public struct SessionDetailView: View {
                     }
                     .padding(.horizontal, 14)
                     .frame(height: 44)
-                    .modifier(SHPrincipalGlassPillModifier())
+                    .shGlassSurface(in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(currentSession.displayTitle)
@@ -924,19 +924,6 @@ struct SessionNoticeRow: View {
     }
 }
 
-private struct SHPrincipalGlassPillModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            content
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75))
-        }
-    }
-}
-
 private struct SHClearTopScrollEdgeModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
@@ -1044,7 +1031,7 @@ private struct ExpandableUserBubbleContent: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .shRaisedSurface(SHColor.surfaceBubble, cornerRadius: 20, elevation: .bubble)
+        .shRaisedSurface(SHColor.surfaceBubble, cornerRadius: SHRadius.bubble, elevation: .bubble)
     }
 }
 
@@ -1389,13 +1376,13 @@ private struct SHTopSheetGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: SHRadius.panel, style: .continuous))
                 .shadow(color: Color.black.opacity(0.45), radius: 18, y: 10)
         } else {
             content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: SHRadius.panel, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: SHRadius.panel, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75)
                 )
                 .shadow(color: Color.black.opacity(0.45), radius: 18, y: 10)

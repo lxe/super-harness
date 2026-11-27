@@ -197,7 +197,7 @@ private struct CompactTraceRowView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 8) {
                     if isRunning {
-                        SHActivityPulse(tint: SHColor.brandAntigravity, size: 10)
+                        SHActivityPulse(tint: SHColor.accentInfo, size: 10)
                             .frame(width: 14, height: ScrollingCommandText.lineHeight)
                     } else {
                         Image(systemName: failed ? "xmark.circle.fill" : "terminal")
@@ -322,7 +322,7 @@ private struct CompactTraceRowView: View {
                 } label: {
                     HStack(alignment: .center, spacing: 7) {
                         if isRunning {
-                            SHActivityPulse(tint: SHColor.brandAntigravity, size: 9)
+                            SHActivityPulse(tint: SHColor.accentInfo, size: 9)
                                 .frame(width: 12, height: 12)
                         } else {
                             Image(systemName: "wrench.adjustable")
@@ -806,11 +806,11 @@ private struct VideoBlockView: View, Equatable {
         HStack(spacing: SHSpacing.md) {
             ZStack {
                 RoundedRectangle(cornerRadius: SHRadius.sm + 2, style: .continuous)
-                    .fill(SHColor.brandAntigravity.opacity(0.16))
+                    .fill(SHColor.accentInfo.opacity(0.16))
                     .frame(width: 40, height: 40)
                 Image(systemName: "play.rectangle.fill")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(SHColor.brandAntigravity)
+                    .foregroundStyle(SHColor.accentInfo)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -822,10 +822,10 @@ private struct VideoBlockView: View, Equatable {
                     if let formatTag {
                         Text(formatTag)
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(SHColor.brandAntigravity)
+                            .foregroundStyle(SHColor.accentInfo)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
-                            .background(SHColor.brandAntigravity.opacity(0.14))
+                            .background(SHColor.accentInfo.opacity(0.14))
                             .clipShape(Capsule())
                     }
                 }
@@ -1212,14 +1212,14 @@ private struct ColorizedDiffView: View {
     private func lineColor(_ line: String) -> Color {
         if line.hasPrefix("+") && !line.hasPrefix("+++") { return SHColor.statusSuccess }
         if line.hasPrefix("-") && !line.hasPrefix("---") { return SHColor.statusDanger }
-        if line.hasPrefix("@@") { return SHColor.brandAntigravity }
+        if line.hasPrefix("@@") { return SHColor.accentInfo }
         return SHColor.inkMuted
     }
 
     private func lineBackground(_ line: String) -> Color {
         if line.hasPrefix("+") && !line.hasPrefix("+++") { return SHColor.statusSuccess.opacity(0.10) }
         if line.hasPrefix("-") && !line.hasPrefix("---") { return SHColor.statusDanger.opacity(0.10) }
-        if line.hasPrefix("@@") { return SHColor.brandAntigravity.opacity(0.08) }
+        if line.hasPrefix("@@") { return SHColor.accentInfo.opacity(0.08) }
         return Color.clear
     }
 }
@@ -1252,7 +1252,7 @@ private struct ToolCallBlockView: View, Equatable {
                 HStack(spacing: 7) {
                     Image(systemName: "wrench.and.screwdriver")
                         .font(.system(size: 11))
-                        .foregroundStyle(SHColor.brandAntigravity)
+                        .foregroundStyle(SHColor.accentInfo)
                     Text(name)
                         .font(SHTypography.mono)
                         .foregroundStyle(SHColor.inkPrimary)
@@ -1331,7 +1331,7 @@ private struct WebSearchBlockView: View, Equatable {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(SHColor.brandAntigravity)
+                .foregroundStyle(SHColor.accentInfo)
             Text(query)
                 .font(SHTypography.caption)
                 .foregroundStyle(SHColor.inkSecondary)
@@ -1428,7 +1428,7 @@ private struct NoticeBlockView: View, Equatable {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 13))
-                .foregroundStyle(SHColor.brandAntigravity)
+                .foregroundStyle(SHColor.accentInfo)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -1443,7 +1443,7 @@ private struct NoticeBlockView: View, Equatable {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(SHColor.brandAntigravity.opacity(0.09))
+        .background(SHColor.accentInfo.opacity(0.09))
         .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
     }
 }

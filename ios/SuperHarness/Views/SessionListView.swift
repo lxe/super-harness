@@ -433,7 +433,7 @@ public struct SessionListView: View {
         .padding(.leading, SHSpacing.lg)
         .padding(.trailing, SHSpacing.sm)
         .frame(height: 44)
-        .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+        .shGlassSurface(in: Capsule())
         .padding(.horizontal, SHSpacing.lg)
         .padding(.top, SHSpacing.xs)
         .padding(.bottom, SHSpacing.sm)
@@ -493,7 +493,7 @@ public struct SessionListView: View {
                     .frame(height: 40)
                     .frame(maxWidth: 260)
                     .fixedSize(horizontal: true, vertical: false)
-                    .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+                    .shGlassSurface(in: Capsule())
                     .offset(
                         x: max(12, pinDrag.location.x - origin.x - 60),
                         y: pinDrag.location.y - origin.y - 58
@@ -724,7 +724,7 @@ public struct SessionListView: View {
                     .foregroundStyle(SHColor.inkPrimary)
                     .padding(.horizontal, 12)
                     .frame(height: 28)
-                    .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+                    .shGlassSurface(in: Capsule())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Now showing \(notice)")
@@ -801,7 +801,7 @@ public struct SessionListView: View {
             } label: {
                 Label(session.pinnedToTop ? "Unpin Top" : "Pin Top", systemImage: "arrow.up.to.line")
             }
-            .tint(SHColor.brandAntigravity)
+            .tint(SHColor.accentInfo)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
@@ -1073,7 +1073,7 @@ private struct HarnessSwitcherStrip: View {
             }
         }
         // The same plain Liquid Glass capsule as the top bar's pills, hugging the circular gauges.
-        .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+        .shGlassSurface(in: Capsule())
         .offset(x: machineSwipeOffset)
         // With two or more machines, a sideways swipe on the dock shows the next or previous
         // machine. The dock follows the finger a little and springs back. A dock that scrolls
@@ -1198,7 +1198,7 @@ private struct HarnessSwitcherStrip: View {
 
 // MARK: - Session Row
 
-private struct SessionListRow: View {
+struct SessionListRow: View {
     let session: UnifiedSession
     let isBusy: Bool
     var isPinned: Bool = false
@@ -1337,7 +1337,7 @@ private struct ManageFoldersSheet: View {
                             createCurrent()
                         }
                         .font(SHTypography.caption.weight(.semibold))
-                        .foregroundStyle(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? SHColor.inkFaint : SHColor.brandAntigravity)
+                        .foregroundStyle(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? SHColor.inkFaint : SHColor.accentInfo)
                         .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     .listRowBackground(SHColor.surfaceSubtle)
@@ -1401,7 +1401,7 @@ private struct ManageFoldersSheet: View {
                                 } label: {
                                     Label("Rename", systemImage: "pencil")
                                 }
-                                .tint(SHColor.brandAntigravity)
+                                .tint(SHColor.accentInfo)
                             }
                             .contextMenu {
                                 Button {
@@ -1469,22 +1469,6 @@ private struct ManageFoldersSheet: View {
         let color = selectedColor
         newName = ""
         Task { _ = await store.createFolder(name: trimmed, color: color) }
-    }
-}
-
-// MARK: - Liquid Glass Surface
-
-private struct SHGlassSurfaceModifier<S: Shape>: ViewModifier {
-    let shape: S
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: shape)
-        } else {
-            content
-                .background(.ultraThinMaterial, in: shape)
-                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.75))
-        }
     }
 }
 
@@ -1564,57 +1548,6 @@ public enum SHErrorPresentation {
               !text.lowercased().hasPrefix("the operation couldn"),
               !text.lowercased().hasPrefix("response decoding error") else { return nil }
         return text
-    }
-}
-
-// MARK: - Working Title Shimmer
-
-/// A one-line title that shows activity by itself: while `isActive`, a soft band of light
-/// sweeps across the letters. It matches the desktop `.sh-working-shimmer` (muted grey to
-/// near-white and back, one sweep every 2.6 seconds, eased in and out).
-struct SHShimmerText: View {
-    let text: String
-    let font: Font
-    let isActive: Bool
-    var period: Double = 2.6
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let dim = Color(red: 161 / 255, green: 166 / 255, blue: 179 / 255).opacity(0.72)
-    private static let bright = Color(red: 244 / 255, green: 245 / 255, blue: 247 / 255).opacity(0.96)
-
-    /// Centre of the bright band at `time`, in units of the text width. It travels from just
-    /// left of the text to just right of it, eased in and out, then starts again.
-    nonisolated static func bandCenter(at time: Double, period: Double) -> Double {
-        let linear = (time / period).truncatingRemainder(dividingBy: 1)
-        let progress = linear < 0 ? linear + 1 : linear
-        let eased = 0.5 - 0.5 * cos(progress * .pi)
-        return -0.6 + eased * 2.2
-    }
-
-    var body: some View {
-        if isActive && !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                let center = Self.bandCenter(at: context.date.timeIntervalSinceReferenceDate, period: period)
-                label.foregroundStyle(
-                    LinearGradient(
-                        colors: [Self.dim, Self.bright, Self.dim],
-                        startPoint: UnitPoint(x: center - 0.6, y: 0.5),
-                        endPoint: UnitPoint(x: center + 0.6, y: 0.5)
-                    )
-                )
-            }
-            .accessibilityLabel("\(text), working")
-        } else {
-            label.foregroundStyle(SHColor.inkPrimary)
-        }
-    }
-
-    private var label: some View {
-        Text(text)
-            .font(font)
-            .lineLimit(1)
-            .truncationMode(.tail)
     }
 }
 
@@ -1850,20 +1783,5 @@ private struct HarnessHoldDragGesture: UIGestureRecognizerRepresentable {
         default:
             break
         }
-    }
-}
-
-/// The Superharness mark shown in the middle of the session list's top bar.
-struct SHToolbarLogo: View {
-    var body: some View {
-        // The porcelain mark, a single-colour template tinted porcelain white.
-        Image("SuperHarnessLogo")
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            .foregroundStyle(SHColor.porcelain)
-            .frame(width: 26, height: 26)
-            .accessibilityLabel("Superharness")
-            .accessibilityIdentifier("header.logo")
     }
 }

@@ -551,7 +551,7 @@ public struct DraftChatView: View {
             .accessibilityIdentifier("composer.mic")
 
         case .transcribing:
-            SHActivityPulse(tint: SHColor.brandAntigravity, size: 16)
+            SHActivityPulse(tint: SHColor.accentInfo, size: 16)
                 .frame(width: 32, height: 32)
                 .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityIdentifier("composer.mic")

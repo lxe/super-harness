@@ -1868,7 +1868,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       {(() => {
         const tabLogoSize = 14;
         return (
-          <div className="relative z-10 bg-surface-subtle px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-1.5 before:h-1.5 before:bg-gradient-to-t before:from-black/16 before:to-transparent">
+          <div className="relative z-10 bg-surface-subtle px-2.5 pt-1.5 pb-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-1.5 before:h-1.5 before:bg-gradient-to-t before:from-black/16 before:to-transparent">
             <SegmentedControl<FilterTab>
               variant="gauge"
               className="bg-transparent shadow-none rounded-none !p-0"

@@ -345,8 +345,19 @@ export const SettingsModal: React.FC<Props> = ({
                   <X className="w-3.5 h-3.5" />
                 </button>
               ) : (
-                <kbd className="w-6 h-6 inline-flex items-center justify-center rounded-lg bg-white/[0.06] text-[11.5px] leading-none font-mono text-ink-faint shrink-0">
-                  /
+                <kbd
+                  aria-label="/"
+                  className="w-6 h-6 inline-flex items-center justify-center rounded-lg bg-white/[0.06] text-ink-faint shrink-0"
+                >
+                  {/* Drawn, not typed: a font's "/" sits high in its line box and never centers. */}
+                  <svg viewBox="0 0 12 12" className="w-3 h-3" aria-hidden="true">
+                    <path
+                      d="M7.75 2 4.25 10"
+                      stroke="currentColor"
+                      strokeWidth={1.4}
+                      strokeLinecap="round"
+                    />
+                  </svg>
                 </kbd>
               )}
             </div>

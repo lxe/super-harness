@@ -60,6 +60,11 @@ import { SuperHarnessMark } from './SuperHarnessMark';
 import { HarnessUsageHoverCard } from './HarnessUsageHoverCard';
 import { SidebarContextMenu } from './SidebarContextMenu';
 
+/** On macOS the window's close, minimise and zoom buttons sit over the top-left corner. */
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+/** Left padding of the top bar on macOS, so the logo sits just to the right of those buttons. */
+const MAC_WINDOW_BUTTONS_INSET = 78;
+
 export type { SidebarFilterTab };
 type FilterTab = SidebarFilterTab;
 
@@ -310,14 +315,21 @@ function resolveGroupCwd(items: UnifiedSession[], isUngrouped = false): string |
   return bestCwd;
 }
 
-/** Keeps "All" first and puts harness gauges in lxe's saved order. */
-function orderGaugeItems<T extends { id: string }>(items: T[], order?: readonly string[] | null): T[] {
+/** Keeps "All" first and puts harness gauges in lxe's saved order. With `shown`, drops the rest. */
+function orderGaugeItems<T extends { id: string }>(
+  items: T[],
+  order?: readonly string[] | null,
+  shown?: ReadonlySet<string>
+): T[] {
   const rank = new Map(normalizeHarnessOrder(order).map((h, i) => [h as string, i]));
-  return [...items].sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
+  return items
+    .filter((item) => !shown || shown.has(item.id))
+    .sort((a, b) => (rank.get(a.id) ?? -1) - (rank.get(b.id) ?? -1));
 }
 
 export const Sidebar: React.FC<Props> = React.memo(({
   width,
+  harnesses,
   sessions,
   draftConversations,
   usage,
@@ -352,6 +364,29 @@ export const Sidebar: React.FC<Props> = React.memo(({
     }
     return 'all';
   });
+
+  // The gauge bar shows only harnesses that can be used here: installed on this machine and
+  // enabled in Settings (a disabled harness is reported as not installed). A harness that is
+  // not installed locally but still has sessions, such as remote ones, stays. Until the first
+  // detection arrives, every harness shows, so the bar does not fill in piece by piece.
+  const shownHarnesses = useMemo(() => {
+    const all: HarnessGroup[] = ['antigravity', 'codex', 'claude', 'muse', 'pi'];
+    if (harnesses.length === 0) return new Set(all);
+    const withSessions = new Set(sessions.map((session) => session.harnessGroup));
+    return new Set(
+      all.filter((id) => {
+        const detection = harnesses.find((h) => h.id === id);
+        return Boolean(detection?.installed) || withSessions.has(id);
+      })
+    );
+  }, [harnesses, sessions]);
+
+  // If the selected harness leaves the bar, show every harness again.
+  useEffect(() => {
+    if (filter !== 'all' && filter !== 'live' && filter !== 'tmux' && !shownHarnesses.has(filter as HarnessGroup)) {
+      setFilter('all');
+    }
+  }, [filter, shownHarnesses]);
   const [sortBy, setSortBy] = useState<SidebarSortBy>(() => {
     try {
       const saved = localStorage.getItem('sh:sidebarSort') as SidebarSortBy | null;
@@ -1560,7 +1595,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
       className="relative shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail select-none"
     >
       {/* Top Bar (draggable window region): Logo (Settings) | Master, Search, Filter, New */}
-      <div className="sh-drag-region h-12 px-3 flex items-center justify-between">
+      <div
+        className="sh-drag-region h-12 px-3 flex items-center justify-between"
+        style={IS_MAC ? { paddingLeft: MAC_WINDOW_BUTTONS_INSET } : undefined}
+      >
         <IconButton label="Settings" onClick={onOpenSettings}>
           <SuperHarnessMark size={18} className="text-ink-primary" />
         </IconButton>
@@ -2226,7 +2264,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     estimated: usage?.pi?.barIsEstimated,
                   },
                 },
-              ], harnessOrder)}
+              ], harnessOrder, shownHarnesses)}
               canReorder={(id) => id !== 'all'}
               onReorder={(dragged, target) => {
                 if (dragged === 'all' || target === 'all') return;

@@ -725,6 +725,9 @@ function createWindow(): void {
     icon: path.join(app.getAppPath(), 'resources', 'icon.png'),
     backgroundColor: '#16171b',
     titleBarStyle: 'hidden',
+    // macOS: centre the window buttons vertically in the 48px top bar. The sidebar's top bar
+    // leaves room for them (see MAC_WINDOW_BUTTONS_INSET in Sidebar.tsx).
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 17 } } : {}),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

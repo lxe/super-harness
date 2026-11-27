@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// The Settings sheet. It mirrors what the desktop app lets you set: nothing here is a
+/// phone-only switch for something the desktop controls, and host internals are not shown.
+///
+/// Every row uses the same icon column, so icons, labels and separators line up across sections.
 public struct HostConnectionSheet: View {
     @Bindable var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -11,11 +15,15 @@ public struct HostConnectionSheet: View {
     @State private var isSendingTestPush: Bool = false
     @State private var testPushFeedback: String?
     @State private var showDesignCatalog: Bool = false
-    @State private var showHarnessDetails: Bool = false
 
     public init(store: AppStore) {
         self.store = store
     }
+
+    /// Width of the leading icon column and the gap after it. Separators start at the label.
+    private static let iconColumn: CGFloat = 30
+    private static let iconGap: CGFloat = 12
+    private static var labelInset: CGFloat { iconColumn + iconGap }
 
     public var body: some View {
         NavigationStack {
@@ -24,7 +32,6 @@ public struct HostConnectionSheet: View {
                 if !store.needsPairing {
                     desktopSection
                     appearanceSection
-                    dictationSection
                     harnessSection
                     reasoningSection
                     notificationSection
@@ -58,11 +65,6 @@ public struct HostConnectionSheet: View {
             } message: {
                 Text("This phone forgets the desktop. To use it again, pair from the desktop’s Settings → Mobile.")
             }
-            .task {
-                if store.dictationStatus == nil, !store.needsPairing {
-                    await store.refreshDictationStatus()
-                }
-            }
         }
     }
 
@@ -81,24 +83,17 @@ public struct HostConnectionSheet: View {
 
     private var desktopSection: some View {
         Section {
-            HStack(spacing: 12) {
-                Image(systemName: "desktopcomputer")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(SHColor.inkSecondary)
-                    .frame(width: 32, height: 32)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-                rowLabel(
-                    store.pairedHostName.isEmpty ? "Desktop" : store.pairedHostName,
-                    detail: store.connectionMode == .demo ? "Demo mode is on" : desktopAddress
-                )
-                Spacer(minLength: 8)
+            row(
+                icon: "desktopcomputer",
+                title: store.pairedHostName.isEmpty ? "Desktop" : store.pairedHostName,
+                detail: store.connectionMode == .demo ? "Demo mode is on" : desktopAddress
+            ) {
                 if store.connectionMode == .live {
                     Text(store.connectionHealth.label)
-                        .font(SHTypography.micro.weight(.medium))
+                        .font(SHTypography.caption.weight(.medium))
                         .foregroundStyle(store.connectionHealth == .connected ? SHColor.statusSuccess : SHColor.inkMuted)
                 }
             }
-            .padding(.vertical, 2)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.desktop")
 
@@ -106,9 +101,12 @@ public struct HostConnectionSheet: View {
                 Button {
                     Task { await runConnectionTest() }
                 } label: {
-                    HStack(spacing: 10) {
-                        actionLabel(isTesting ? "Testing…" : "Test Connection", icon: "bolt.horizontal")
-                        Spacer()
+                    row(
+                        icon: "bolt.horizontal",
+                        title: isTesting ? "Testing…" : "Test Connection",
+                        detail: testResult?.message,
+                        detailColor: testResultColor
+                    ) {
                         if isTesting {
                             SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
                         }
@@ -116,35 +114,152 @@ public struct HostConnectionSheet: View {
                 }
                 .disabled(isTesting)
 
-                if let result = testResult {
-                    HStack(spacing: 8) {
-                        Image(systemName: result.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundStyle(result.ok ? SHColor.statusSuccess : SHColor.statusDanger)
-                        Text(result.message)
-                            .font(SHTypography.micro)
-                            .foregroundStyle(result.ok ? SHColor.statusSuccess : SHColor.statusDanger)
-                    }
-                }
-
-                Button(role: .destructive) {
+                Button {
                     isUnpairConfirmationPresented = true
                 } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "xmark.circle")
-                            .font(.system(size: 14, weight: .medium))
-                            .frame(width: 22)
-                        Text("Unpair")
-                            .font(SHTypography.label)
-                    }
-                    .foregroundStyle(SHColor.statusDanger)
+                    row(icon: "xmark.circle", title: "Unpair", tint: SHColor.statusDanger) { EmptyView() }
                 }
                 .accessibilityIdentifier("settings.unpair")
             }
         } header: {
-            sectionHeader("Desktop", icon: "desktopcomputer")
-        } footer: {
-            Text("Pair or revoke phones in Super Harness on the desktop, under Settings → Mobile.")
-                .foregroundStyle(SHColor.inkFaint)
+            sectionHeader("Desktop")
+        }
+        .listRowBackground(SHColor.surfaceSubtle)
+    }
+
+    private var testResultColor: Color {
+        guard let testResult else { return SHColor.inkMuted }
+        return testResult.ok ? SHColor.statusSuccess : SHColor.statusDanger
+    }
+
+    // MARK: - Chat Appearance
+
+    private var appearanceSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Text Size")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(SHColor.inkPrimary)
+                SHChoiceBar(
+                    options: ChatTextSize.allCases.map { ($0, $0 == .extraLarge ? "X-Large" : $0.label) },
+                    selection: $store.chatTextSize
+                )
+                .accessibilityIdentifier("settings.chatTextSize")
+            }
+            .padding(.vertical, 2)
+            .listRowSeparator(.hidden)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Spacing")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(SHColor.inkPrimary)
+                SHChoiceBar(
+                    options: ChatDensity.allCases.map { ($0, $0.label) },
+                    selection: $store.chatDensity
+                )
+                .accessibilityIdentifier("settings.chatDensity")
+            }
+            .padding(.vertical, 2)
+            .listRowSeparator(.hidden)
+
+            // Live sample drawn with the chosen size and spacing.
+            SHMarkdownView(
+                text: "The tests pass and the build is ready to install.\n\n- Chat text follows this size.\n- Lines and paragraphs follow this spacing.",
+                isUserBubble: false
+            )
+            .environment(\.shChatMetrics, store.chatMetrics)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            .padding(.vertical, 2)
+            .listRowSeparator(.hidden)
+            .accessibilityIdentifier("settings.chatPreview")
+        } header: {
+            sectionHeader("Chat Appearance")
+        }
+        .listRowBackground(SHColor.surfaceSubtle)
+    }
+
+    // MARK: - Harnesses
+
+    /// The desktop's own "Enable <harness>" switches (settings.enabledHarnesses).
+    private var harnessSection: some View {
+        Section {
+            ForEach(store.harnessOrder) { group in
+                let detection = store.harnesses.first { $0.id == group }
+                Toggle(isOn: Binding(
+                    get: { store.isHarnessEnabled(group) },
+                    set: { enabled in Task { await store.setHarnessEnabled(group, enabled: enabled) } }
+                )) {
+                    HStack(spacing: Self.iconGap) {
+                        HarnessLogoView(group: group, size: 19)
+                            .frame(width: Self.iconColumn, height: Self.iconColumn)
+                        rowLabel(
+                            group.title,
+                            detail: detection.map { "\($0.activeSessionCount) active · \($0.totalSessionCount) total" }
+                        )
+                    }
+                }
+                .tint(SHColor.toggleOn)
+                .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+                .accessibilityIdentifier("settings.harness.\(group.rawValue)")
+            }
+        } header: {
+            sectionHeader("Harnesses")
+        }
+        .listRowBackground(SHColor.surfaceSubtle)
+    }
+
+    // MARK: - Thinking Effort
+
+    private var reasoningSection: some View {
+        Section {
+            Toggle(isOn: $store.allowExtremeReasoning) {
+                iconLabel(
+                    icon: "brain",
+                    title: "Max and Ultra Effort",
+                    detail: store.allowExtremeReasoning ? "Offered in the effort menu" : "Hidden from the effort menu"
+                )
+            }
+            .tint(SHColor.toggleOn)
+            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+            .accessibilityIdentifier("settings.extremeReasoning")
+        } header: {
+            sectionHeader("Thinking Effort")
+        }
+        .listRowBackground(SHColor.surfaceSubtle)
+    }
+
+    // MARK: - Notifications
+
+    private var notificationSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { store.pushNotificationsEnabled },
+                set: { store.setPushNotificationsEnabled($0) }
+            )) {
+                iconLabel(icon: "bell", title: "Push Alerts", detail: PushNotificationCoordinator.shared.lastRegistrationStatus)
+            }
+            .tint(SHColor.toggleOn)
+            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+
+            Button {
+                Task {
+                    isSendingTestPush = true
+                    let ok = await store.sendTestPushNotification()
+                    isSendingTestPush = false
+                    testPushFeedback = ok ? "Test alert sent" : "The test alert could not be sent"
+                }
+            } label: {
+                row(icon: "bell.badge", title: "Send Test Alert", detail: testPushFeedback) {
+                    if isSendingTestPush {
+                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
+                    }
+                }
+            }
+            .disabled(isSendingTestPush || store.connectionMode != .live)
+        } header: {
+            sectionHeader("Notifications")
         }
         .listRowBackground(SHColor.surfaceSubtle)
     }
@@ -163,330 +278,123 @@ public struct HostConnectionSheet: View {
                     }
                 }
             )) {
-                rowLabel("Demo Mode", detail: "Sample sessions, no desktop needed")
+                iconLabel(icon: "play.rectangle", title: "Demo Mode", detail: "Sample sessions")
             }
             .tint(SHColor.toggleOn)
             .disabled(isApplyingDemoMode)
+            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
             .accessibilityIdentifier("settings.demoMode")
 
             Button {
                 showDesignCatalog = true
             } label: {
-                actionLabel("Design System Catalog", icon: "square.grid.2x2")
-            }
-        } header: {
-            sectionHeader("Developer", icon: "hammer")
-        }
-        .listRowBackground(SHColor.surfaceSubtle)
-    }
-
-    // MARK: - Chat Appearance
-
-    private var appearanceSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                rowLabel("Text Size", detail: nil)
-                Picker("Text Size", selection: $store.chatTextSize) {
-                    ForEach(ChatTextSize.allCases) { size in
-                        Text(size == .extraLarge ? "XL" : size.label).tag(size)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("settings.chatTextSize")
-            }
-            .padding(.vertical, 4)
-
-            VStack(alignment: .leading, spacing: 8) {
-                rowLabel("Spacing", detail: nil)
-                Picker("Spacing", selection: $store.chatDensity) {
-                    ForEach(ChatDensity.allCases) { density in
-                        Text(density.label).tag(density)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("settings.chatDensity")
-            }
-            .padding(.vertical, 4)
-
-            // Live sample drawn with the chosen size and spacing.
-            VStack(alignment: .leading, spacing: store.chatMetrics.blockGap) {
-                Text("Preview")
-                    .font(SHTypography.micro)
-                    .foregroundStyle(SHColor.inkMuted)
-                SHMarkdownView(
-                    text: "The tests pass and the build is ready to install.\n\n- Chat text follows this size.\n- Lines and messages follow this spacing.",
-                    isUserBubble: false
-                )
-                .environment(\.shChatMetrics, store.chatMetrics)
-            }
-            .padding(.vertical, 4)
-            .accessibilityIdentifier("settings.chatPreview")
-        } header: {
-            sectionHeader("Chat Appearance", icon: "textformat.size")
-        } footer: {
-            Text("Applies to messages in every chat on this device.")
-                .foregroundStyle(SHColor.inkFaint)
-        }
-        .listRowBackground(SHColor.surfaceSubtle)
-    }
-
-    // MARK: - Dictation
-
-    private var dictationSection: some View {
-        Section {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(dictationDotColor)
-                    .frame(width: 8, height: 8)
-                rowLabel(dictationStatusHeadline, detail: dictationStatusDetail)
-                Spacer()
-                Button {
-                    Task { await store.refreshDictationStatus() }
-                } label: {
-                    if store.isCheckingDictation {
-                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(SHColor.inkSecondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Check dictation")
-            }
-            .padding(.vertical, 2)
-            .accessibilityIdentifier("settings.dictation")
-        } header: {
-            sectionHeader("Dictation", icon: "mic")
-        } footer: {
-            Text("Dictation runs through your desktop. Choose the dictation server in Super Harness on the desktop, under Settings → Dictation.")
-                .foregroundStyle(SHColor.inkFaint)
-        }
-        .listRowBackground(SHColor.surfaceSubtle)
-    }
-
-    private var dictationDotColor: Color {
-        guard let st = store.dictationStatus else { return SHColor.inkFaint }
-        if st.healthy { return SHColor.statusSuccess }
-        return st.configured ? SHColor.statusDanger : SHColor.statusWarning
-    }
-
-    private var dictationStatusHeadline: String {
-        guard let st = store.dictationStatus else { return "Checking…" }
-        if st.healthy { return "Ready" }
-        return st.configured ? "Dictation server unreachable" : "Not set up"
-    }
-
-    /// One quiet line under the status: the error when there is one, otherwise the model's
-    /// short name ("OpenVINO/whisper-large-v3-turbo-fp16-ov" → "whisper-large-v3-turbo-fp16-ov").
-    /// The full model id and server URL live under Advanced.
-    private var dictationStatusDetail: String? {
-        guard let st = store.dictationStatus else { return nil }
-        if !st.configured { return AppStore.dictationSetupMessage }
-        if let err = st.error, !err.isEmpty { return err }
-        if st.healthy, let model = st.model, !model.isEmpty {
-            return model.split(separator: "/").last.map(String.init) ?? model
-        }
-        return nil
-    }
-
-    // MARK: - Harnesses
-
-    private var harnessSection: some View {
-        Section {
-            if store.harnesses.isEmpty {
-                Text("No harnesses detected yet.")
-                    .font(SHTypography.caption)
-                    .foregroundStyle(SHColor.inkMuted)
-            } else {
-                ForEach(store.harnesses) { h in
-                    HStack(spacing: 12) {
-                        HarnessLogoView(group: h.id, size: 18)
-                            .frame(width: 32, height: 32)
-                            .background(Color.white.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-
-                        rowLabel(h.id.title, detail: "\(h.activeSessionCount) active · \(h.totalSessionCount) total")
-
-                        Spacer()
-
-                        // Every row gets the same trailing switch. Harnesses whose daemon the
-                        // host cannot control show it disabled instead of leaving a gap.
-                        Toggle(
-                            "\(h.id.title) remote control",
-                            isOn: Binding(
-                                get: { h.remoteControlEnabled },
-                                set: { enabled in
-                                    Task {
-                                        await store.controlHarness(
-                                            h.id,
-                                            action: enabled ? .startRemote : .stopRemote
-                                        )
-                                    }
-                                }
-                            )
-                        )
-                        .labelsHidden()
-                        .tint(SHColor.toggleOn)
-                        .disabled(!h.capabilities.canControlDaemon)
-                    }
-                    .padding(.vertical, 2)
-                }
-
-                SHInlineDisclosureRow(
-                    icon: "info.circle",
-                    title: "Details",
-                    isExpanded: showHarnessDetails
-                ) {
-                    withAnimation { showHarnessDetails.toggle() }
-                }
-
-                if showHarnessDetails {
-                    ForEach(store.harnesses) { h in
-                        detailRow(h.name, value: harnessDetail(h))
-                    }
+                row(icon: "square.grid.2x2", title: "Design System Catalog") {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(SHColor.inkFaint)
                 }
             }
         } header: {
-            sectionHeader("Harnesses", icon: "square.stack.3d.up")
-        } footer: {
-            Text("The switch turns a harness's remote control on or off.")
-                .foregroundStyle(SHColor.inkFaint)
-        }
-        .listRowBackground(SHColor.surfaceSubtle)
-    }
-
-    private func harnessDetail(_ h: HarnessDetection) -> String {
-        var parts: [String] = []
-        if let ver = h.version, !ver.isEmpty {
-            // Hosts report either a bare number ("1.5.18") or a full banner ("codex-cli 0.172.0").
-            parts.append(ver.first?.isNumber == true ? "v\(ver)" : ver)
-        }
-        parts.append(h.daemonRunning ? "daemon on" : "daemon off")
-        if !h.capabilities.canControlDaemon { parts.append("no remote toggle") }
-        return parts.joined(separator: " · ")
-    }
-
-    // MARK: - Thinking Effort
-
-    private var reasoningSection: some View {
-        Section {
-            Toggle(isOn: $store.allowExtremeReasoning) {
-                rowLabel("Max and Ultra Effort", detail: store.allowExtremeReasoning ? "Offered in the effort menu" : "Hidden; nothing starts at Max or Ultra")
-            }
-            .tint(SHColor.toggleOn)
-            .accessibilityIdentifier("settings.extremeReasoning")
-        } header: {
-            sectionHeader("Thinking Effort", icon: "brain")
-        }
-        .listRowBackground(SHColor.surfaceSubtle)
-    }
-
-    // MARK: - Notifications
-
-    private var notificationSection: some View {
-        Section {
-            Toggle(isOn: Binding(
-                get: { store.pushNotificationsEnabled },
-                set: { store.setPushNotificationsEnabled($0) }
-            )) {
-                rowLabel("Push Alerts", detail: PushNotificationCoordinator.shared.lastRegistrationStatus)
-            }
-            .tint(SHColor.toggleOn)
-
-            Button {
-                Task {
-                    isSendingTestPush = true
-                    let ok = await store.sendTestPushNotification()
-                    isSendingTestPush = false
-                    testPushFeedback = ok ? "Test push sent" : "Push relay not deployed yet"
-                }
-            } label: {
-                HStack {
-                    actionLabel("Send Test Alert", icon: "bell.badge")
-                    Spacer()
-                    if isSendingTestPush {
-                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
-                    }
-                }
-            }
-            .disabled(isSendingTestPush || store.connectionMode != .live)
-
-            if let testPushFeedback {
-                Text(testPushFeedback)
-                    .font(SHTypography.micro)
-                    .foregroundStyle(SHColor.inkMuted)
-            }
-        } header: {
-            sectionHeader("Notifications", icon: "bell")
-        } footer: {
-            Text("Alerts when an agent finishes or asks for input, plus background session refresh.")
-                .foregroundStyle(SHColor.inkFaint)
+            sectionHeader("Developer")
         }
         .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Row building blocks
 
-    /// Section title with a small icon; every section uses this so the page reads as one list.
-    private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-        }
-        .foregroundStyle(SHColor.inkMuted)
-        .textCase(nil)
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(SHColor.inkMuted)
+            .textCase(nil)
     }
 
-    /// A tappable row: neutral icon, primary-coloured title.
-    private func actionLabel(_ title: String, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(SHColor.inkSecondary)
-                .frame(width: 22)
-            Text(title)
-                .font(SHTypography.label)
-                .foregroundStyle(SHColor.inkPrimary)
-        }
-    }
-
-    /// Primary line plus one optional quiet secondary line, each kept to a single line.
-    private func rowLabel(_ title: String, detail: String?) -> some View {
+    /// Title with one optional quiet line under it.
+    private func rowLabel(_ title: String, detail: String?, tint: Color = SHColor.inkPrimary, detailColor: Color = SHColor.inkMuted) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(SHTypography.label.weight(.semibold))
-                .foregroundStyle(SHColor.inkPrimary)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(tint)
                 .lineLimit(1)
             if let detail, !detail.isEmpty {
                 Text(detail)
-                    .font(SHTypography.micro)
-                    .foregroundStyle(SHColor.inkMuted)
+                    .font(SHTypography.caption)
+                    .foregroundStyle(detailColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
         }
     }
 
-    /// Read-only reference row used inside disclosures (full model ids, versions).
-    private func detailRow(_ title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(SHTypography.micro)
-                .foregroundStyle(SHColor.inkMuted)
-            Text(value)
-                .font(SHTypography.monoSmall)
-                .foregroundStyle(SHColor.inkSecondary)
-                .textSelection(.enabled)
+    /// Icon in the fixed leading column, then the label.
+    private func iconLabel(icon: String, title: String, detail: String? = nil, tint: Color = SHColor.inkPrimary, detailColor: Color = SHColor.inkMuted) -> some View {
+        HStack(spacing: Self.iconGap) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(tint == SHColor.inkPrimary ? SHColor.inkSecondary : tint)
+                .frame(width: Self.iconColumn, height: Self.iconColumn)
+            rowLabel(title, detail: detail, tint: tint, detailColor: detailColor)
         }
-        .padding(.vertical, 2)
+    }
+
+    /// The one row layout: icon column, label, optional trailing content. Its separator starts
+    /// at the label, the same as every other row.
+    private func row<Trailing: View>(
+        icon: String,
+        title: String,
+        detail: String? = nil,
+        tint: Color = SHColor.inkPrimary,
+        detailColor: Color = SHColor.inkMuted,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(spacing: 8) {
+            iconLabel(icon: icon, title: title, detail: detail, tint: tint, detailColor: detailColor)
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .frame(minHeight: 36)
+        .contentShape(Rectangle())
+        .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
     }
 
     private func runConnectionTest() async {
         isTesting = true
         defer { isTesting = false }
         testResult = await store.testHostConnection(urlString: store.hostURLString, token: store.bearerToken)
+    }
+}
+
+/// A full-height row of choices, one selected: the same job as a segmented control, at a size
+/// that is comfortable to tap and read.
+struct SHChoiceBar<Value: Hashable>: View {
+    let options: [(value: Value, label: String)]
+    @Binding var selection: Value
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                let isSelected = option.value == selection
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { selection = option.value }
+                } label: {
+                    Text(option.label)
+                        .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(
+                            isSelected ? Color.white.opacity(0.14) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }

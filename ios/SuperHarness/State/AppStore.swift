@@ -2735,6 +2735,30 @@ public final class AppStore {
         return nil
     }
 
+    /// The desktop's "Enable <harness>" setting. A harness the host has not listed is enabled.
+    public func isHarnessEnabled(_ harness: HarnessGroup) -> Bool {
+        settings.enabledHarnesses?[harness.rawValue] ?? true
+    }
+
+    /// Changes the desktop's own setting (settings.enabledHarnesses), sending the full map so
+    /// the host never sees a partial one.
+    public func setHarnessEnabled(_ harness: HarnessGroup, enabled: Bool) async {
+        var map: [String: Bool] = [:]
+        for group in HarnessGroup.allCases { map[group.rawValue] = isHarnessEnabled(group) }
+        for (key, value) in settings.enabledHarnesses ?? [:] where map[key] == nil { map[key] = value }
+        map[harness.rawValue] = enabled
+        let previous = settings.enabledHarnesses
+        settings.enabledHarnesses = map
+        do {
+            if let updated = try await client.updateSettings(enabledHarnesses: map) {
+                settings.enabledHarnesses = updated.enabledHarnesses ?? map
+            }
+        } catch {
+            settings.enabledHarnesses = previous
+            reportError(error)
+        }
+    }
+
     public func controlHarness(_ harness: HarnessGroup, action: HarnessControlAction) async {
         do {
             let resp = try await client.controlHarness(harness: harness, action: action)

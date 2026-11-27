@@ -1115,4 +1115,18 @@ final class UnifiedModelsTests: XCTestCase {
         let hostOrder = try await client.fetchBootstrap().state?.settings.pinnedOrder
         XCTAssertEqual(hostOrder, [pinned[1], other.id, pinned[0]])
     }
+
+    @MainActor func testHarnessSwitchWritesTheDesktopsEnabledHarnessesAsAFullMap() async throws {
+        let client = MockSuperHarnessClient()
+        let store = AppStore(client: client, keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "Enabled.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        await store.bootstrap()
+        XCTAssertTrue(HarnessGroup.allCases.allSatisfy(store.isHarnessEnabled), "a harness the host has not listed is enabled")
+
+        await store.setHarnessEnabled(.muse, enabled: false)
+        XCTAssertFalse(store.isHarnessEnabled(.muse))
+        XCTAssertTrue(store.isHarnessEnabled(.claude))
+        let sent = try await client.fetchBootstrap().state?.settings.enabledHarnesses
+        XCTAssertEqual(sent, ["antigravity": true, "codex": true, "claude": true, "muse": false, "pi": true])
+    }
 }

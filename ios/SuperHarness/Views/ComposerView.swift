@@ -1929,6 +1929,7 @@ private struct SHModelEffortPopoverBody: View {
                                             .font(.system(size: 14.5, weight: isChecked ? .semibold : .regular))
                                             .foregroundStyle(isChecked ? SHColor.inkPrimary : SHColor.inkSecondary)
                                             .lineLimit(1)
+                                            .animation(.easeOut(duration: 0.24), value: isChecked)
                                         Spacer(minLength: 8)
                                         if isChecked {
                                             Image(systemName: "checkmark")
@@ -1970,6 +1971,8 @@ private struct SHModelEffortPopoverBody: View {
             }
         }
         .frame(width: 296, height: totalHeight, alignment: .top)
+        // The popover's own corner: rows inside it take their corners from this one.
+        .containerShape(RoundedRectangle(cornerRadius: SHRadius.systemPopover, style: .continuous))
         .animation(nil, value: activeEffort)
         .background(SHWillDisappearHook(action: onWillClose))
     }
@@ -2083,7 +2086,8 @@ private struct SHSendMenuButton: UIViewRepresentable {
 private struct SHPopoverRowHighlight: View {
     var body: some View {
         if #available(iOS 26.0, *) {
-            ConcentricRectangle(corners: .concentric(minimum: 10), isUniform: false)
+            // Takes its corner radius from the popover's container shape minus its distance to it.
+            ConcentricRectangle(corners: .concentric(minimum: 0), isUniform: true)
                 .fill(Color.white.opacity(0.07))
         } else {
             RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.systemPopover, inset: 6), style: .continuous)

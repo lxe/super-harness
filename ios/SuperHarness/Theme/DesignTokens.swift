@@ -110,7 +110,7 @@ public enum SHRadius {
     public static let pill: CGFloat = 999
     /// Corner radius of the system's glass popover on iOS 26 (measured in the Simulator), for
     /// shapes nested inside one.
-    public static let systemPopover: CGFloat = 24
+    public static let systemPopover: CGFloat = 30
 
     /// Radius for a shape nested inside another rounded shape, so the two corners stay
     /// concentric: the outer radius minus the gap between them, never tighter than `sm`.

@@ -54,10 +54,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel
           ? cn(
-              'h-8 px-4 rounded-none bg-[#15171d] hover:bg-[#1a1c24] border-y border-[#232632] text-[13px] font-semibold tracking-[-0.01em] text-ink-primary',
+              'h-8 pl-2.5 pr-3 rounded-none bg-[#13151a] hover:bg-[#171920] border-y border-[#1c1f28] shadow-[0_2px_4px_rgba(0,0,0,0.18)] text-[13px] font-normal tracking-[-0.005em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
-          : 'h-7 px-2 rounded-lg bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary',
+          : 'h-7 px-2 rounded-lg bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-normal text-ink-secondary/80 hover:text-ink-primary',
         !isTopLevel && sticky && 'sticky top-8 z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
@@ -67,7 +67,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
-        className="flex-1 min-w-0 h-full flex items-center gap-2 cursor-pointer focus:outline-none focus-visible:shadow-none"
+        className={cn(
+          'flex-1 min-w-0 h-full flex items-center cursor-pointer focus:outline-none focus-visible:shadow-none',
+          isTopLevel ? 'gap-2.5' : 'gap-2'
+        )}
       >
         {collapsed ? (
           <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
@@ -75,7 +78,13 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
         )}
         {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
-        <span className={cn('leading-none truncate', working && 'sh-nav-title-shimmer')}>
+        <span
+          className={cn(
+            'leading-none truncate',
+            isTopLevel && 'translate-y-[1px]',
+            working && 'sh-nav-title-shimmer'
+          )}
+        >
           {label}
         </span>
         {count !== undefined && (

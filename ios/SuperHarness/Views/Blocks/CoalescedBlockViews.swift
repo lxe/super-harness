@@ -254,27 +254,36 @@ private struct CompactTraceRowView: View {
             .shRecessedWell(cornerRadius: SHRadius.md)
 
         case .thinking(let text, let summary):
-            let title = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                ?? text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first
-                ?? "Thought"
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedSummary = summary?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasDistinctSummary: Bool = {
+                guard let s = trimmedSummary, !s.isEmpty else { return false }
+                return s != trimmedText
+            }()
+            let title = hasDistinctSummary
+                ? (trimmedSummary ?? "Thought")
+                : (trimmedText.isEmpty ? "Thought" : trimmedText)
             VStack(alignment: .leading, spacing: 4) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
                 } label: {
-                    HStack(spacing: 7) {
+                    HStack(alignment: .top, spacing: 7) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 10.5))
                             .foregroundStyle(SHColor.inkFaint)
                             .frame(width: 12)
+                            .padding(.top, 2.5)
                         Text(title)
                             .font(.system(size: 12.5))
-                            .foregroundStyle(SHColor.inkMuted)
+                            .foregroundStyle(isDetailOpen && !hasDistinctSummary ? SHColor.inkSecondary : SHColor.inkMuted)
                             .lineLimit(isDetailOpen ? nil : 1)
-                        Spacer(minLength: 4)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(SHColor.inkFaint)
                             .rotationEffect(.degrees(isDetailOpen ? 90 : 0))
+                            .padding(.top, 3.5)
                     }
                     .padding(.vertical, 5)
                     .padding(.horizontal, 6)
@@ -282,9 +291,9 @@ private struct CompactTraceRowView: View {
                 }
                 .buttonStyle(.plain)
 
-                if isDetailOpen {
+                if isDetailOpen && hasDistinctSummary && !trimmedText.isEmpty {
                     SHScrollInset(maxHeight: 240) {
-                        Text(text)
+                        Text(trimmedText)
                             .font(.system(size: 12.5))
                             .foregroundStyle(SHColor.inkSecondary)
                             .textSelection(.enabled)

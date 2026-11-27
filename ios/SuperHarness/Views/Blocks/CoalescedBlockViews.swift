@@ -262,9 +262,14 @@ private struct CompactTraceRowView: View {
                 guard let s = trimmedSummary, !s.isEmpty else { return false }
                 return s != trimmedText
             }()
-            let title = hasDistinctSummary
+            let rawHeader = hasDistinctSummary
                 ? (trimmedSummary ?? "Thought")
                 : (trimmedText.isEmpty ? "Thought" : trimmedText)
+            let collapsedHeaderLine = rawHeader
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .first(where: { !$0.isEmpty }) ?? "Thought"
+            let displaySource = isDetailOpen ? rawHeader : collapsedHeaderLine
             VStack(alignment: .leading, spacing: 4) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.14)) { isDetailOpen.toggle() }
@@ -275,7 +280,7 @@ private struct CompactTraceRowView: View {
                             .foregroundStyle(SHColor.inkFaint)
                             .frame(width: 12)
                             .padding(.top, 2.5)
-                        Text(title)
+                        Text(SHMarkdownCache.inlineAttributedString(for: displaySource, isUserBubble: false, scale: 0.85))
                             .font(.system(size: 12.5))
                             .foregroundStyle(isDetailOpen && !hasDistinctSummary ? SHColor.inkSecondary : SHColor.inkMuted)
                             .lineLimit(isDetailOpen ? nil : 1)
@@ -295,9 +300,7 @@ private struct CompactTraceRowView: View {
 
                 if isDetailOpen && hasDistinctSummary && !trimmedText.isEmpty {
                     SHScrollInset(maxHeight: 240) {
-                        Text(trimmedText)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(SHColor.inkSecondary)
+                        SHMarkdownView(text: trimmedText, isUserBubble: false)
                             .textSelection(.enabled)
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -877,6 +880,13 @@ private struct ThinkingBlockView: View, Equatable {
     }
 
     var body: some View {
+        let headerSource = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let headerLine = headerSource
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first(where: { !$0.isEmpty }) ?? "Thinking"
+
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.16)) { isExpanded.toggle() }
@@ -885,7 +895,7 @@ private struct ThinkingBlockView: View, Equatable {
                     Image(systemName: "brain.head.profile")
                         .font(.system(size: 12))
                         .foregroundStyle(SHColor.inkMuted)
-                    Text(summary ?? "Thinking")
+                    Text(SHMarkdownCache.inlineAttributedString(for: headerLine, isUserBubble: false, scale: 0.85))
                         .font(SHTypography.caption.weight(.medium))
                         .foregroundStyle(SHColor.inkSecondary)
                         .lineLimit(1)
@@ -903,9 +913,7 @@ private struct ThinkingBlockView: View, Equatable {
             if isExpanded {
                 Divider().overlay(SHColor.lineHairline)
                 SHScrollInset(maxHeight: 280) {
-                    Text(text)
-                        .font(SHTypography.caption.italic())
-                        .foregroundStyle(SHColor.inkMuted)
+                    SHMarkdownView(text: text, isUserBubble: false)
                         .textSelection(.enabled)
                         .padding(13)
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -18,10 +18,10 @@ export interface CollapsibleCardProps {
 
 const VARIANT_CLASSES = {
   default:
-    'rounded-2xl bg-[#1a1c22] shadow-[0_1px_2px_rgba(0,0,0,0.22),0_2px_5px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.04)]',
-  recessed: 'rounded-xl bg-[#13151a] shadow-[inset_0_1px_2px_rgba(0,0,0,0.26)]',
+    'rounded-2xl bg-surface-subtle shadow-[0_1px_2px_rgba(0,0,0,0.22),0_2px_5px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.04)]',
+  recessed: 'rounded-xl bg-surface-code shadow-[inset_0_1px_2px_rgba(0,0,0,0.26)]',
   subtle:
-    'rounded-xl bg-[#181a20] shadow-[0_1px_2px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.035)]',
+    'rounded-xl bg-surface-subtle shadow-[0_1px_2px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.035)]',
   plain: 'rounded-lg bg-transparent',
 };
 

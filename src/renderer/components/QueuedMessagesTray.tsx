@@ -35,7 +35,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
       : null;
 
   return (
-    <div className="rounded-2xl bg-[#1a1c22] sh-shadow-card overflow-hidden">
+    <div className="rounded-2xl bg-surface-subtle sh-shadow-card overflow-hidden">
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}

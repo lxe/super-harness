@@ -54,11 +54,11 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel
           ? cn(
-              'h-8 pl-2.5 pr-3 rounded-none bg-[#15161a] hover:bg-[#191a1f] shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[13px] font-normal tracking-[-0.005em] text-ink-primary',
+              'h-[34px] pl-2.5 pr-3 rounded-none bg-surface-canvas hover:bg-surface-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[14px] font-normal tracking-[-0.005em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
-          : 'h-7 px-2 rounded-lg bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-normal text-ink-secondary/80 hover:text-ink-primary',
-        !isTopLevel && sticky && 'sticky top-8 z-10',
+          : 'h-[30px] px-2 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[13px] font-normal text-ink-secondary/80 hover:text-ink-primary',
+        !isTopLevel && sticky && 'sticky top-[34px] z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
@@ -167,14 +167,14 @@ export const NavRow: React.FC<NavRowProps> = ({
       <div
         title={tooltip ?? title}
         className={cn(
-          'group relative h-8 flex items-center gap-2 px-2.5 rounded-lg cursor-pointer transition-colors select-none',
+          'group relative h-[34px] flex items-center gap-2 px-2.5 rounded-lg cursor-pointer transition-colors select-none',
           selected
             ? 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/40'
             : active
-              ? 'bg-white/[0.09] text-ink-primary font-medium'
+              ? 'bg-surface-raised text-ink-primary font-medium'
               : secondaryActive
-                ? 'bg-white/[0.05] text-ink-primary'
-                : 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.045]',
+                ? 'bg-surface-subtle text-ink-primary'
+                : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-subtle',
           className
         )}
         {...rest}
@@ -203,7 +203,7 @@ export const NavRow: React.FC<NavRowProps> = ({
           <span
             style={effectiveOpacity !== undefined ? { opacity: effectiveOpacity } : undefined}
             className={cn(
-              'text-[13px] leading-[1.35] truncate transition-opacity group-hover:!opacity-100',
+              'text-[14px] leading-[1.35] truncate transition-opacity group-hover:!opacity-100',
               working && 'sh-nav-title-shimmer font-medium'
             )}
           >

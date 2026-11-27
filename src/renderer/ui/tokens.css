@@ -4,20 +4,21 @@
  * ============================================================================ */
 
 @theme {
-  /* Surface elevation scale (recessed -> elevated) */
-  --color-surface-code: #101114;
-  --color-surface-rail: #111215;
-  --color-surface-canvas: #16171b;
-  --color-surface-subtle: #181a1f;
-  --color-surface-popover: #1a1c22;
-  --color-surface-raised: #1f2128;
-  --color-surface-bubble: #23252c;
+  /* Unified OKLCH obsidian surface scale (hue 260, uniform chroma, recessed -> elevated) */
+  --color-surface-code: oklch(0.172 0.007 260);
+  --color-surface-rail: oklch(0.184 0.007 260);
+  --color-surface-canvas: oklch(0.206 0.008 260);
+  --color-surface-subtle: oklch(0.222 0.008 260);
+  --color-surface-popover: oklch(0.238 0.009 260);
+  --color-surface-raised: oklch(0.258 0.010 260);
+  --color-surface-bubble: oklch(0.276 0.010 260);
+  --color-surface-hover: oklch(0.294 0.010 260);
 
-  /* Ink / text hierarchy */
-  --color-ink-primary: #f1f3f7;
-  --color-ink-secondary: #c8ccd6;
-  --color-ink-muted: #8b909e;
-  --color-ink-faint: #5f6472;
+  /* Ink / text hierarchy (same 260 hue) */
+  --color-ink-primary: oklch(0.955 0.005 260);
+  --color-ink-secondary: oklch(0.835 0.008 260);
+  --color-ink-muted: oklch(0.660 0.011 260);
+  --color-ink-faint: oklch(0.515 0.011 260);
 
   /* Harness brand accents */
   --color-brand-antigravity: #60a5fa;
@@ -34,21 +35,21 @@
   --color-status-danger: #fb7185;
 
   /* Border tokens */
-  --color-line-hairline: rgba(255, 255, 255, 0.06);
-  --color-line-subtle: rgba(255, 255, 255, 0.1);
-  --color-line-strong: rgba(255, 255, 255, 0.18);
+  --color-line-hairline: oklch(1 0 0 / 0.055);
+  --color-line-subtle: oklch(1 0 0 / 0.095);
+  --color-line-strong: oklch(1 0 0 / 0.17);
 
-  /* Typography scale — generous, crisp desktop readability */
-  --text-heading: 0.96875rem;    /* 15.5px */
-  --text-heading--line-height: 1.4rem;
-  --text-body: 0.90625rem;       /* 14.5px */
-  --text-body--line-height: 1.425rem;
-  --text-label: 0.875rem;        /* 14px */
-  --text-label--line-height: 1.25rem;
-  --text-caption: 0.8125rem;     /* 13px */
-  --text-caption--line-height: 1.15rem;
-  --text-micro: 0.75rem;         /* 12px */
-  --text-micro--line-height: 1.05rem;
+  /* Typography scale — comfortable desktop hierarchy (Ctrl +/- scales globally) */
+  --text-heading: 1rem;          /* 16px */
+  --text-heading--line-height: 1.45rem;
+  --text-body: 0.9375rem;        /* 15px */
+  --text-body--line-height: 1.45rem;
+  --text-label: 0.90625rem;      /* 14.5px */
+  --text-label--line-height: 1.3rem;
+  --text-caption: 0.84375rem;    /* 13.5px */
+  --text-caption--line-height: 1.2rem;
+  --text-micro: 0.78125rem;      /* 12.5px */
+  --text-micro--line-height: 1.1rem;
 
   /* Squircle-calibrated radius scale (~1.65x circular radii so superellipses look lush, not square) */
   --radius-sm: 0.4375rem;        /* 7px */
@@ -62,22 +63,23 @@
 :root {
   color-scheme: dark;
 
-  --sh-surface-code: #101114;
-  --sh-surface-rail: #111215;
-  --sh-surface-canvas: #16171b;
-  --sh-surface-subtle: #181a1f;
-  --sh-surface-popover: #1a1c22;
-  --sh-surface-raised: #1f2128;
-  --sh-surface-bubble: #23252c;
+  --sh-surface-code: oklch(0.172 0.007 260);
+  --sh-surface-rail: oklch(0.184 0.007 260);
+  --sh-surface-canvas: oklch(0.206 0.008 260);
+  --sh-surface-subtle: oklch(0.222 0.008 260);
+  --sh-surface-popover: oklch(0.238 0.009 260);
+  --sh-surface-raised: oklch(0.258 0.010 260);
+  --sh-surface-bubble: oklch(0.276 0.010 260);
+  --sh-surface-hover: oklch(0.294 0.010 260);
 
-  --sh-ink-primary: #f1f3f7;
-  --sh-ink-secondary: #c8ccd6;
-  --sh-ink-muted: #8b909e;
-  --sh-ink-faint: #5f6472;
+  --sh-ink-primary: oklch(0.955 0.005 260);
+  --sh-ink-secondary: oklch(0.835 0.008 260);
+  --sh-ink-muted: oklch(0.660 0.011 260);
+  --sh-ink-faint: oklch(0.515 0.011 260);
 
-  --sh-line-hairline: rgba(255, 255, 255, 0.06);
-  --sh-line-subtle: rgba(255, 255, 255, 0.1);
-  --sh-line-strong: rgba(255, 255, 255, 0.18);
+  --sh-line-hairline: oklch(1 0 0 / 0.055);
+  --sh-line-subtle: oklch(1 0 0 / 0.095);
+  --sh-line-strong: oklch(1 0 0 / 0.17);
 
   --sh-brand-antigravity: #60a5fa;
   --sh-brand-codex: #10a37f;

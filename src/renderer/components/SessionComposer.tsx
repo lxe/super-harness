@@ -203,7 +203,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
         className={`relative rounded-[22px] transition-all ${
           dragOver
             ? 'bg-surface-raised ring-1 ring-inset ring-white/15 sh-shadow-card-focus'
-            : 'bg-[#1c1e24] sh-shadow-card focus-within:bg-[#1e2027] focus-within:sh-shadow-card-focus'
+            : 'bg-surface-popover sh-shadow-card focus-within:bg-surface-raised/80 focus-within:sh-shadow-card-focus'
         }`}
       >
         {attachments.length > 0 && (

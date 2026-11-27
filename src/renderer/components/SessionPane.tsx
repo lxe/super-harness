@@ -1182,7 +1182,7 @@ export const SessionPane: React.FC<Props> = ({
             onClick={scrollToBottom}
             aria-label="Scroll to bottom"
             title="Scroll to bottom"
-            className="absolute -top-11 left-1/2 -translate-x-1/2 z-20 w-8 h-8 rounded-full bg-[#242731]/95 hover:bg-[#2c303d] text-ink-secondary hover:text-ink-primary sh-shadow-card flex items-center justify-center transition-all cursor-pointer focus:outline-none focus-visible:shadow-none"
+            className="absolute -top-11 left-1/2 -translate-x-1/2 z-20 w-8 h-8 rounded-full bg-surface-raised/95 hover:bg-surface-bubble text-ink-secondary hover:text-ink-primary sh-shadow-card flex items-center justify-center transition-all cursor-pointer focus:outline-none focus-visible:shadow-none"
           >
             <ArrowDown className="w-4 h-4" />
           </button>

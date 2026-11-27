@@ -4,7 +4,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import { cn } from './cn';
 
 const BASE_CONTROL =
-  'w-full bg-[#15171c] rounded-lg shadow-[inset_0_1px_2px_rgba(0,0,0,0.32)] text-ink-primary placeholder:text-ink-faint transition-all focus:outline-none focus-visible:shadow-none focus:bg-[#191b22] focus:ring-1 focus:ring-white/15 disabled:opacity-45';
+  'w-full bg-surface-rail rounded-lg shadow-[inset_0_1px_2px_rgba(0,0,0,0.32)] text-ink-primary placeholder:text-ink-faint transition-all focus:outline-none focus-visible:shadow-none focus:bg-surface-subtle focus:ring-1 focus:ring-white/15 disabled:opacity-45';
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   inputSize?: 'sm' | 'md';
@@ -177,10 +177,10 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           onKeyDown={handleTriggerKeyDown}
           className={cn(
             'w-full flex items-center justify-between gap-2 rounded-lg text-left transition-all cursor-pointer select-none',
-            'bg-[#22252d] hover:bg-[#282b34] text-ink-primary',
+            'bg-surface-raised hover:bg-surface-bubble text-ink-primary',
             'shadow-[0_1px_2px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.06)]',
             'focus:outline-none focus-visible:shadow-none focus-visible:ring-1 focus-visible:ring-white/20 disabled:opacity-45 disabled:cursor-not-allowed',
-            open && 'bg-[#282b34] ring-1 ring-white/15',
+            open && 'bg-surface-bubble ring-1 ring-white/15',
             inputSize === 'sm' ? 'h-8 px-3 text-caption' : 'h-9 px-3.5 text-label'
           )}
         >

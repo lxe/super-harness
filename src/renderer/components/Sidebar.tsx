@@ -1209,7 +1209,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
       {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar) */}
       {globalPinnedSessions.length > 0 && (
-        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-[#1c1f28]">
+        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline">
           {globalPinnedSessions.map((s) =>
             renderSessionRow(s, { showLogo: true, showPin: false })
           )}
@@ -1374,7 +1374,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   <div
                     key={grp.id}
                     className={`space-y-0.5 ${grpIdx === 0 ? 'pt-1.5' : ''} ${
-                      grpIdx < topGroups.length - 1 ? '-mx-2.5 px-2.5 pb-1.5 border-b border-[#1c1f28]' : ''
+                      grpIdx < topGroups.length - 1 ? '-mx-2.5 px-2.5 pb-1.5 border-b border-line-hairline' : ''
                     }`}
                   >
                     {(grp.items ?? []).map((s) =>

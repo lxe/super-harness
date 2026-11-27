@@ -189,7 +189,7 @@ export const NavRow: React.FC<NavRowProps> = ({
               <span
                 aria-label="Unread"
                 title="New activity since you last opened this thread"
-                className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 ring-[1.5px] ring-surface-rail shadow-[0_0_7px_rgba(251,191,36,0.85)]"
+                className="sh-unread-throb absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 ring-[1.5px] ring-surface-rail shadow-[0_0_7px_rgba(251,191,36,0.85)]"
               />
             )}
           </span>
@@ -205,7 +205,7 @@ export const NavRow: React.FC<NavRowProps> = ({
             <span
               aria-label="Unread"
               title="New activity since you last opened this thread"
-              className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.85)] shrink-0"
+              className="sh-unread-throb w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.85)] shrink-0"
             />
           )}
           {titleBadge && <span className="shrink-0 inline-flex items-center">{titleBadge}</span>}

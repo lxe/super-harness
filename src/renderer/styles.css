@@ -575,6 +575,23 @@ body,
 .sh-mark-spin-piece-2 { animation: sh-mark-spin-2 1.6s cubic-bezier(0.4, 0, 0.2, 1) -0.8s infinite; }
 .sh-mark-spin-piece-3 { animation: sh-mark-spin-3 1.6s cubic-bezier(0.4, 0, 0.2, 1) -0.4s infinite; }
 
+/* Gentle breathing throb for amber unread notification dots (compositor-only transform + opacity) */
+@keyframes sh-unread-dot-throb {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.78;
+  }
+  50% {
+    transform: scale(1.16);
+    opacity: 1;
+  }
+}
+
+.sh-unread-throb {
+  animation: sh-unread-dot-throb 2.4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 /* Pause infinite CSS animations when the Electron window is hidden or a row is offscreen */
 .sh-window-hidden .sh-orb-sphere,
 .sh-window-hidden .sh-orb-shade,
@@ -582,6 +599,7 @@ body,
 .sh-window-hidden .sh-gauge-arc-shimmer,
 .sh-window-hidden .sh-mark-piece,
 .sh-window-hidden .sh-mark-spin-piece,
+.sh-window-hidden .sh-unread-throb,
 .sh-window-hidden .sh-working-shimmer::after,
 [data-sh-offscreen='true'] .sh-orb-sphere,
 [data-sh-offscreen='true'] .sh-orb-shade,
@@ -589,6 +607,7 @@ body,
 [data-sh-offscreen='true'] .sh-gauge-arc-shimmer,
 [data-sh-offscreen='true'] .sh-mark-piece,
 [data-sh-offscreen='true'] .sh-mark-spin-piece,
+[data-sh-offscreen='true'] .sh-unread-throb,
 [data-sh-offscreen='true'] .sh-working-shimmer::after,
 [data-sh-offscreen='true'].sh-working-shimmer::after {
   animation-play-state: paused !important;
@@ -601,6 +620,7 @@ body,
   .sh-gauge-arc-shimmer,
   .sh-mark-piece,
   .sh-mark-spin-piece,
+  .sh-unread-throb,
   .sh-working-shimmer::after {
     animation-play-state: paused !important;
   }

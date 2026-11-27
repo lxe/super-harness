@@ -1240,51 +1240,71 @@ export const Sidebar: React.FC<Props> = React.memo(({
         </div>
       </div>
 
-      {/* Inline Search — right below the top bar, raised composer-like squircle surface */}
-      {(showSearch || query) && (
-        <div className="px-2.5 pb-2">
-          <div className="h-9 flex items-center gap-2 px-3 rounded-xl bg-surface-popover sh-shadow-card focus-within:bg-surface-raised/85 focus-within:sh-shadow-card-focus transition-all">
-            <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  if (query) {
-                    setQuery('');
-                  } else {
-                    setShowSearch(false);
-                  }
-                }
-              }}
-              placeholder="Filter conversations…"
-              className="flex-1 min-w-0 bg-transparent p-0 text-[13.5px] leading-normal text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                if (query) {
-                  setQuery('');
-                  searchInputRef.current?.focus();
-                } else {
-                  setShowSearch(false);
-                }
-              }}
-              title={query ? 'Clear filter' : 'Close filter'}
-              aria-label={query ? 'Clear filter' : 'Close filter'}
-              className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
-                query
-                  ? 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.1]'
-                  : 'text-ink-faint hover:text-ink-secondary hover:bg-white/[0.06]'
-              }`}
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+      {/* Inline Search — right below the top bar, raised composer-like squircle surface with smooth pop-in/out */}
+      {(() => {
+        const isSearchOpen = showSearch || Boolean(query);
+        return (
+          <div
+            aria-hidden={!isSearchOpen}
+            className={`grid transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              isSearchOpen
+                ? 'grid-rows-[1fr] opacity-100'
+                : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div
+                className={`px-2.5 pb-2 pt-0.5 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                  isSearchOpen ? 'translate-y-0 scale-100' : '-translate-y-1.5 scale-[0.98]'
+                }`}
+              >
+                <div className="h-9 flex items-center gap-2 px-3 rounded-xl bg-surface-popover sh-shadow-card focus-within:bg-surface-raised/85 focus-within:sh-shadow-card-focus transition-all">
+                  <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    tabIndex={isSearchOpen ? 0 : -1}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        if (query) {
+                          setQuery('');
+                        } else {
+                          setShowSearch(false);
+                        }
+                      }
+                    }}
+                    placeholder="Filter conversations…"
+                    className="flex-1 min-w-0 bg-transparent p-0 text-[13.5px] leading-normal text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={isSearchOpen ? 0 : -1}
+                    onClick={() => {
+                      if (query) {
+                        setQuery('');
+                        searchInputRef.current?.focus();
+                      } else {
+                        setShowSearch(false);
+                      }
+                    }}
+                    title={query ? 'Clear filter' : 'Close filter'}
+                    aria-label={query ? 'Clear filter' : 'Close filter'}
+                    className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                      query
+                        ? 'text-ink-secondary hover:text-ink-primary hover:bg-white/[0.1]'
+                        : 'text-ink-faint hover:text-ink-secondary hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar / Search) */}
       {globalPinnedSessions.length > 0 && (

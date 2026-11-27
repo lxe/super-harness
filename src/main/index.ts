@@ -28,6 +28,11 @@ import { PairingService } from './services/pairing';
 import { BonjourAdvertiser } from './services/bonjourAdvertiser';
 import { buildPairingUrl, defaultDesktopName, mobileAddresses } from './services/mobileAccess';
 import QRCode from 'qrcode';
+
+// The app may be started from inside a tmux pane (e.g. a restart run from a terminal). Nothing it
+// launches lives in that pane, so drop the pane before any child process can inherit it.
+delete process.env.TMUX;
+delete process.env.TMUX_PANE;
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';

@@ -768,7 +768,7 @@ export async function detectClaude(
         const full = path.join(CLAUDE_SESSIONS_DIR, fn);
         let data: ActiveClaudeSessionJson;
         try {
-          data = JSON.parse(fs.readFileSync(full, 'utf8')) as ActiveClaudeSessionJson;
+          data = withoutHeadlessTmux(JSON.parse(fs.readFileSync(full, 'utf8')) as ActiveClaudeSessionJson);
         } catch {
           continue;
         }
@@ -2101,6 +2101,19 @@ export type ClaudeDispatchDecision =
 /**
  * Inspects live `~/.claude/sessions/*.json` PID records for a given session ID.
  */
+/**
+ * A headless Claude process (the SDK / stream-json mode Superharness and Claude Desktop run)
+ * has no terminal, but records the tmux pane of whatever started its parent. Treating that as
+ * ownership typed one chat's messages into another chat's terminal, so its tmux field is ignored.
+ */
+export function withoutHeadlessTmux(data: ActiveClaudeSessionJson): ActiveClaudeSessionJson {
+  if (data.tmux && data.entrypoint === 'sdk-cli') {
+    const { tmux: _ignored, ...rest } = data;
+    return rest as ActiveClaudeSessionJson;
+  }
+  return data;
+}
+
 export function findLiveClaudeOwners(
   nativeSessionId: string,
   sessionsDir = CLAUDE_SESSIONS_DIR
@@ -2112,7 +2125,9 @@ export function findLiveClaudeOwners(
       if (!fn.endsWith('.json')) continue;
       let data: ActiveClaudeSessionJson;
       try {
-        data = JSON.parse(fs.readFileSync(path.join(sessionsDir, fn), 'utf8')) as ActiveClaudeSessionJson;
+        data = withoutHeadlessTmux(
+          JSON.parse(fs.readFileSync(path.join(sessionsDir, fn), 'utf8')) as ActiveClaudeSessionJson
+        );
       } catch {
         continue;
       }

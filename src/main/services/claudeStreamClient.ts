@@ -4,6 +4,15 @@ import os from 'node:os';
 import type { ImageAttachment, StreamEvent } from '../../shared/types';
 import { whichBinary } from '../utils/system';
 
+
+/** The environment without tmux's variables, for processes that have no terminal of their own. */
+export function withoutTmuxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  delete out.TMUX;
+  delete out.TMUX_PANE;
+  return out;
+}
+
 const VALID_CLAUDE_PERM_MODES = new Set([
   'acceptEdits',
   'auto',
@@ -283,7 +292,8 @@ export class ClaudeStreamPool {
 
     const proc = spawn(opts.bin, args, {
       cwd: opts.cwd,
-      env: { ...process.env },
+      // Never inherit a tmux pane: this process has no terminal of its own.
+      env: withoutTmuxEnv(process.env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

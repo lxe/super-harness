@@ -1278,3 +1278,21 @@ describe('Claude interrupt notice', () => {
     expect(notices([said(t0, 'start'), marker(t0 + 4000), said(t0 + 10 * 60_000, 'later')])).toBe(1);
   });
 });
+
+describe('headless Claude never owns a terminal', () => {
+  it('ignores the tmux pane a headless (sdk-cli) Claude records', async () => {
+    const { withoutHeadlessTmux } = await import('../src/main/adapters/claudeAdapter');
+    const headless = withoutHeadlessTmux({ sessionId: 's', pid: 1, entrypoint: 'sdk-cli', tmux: 'sh-x:@2.%2' } as never) as { tmux?: string };
+    expect(headless.tmux).toBeUndefined();
+    const tui = withoutHeadlessTmux({ sessionId: 's', pid: 1, entrypoint: 'cli', tmux: 'sh-x:@2.%2' } as never) as { tmux?: string };
+    expect(tui.tmux).toBe('sh-x:@2.%2');
+  });
+
+  it('starts background Claude processes without tmux variables', async () => {
+    const { withoutTmuxEnv } = await import('../src/main/services/claudeStreamClient');
+    const env = withoutTmuxEnv({ TMUX: '/tmp/tmux-1000/default,1,2', TMUX_PANE: '%2', PATH: '/bin' });
+    expect(env.TMUX).toBeUndefined();
+    expect(env.TMUX_PANE).toBeUndefined();
+    expect(env.PATH).toBe('/bin');
+  });
+});

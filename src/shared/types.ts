@@ -461,6 +461,11 @@ export interface SuperHarnessSettings {
    * (shared by desktop and phone). Missing harnesses follow in the default order.
    */
   harnessOrder?: HarnessGroup[];
+  /**
+   * Display order of pinned chats (session ids), shared by desktop and phone. Pinned chats
+   * missing from it follow in their usual order; ids that are no longer pinned are ignored.
+   */
+  pinnedOrder?: string[];
   pollIntervalMs: number;
   maxSessionsPerHarness: number;
   sidebarGroupBy: SidebarGroupBy;

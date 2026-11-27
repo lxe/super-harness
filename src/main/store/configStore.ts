@@ -205,6 +205,15 @@ export class ConfigStore {
         : [];
       patch = { ...patch, harnessOrder: order as SuperHarnessSettings['harnessOrder'] };
     }
+    if (patch.pinnedOrder !== undefined) {
+      const ids = Array.isArray(patch.pinnedOrder)
+        ? patch.pinnedOrder
+            .filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length < 300)
+            .filter((id, i, a) => a.indexOf(id) === i)
+            .slice(0, 500)
+        : [];
+      patch = { ...patch, pinnedOrder: ids };
+    }
     this.state.settings = {
       ...this.state.settings,
       ...patch,

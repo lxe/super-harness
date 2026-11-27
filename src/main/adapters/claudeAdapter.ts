@@ -1077,6 +1077,23 @@ export function parseClaudeJsonlLines(
   let currentAssistant: UnifiedMessage | null = null;
   let seq = 0;
 
+  // Claude logs a dequeue for every delivered queue entry, but it may come before or after
+  // the record that delivers the text (a queued_command attachment or a plain user turn).
+  // An entry removed early by its delivery record leaves a credit, so its own dequeue does
+  // not pop the next, still-waiting entry. Without this, one stale entry sat at the head
+  // and every later dequeue removed the previous message, so the newest delivered message
+  // kept showing as a pending steer at the end of the chat.
+  let dequeueCredits = 0;
+  const normalizeQueueText = (txt: string): string => txt.replace(/\s+/g, ' ').trim();
+  const consumeQueuedText = (txt: string): void => {
+    const target = normalizeQueueText(txt);
+    if (!target) return;
+    const idx = rawNativeQueue.findIndex((q) => normalizeQueueText(q.item.text) === target);
+    if (idx < 0) return;
+    rawNativeQueue.splice(idx, 1);
+    dequeueCredits += 1;
+  };
+
   const isInternalClaudeQueueContent = (txt: string): boolean =>
     /^<(?:task-notification|cross-session-message|teammate-message|system-reminder|local-command-|command-name)\b/i.test(
       txt
@@ -1116,9 +1133,11 @@ export function parseClaudeJsonlLines(
           isInternal: isInternalClaudeQueueContent(trimmed),
         });
       } else if (op === 'dequeue') {
-        rawNativeQueue.shift();
+        if (dequeueCredits > 0) dequeueCredits -= 1;
+        else rawNativeQueue.shift();
       } else if (op === 'popAll' || op === 'clear') {
         rawNativeQueue.length = 0;
+        dequeueCredits = 0;
       } else if (op === 'remove' && typeof obj.content === 'string') {
         const target = obj.content.trim();
         const idx = rawNativeQueue.findIndex((q) => q.item.text === target);
@@ -1133,8 +1152,7 @@ export function parseClaudeJsonlLines(
       const att = obj.attachment as Record<string, unknown> | undefined;
       const prompt = typeof att?.prompt === 'string' ? att.prompt.trim() : '';
       if (att?.type === 'queued_command' && att.commandMode === 'prompt' && prompt) {
-        const qIdx = rawNativeQueue.findIndex((q) => q.item.text === prompt);
-        if (qIdx >= 0) rawNativeQueue.splice(qIdx, 1);
+        consumeQueuedText(prompt);
         if (!isInternalClaudeQueueContent(prompt)) {
           const extracted = extractAttachedImagesFromText(stripPastedContentWrappers(prompt));
           const blocks: UnifiedBlock[] = [...extracted.images];
@@ -1170,6 +1188,15 @@ export function parseClaudeJsonlLines(
     const content = msg.content;
 
     if (type === 'user') {
+      // A queued message delivered as its own turn shows up here as a plain user prompt.
+      if (typeof content === 'string') consumeQueuedText(content);
+      else if (Array.isArray(content)) {
+        const text = content
+          .filter((c) => (c as { type?: string })?.type === 'text')
+          .map((c) => String((c as { text?: unknown }).text ?? ''))
+          .join('\n');
+        if (text) consumeQueuedText(text);
+      }
       const origin = (obj.origin && typeof obj.origin === 'object'
         ? (obj.origin as Record<string, unknown>)
         : undefined);

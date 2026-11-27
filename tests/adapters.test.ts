@@ -819,6 +819,36 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     ).toEqual(['Still queued follow-up']);
   });
 
+  it('does not leave a delivered message as a stale steer when its attachment precedes its dequeue', () => {
+    const q = (operation: string, content?: string, t = '2026-11-26T00:01:00Z') =>
+      JSON.stringify({ type: 'queue-operation', operation, timestamp: t, ...(content ? { content } : {}) });
+    const att = (prompt: string, uuid: string) =>
+      JSON.stringify({
+        type: 'attachment',
+        uuid,
+        timestamp: '2026-11-26T00:02:00Z',
+        attachment: { type: 'queued_command', prompt, commandMode: 'prompt' },
+      });
+    const user = (text: string, uuid: string) =>
+      JSON.stringify({ type: 'user', uuid, timestamp: '2026-11-26T00:05:00Z', message: { role: 'user', content: text } });
+    const lines = [
+      // A: delivered into the running turn before Claude logs its dequeue.
+      q('enqueue', 'first steer'),
+      att('first steer', 'a1'),
+      q('dequeue'),
+      // B: sent while busy, then delivered as its own turn.
+      q('enqueue', 'second message', '2026-11-26T00:03:00Z'),
+      q('dequeue', undefined, '2026-11-26T00:04:00Z'),
+      user('second message', 'u2'),
+    ];
+    const parsed = parseClaudeJsonlLines(lines, 'claude:test-stale', Date.now(), 40);
+    const userTexts = parsed.messages
+      .filter((m) => m.role === 'user')
+      .map((m) => (m.blocks.find((b) => b.type === 'text') as { text: string }).text);
+    expect(userTexts).toEqual(['first steer', 'second message']);
+    expect(parsed.messages.some((m) => m.id.startsWith('claude-steer-'))).toBe(false);
+  });
+
   it('renders a delivered queued_command at its delivery point exactly once', () => {
     const lines = [
       JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: '2026-11-26T00:01:00Z', content: 'steer me' }),

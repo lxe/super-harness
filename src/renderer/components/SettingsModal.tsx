@@ -369,17 +369,6 @@ export const SettingsModal: React.FC<Props> = ({
               );
             })}
           </nav>
-
-          <div className="px-4 py-4 border-t border-line-hairline text-micro text-ink-faint space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span>API</span>
-              <span className="font-mono text-ink-muted">:{controlPort}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Settings</span>
-              <span className="font-mono text-ink-muted">Ctrl ,</span>
-            </div>
-          </div>
         </aside>
 
         {/* Right Content Pane */}

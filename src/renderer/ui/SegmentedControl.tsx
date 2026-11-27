@@ -35,59 +35,115 @@ export interface SegmentedControlProps<T extends string> {
   canReorder?: (id: T) => boolean;
 }
 
-const GAUGE_COLORS: Record<ProgressTone, { stroke: string; comet: string }> = {
-  antigravity: {
-    stroke: '#60a5fa',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(96,165,250,0.16) 195deg, rgba(147,197,253,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  codex: {
-    stroke: '#10a37f',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(16,163,127,0.16) 195deg, rgba(110,231,183,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  claude: {
-    stroke: '#d97757',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(217,119,87,0.16) 195deg, rgba(253,186,116,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  pi: {
-    stroke: '#22d3ee',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(34,211,238,0.16) 195deg, rgba(165,243,252,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  muse: {
-    stroke: '#a855f7',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(168,85,247,0.18) 195deg, rgba(232,121,249,0.65) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  warning: {
-    stroke: '#fbbf24',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(251,191,36,0.16) 195deg, rgba(253,224,71,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  danger: {
-    stroke: '#fb7185',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(251,113,133,0.16) 195deg, rgba(253,164,175,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
-  neutral: {
-    stroke: '#d4d4d8',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(212,212,216,0.14) 195deg, rgba(244,244,245,0.55) 295deg, rgba(255,255,255,0.9) 348deg, transparent 360deg)',
-  },
-  auto: {
-    stroke: '#818cf8',
-    comet:
-      'conic-gradient(from 0deg, transparent 0deg, transparent 120deg, rgba(129,140,248,0.16) 195deg, rgba(199,210,254,0.62) 295deg, rgba(255,255,255,0.92) 348deg, transparent 360deg)',
-  },
+const GAUGE_COLORS: Record<ProgressTone, { stroke: string }> = {
+  antigravity: { stroke: '#60a5fa' },
+  codex: { stroke: '#10a37f' },
+  claude: { stroke: '#d97757' },
+  pi: { stroke: '#22d3ee' },
+  muse: { stroke: '#a855f7' },
+  warning: { stroke: '#fbbf24' },
+  danger: { stroke: '#fb7185' },
+  neutral: { stroke: '#d4d4d8' },
+  auto: { stroke: '#818cf8' },
 };
+
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const n = parseInt(clean, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/**
+ * Matches iOS `SHRadialGauge.brightened(_:)`: lighter, still-saturated version
+ * of `hex` in the same hue (sat * 0.82, brightness * 1.3 + 0.08).
+ */
+function brightenedRgb(hex: string): [number, number, number] {
+  const [r8, g8, b8] = hexToRgb(hex);
+  const r = r8 / 255;
+  const g = g8 / 255;
+  const b = b8 / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  const s = (max === 0 ? 0 : d / max) * 0.82;
+  const v = Math.min(1, max * 1.3 + 0.08);
+
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  let nr = v;
+  let ng = t;
+  let nb = p;
+  switch (i % 6) {
+    case 1:
+      nr = q; ng = v; nb = p;
+      break;
+    case 2:
+      nr = p; ng = v; nb = t;
+      break;
+    case 3:
+      nr = p; ng = q; nb = v;
+      break;
+    case 4:
+      nr = t; ng = p; nb = v;
+      break;
+    case 5:
+      nr = v; ng = p; nb = q;
+      break;
+  }
+  return [Math.round(nr * 255), Math.round(ng * 255), Math.round(nb * 255)];
+}
+
+/**
+ * Matches iOS `SHRadialGauge.pulseGradient(color:spanDegrees:)`:
+ * 16-stop raised-cosine swell over 200deg so the wave rises and falls smoothly with zero hard edges.
+ */
+function buildRaisedCosineConic(
+  [r, g, b]: [number, number, number],
+  maxAlpha: number,
+  spanDegrees = 200
+): string {
+  const steps = 16;
+  const stops: string[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const u = i / steps;
+    const strength = 0.5 - 0.5 * Math.cos(2 * Math.PI * u);
+    const alpha = +(strength * maxAlpha).toFixed(3);
+    const deg = +(u * spanDegrees).toFixed(1);
+    stops.push(`rgba(${r},${g},${b},${alpha}) ${deg}deg`);
+  }
+  stops.push(`rgba(${r},${g},${b},0) 360deg`);
+  return `conic-gradient(from 0deg, ${stops.join(', ')})`;
+}
+
+const pulseGradientCache = new Map<string, { trackPulse: string; brightPulse: string }>();
+
+function getGaugePulseGradients(strokeHex: string): { trackPulse: string; brightPulse: string } {
+  let cached = pulseGradientCache.get(strokeHex);
+  if (!cached) {
+    cached = {
+      trackPulse: buildRaisedCosineConic(hexToRgb(strokeHex), 0.42),
+      brightPulse: buildRaisedCosineConic(brightenedRgb(strokeHex), 1.0),
+    };
+    pulseGradientCache.set(strokeHex, cached);
+  }
+  return cached;
+}
 
 function resolveGaugePalette(
   value: number | null,
   tone: ProgressTone,
   estimated?: boolean
-): { stroke: string; comet: string } {
+): { stroke: string } {
   if (value !== null && !estimated && (tone === 'auto' || tone === 'antigravity' || tone === 'codex' || tone === 'claude' || tone === 'muse' || tone === 'pi')) {
     if (value >= 95) return GAUGE_COLORS.danger;
     if (value >= 80) return GAUGE_COLORS.warning;
@@ -114,6 +170,7 @@ export function SegmentedControl<T extends string>({
   const hasAnyProgress = items.some((i) => i.progress !== undefined);
   const [dragId, setDragId] = React.useState<T | null>(null);
   const [overId, setOverId] = React.useState<T | null>(null);
+  const gaugeUid = React.useId().replace(/:/g, '');
   const dragIdRef = React.useRef<T | null>(null);
   const overIdRef = React.useRef<T | null>(null);
   const pendingDragRef = React.useRef<{ id: T; startX: number; startY: number; pointerId: number } | null>(null);
@@ -308,22 +365,98 @@ export function SegmentedControl<T extends string>({
                   </svg>
                 )}
 
-                {/* 3. Long color-dodge shimmer wave: lifts grey toward white & boosts chroma on colored arcs */}
-                {item.working && (
-                  <span
-                    aria-hidden="true"
-                    className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
-                    style={{
-                      background:
-                        'conic-gradient(from 0deg, transparent 0deg, rgba(255,255,255,0.12) 45deg, rgba(255,255,255,0.52) 115deg, rgba(255,255,255,0.12) 185deg, transparent 230deg)',
-                      mixBlendMode: 'color-dodge',
-                      WebkitMaskImage:
-                        'radial-gradient(farthest-side, transparent calc(100% - 3.1px), #000 calc(100% - 2.8px))',
-                      maskImage:
-                        'radial-gradient(farthest-side, transparent calc(100% - 3.1px), #000 calc(100% - 2.8px))',
-                    }}
-                  />
-                )}
+                {/* 3. Working pulse (mirrors iOS SHRadialGauge):
+                    raised-cosine hue wave over empty track + additive soft halo + brightened usage arc */}
+                {item.working && (() => {
+                  const { trackPulse, brightPulse } = getGaugePulseGradients(palette.stroke);
+                  const safeItemId = `${gaugeUid}-${String(item.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+                  const arcMaskId = `sh-arc-mask-${safeItemId}`;
+                  const haloMaskId = `sh-halo-mask-${safeItemId}`;
+                  const haloBlurId = `sh-halo-blur-${safeItemId}`;
+                  return (
+                    <>
+                      {/* Faint hue-matched swell travelling round the track */}
+                      <span
+                        aria-hidden="true"
+                        className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
+                        style={{
+                          background: trackPulse,
+                          WebkitMaskImage:
+                            'radial-gradient(farthest-side, transparent calc(100% - 3.0px), #000 calc(100% - 2.6px))',
+                          maskImage:
+                            'radial-gradient(farthest-side, transparent calc(100% - 3.0px), #000 calc(100% - 2.6px))',
+                        }}
+                      />
+
+                      {displayPct > 0 && (
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 36 36"
+                          overflow="visible"
+                          className="absolute inset-0 w-full h-full pointer-events-none"
+                        >
+                          <defs>
+                            <filter id={haloBlurId} x="-50%" y="-50%" width="200%" height="200%">
+                              <feGaussianBlur stdDeviation="1.5" />
+                            </filter>
+                            <mask id={arcMaskId} maskUnits="userSpaceOnUse" x="-6" y="-6" width="48" height="48">
+                              <circle
+                                cx="18"
+                                cy="18"
+                                r={GAUGE_RADIUS}
+                                fill="none"
+                                stroke="#fff"
+                                strokeWidth="3.0"
+                                strokeLinecap="round"
+                                strokeDasharray={GAUGE_CIRCUMFERENCE}
+                                strokeDashoffset={dashOffset}
+                                transform="rotate(-90 18 18)"
+                              />
+                            </mask>
+                            <mask id={haloMaskId} maskUnits="userSpaceOnUse" x="-8" y="-8" width="52" height="52">
+                              <circle
+                                cx="18"
+                                cy="18"
+                                r={GAUGE_RADIUS}
+                                fill="none"
+                                stroke="#fff"
+                                strokeWidth="6.6"
+                                strokeLinecap="round"
+                                strokeDasharray={GAUGE_CIRCUMFERENCE}
+                                strokeDashoffset={dashOffset}
+                                transform="rotate(-90 18 18)"
+                                filter={`url(#${haloBlurId})`}
+                              />
+                            </mask>
+                          </defs>
+
+                          {/* Soft additive halo in the brightened hue, confined to the usage arc */}
+                          <g mask={`url(#${haloMaskId})`} style={{ mixBlendMode: 'plus-lighter' }}>
+                            <foreignObject x="-4" y="-4" width="44" height="44">
+                              <div
+                                className="sh-gauge-aurora w-full h-full rounded-full"
+                                style={{
+                                  background: brightPulse,
+                                  filter: 'blur(1.8px)',
+                                }}
+                              />
+                            </foreignObject>
+                          </g>
+
+                          {/* Brightened usage arc itself */}
+                          <g mask={`url(#${arcMaskId})`}>
+                            <foreignObject x="0" y="0" width="36" height="36">
+                              <div
+                                className="sh-gauge-aurora w-full h-full rounded-full"
+                                style={{ background: brightPulse }}
+                              />
+                            </foreignObject>
+                          </g>
+                        </svg>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* Centered icon (or compact 'All' glyph for the unified tab) */}
                 <span className="relative z-10 inline-flex items-center justify-center">

@@ -832,7 +832,7 @@ private struct HarnessSwitcherStrip: View {
 
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
-    private static let scrollableCellWidth: CGFloat = 62
+    private static let scrollableCellWidth: CGFloat = 66
     /// Six gauges still fit side by side on a phone; beyond that the dock scrolls. There is no
     /// "All" gauge: with no harness selected nothing is highlighted and every harness is shown,
     /// and tapping the selected gauge deselects it.
@@ -897,18 +897,41 @@ private struct HarnessSwitcherStrip: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     chipsRow
                         .padding(.horizontal, Self.stripPadding)
-                        .padding(.vertical, 5)
+                        .padding(.vertical, 6)
                         .coordinateSpace(name: Self.stripSpace)
                 }
             } else {
                 chipsRow
                     .padding(.horizontal, Self.stripPadding)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 6)
                     .coordinateSpace(name: Self.stripSpace)
             }
         }
         .frame(maxWidth: .infinity)
+        .background(
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.09), Color.white.opacity(0.02), Color.clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        )
         .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+        .overlay(
+            Capsule()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.26), Color.white.opacity(0.06), Color.white.opacity(0.12)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
+                .allowsHitTesting(false)
+        )
+        .shadow(color: Color.black.opacity(0.26), radius: 12, y: 4)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         .onChange(of: drag) { _, state in
             ignoreTapsUntil = Date().addingTimeInterval(0.5)
@@ -952,17 +975,19 @@ private struct HarnessSwitcherStrip: View {
 
         // A plain tappable view, not a Button: a Button keeps the whole touch to itself, so the
         // hold-to-drag recognizer attached around it would never see the press.
+        let tint = SHColor.harness(group)
         return Group {
-            chipCell(isSelected: isSelected) {
+            chipCell(isSelected: isSelected, tint: tint) {
                 SHRadialGauge(
                     value: barPct,
-                    tint: SHColor.harness(group),
+                    tint: tint,
                     estimated: summary?.barIsEstimated ?? false,
                     isWorking: working,
-                    isActive: isSelected
+                    isActive: isSelected,
+                    size: 38
                 ) {
-                    HarnessLogoView(group: group, size: 15)
-                        .opacity(isSelected ? 1 : 0.8)
+                    HarnessLogoView(group: group, size: 17)
+                        .opacity(isSelected ? 1 : 0.82)
                 }
             }
         }
@@ -980,14 +1005,40 @@ private struct HarnessSwitcherStrip: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {
+    private func chipCell<Content: View>(isSelected: Bool, tint: Color, @ViewBuilder content: () -> Content) -> some View {
         content()
             .frame(
                 minWidth: needsHorizontalScroll ? Self.scrollableCellWidth : nil,
                 maxWidth: needsHorizontalScroll ? Self.scrollableCellWidth : .infinity
             )
-            .frame(height: 44)
-            .background(isSelected ? Color.white.opacity(0.14) : Color.clear)
+            .frame(height: 52)
+            .background {
+                if isSelected {
+                    ZStack {
+                        Capsule().fill(tint.opacity(0.16))
+                        Capsule().fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.22), Color.white.opacity(0.10)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    }
+                }
+            }
+            .overlay {
+                if isSelected {
+                    Capsule()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.32), tint.opacity(0.28)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.75
+                        )
+                }
+            }
             .clipShape(Capsule())
             .contentShape(Capsule())
     }

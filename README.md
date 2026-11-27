@@ -38,7 +38,8 @@ Super Harness is **non-destructive** — each harness keeps its own transcripts,
 - **One-line summaries & session telemetry**: Automatic one-line thread summaries on mobile rows and desktop hover, plus per-thread context usage, tokens, and estimated cost.
 - **Live quota gauges**: Radial quota rings across every enabled harness with working activity shimmer, spend history, and pace indicators.
 - **Shared organization**: Drag to reorder harnesses, drag any chat to pin it, group by harness, project, or folder, and keep pin order synced between Desktop and iOS.
-- **Native iOS companion**: Liquid Glass UI, QR / LAN / Tailscale pairing, push notifications, voice dictation, and offline Demo Mode.
+- **Voice dictation**: Built-in speech-to-text dictation right in the composer on both Desktop and iOS, with a live audio meter, configurable hotkey, and support for local or OpenAI-compatible Whisper transcription servers.
+- **Feature-rich native iOS companion**: Mirrors everything your desktop sees in real time — live transcripts, diffs, tool calls, quota gauges, folders, and synced pin order — complete with APNs push notifications when agents finish or need input, file & photo uploads, voice dictation, QR / LAN / Tailscale pairing, Liquid Glass UI, and offline Demo Mode.
 - **Remote SSH mirroring**: Mirror Claude and Antigravity sessions running on another machine directly into your sidebar and phone.
 
 ## Getting Started

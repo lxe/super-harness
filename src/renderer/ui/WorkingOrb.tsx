@@ -103,6 +103,11 @@ export function resolveHarnessOrbTone(
   return group;
 }
 
+/** The harness/status tint the working mark uses, for other activity glyphs that sit beside it. */
+export function workingToneColor(tone: WorkingOrbTone = 'master'): string {
+  return (ORB_PALETTES[tone] ?? ORB_PALETTES.master).mid;
+}
+
 export interface WorkingOrbProps {
   tone?: WorkingOrbTone;
   size?: 'sm' | 'md' | 'lg';

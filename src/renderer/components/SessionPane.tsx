@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HARNESS_TITLES } from '../utils/harnessMeta';
-import { ArrowDown, ChevronDown, ChevronRight, FileText, Terminal } from 'lucide-react';
+import { ArrowDown, ChevronDown, ChevronRight, FileText, SquareTerminal, Terminal } from 'lucide-react';
 import type {
   HarnessCatalog,
   HarnessGroup,
@@ -16,6 +16,7 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 import { Badge, Button, Modal, WorkingIndicator, WorkingOrb } from '../ui';
+import { workingToneColor } from '../ui/WorkingOrb';
 import { isBusyDispatchError } from '../utils/queueStorage';
 import {
   captureStreamTurnBaseline,
@@ -1071,10 +1072,17 @@ export const SessionPane: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() => setTasksExpanded((v) => !v)}
-                      className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5 px-1 -mx-1 rounded-md outline-none focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
+                      className="inline-flex items-center gap-2 text-caption font-medium select-none cursor-pointer py-0.5 px-1 -mx-1 rounded-md outline-none focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
                     >
-                      <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
-                      <span>
+                      {/* Same layout as the Working line above, with a terminal glyph in place of the mark */}
+                      <span
+                        aria-hidden="true"
+                        style={{ color: workingToneColor(session.harnessGroup), width: 18, height: 18 }}
+                        className="inline-flex items-center justify-center shrink-0 -translate-y-[1px]"
+                      >
+                        <SquareTerminal className="w-[15px] h-[15px]" strokeWidth={2} />
+                      </span>
+                      <span className="sh-working-shimmer">
                         {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'} running
                       </span>
                       {tasksExpanded ? (

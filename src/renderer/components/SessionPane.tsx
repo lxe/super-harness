@@ -948,7 +948,7 @@ export const SessionPane: React.FC<Props> = ({
       if (res.ok) {
         setDispatchNote(
           session.harnessGroup === 'muse'
-            ? `Restarted in tmux (${res.tmuxSession || 'live'}) — Super Harness can now type into that terminal`
+            ? `Restarted in tmux (${res.tmuxSession || 'live'}) — Superharness can now type into that terminal`
             : `Moved to tmux (${res.tmuxSession || 'live'})`
         );
         setStreamError(null);
@@ -1292,18 +1292,18 @@ export const SessionPane: React.FC<Props> = ({
         >
           <div className="space-y-3 text-body text-ink-secondary">
             <p>
-              This session is open in a Muse terminal that Super Harness cannot type into (it has
+              This session is open in a Muse terminal that Superharness cannot type into (it has
               no attach endpoint and is not inside tmux), which is why messages sent from here are
               not delivered.
             </p>
             <p>
-              Super Harness will close that exact Muse terminal process and relaunch the same
+              Superharness will close that exact Muse terminal process and relaunch the same
               session with <code>muse resume</code> inside a new tmux session. The conversation
               is preserved. Closing the old terminal can take up to half a minute. If the session
-              is mid-turn, Super Harness will refuse rather than kill active work.
+              is mid-turn, Superharness will refuse rather than kill active work.
             </p>
             <p>
-              Afterwards Super Harness can type into that tmux terminal for you, and you can watch
+              Afterwards Superharness can type into that tmux terminal for you, and you can watch
               or take over any time with <code>tmux attach</code>.
             </p>
           </div>

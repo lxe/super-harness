@@ -319,7 +319,7 @@ export const SettingsModal: React.FC<Props> = ({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Super Harness Settings"
+        aria-label="Superharness Settings"
         onClick={(e) => e.stopPropagation()}
         className="w-[880px] max-w-[92vw] h-[640px] max-h-[86vh] rounded-2xl border border-line-subtle bg-surface-canvas shadow-[0_24px_64px_-12px_rgba(0,0,0,0.8)] flex overflow-hidden select-none"
       >
@@ -491,7 +491,7 @@ export const SettingsModal: React.FC<Props> = ({
 
                   <SettingsRow
                     label="Also show"
-                    description="Hidden here means hidden in Super Harness"
+                    description="Hidden here means hidden in Superharness"
                     control={
                       <div className="flex items-center gap-5">
                         <Checkbox

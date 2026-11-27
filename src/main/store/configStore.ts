@@ -71,7 +71,7 @@ export function createDefaultState(): SuperHarnessState {
             text: [
               '### Master Orchestrator Ready',
               '',
-              'I have live MCP control over **Super Harness** across all your detected harnesses (**Codex**, **Claude Desktop**, **Claude tmux / Remote Control**, **Antigravity**, and **Muse**).',
+              'I have live MCP control over **Superharness** across all your detected harnesses (**Codex**, **Claude Desktop**, **Claude tmux / Remote Control**, **Antigravity**, and **Muse**).',
               '',
               'Ask me in natural language — or use instant slash commands:',
               '- `/status` — inspect detected harnesses, live PIDs, and remote-control daemons',

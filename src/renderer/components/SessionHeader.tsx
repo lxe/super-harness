@@ -185,7 +185,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
           {!isMaster && (
             <IconButton
               label={
-                session.pinnedToTop ? 'Unpin from Super Harness top' : 'Pin to Super Harness top'
+                session.pinnedToTop ? 'Unpin from Superharness top' : 'Pin to Superharness top'
               }
               tone={session.pinnedToTop ? 'warning' : 'default'}
               onClick={() =>
@@ -258,7 +258,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                         setMenuOpen(false);
                       }}
                     >
-                      {session.pinnedToTop ? 'Unpin from top' : 'Pin to Super Harness top'}
+                      {session.pinnedToTop ? 'Unpin from top' : 'Pin to Superharness top'}
                     </MenuItem>
                     {session.pinned && (
                       <MenuItem
@@ -270,7 +270,7 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
                       >
                         Unpin from{' '}
                         {session.harnessGroup === 'master'
-                          ? 'Super Harness'
+                          ? 'Superharness'
                           : HARNESS_TITLES[session.harnessGroup]}
                       </MenuItem>
                     )}

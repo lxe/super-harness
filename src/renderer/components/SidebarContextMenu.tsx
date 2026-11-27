@@ -531,10 +531,10 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
         {isMulti
           ? allPinnedTop
             ? `Unpin ${targets.length} from top`
-            : `Pin ${targets.length} to Super Harness top`
+            : `Pin ${targets.length} to Superharness top`
           : single.pinnedToTop
             ? 'Unpin from top'
-            : 'Pin to Super Harness top'}
+            : 'Pin to Superharness top'}
       </MenuItem>
 
       {harnessPinnedTargets.length > 0 && (

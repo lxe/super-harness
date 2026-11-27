@@ -558,7 +558,7 @@ const controlServer = new ControlServer(
       pushNotifier.notify(
         {
           kind: 'test',
-          title: opts?.title || 'Super Harness',
+          title: opts?.title || 'Superharness',
           body: opts?.body || 'Push notifications are connected and working.',
         },
         { bypassCooldown: true }
@@ -721,7 +721,7 @@ function createWindow(): void {
     height: 920,
     minWidth: 980,
     minHeight: 640,
-    title: 'Super Harness',
+    title: 'Superharness',
     icon: path.join(app.getAppPath(), 'resources', 'icon.png'),
     backgroundColor: '#16171b',
     titleBarStyle: 'hidden',

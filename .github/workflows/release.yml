@@ -127,14 +127,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: Super Harness ${{ steps.tag.outputs.tag }}
-          prerelease: true
+          name: Superharness ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
           generate_release_notes: true
           body: |
             > [!WARNING]
             > **Alpha build** — macOS and Windows installers are currently unsigned.
             >
-            > - **macOS**: After dragging `Super Harness.app` to Applications, run `xattr -cr "/Applications/Super Harness.app"` if Gatekeeper blocks opening an unsigned build.
-            > - **Linux**: Make the `.AppImage` executable (`chmod +x Super-Harness-*.AppImage`) or install the `.deb` package (`sudo apt install ./Super-Harness-*.deb`).
+            > - **macOS**: After dragging `Superharness.app` to Applications, run `xattr -cr "/Applications/Superharness.app"` if Gatekeeper blocks opening an unsigned build.
+            > - **Linux**: Make the `.AppImage` executable (`chmod +x Superharness-*.AppImage`) or install the `.deb` package (`sudo apt install ./Superharness-*.deb`).
             > - **Windows**: Run the NSIS installer or the portable `.exe`.
           files: dist-artifacts/*

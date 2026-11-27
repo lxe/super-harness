@@ -41,7 +41,7 @@ export const SuperHarnessMark: React.FC<SuperHarnessMarkProps> = ({
       viewBox="-2.4 -1.4 16.8 16.8"
       fill="none"
       className={`shrink-0 overflow-visible ${animated ? (isSpinner ? 'sh-mark-spinner' : 'sh-mark-animated') : ''} ${className}`}
-      aria-label="Super Harness"
+      aria-label="Superharness"
     >
       <defs>
         <linearGradient id={gradId} x1="1" y1="0" x2="11" y2="14" gradientUnits="userSpaceOnUse">

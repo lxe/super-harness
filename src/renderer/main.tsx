@@ -32,7 +32,7 @@ class RootErrorBoundary extends React.Component<
         <div className="h-screen w-screen bg-[#16171b] text-zinc-100 flex items-center justify-center p-6">
           <div className="max-w-lg w-full rounded-2xl border border-white/10 bg-[#1d1f25] p-5 space-y-3 shadow-2xl">
             <div className="text-sm font-semibold text-red-300">
-              Super Harness UI encountered a render error
+              Superharness UI encountered a render error
             </div>
             <pre className="text-xs text-zinc-300 bg-black/40 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-words">
               {this.state.error.message}

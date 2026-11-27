@@ -203,7 +203,7 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
       <SettingsGroup title="Phone access">
         <SettingsRow
           label="Allow phones to connect"
-          description="Lets the Super Harness iPhone app reach this desktop. Phones need to pair first."
+          description="Lets the Superharness iPhone app reach this desktop. Phones need to pair first."
           control={<Switch checked={mobile.enabled} onChange={(enabled) => updateMobile({ enabled })} />}
         />
       </SettingsGroup>
@@ -222,7 +222,7 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
               />
               <div className="min-w-0 space-y-3 pt-1">
                 <p className="text-body text-ink-primary leading-snug">
-                  Open Super Harness on your iPhone and scan this code.
+                  Open Superharness on your iPhone and scan this code.
                 </p>
                 <div className="space-y-1">
                   <div className="text-caption text-ink-muted">Or enter this code:</div>

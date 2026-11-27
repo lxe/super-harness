@@ -872,7 +872,7 @@ export const App: React.FC = () => {
     (href: string, inSplitPane = false) => {
       const target = resolveSessionLink(href, sessions);
       if (!target) {
-        showToast('Session not found in Super Harness');
+        showToast('Session not found in Superharness');
         return;
       }
       if (inSplitPane) {

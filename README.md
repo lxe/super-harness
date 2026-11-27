@@ -1,27 +1,27 @@
 <div align="center">
-  <img src="./resources/icon.png" alt="Super Harness" width="104" height="104" />
-  <h1>Super Harness</h1>
+  <img src="./resources/icon.png" alt="Superharness" width="104" height="104" />
+  <h1>Superharness</h1>
   <p><strong>The unified multiplexer for all your coding harnesses and ADEs.</strong></p>
 </div>
 
 <p align="center">
-  <img src="./docs/screenshots/desktop-app.png" alt="Super Harness Desktop App (2-pane Split View)" width="100%" />
+  <img src="./docs/screenshots/desktop-app.png" alt="Superharness Desktop App (2-pane Split View)" width="100%" />
 </p>
 
 > [!WARNING]
-> **Alpha software for personal use.** Super Harness is an active personal project built for my own Linux + macOS + iOS multi-agent workflow. Expect breaking changes, rough edges, and no stability guarantees.
+> **Alpha software for personal use.** Superharness is an active personal project built for my own Linux + macOS + iOS multi-agent workflow. Expect breaking changes, rough edges, and no stability guarantees.
 
 ## iPhoneApp
 
 <p align="center">
-  <img src="./docs/screenshots/ios-sessions-demo.png" alt="Super Harness iOS Session List (Demo Mode)" width="34%" />
+  <img src="./docs/screenshots/ios-sessions-demo.png" alt="Superharness iOS Session List (Demo Mode)" width="34%" />
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="./docs/screenshots/ios-chat-demo.png" alt="Super Harness iOS Chat Transcript (Demo Mode)" width="34%" />
+  <img src="./docs/screenshots/ios-chat-demo.png" alt="Superharness iOS Chat Transcript (Demo Mode)" width="34%" />
 </p>
 
 ## Supported Harnesses
 
-Super Harness is **non-destructive** — each harness keeps its own transcripts, auth, and sandboxes while Super Harness unifies them under one interface.
+Superharness is **non-destructive** — each harness keeps its own transcripts, auth, and sandboxes while Superharness unifies them under one interface.
 
 - **OpenAI Codex** — Desktop, app-server daemon, and CLI
 - **Claude** — Desktop, Claude Code CLI, `tmux` sessions, and remote SSH hosts

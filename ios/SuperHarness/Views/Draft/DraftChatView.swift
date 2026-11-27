@@ -87,15 +87,23 @@ public struct DraftChatView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: SHSpacing.md) {
-                harnessCard
-                optionsCard
+        GeometryReader { viewport in
+            ScrollView {
+                // The hero is centred in whatever height the cards leave free, and the cards
+                // sit just above the composer, within reach of the thumb.
+                VStack(spacing: SHSpacing.md) {
+                    Spacer(minLength: SHSpacing.lg)
+                    hero
+                    Spacer(minLength: SHSpacing.lg)
+                    harnessGrid
+                    optionsCard
+                }
+                .padding(.horizontal, SHSpacing.lg)
+                .padding(.vertical, SHSpacing.md)
+                .frame(minHeight: viewport.size.height)
             }
-            .padding(.horizontal, SHSpacing.lg)
-            .padding(.vertical, SHSpacing.md)
+            .defaultScrollAnchor(.bottom)
         }
-        .defaultScrollAnchor(.bottom)
         .scrollDismissesKeyboard(.interactively)
         .background(SHColor.surfaceCanvas.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -141,58 +149,98 @@ public struct DraftChatView: View {
 
     // MARK: - Harness Picker (on the page)
 
-    private var harnessCard: some View {
-        VStack(alignment: .leading, spacing: SHSpacing.sm) {
-            sectionTitle("Harness")
-            VStack(spacing: 0) {
-                ForEach(Array(StartHarnessKind.pickable.enumerated()), id: \.element) { index, kind in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(SHColor.lineHairline)
-                            .frame(height: 1)
-                            .padding(.leading, 56)
-                    }
-                    harnessRow(kind)
-                }
-            }
-            .background(SHColor.surfaceSubtle)
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+    /// The selected harness's logo on a raised tile, with a title that names it.
+    private var hero: some View {
+        VStack(spacing: 10) {
+            HarnessLogoView(harness: selectedHarness.kind, size: 24)
+                .frame(width: 48, height: 48)
+                .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg, elevation: .card)
+                .id(selectedHarness)
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            Text("Start a new \(Self.cardTitle(selectedHarness)) thread")
+                .font(SHTypography.title)
+                .foregroundStyle(SHColor.inkPrimary)
+                .multilineTextAlignment(.center)
+                .contentTransition(.opacity)
+            Text("Choose a project and model below, then send your first message.")
+                .font(SHTypography.caption)
+                .foregroundStyle(SHColor.inkMuted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 300)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("draft.hero")
+    }
+
+    /// New Claude chats always start in tmux, so the card says just "Claude".
+    static func cardTitle(_ kind: StartHarnessKind) -> String {
+        kind.harnessGroup == .claude ? "Claude" : kind.label
+    }
+
+    static func cardCaption(_ kind: StartHarnessKind) -> String {
+        switch kind {
+        case .antigravity: return "Direct ACP conversation"
+        case .codex: return "OpenAI Codex thread"
+        case .claudeCli, .claudeTmux: return "tmux + remote control"
+        case .muse: return "Headless exec, resumable"
+        case .pi: return "Pi RPC session, steerable"
         }
     }
 
-    private func harnessRow(_ kind: StartHarnessKind) -> some View {
+    /// The harnesses as raised cards, two to a row. An odd one out takes a full row.
+    private var harnessGrid: some View {
+        let kinds = StartHarnessKind.pickable
+        let rows = stride(from: 0, to: kinds.count, by: 2).map { Array(kinds[$0..<min($0 + 2, kinds.count)]) }
+        return VStack(spacing: 10) {
+            ForEach(rows, id: \.self) { row in
+                HStack(spacing: 10) {
+                    ForEach(row) { kind in
+                        harnessCard(kind)
+                    }
+                }
+            }
+        }
+    }
+
+    private func harnessCard(_ kind: StartHarnessKind) -> some View {
         let isSelected = selectedHarness == kind
-        let brand = SHColor.harness(kind.harnessGroup)
         return Button {
             #if canImport(UIKit)
             UISelectionFeedbackGenerator().selectionChanged()
             #endif
-            withAnimation(.easeInOut(duration: 0.16)) {
+            withAnimation(.easeInOut(duration: 0.18)) {
                 selectHarness(kind)
             }
         } label: {
-            HStack(spacing: 12) {
-                HarnessLogoView(harness: kind.kind, size: 18)
-                    .frame(width: 32, height: 32)
-                    .background(brand.opacity(isSelected ? 0.18 : 0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-                Text(kind.label)
-                    .font(SHTypography.label.weight(isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(brand)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    HarnessLogoView(harness: kind.kind, size: 17)
+                        .frame(width: 18, height: 18)
+                    Text(Self.cardTitle(kind))
+                        .font(SHTypography.label.weight(.semibold))
+                        .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
+                        .lineLimit(1)
                 }
+                Text(Self.cardCaption(kind))
+                    .font(SHTypography.micro)
+                    .foregroundStyle(isSelected ? SHColor.inkMuted : SHColor.inkFaint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .padding(.horizontal, 12)
-            .frame(height: 50)
-            .background(isSelected ? brand.opacity(0.08) : Color.clear)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .shRaisedSurface(
+                isSelected ? SHColor.surfaceBubble : SHColor.surfaceSubtle,
+                cornerRadius: SHRadius.lg,
+                elevation: isSelected ? .card : .tile
+            )
+            .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(kind.label)
+        .accessibilityLabel("\(Self.cardTitle(kind)), \(Self.cardCaption(kind))")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("draft.harness.\(kind.rawValue)")
     }
@@ -254,14 +302,13 @@ public struct DraftChatView: View {
                             .foregroundStyle(SHColor.inkSecondary)
                     }
                 }
-                .tint(SHColor.brandClaude)
+                .tint(SHColor.toggleOn)
                 .padding(.horizontal, 12)
                 .frame(height: 50)
                 .accessibilityLabel("Toggle remote control")
             }
         }
-        .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+        .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.lg, elevation: .tile)
     }
 
     private func optionIcon(_ systemName: String) -> some View {
@@ -269,13 +316,6 @@ public struct DraftChatView: View {
             .font(.system(size: 14, weight: .medium))
             .foregroundStyle(SHColor.inkMuted)
             .frame(width: 32, height: 32)
-    }
-
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(SHTypography.micro.weight(.semibold))
-            .foregroundStyle(SHColor.inkMuted)
-            .padding(.leading, 4)
     }
 
     // MARK: - Composer (same surface and controls as ComposerView)
@@ -338,7 +378,7 @@ public struct DraftChatView: View {
                     .padding(.top, 8)
                 }
 
-                TextField("Message \(selectedHarness.label)…", text: promptText, axis: .vertical)
+                TextField("Message \(Self.cardTitle(selectedHarness))…", text: promptText, axis: .vertical)
                     .focused($isInputFocused)
                     .lineLimit(1...6)
                     .font(SHTypography.body)

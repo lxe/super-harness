@@ -15,6 +15,9 @@ public struct LiveStepsBarView: View {
 
     private var steps: [LiveStepItem] { activity.steps ?? [] }
     private var runningTasks: [RunningTaskItem] { activity.runningTasks ?? [] }
+    private var isActivelyWorking: Bool {
+        activity.isWorking || runningTasks.contains(where: { $0.isDaemon != true })
+    }
 
     private var titleText: String {
         if let focus = activity.focus, !focus.isEmpty {
@@ -26,7 +29,7 @@ public struct LiveStepsBarView: View {
         if let task = runningTasks.first {
             return task.summary
         }
-        return activity.isWorking ? "Running" : "Activity"
+        return isActivelyWorking ? "Running" : "Activity"
     }
 
     private var progressBadge: String? {
@@ -43,8 +46,8 @@ public struct LiveStepsBarView: View {
                 icon: "apple.terminal",
                 title: titleText,
                 trailingBadge: progressBadge,
-                tint: activity.isWorking ? accentColor : SHColor.inkMuted,
-                isShimmering: activity.isWorking,
+                tint: isActivelyWorking ? accentColor : SHColor.inkMuted,
+                isShimmering: isActivelyWorking,
                 isExpanded: isExpanded
             ) {
                 isExpanded.toggle()

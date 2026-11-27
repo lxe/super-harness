@@ -312,13 +312,11 @@ public struct SessionDetailView: View {
                         availableModels: availableModels,
                         allowExtreme: store.allowExtremeReasoning
                     )
-                    Task {
-                        await store.setSessionModel(
-                            sessionId: session.id,
-                            model: resolved.modelId,
-                            reasoningEffort: resolved.effort
-                        )
-                    }
+                    store.commitSessionModel(
+                        sessionId: session.id,
+                        model: resolved.modelId,
+                        reasoningEffort: resolved.effort
+                    )
                 },
                 onSelectReasoningEffort: { effort in
                     let resolved = ComposerView.resolveEffortSelection(
@@ -326,13 +324,24 @@ public struct SessionDetailView: View {
                         currentModel: currentSession.model,
                         availableModels: availableModels
                     )
-                    Task {
-                        await store.setSessionModel(
-                            sessionId: session.id,
-                            model: resolved.modelId,
-                            reasoningEffort: resolved.effort
-                        )
-                    }
+                    store.commitSessionModel(
+                        sessionId: session.id,
+                        model: resolved.modelId,
+                        reasoningEffort: resolved.effort
+                    )
+                },
+                onSelectModelAndEffort: { modelOption, draftedEffort in
+                    let resolved = ComposerView.resolveModelSelection(
+                        picked: modelOption,
+                        currentEffort: draftedEffort ?? currentSession.reasoningEffort,
+                        availableModels: availableModels,
+                        allowExtreme: store.allowExtremeReasoning
+                    )
+                    store.commitSessionModel(
+                        sessionId: session.id,
+                        model: resolved.modelId,
+                        reasoningEffort: resolved.effort
+                    )
                 },
                 onTranscribeAudio: { wavData in
                     try await store.transcribeDictation(wavData: wavData)

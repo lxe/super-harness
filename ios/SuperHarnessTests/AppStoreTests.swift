@@ -1345,4 +1345,126 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(sections.first(where: { $0.title == "DSX" })?.sessions.map(\.id), ["claude:dsx"])
         XCTAssertEqual(sections.first(where: { $0.title == "my-repo" })?.sessions.map(\.id), ["codex:subrepo"])
     }
+
+    func testModelEffortMenuDefersCommitUntilDismissAndDeduplicatesNoOps() {
+        // Open and close without changing anything -> no commit
+        XCTAssertNil(
+            SHModelEffortMenu.resolveCommit(
+                initialModelId: "gemini-4-neon",
+                pickedModelId: nil,
+                initialEffort: "high",
+                draftEffort: "high"
+            )
+        )
+
+        // Tap already-selected model without changing effort -> no commit
+        XCTAssertNil(
+            SHModelEffortMenu.resolveCommit(
+                initialModelId: "gemini-4-neon",
+                pickedModelId: "gemini-4-neon",
+                initialEffort: "high",
+                draftEffort: "HIGH"
+            )
+        )
+
+        // Slide effort and tap outside -> single effortOnly commit
+        XCTAssertEqual(
+            SHModelEffortMenu.resolveCommit(
+                initialModelId: "gemini-4-neon",
+                pickedModelId: nil,
+                initialEffort: "high",
+                draftEffort: "low"
+            ),
+            .effortOnly("low")
+        )
+
+        // Slide effort and tap the already-selected model -> single effortOnly commit
+        XCTAssertEqual(
+            SHModelEffortMenu.resolveCommit(
+                initialModelId: "gemini-4-neon",
+                pickedModelId: "gemini-4-neon",
+                initialEffort: "high",
+                draftEffort: "medium"
+            ),
+            .effortOnly("medium")
+        )
+
+        // Slide effort AND pick a different model -> single atomic modelAndEffort commit
+        XCTAssertEqual(
+            SHModelEffortMenu.resolveCommit(
+                initialModelId: "gemini-4-neon",
+                pickedModelId: "gemini-4-carbon",
+                initialEffort: "high",
+                draftEffort: "low"
+            ),
+            .modelAndEffort(modelId: "gemini-4-carbon", effort: "low")
+        )
+    }
+
+    func testCommitSessionModelProtectsAgainstStalePollsAndClearsOnServerEcho() async {
+        let suite = "sh.tests.modelreconcile.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        let staleSession = UnifiedSession(
+            id: "antigravity:reconcile-1",
+            harness: .antigravity,
+            harnessGroup: .antigravity,
+            title: "Reconcile test",
+            cwd: "/home/alice",
+            projectName: "Home (~)",
+            model: "gemini-4-neon-high",
+            reasoningEffort: "high",
+            status: .idle,
+            createdAt: now,
+            updatedAt: now
+        )
+        store.sessions = [staleSession]
+
+        // 1. commitSessionModel updates optimistically synchronously before any network await
+        let syncTask = store.commitSessionModel(
+            sessionId: staleSession.id,
+            model: "gemini-4-neon-low",
+            reasoningEffort: "low"
+        )
+        XCTAssertEqual(store.sessions.first?.model, "gemini-4-neon-low")
+        XCTAssertEqual(store.sessions.first?.reasoningEffort, "low")
+        XCTAssertNotNil(store.pendingModelOverrides[staleSession.id])
+
+        // 2. A stale SSE delta arriving while request is in flight must NOT flash back to "high"
+        store.applySessionsDelta(SessionsDeltaEnvelope(upserts: [staleSession]))
+        XCTAssertEqual(store.sessions.first?.model, "gemini-4-neon-low")
+        XCTAssertEqual(store.sessions.first?.reasoningEffort, "low")
+
+        // 3. Wait for organize acknowledgement; stale snapshots within grace window still don't revert
+        await syncTask.value
+        XCTAssertEqual(store.pendingModelOverrides[staleSession.id]?.serverAcknowledged, true)
+        store.applySessionsDelta(SessionsDeltaEnvelope(upserts: [staleSession]))
+        XCTAssertEqual(store.sessions.first?.model, "gemini-4-neon-low")
+        XCTAssertEqual(store.sessions.first?.reasoningEffort, "low")
+
+        // 4. Once the server echoes the matching model/effort, the override clears cleanly
+        var echoed = staleSession
+        echoed.model = "gemini-4-neon-low"
+        echoed.reasoningEffort = "low"
+        store.applySessionsDelta(SessionsDeltaEnvelope(upserts: [echoed]))
+        XCTAssertNil(store.pendingModelOverrides[staleSession.id])
+
+        // 5. Subsequent external updates (e.g. Desktop switches to medium) now flow through normally
+        var externalChange = echoed
+        externalChange.model = "gemini-4-neon-medium"
+        externalChange.reasoningEffort = "medium"
+        store.applySessionsDelta(SessionsDeltaEnvelope(upserts: [externalChange]))
+        XCTAssertEqual(store.sessions.first?.model, "gemini-4-neon-medium")
+        XCTAssertEqual(store.sessions.first?.reasoningEffort, "medium")
+
+        // 6. Rapid back-to-back commits always settle on the newest value without reverting
+        _ = store.commitSessionModel(sessionId: staleSession.id, model: "gemini-4-neon-low", reasoningEffort: "low")
+        let finalTask = store.commitSessionModel(sessionId: staleSession.id, model: "gemini-4-neon-xhigh", reasoningEffort: "xhigh")
+        await finalTask.value
+        XCTAssertEqual(store.sessions.first?.model, "gemini-4-neon-xhigh")
+        XCTAssertEqual(store.sessions.first?.reasoningEffort, "xhigh")
+    }
 }

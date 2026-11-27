@@ -187,6 +187,16 @@ public struct DraftChatView: View {
                         }
                         store.newThreadConfig.reasoning = resolved.effort
                     },
+                    onSelectModelAndEffort: { modelOption, draftedEffort in
+                        let resolved = ComposerView.resolveModelSelection(
+                            picked: modelOption,
+                            currentEffort: draftedEffort ?? (selectedReasoning.isEmpty ? nil : selectedReasoning),
+                            availableModels: availableModels,
+                            allowExtreme: store.allowExtremeReasoning
+                        )
+                        store.newThreadConfig.modelId = resolved.modelId
+                        store.newThreadConfig.reasoning = resolved.effort ?? ""
+                    },
                     onTranscribeAudio: { wavData in
                         try await store.transcribeDictation(wavData: wavData)
                     },

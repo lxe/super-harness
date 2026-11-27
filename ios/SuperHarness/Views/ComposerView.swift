@@ -47,6 +47,7 @@ public struct ComposerView: View {
     public let onTapAttachment: (ImageAttachment) -> Void
     public let onSelectModel: ((HarnessModelOption) -> Void)?
     public let onSelectReasoningEffort: ((String) -> Void)?
+    public let onSelectModelAndEffort: ((HarnessModelOption, String?) -> Void)?
     public let onTranscribeAudio: ((Data) async throws -> String)?
     /// Runs when recording starts, so the host connection can be opened while the user speaks.
     public let onDictationStart: (@MainActor () async -> Void)?
@@ -88,6 +89,7 @@ public struct ComposerView: View {
         onTapAttachment: @escaping (ImageAttachment) -> Void,
         onSelectModel: ((HarnessModelOption) -> Void)? = nil,
         onSelectReasoningEffort: ((String) -> Void)? = nil,
+        onSelectModelAndEffort: ((HarnessModelOption, String?) -> Void)? = nil,
         onTranscribeAudio: ((Data) async throws -> String)? = nil,
         onDictationStart: (@MainActor () async -> Void)? = nil,
         onSend: @escaping (SendMode) -> Void,
@@ -118,6 +120,7 @@ public struct ComposerView: View {
         self.onTapAttachment = onTapAttachment
         self.onSelectModel = onSelectModel
         self.onSelectReasoningEffort = onSelectReasoningEffort
+        self.onSelectModelAndEffort = onSelectModelAndEffort
         self.onTranscribeAudio = onTranscribeAudio
         self.onDictationStart = onDictationStart
         self.onSend = onSend
@@ -142,6 +145,7 @@ public struct ComposerView: View {
         onTapAttachment: @escaping (ImageAttachment) -> Void,
         onSelectModel: ((HarnessModelOption) -> Void)? = nil,
         onSelectReasoningEffort: ((String) -> Void)? = nil,
+        onSelectModelAndEffort: ((HarnessModelOption, String?) -> Void)? = nil,
         onTranscribeAudio: ((Data) async throws -> String)? = nil,
         onDictationStart: (@MainActor () async -> Void)? = nil,
         onSend: @escaping (SendMode) -> Void,
@@ -172,6 +176,7 @@ public struct ComposerView: View {
             onTapAttachment: onTapAttachment,
             onSelectModel: onSelectModel,
             onSelectReasoningEffort: onSelectReasoningEffort,
+            onSelectModelAndEffort: onSelectModelAndEffort,
             onTranscribeAudio: onTranscribeAudio,
             onDictationStart: onDictationStart,
             onSend: onSend,
@@ -523,7 +528,15 @@ public struct ComposerView: View {
                         onSelectModel(match.representative)
                     }
                 },
-                onSelectEffort: { level in onSelectReasoningEffort?(level) }
+                onSelectEffort: { level in onSelectReasoningEffort?(level) },
+                onCommitModelAndEffort: { stem, effort in
+                    guard let match = options.first(where: { $0.stem == stem }) else { return }
+                    if let onSelectModelAndEffort {
+                        onSelectModelAndEffort(match.representative, effort)
+                    } else {
+                        onSelectModel(match.representative)
+                    }
+                }
             )
             .equatable()
         } else {
@@ -1598,6 +1611,11 @@ struct SHModelEffortMenu: View, Equatable {
         let isSelected: Bool
     }
 
+    enum CommitAction: Equatable {
+        case modelAndEffort(modelId: String, effort: String?)
+        case effortOnly(String)
+    }
+
     let models: [ModelItem]
     let efforts: [EffortItem]
     let harness: HarnessKind
@@ -1607,8 +1625,20 @@ struct SHModelEffortMenu: View, Equatable {
     let identifier: String
     let onSelectModel: (String) -> Void
     let onSelectEffort: (String) -> Void
+    var onCommitModelAndEffort: ((String, String?) -> Void)? = nil
 
     @State private var isPopoverPresented: Bool = false
+    /// Frozen snapshot captured when the popover opens so background host refreshes/SSE events
+    /// can never mutate, flicker, or bounce an open menu. All changes stay local until dismiss.
+    @State private var hasActiveDraftSession: Bool = false
+    @State private var frozenModels: [ModelItem] = []
+    @State private var frozenEfforts: [EffortItem] = []
+    @State private var frozenTitle: String = ""
+    @State private var frozenEffortLabel: String? = nil
+    @State private var initialModelId: String? = nil
+    @State private var initialEffort: String? = nil
+    @State private var draftEffort: String? = nil
+    @State private var pendingPickedModelId: String? = nil
 
     nonisolated static func == (lhs: SHModelEffortMenu, rhs: SHModelEffortMenu) -> Bool {
         lhs.models == rhs.models
@@ -1620,29 +1650,118 @@ struct SHModelEffortMenu: View, Equatable {
             && lhs.identifier == rhs.identifier
     }
 
-    private var activeEffortLevel: String? {
+    /// Computes the single commit action to dispatch when the popover closes, or `nil` when
+    /// the user dismissed without changing either model or effort.
+    nonisolated static func resolveCommit(
+        initialModelId: String?,
+        pickedModelId: String?,
+        initialEffort: String?,
+        draftEffort: String?
+    ) -> CommitAction? {
+        let effortChanged: Bool = {
+            switch (initialEffort?.lowercased(), draftEffort?.lowercased()) {
+            case (nil, nil): return false
+            case let (a?, b?): return a != b
+            default: return true
+            }
+        }()
+        if let pickedModelId {
+            let modelChanged = pickedModelId != initialModelId
+            if modelChanged {
+                return .modelAndEffort(modelId: pickedModelId, effort: draftEffort)
+            }
+            if effortChanged, let draftEffort {
+                return .effortOnly(draftEffort)
+            }
+            return nil
+        }
+        if effortChanged, let draftEffort {
+            return .effortOnly(draftEffort)
+        }
+        return nil
+    }
+
+    private var liveActiveEffortLevel: String? {
         efforts.first(where: { $0.isSelected })?.level ?? efforts.first?.level
+    }
+
+    private var displayedModels: [ModelItem] {
+        hasActiveDraftSession ? frozenModels : models
+    }
+
+    private var displayedEfforts: [EffortItem] {
+        hasActiveDraftSession ? frozenEfforts : efforts
+    }
+
+    private var displayedEffortLevel: String? {
+        hasActiveDraftSession ? draftEffort : liveActiveEffortLevel
     }
 
     private var accentColor: Color {
         harness.harnessGroup.map(SHColor.harness) ?? SHColor.accentPrimary
     }
 
+    private func beginDraftSession() {
+        frozenModels = models
+        frozenEfforts = efforts
+        frozenTitle = title
+        frozenEffortLabel = effortLabel
+        initialModelId = models.first(where: { $0.isSelected })?.id
+        initialEffort = liveActiveEffortLevel
+        draftEffort = liveActiveEffortLevel
+        pendingPickedModelId = nil
+        hasActiveDraftSession = true
+    }
+
+    private func commitDraftSession() {
+        guard hasActiveDraftSession else { return }
+        let action = Self.resolveCommit(
+            initialModelId: initialModelId,
+            pickedModelId: pendingPickedModelId,
+            initialEffort: initialEffort,
+            draftEffort: draftEffort
+        )
+        hasActiveDraftSession = false
+        pendingPickedModelId = nil
+
+        guard let action else { return }
+        switch action {
+        case .modelAndEffort(let modelId, let effort):
+            if let onCommitModelAndEffort {
+                onCommitModelAndEffort(modelId, effort)
+            } else {
+                onSelectModel(modelId)
+                if let effort, effort.lowercased() != initialEffort?.lowercased() {
+                    onSelectEffort(effort)
+                }
+            }
+        case .effortOnly(let effort):
+            onSelectEffort(effort)
+        }
+    }
     var body: some View {
+        let pillTitle = hasActiveDraftSession ? frozenTitle : title
+        let pillEffort = hasActiveDraftSession ? frozenEffortLabel : effortLabel
+
         Button {
             #if canImport(UIKit)
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             #endif
-            isPopoverPresented.toggle()
+            if !isPopoverPresented {
+                beginDraftSession()
+                isPopoverPresented = true
+            } else {
+                isPopoverPresented = false
+            }
         } label: {
             HStack(spacing: 6) {
                 HarnessLogoView(harness: harness, size: 14.5)
-                Text(title)
+                Text(pillTitle)
                     .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(SHColor.inkPrimary)
                     .lineLimit(1)
-                if let effortLabel, !effortLabel.isEmpty {
-                    Text(effortLabel)
+                if let pillEffort, !pillEffort.isEmpty {
+                    Text(pillEffort)
                         .font(.system(size: 13.5, weight: .regular))
                         .foregroundStyle(SHColor.inkMuted)
                         .lineLimit(1)
@@ -1667,26 +1786,36 @@ struct SHModelEffortMenu: View, Equatable {
                 .presentationCompactAdaptation(.popover)
                 .presentationBackground(SHColor.surfacePopover)
         }
+        .onChange(of: isPopoverPresented) { _, presented in
+            if !presented {
+                commitDraftSession()
+            }
+        }
     }
 
     private var popoverContent: some View {
+        let activeModels = displayedModels
+        let activeEfforts = displayedEfforts
+        let activeEffort = displayedEffortLevel
         let rowHeight: CGFloat = 46
-        let listHeight = min(CGFloat(max(1, models.count)) * rowHeight + 10, 330)
+        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight + 10, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
-        let thinkingSectionHeight: CGFloat = efforts.isEmpty ? 0 : (14 + 56 + 12 + 1)
+        let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12 + 1)
         // The model list needs no heading; a little space separates it from the Thinking section.
         let modelHeaderHeight: CGFloat = 6
         let totalHeight = thinkingSectionHeight + modelHeaderHeight + listHeight
 
         return VStack(alignment: .leading, spacing: 0) {
-            if !efforts.isEmpty {
+            if !activeEfforts.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     SHThinkingEffortSlider(
-                        levels: efforts.map(\.level),
-                        selectedLevel: activeEffortLevel,
+                        levels: activeEfforts.map(\.level),
+                        selectedLevel: activeEffort,
                         accentColor: accentColor,
-                        onSelect: onSelectEffort
+                        onSelect: { level in
+                            draftEffort = level
+                        }
                     )
                 }
                 .padding(.horizontal, 14)
@@ -1704,12 +1833,12 @@ struct SHModelEffortMenu: View, Equatable {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 2) {
-                            ForEach(models) { item in
+                            ForEach(activeModels) { item in
                                 Button {
                                     #if canImport(UIKit)
                                     UISelectionFeedbackGenerator().selectionChanged()
                                     #endif
-                                    onSelectModel(item.id)
+                                    pendingPickedModelId = item.id
                                     isPopoverPresented = false
                                 } label: {
                                     HStack(spacing: 10) {
@@ -1743,7 +1872,7 @@ struct SHModelEffortMenu: View, Equatable {
                     }
                     .frame(height: listHeight)
                     .onAppear {
-                        if let active = models.first(where: { $0.isSelected }) {
+                        if let active = activeModels.first(where: { $0.isSelected }) {
                             proxy.scrollTo(active.id, anchor: .center)
                         }
                     }
@@ -1751,7 +1880,7 @@ struct SHModelEffortMenu: View, Equatable {
             }
         }
         .frame(width: 296, height: totalHeight, alignment: .top)
-        .animation(nil, value: activeEffortLevel)
+        .animation(nil, value: activeEffort)
     }
 }
 

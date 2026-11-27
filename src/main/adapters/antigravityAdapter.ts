@@ -87,7 +87,15 @@ export function isAntigravityTranscriptTerminal(
         fs.closeSync(fd);
       }
       const lines = tail.split('\n');
-      for (let i = lines.length - 1; i >= 0; i--) {
+      let lastParsedIsTerminal = false;
+      let foundLastStep = false;
+      // Track non-daemon background tasks in the tail so a text-only interim reply
+      // ("Waiting for results.") while a background command is actively running is NOT
+      // misclassified as terminal/idle.
+      const pendingBgIsDaemon: boolean[] = [];
+      const activeTailTasks = new Map<string, { logPath?: string; isDaemon: boolean }>();
+
+      for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trim();
         if (!trimmed) continue;
         try {
@@ -95,14 +103,94 @@ export function isAntigravityTranscriptTerminal(
           const stepType = typeof obj.type === 'string' ? obj.type : '';
           const status = typeof obj.status === 'string' ? obj.status : '';
           if (!stepType && !status) continue;
-          const toolCalls = Array.isArray(obj.tool_calls) ? obj.tool_calls : [];
-          isTerminal =
-            stepType === 'PLANNER_RESPONSE' &&
-            status === 'DONE' &&
-            toolCalls.length === 0;
-          break;
+
+          if (stepType === 'CHECKPOINT' && typeof obj.content === 'string') {
+            activeTailTasks.clear();
+            const idx = obj.content.indexOf('# Running Background Tasks');
+            if (idx >= 0) {
+              const section = obj.content.slice(idx);
+              const re =
+                /"taskId":\s*"([^"]+)"[\s\S]*?"logUri":\s*"file:\/\/([^"]*)"[\s\S]*?"isDaemon":\s*(true|false)/g;
+              for (const m of section.matchAll(re)) {
+                activeTailTasks.set(m[1], {
+                  logPath: m[2] || undefined,
+                  isDaemon: m[3] === 'true',
+                });
+              }
+            }
+          } else if (stepType === 'SYSTEM_MESSAGE' && typeof obj.content === 'string') {
+            for (const m of obj.content.matchAll(
+              /Task id "([^"]+)"\s+(?:finished|was canceled|canceled|cancelled|failed|stopped|completed|exited)/gi
+            )) {
+              activeTailTasks.delete(m[1]);
+            }
+          } else if (stepType === 'PLANNER_RESPONSE') {
+            const toolCalls = Array.isArray(obj.tool_calls) ? obj.tool_calls : [];
+            pendingBgIsDaemon.length = 0;
+            for (const tc of toolCalls) {
+              if (!tc || typeof tc !== 'object') continue;
+              const t = tc as Record<string, unknown>;
+              const name = String(t.name || '');
+              const argsObj = (t.args ?? {}) as Record<string, unknown>;
+              if (name === 'manage_task' && String(argsObj.Action ?? '').replace(/^"|"$/g, '') === 'kill') {
+                const tid = String(argsObj.TaskId ?? '').replace(/^"|"$/g, '');
+                if (tid) activeTailTasks.delete(tid);
+              } else if (name === 'run_command' || name === 'schedule') {
+                pendingBgIsDaemon.push(String(argsObj.IsDaemon) === 'true');
+              }
+            }
+            lastParsedIsTerminal = status === 'DONE' && toolCalls.length === 0;
+            foundLastStep = true;
+            continue;
+          } else if (stepType === 'GENERIC' && typeof obj.content === 'string') {
+            if (status === 'RUNNING') {
+              const taskMatch = obj.content.match(
+                /Tool is running as a background task with task id:\s*([a-zA-Z0-9_-]+\/task-\d+)/
+              );
+              if (taskMatch) {
+                const logMatch = obj.content.match(/Task logs are available at:\s*file:\/\/([^\s\n]+)/);
+                activeTailTasks.set(taskMatch[1], {
+                  logPath: logMatch?.[1],
+                  isDaemon: pendingBgIsDaemon.shift() ?? false,
+                });
+              }
+            }
+          }
+
+          lastParsedIsTerminal = false;
+          foundLastStep = true;
         } catch {
           continue;
+        }
+      }
+
+      if (foundLastStep && lastParsedIsTerminal) {
+        let hasActiveNonDaemonTask = false;
+        for (const task of activeTailTasks.values()) {
+          if (task.isDaemon) continue;
+          if (task.logPath) {
+            try {
+              const logMtime = fs.statSync(task.logPath).mtimeMs;
+              if (nowMs - logMtime <= 180_000) {
+                hasActiveNonDaemonTask = true;
+                break;
+              }
+            } catch {
+              // Missing log file: fall back to transcript recency window
+              if (nowMs - mtimeMs <= 180_000) {
+                hasActiveNonDaemonTask = true;
+                break;
+              }
+            }
+          } else if (nowMs - mtimeMs <= 180_000) {
+            hasActiveNonDaemonTask = true;
+            break;
+          }
+        }
+        isTerminal = !hasActiveNonDaemonTask;
+        if (hasActiveNonDaemonTask) {
+          // Do not cache `false` indefinitely — re-check log freshness on subsequent polls
+          return false;
         }
       }
     }
@@ -769,8 +857,9 @@ export function parseAntigravityJsonlLines(
   }
 
   const hasInProgressStep = Boolean(latestSteps?.some((s) => s.status === 'in_progress'));
-  const recentlyModified = Date.now() - sourceMtimeMs < 35_000;
-  const isWorking =
+  const nowMs = Date.now();
+  const recentlyModified = nowMs - sourceMtimeMs < 35_000;
+  const baseWorking =
     recentlyModified &&
     (hasInProgressStep ||
       lastStepType === 'GENERIC' ||
@@ -778,7 +867,6 @@ export function parseAntigravityJsonlLines(
       lastStepType === 'USER_INPUT' ||
       (lastStepType === 'PLANNER_RESPONSE' && lastPlannerHadToolCalls));
 
-  const nowMs = Date.now();
   const runningTasksList = Array.from(runningTasks.values()).filter((task) => {
     if (task.isDaemon) return true;
     // Prune ghost non-daemon tasks (e.g. from aborted/forked turns whose completion message never landed)
@@ -788,17 +876,20 @@ export function parseAntigravityJsonlLines(
         if (nowMs - logMtime > 180_000) return false;
       } catch {
         // If log file no longer exists, drop once the session has gone idle
-        if (!isWorking) return false;
+        if (!baseWorking) return false;
       }
     }
     return true;
   });
 
+  const hasActiveNonDaemonTask = runningTasksList.some((task) => !task.isDaemon);
+  const isWorking = baseWorking || hasActiveNonDaemonTask;
+
   const liveActivity: LiveActivityState = {
     isWorking,
     focus: isWorking ? latestFocus : undefined,
     // Suppress stale in-progress steps once a conversation has been idle for >2 minutes
-    steps: isWorking || Date.now() - sourceMtimeMs < 120_000 ? latestSteps : undefined,
+    steps: isWorking || nowMs - sourceMtimeMs < 120_000 ? latestSteps : undefined,
     runningTasks: runningTasksList.length > 0 ? runningTasksList : undefined,
     lastEventAt,
   };
@@ -1239,12 +1330,20 @@ export function createAntigravityDriver(): HarnessDriver {
         ensureLsSubscription(session.nativeId);
         const status = lsClient.getObservedStatus(session.nativeId);
         if (status) {
+          const hasActiveNonDaemonTask = Boolean(
+            res.liveActivity?.runningTasks?.some((t) => !t.isDaemon)
+          );
           const hubSaysWorking = status !== 'CASCADE_RUN_STATUS_IDLE';
           const terminalReply = resolved
             ? isAntigravityTranscriptTerminal(resolved, res.sourceMtimeMs)
             : false;
-          const isWorking = hubSaysWorking && !terminalReply;
-          res.liveActivity = { ...(res.liveActivity ?? { isWorking }), isWorking, lastEventAt: Date.now() };
+          const isWorking = hasActiveNonDaemonTask || (hubSaysWorking && !terminalReply);
+          res.liveActivity = {
+            ...(res.liveActivity ?? { isWorking }),
+            isWorking,
+            focus: isWorking ? res.liveActivity?.focus : undefined,
+            lastEventAt: Date.now(),
+          };
         }
       }
       return res;

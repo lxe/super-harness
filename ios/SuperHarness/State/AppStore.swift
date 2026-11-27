@@ -215,6 +215,20 @@ public final class AppStore {
     /// Debug: `SH_MOCK_MACHINES` lists stand-in machines, so switching can be tried in the demo.
     @ObservationIgnored private var usesMockMachines = false
 
+    // MARK: - Optimistic Model / Thinking Effort Reconciliation
+    struct PendingModelOverride: Equatable {
+        let generation: UInt64
+        let model: String?
+        let reasoningEffort: String?
+        let createdAt: Date
+        var acknowledgedAt: Date?
+        var serverAcknowledged: Bool
+    }
+    static let modelOverrideGraceSeconds: TimeInterval = 8.0
+    @ObservationIgnored var pendingModelOverrides: [String: PendingModelOverride] = [:]
+    @ObservationIgnored private var modelOverrideGeneration: UInt64 = 0
+    @ObservationIgnored private var pendingModelSyncTasks: [String: Task<Void, Never>] = [:]
+
     /// A desktop address and a token are both stored. A store built around an injected client
     /// (tests, previews) counts as paired until it is unpaired.
     public var isPaired: Bool {
@@ -583,9 +597,10 @@ public final class AppStore {
             var scrubbed: [String: SessionTranscriptResult] = [:]
             for (sid, tr) in snap.recentTranscripts {
                 var copy = tr
-                if var la = copy.liveActivity, la.isWorking {
+                if var la = copy.liveActivity, la.isWorking || !(la.runningTasks?.isEmpty ?? true) {
                     la.isWorking = false
                     la.focus = nil
+                    la.runningTasks = nil
                     copy.liveActivity = la
                 }
                 scrubbed[sid] = copy
@@ -1005,8 +1020,9 @@ public final class AppStore {
         if harnesses != payload.harnesses {
             harnesses = payload.harnesses
         }
-        if sessions != payload.sessions {
-            sessions = payload.sessions
+        let reconciledSessions = reconcilePendingModelOverrides(on: payload.sessions)
+        if sessions != reconciledSessions {
+            sessions = reconciledSessions
         }
         if let working = payload.activeWorkingSessionIds {
             let nextWorking = Set(working)
@@ -1223,8 +1239,9 @@ public final class AppStore {
             if let newHarnesses, harnesses != newHarnesses {
                 harnesses = newHarnesses
             }
-            if sessions != newSessions {
-                sessions = newSessions
+            let reconciled = reconcilePendingModelOverrides(on: newSessions)
+            if sessions != reconciled {
+                sessions = reconciled
             }
             if let workingSessionIds {
                 let nextWorking = Set(workingSessionIds)
@@ -1351,7 +1368,8 @@ public final class AppStore {
             )
         }
 
-        for upsert in delta.upserts {
+        for rawUpsert in delta.upserts {
+            let upsert = reconcilePendingModelOverride(on: rawUpsert)
             if let existingIdx = indexById[upsert.id] {
                 if nextSessions[existingIdx] != upsert {
                     nextSessions[existingIdx] = upsert
@@ -2963,26 +2981,110 @@ public final class AppStore {
         }
     }
 
-    public func setSessionModel(sessionId: String, model: String?, reasoningEffort: String?) async {
+    /// Preserves in-flight or freshly acknowledged local model/effort commits across incoming
+    /// bootstrap/SSE snapshots so stale server state never flashes the UI back to the prior value.
+    func reconcilePendingModelOverrides(on incoming: [UnifiedSession], now: Date = Date()) -> [UnifiedSession] {
+        guard !pendingModelOverrides.isEmpty else { return incoming }
+        return incoming.map { reconcilePendingModelOverride(on: $0, now: now) }
+    }
+
+    func reconcilePendingModelOverride(on incoming: UnifiedSession, now: Date = Date()) -> UnifiedSession {
+        guard let pending = pendingModelOverrides[incoming.id] else { return incoming }
+
+        let modelMatches: Bool = {
+            guard let targetModel = pending.model else { return true }
+            return incoming.model?.lowercased() == targetModel.lowercased()
+        }()
+        let effortMatches: Bool = {
+            guard let targetEffort = pending.reasoningEffort else { return true }
+            return incoming.reasoningEffort?.lowercased() == targetEffort.lowercased()
+        }()
+
+        if modelMatches && effortMatches && pending.serverAcknowledged {
+            pendingModelOverrides.removeValue(forKey: incoming.id)
+            return incoming
+        }
+
+        let referenceDate = pending.acknowledgedAt ?? pending.createdAt
+        let withinGrace = !pending.serverAcknowledged
+            || now.timeIntervalSince(referenceDate) < Self.modelOverrideGraceSeconds
+        guard withinGrace else {
+            pendingModelOverrides.removeValue(forKey: incoming.id)
+            return incoming
+        }
+
+        var merged = incoming
+        if let targetModel = pending.model {
+            merged.model = targetModel
+        }
+        if let targetEffort = pending.reasoningEffort {
+            merged.reasoningEffort = targetEffort
+        }
+        return merged
+    }
+
+    /// Synchronously applies the optimistic model/effort update on `@MainActor` (so closing the
+    /// popover updates the composer pill in the exact same frame with zero flash), then serializes
+    /// the server sync per session so rapid commits never arrive out of order.
+    @discardableResult
+    public func commitSessionModel(sessionId: String, model: String?, reasoningEffort: String?) -> Task<Void, Never> {
+        modelOverrideGeneration &+= 1
+        let gen = modelOverrideGeneration
+        let now = Date()
+        pendingModelOverrides[sessionId] = PendingModelOverride(
+            generation: gen,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            createdAt: now,
+            acknowledgedAt: nil,
+            serverAcknowledged: false
+        )
         mutateSession(sessionId) { session in
             if let model { session.model = model }
             if let reasoningEffort { session.reasoningEffort = reasoningEffort }
         }
-        let action = OrganizeAction(
-            type: .setModel,
-            sessionId: sessionId,
-            model: model,
-            reasoningEffort: reasoningEffort
-        )
-        do {
-            _ = try await client.organize(actions: [action])
-            mutateSession(sessionId) { session in
-                if let model { session.model = model }
-                if let reasoningEffort { session.reasoningEffort = reasoningEffort }
+
+        let previousTask = pendingModelSyncTasks[sessionId]
+        let nextTask = Task { [weak self] in
+            if let previousTask {
+                await previousTask.value
             }
-        } catch {
-            reportSessionError(error, sessionId: sessionId)
+            guard let self else { return }
+            // If a newer local commit superseded this one while waiting, skip the stale request.
+            guard self.pendingModelOverrides[sessionId]?.generation == gen else { return }
+
+            let action = OrganizeAction(
+                type: .setModel,
+                sessionId: sessionId,
+                model: model,
+                reasoningEffort: reasoningEffort
+            )
+            do {
+                _ = try await self.client.organize(actions: [action])
+                guard var current = self.pendingModelOverrides[sessionId], current.generation == gen else {
+                    return
+                }
+                current.serverAcknowledged = true
+                current.acknowledgedAt = Date()
+                self.pendingModelOverrides[sessionId] = current
+                self.mutateSession(sessionId) { session in
+                    if let model { session.model = model }
+                    if let reasoningEffort { session.reasoningEffort = reasoningEffort }
+                }
+            } catch {
+                if self.pendingModelOverrides[sessionId]?.generation == gen {
+                    self.pendingModelOverrides.removeValue(forKey: sessionId)
+                    self.reportSessionError(error, sessionId: sessionId)
+                }
+            }
         }
+        pendingModelSyncTasks[sessionId] = nextTask
+        return nextTask
+    }
+
+    public func setSessionModel(sessionId: String, model: String?, reasoningEffort: String?) async {
+        let task = commitSessionModel(sessionId: sessionId, model: model, reasoningEffort: reasoningEffort)
+        await task.value
     }
 
     // MARK: - YapYap Voice Dictation
@@ -3289,6 +3391,9 @@ public final class AppStore {
         transcriptLimitsBySessionId.removeAll()
         streamingMessagesBySessionId.removeAll()
         pendingOutgoingBySessionId.removeAll()
+        pendingModelOverrides.removeAll()
+        for task in pendingModelSyncTasks.values { task.cancel() }
+        pendingModelSyncTasks.removeAll()
         hostWorkingSessionIds.removeAll()
         transcriptRevisionBySessionId.removeAll()
         mediaCache.removeAll()
@@ -3451,6 +3556,9 @@ public final class AppStore {
         transcriptLimitsBySessionId.removeAll()
         streamingMessagesBySessionId.removeAll()
         pendingOutgoingBySessionId.removeAll()
+        pendingModelOverrides.removeAll()
+        for task in pendingModelSyncTasks.values { task.cancel() }
+        pendingModelSyncTasks.removeAll()
         hostWorkingSessionIds.removeAll()
         transcriptRevisionBySessionId.removeAll()
         mediaCache.removeAll()

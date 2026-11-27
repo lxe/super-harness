@@ -1916,7 +1916,18 @@ public final class AppStore {
         let persisted = transcriptsBySessionId[sessionId]?.messages ?? []
         var list = persisted
         if let pending = pendingOutgoingBySessionId[sessionId], !pending.isEmpty {
-            list.append(contentsOf: pending.map { $0.asUnifiedMessage() })
+            // Never render a transient `mobile-opt-*` alongside an active local pending bubble,
+            // and never render a pending bubble that already matches a newly persisted user message.
+            let pendingNorms = Set(pending.map { Self.normalizeForDedup($0.text) }.filter { !$0.isEmpty })
+            list.removeAll { msg in
+                guard msg.id.hasPrefix("mobile-opt-") else { return false }
+                let norm = Self.normalizeForDedup(Self.extractPlainText(from: msg))
+                return pendingNorms.contains(norm)
+            }
+            let visiblePending = pending.filter { item in
+                !Self.pendingMatchesPersistedTranscript(item, messages: persisted)
+            }
+            list.append(contentsOf: visiblePending.map { $0.asUnifiedMessage() })
         }
         if let streaming = streamingMessagesBySessionId[sessionId] {
             let overlay = Self.resolveVisibleStreamingOverlay(
@@ -2071,12 +2082,15 @@ public final class AppStore {
             draftAttachments[sessionId] = []
         }
 
+        let baselineId = transcriptsBySessionId[sessionId]?.messages
+            .last(where: { !$0.id.hasPrefix("mobile-opt-") && !$0.id.hasPrefix("pending-") })?.id
         let pending = PendingOutgoingMessage(
             text: messageText,
             attachments: media,
             createdAt: Date().timeIntervalSince1970 * 1000.0,
             mode: mode,
-            state: .sending
+            state: .sending,
+            baselineLastPersistedId: baselineId
         )
         PerfLogger.markSendTapped(sessionId: sessionId)
         var list = pendingOutgoingBySessionId[sessionId] ?? []
@@ -2148,6 +2162,57 @@ public final class AppStore {
         }
     }
 
+    /// Collapse all whitespace runs so line-wrapping or `\r\n` differences (e.g. Claude tmux)
+    /// never prevent an optimistic user bubble from reconciling with the persisted transcript.
+    private static func normalizeForDedup(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func extractPlainText(from msg: UnifiedMessage) -> String {
+        msg.blocks.compactMap { block -> String? in
+            if case .text(let t) = block { return t }
+            return nil
+        }.joined(separator: "\n")
+    }
+
+    private static func pendingMatchesPersistedTranscript(
+        _ pending: PendingOutgoingMessage,
+        messages: [UnifiedMessage]
+    ) -> Bool {
+        let normPending = normalizeForDedup(pending.text)
+
+        // Prefer structural ordering after the baseline message captured when the user hit Send.
+        // This is 100% immune to clock skew between iPhone and Linux/macOS hosts.
+        let candidates: [UnifiedMessage]
+        if let baselineId = pending.baselineLastPersistedId,
+           let baselineIdx = messages.lastIndex(where: { $0.id == baselineId }) {
+            let afterBaseline = messages[(baselineIdx + 1)...]
+            candidates = afterBaseline.filter { $0.role == .user && !$0.id.hasPrefix("mobile-opt-") }
+        } else {
+            let persistedUsers = messages.filter { $0.role == .user && !$0.id.hasPrefix("mobile-opt-") }
+            let lastPersistedId = messages.last(where: { !$0.id.hasPrefix("mobile-opt-") })?.id
+            candidates = Array(persistedUsers.suffix(6)).filter { msg in
+                msg.id == lastPersistedId || msg.timestamp == 0 || msg.timestamp >= pending.createdAt - 60_000
+            }
+        }
+
+        return candidates.contains { msg in
+            let normMsg = normalizeForDedup(extractPlainText(from: msg))
+            if !normPending.isEmpty {
+                return normMsg == normPending || normMsg.contains(normPending)
+            }
+            if !pending.attachments.isEmpty {
+                return msg.blocks.contains { block in
+                    if case .image = block { return true }
+                    return false
+                }
+            }
+            return false
+        }
+    }
+
     public func reconcilePendingOutgoing(
         for sessionId: String,
         transcript: SessionTranscriptResult,
@@ -2155,41 +2220,16 @@ public final class AppStore {
     ) {
         guard let current = pendingOutgoingBySessionId[sessionId], !current.isEmpty else { return }
 
-        // Only reconcile against REAL persisted user messages (never transient `mobile-opt-*`
-        // placeholders or brief `queuedMessages` handoffs that cause disappear/reappear flicker).
-        let persistedUserMessages = transcript.messages.filter {
-            $0.role == .user && !$0.id.hasPrefix("mobile-opt-")
-        }
-        let tailUsers = Array(persistedUserMessages.suffix(6))
-
         let remaining = current.filter { pending in
             // Expire sent pending messages after 90s even if host never echoed them back
             if pending.state == .sent && (nowMs - pending.createdAt) >= 90_000 {
                 return false
             }
 
-            let trimmedPending = pending.text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // Drop only once matched by a real persisted user message in the tail of the transcript.
-            // Allow 60s clock skew (or timestamp == 0) so clock differences never leave duplicates.
-            let matchedInTranscript = tailUsers.contains { msg in
-                guard msg.timestamp == 0 || msg.timestamp >= pending.createdAt - 60_000 else { return false }
-                let msgText = msg.blocks.compactMap { block -> String? in
-                    if case .text(let t) = block { return t }
-                    return nil
-                }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if !trimmedPending.isEmpty {
-                    return msgText == trimmedPending || msgText.contains(trimmedPending)
-                }
-                if !pending.attachments.isEmpty {
-                    return msg.blocks.contains { block in
-                        if case .image = block { return true }
-                        return false
-                    }
-                }
-                return false
-            }
+            let matchedInTranscript = Self.pendingMatchesPersistedTranscript(
+                pending,
+                messages: transcript.messages
+            )
             if matchedInTranscript {
                 PerfLogger.markFirstTranscriptPushWithUserMessage(sessionId: sessionId, pendingId: pending.id)
             }

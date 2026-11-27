@@ -1967,6 +1967,9 @@ public struct PendingOutgoingMessage: Identifiable, Sendable, Equatable {
     public let createdAt: Double
     public let mode: SendMode
     public var state: DeliveryState
+    /// ID of the last real persisted message in the transcript when this pending bubble was enqueued.
+    /// Used for clock-skew-proof deduplication when the host echoes the persisted user message back.
+    public let baselineLastPersistedId: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -1974,7 +1977,8 @@ public struct PendingOutgoingMessage: Identifiable, Sendable, Equatable {
         attachments: [ImageAttachment] = [],
         createdAt: Double = Date().timeIntervalSince1970 * 1000.0,
         mode: SendMode = .steer,
-        state: DeliveryState = .sending
+        state: DeliveryState = .sending,
+        baselineLastPersistedId: String? = nil
     ) {
         self.id = id
         self.text = text
@@ -1982,6 +1986,7 @@ public struct PendingOutgoingMessage: Identifiable, Sendable, Equatable {
         self.createdAt = createdAt
         self.mode = mode
         self.state = state
+        self.baselineLastPersistedId = baselineLastPersistedId
     }
 
     public var messageId: String { "pending-\(id)" }

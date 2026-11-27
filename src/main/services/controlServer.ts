@@ -987,6 +987,10 @@ export class ControlServer {
         if (req.method === 'POST' && url.pathname === '/api/abort') {
           const body = await readBody();
           const sessionId = String(body.sessionId || '');
+          // A stop interrupts a live turn, so record who asked for it.
+          console.log(
+            `[abort] session=${sessionId} from=${req.socket.remoteAddress ?? '?'} ua=${String(req.headers['user-agent'] ?? '').slice(0, 60)}`
+          );
           const result = this.hooks.abortRun
             ? await this.hooks.abortRun(sessionId)
             : { ok: this.dispatcher.abort(sessionId) };

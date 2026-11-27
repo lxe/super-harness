@@ -1091,6 +1091,7 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle('sh:abort', async (_ev, sessionId: string) => {
+    console.log(`[abort] session=${sessionId} from=desktop-window`);
     if (sessionId === 'master:root') {
       return { ok: masterEngine.abort() };
     }

@@ -1236,3 +1236,12 @@ describe('Claude driver queueing', () => {
     expect(calls).toEqual([{ force: false }]);
   });
 });
+
+describe('Claude interrupt marker', () => {
+  it('recognises the lines Claude Code records when a turn is interrupted', async () => {
+    const { isClaudeInterruptMarker } = await import('../src/main/adapters/claudeAdapter');
+    expect(isClaudeInterruptMarker('[Request interrupted by user for tool use]')).toBe(true);
+    expect(isClaudeInterruptMarker(' [Request interrupted by user] ')).toBe(true);
+    expect(isClaudeInterruptMarker('I said [Request interrupted by user] earlier')).toBe(false);
+  });
+});

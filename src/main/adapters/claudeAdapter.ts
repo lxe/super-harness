@@ -1433,6 +1433,19 @@ export function parseClaudeJsonlLines(
           return;
         }
 
+        // Claude Code writes this marker as a user line when Escape stops a turn. Nobody typed
+        // it, so show it as a quiet notice, not as a message from the user.
+        if (allImages.length === 0 && isClaudeInterruptMarker(trimmed)) {
+          currentAssistant = null;
+          messages.push({
+            id: uniqueId(String(obj.uuid || `ci-${seq++}`)),
+            role: 'system',
+            timestamp: ts,
+            blocks: [{ type: 'notice', title: 'Turn interrupted', detail: 'The Stop button or Esc stopped Claude here.' }],
+          });
+          return;
+        }
+
         // Render local slash commands (/effort, /model, /compact, etc.) as quiet system notices
         if (
           allImages.length === 0 &&
@@ -2210,6 +2223,11 @@ export async function cycleClaudeTuiMode(
 }
 
 /** Wait until Claude registers `nativeId` under a new pid in ~/.claude/sessions. */
+/** The line Claude Code records in place of a user message when a turn is interrupted. */
+export function isClaudeInterruptMarker(text: string): boolean {
+  return /^\[Request interrupted by user(?: for tool use)?\]$/.test(text.trim());
+}
+
 async function waitForClaudeRelaunch(nativeId: string, oldPid: number | undefined, timeoutMs = 12000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

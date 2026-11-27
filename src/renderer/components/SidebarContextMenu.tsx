@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HARNESS_TITLES } from '../utils/harnessMeta';
 import {
   Archive,
   Check,
-  ChevronDown,
   ChevronRight,
   Columns2,
   Folder,
@@ -22,6 +21,91 @@ import { MenuDivider, MenuHeader, MenuItem, PopoverSurface } from '../ui';
 function harnessLabelForPin(session: UnifiedSession): string {
   return session.harnessGroup === 'master' ? 'harness' : HARNESS_TITLES[session.harnessGroup] ?? 'harness';
 }
+
+const SUBMENU_GAP_PX = 4;
+const SUBMENU_CLOSE_DELAY_MS = 180;
+
+/**
+ * A context-menu row that opens its children in a second-level menu beside
+ * the parent, flipping left or upward when it would leave the window.
+ * Opens on hover or click; closes shortly after the pointer leaves, unless
+ * focus is inside it (e.g. while typing a new section name).
+ */
+const MenuSubmenu: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}> = ({ icon, label, open, onOpenChange, children }) => {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const flyRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+  const [placement, setPlacement] = useState({ left: false, up: false });
+
+  const cancelClose = () => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  useEffect(() => cancelClose, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const row = wrapRef.current?.getBoundingClientRect();
+    const fly = flyRef.current?.getBoundingClientRect();
+    if (!row || !fly) return;
+    setPlacement({
+      left: row.right + SUBMENU_GAP_PX + fly.width > window.innerWidth - 8,
+      up: row.top + fly.height > window.innerHeight - 8,
+    });
+  }, [open]);
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative"
+      onMouseEnter={() => {
+        cancelClose();
+        onOpenChange(true);
+      }}
+      onMouseLeave={() => {
+        cancelClose();
+        closeTimer.current = window.setTimeout(() => {
+          if (wrapRef.current?.contains(document.activeElement)) return;
+          onOpenChange(false);
+        }, SUBMENU_CLOSE_DELAY_MS);
+      }}
+    >
+      <MenuItem
+        icon={icon}
+        active={open}
+        rightSlot={<ChevronRight className="w-3.5 h-3.5 text-ink-faint" />}
+        onClick={() => onOpenChange(!open)}
+      >
+        {label}
+      </MenuItem>
+
+      {open && (
+        <div
+          ref={flyRef}
+          className="absolute z-10"
+          style={{
+            ...(placement.left
+              ? { right: '100%', marginRight: SUBMENU_GAP_PX }
+              : { left: '100%', marginLeft: SUBMENU_GAP_PX }),
+            ...(placement.up ? { bottom: -6 } : { top: -6 }),
+          }}
+        >
+          <PopoverSurface width="md" className="space-y-0.5 max-h-[70vh] overflow-y-auto">
+            {children}
+          </PopoverSurface>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export interface SidebarContextMenuProps {
   x: number;
@@ -294,158 +378,134 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
       )}
 
       {canMoveSection && (
-        <div>
-          <MenuItem
-            icon={<FolderInput className="w-3.5 h-3.5" />}
-            rightSlot={
-              showMoveSections ? (
-                <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
-              )
-            }
-            onClick={() => setOpenSubmenu((v) => (v === 'section' ? null : 'section'))}
-          >
-            {isMulti
-              ? `Move ${targets.length} to section`
-              : `Move to ${harnessLabelForPin(single)} section`}
-          </MenuItem>
-
-          {showMoveSections && (
-            <div className="mt-1 ml-2 pl-2 border-l border-line-hairline space-y-0.5 max-h-48 overflow-y-auto">
-              {availableSections!.map((sec) => {
-                const isCurrent = currentSingleSection === sec.label;
-                return (
-                  <MenuItem
-                    key={sec.label}
-                    icon={
-                      sec.isUngrouped ? (
-                        <Inbox className="w-3.5 h-3.5 text-ink-muted" />
-                      ) : (
-                        <Folder className="w-3.5 h-3.5 text-ink-secondary" />
-                      )
-                    }
-                    rightSlot={
-                      isCurrent ? (
-                        <Check className="w-3.5 h-3.5 text-ink-primary" />
-                      ) : undefined
-                    }
-                    onClick={() =>
-                      moveTargetsToSection(
-                        sec.isUngrouped ? null : sec.label,
-                        sec.isUngrouped ? 9999 : sec.order
-                      )
-                    }
-                  >
-                    <span className="truncate">{sec.label}</span>
-                  </MenuItem>
-                );
-              })}
-
-              {creatingSection ? (
-                <div className="px-1.5 py-1 flex items-center gap-1">
-                  <input
-                    autoFocus
-                    value={newSectionName}
-                    onChange={(e) => setNewSectionName(e.target.value)}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === 'Enter') commitNewSection();
-                      if (e.key === 'Escape') {
-                        setCreatingSection(false);
-                        setNewSectionName('');
-                      }
-                    }}
-                    placeholder="Section name..."
-                    className="w-full px-2 py-1 text-caption rounded-md bg-surface-base border border-line-subtle text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
-                  />
-                </div>
-              ) : (
-                <MenuItem
-                  icon={<Plus className="w-3.5 h-3.5 text-ink-muted" />}
-                  onClick={() => setCreatingSection(true)}
-                >
-                  New section…
-                </MenuItem>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div>
-        <MenuItem
+        <MenuSubmenu
           icon={<FolderInput className="w-3.5 h-3.5" />}
-          rightSlot={
-            showMoveFolders ? (
-              <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
-            ) : (
-              <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
-            )
+          label={
+            isMulti
+              ? `Move ${targets.length} to section`
+              : `Move to ${harnessLabelForPin(single)} section`
           }
-          onClick={() => setOpenSubmenu((v) => (v === 'folder' ? null : 'folder'))}
+          open={showMoveSections}
+          onOpenChange={(o) => setOpenSubmenu(o ? 'section' : null)}
         >
-          {isMulti ? `Move ${targets.length} to folder` : 'Move to folder'}
-        </MenuItem>
-
-        {showMoveFolders && (
-          <div className="mt-1 ml-2 pl-2 border-l border-line-hairline space-y-0.5 max-h-48 overflow-y-auto">
-            {sortedFolders.map((f) => (
+          {availableSections!.map((sec) => {
+            const isCurrent = currentSingleSection === sec.label;
+            return (
               <MenuItem
-                key={f.id}
-                icon={<Folder className="w-3.5 h-3.5" style={{ color: f.color }} />}
+                key={sec.label}
+                icon={
+                  sec.isUngrouped ? (
+                    <Inbox className="w-3.5 h-3.5 text-ink-muted" />
+                  ) : (
+                    <Folder className="w-3.5 h-3.5 text-ink-secondary" />
+                  )
+                }
                 rightSlot={
-                  currentSingleFolder === f.id ? (
+                  isCurrent ? (
                     <Check className="w-3.5 h-3.5 text-ink-primary" />
                   ) : undefined
                 }
-                onClick={() => moveTargetsToFolder(f.id)}
+                onClick={() =>
+                  moveTargetsToSection(
+                    sec.isUngrouped ? null : sec.label,
+                    sec.isUngrouped ? 9999 : sec.order
+                  )
+                }
               >
-                <span className="truncate">{f.name}</span>
+                <span className="truncate">{sec.label}</span>
               </MenuItem>
-            ))}
+            );
+          })}
 
+          {creatingSection ? (
+            <div className="px-1.5 py-1 flex items-center gap-1">
+              <input
+                autoFocus
+                value={newSectionName}
+                onChange={(e) => setNewSectionName(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') commitNewSection();
+                  if (e.key === 'Escape') {
+                    setCreatingSection(false);
+                    setNewSectionName('');
+                  }
+                }}
+                placeholder="Section name..."
+                className="w-full px-2 py-1 text-caption rounded-md bg-surface-base border border-line-subtle text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+              />
+            </div>
+          ) : (
             <MenuItem
-              icon={<Inbox className="w-3.5 h-3.5 text-ink-muted" />}
-              rightSlot={
-                currentSingleFolder === null ? (
-                  <Check className="w-3.5 h-3.5 text-ink-primary" />
-                ) : undefined
-              }
-              onClick={() => moveTargetsToFolder(null)}
+              icon={<Plus className="w-3.5 h-3.5 text-ink-muted" />}
+              onClick={() => setCreatingSection(true)}
             >
-              Unfiled
+              New section…
             </MenuItem>
+          )}
+        </MenuSubmenu>
+      )}
 
-            {creatingFolder ? (
-              <div className="px-1.5 py-1 flex items-center gap-1">
-                <input
-                  autoFocus
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') commitNewFolder();
-                    if (e.key === 'Escape') {
-                      setCreatingFolder(false);
-                      setNewFolderName('');
-                    }
-                  }}
-                  placeholder="Folder name..."
-                  className="w-full px-2 py-1 text-caption rounded-md bg-surface-base border border-line-subtle text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
-                />
-              </div>
-            ) : (
-              <MenuItem
-                icon={<Plus className="w-3.5 h-3.5 text-ink-muted" />}
-                onClick={() => setCreatingFolder(true)}
-              >
-                New folder…
-              </MenuItem>
-            )}
+      <MenuSubmenu
+        icon={<FolderInput className="w-3.5 h-3.5" />}
+        label={isMulti ? `Move ${targets.length} to folder` : 'Move to folder'}
+        open={showMoveFolders}
+        onOpenChange={(o) => setOpenSubmenu(o ? 'folder' : null)}
+      >
+        {sortedFolders.map((f) => (
+          <MenuItem
+            key={f.id}
+            icon={<Folder className="w-3.5 h-3.5" style={{ color: f.color }} />}
+            rightSlot={
+              currentSingleFolder === f.id ? (
+                <Check className="w-3.5 h-3.5 text-ink-primary" />
+              ) : undefined
+            }
+            onClick={() => moveTargetsToFolder(f.id)}
+          >
+            <span className="truncate">{f.name}</span>
+          </MenuItem>
+        ))}
+
+        <MenuItem
+          icon={<Inbox className="w-3.5 h-3.5 text-ink-muted" />}
+          rightSlot={
+            currentSingleFolder === null ? (
+              <Check className="w-3.5 h-3.5 text-ink-primary" />
+            ) : undefined
+          }
+          onClick={() => moveTargetsToFolder(null)}
+        >
+          Unfiled
+        </MenuItem>
+
+        {creatingFolder ? (
+          <div className="px-1.5 py-1 flex items-center gap-1">
+            <input
+              autoFocus
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') commitNewFolder();
+                if (e.key === 'Escape') {
+                  setCreatingFolder(false);
+                  setNewFolderName('');
+                }
+              }}
+              placeholder="Folder name..."
+              className="w-full px-2 py-1 text-caption rounded-md bg-surface-base border border-line-subtle text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+            />
           </div>
+        ) : (
+          <MenuItem
+            icon={<Plus className="w-3.5 h-3.5 text-ink-muted" />}
+            onClick={() => setCreatingFolder(true)}
+          >
+            New folder…
+          </MenuItem>
         )}
-      </div>
+      </MenuSubmenu>
 
       <MenuDivider />
       <MenuItem

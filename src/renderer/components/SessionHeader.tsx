@@ -33,10 +33,8 @@ export interface SessionHeaderProps {
   isMaster: boolean;
   subagents: UnifiedSession[];
   folders: SessionFolder[];
-  viewMode: 'chat' | 'tmux';
   isSplitPane?: boolean;
   hasSplitOpen: boolean;
-  onToggleViewMode: () => void;
   onSelectSession: (id: string) => void;
   onOrganize: (actions: OrganizeAction[]) => void;
   onReloadTranscript: () => void;
@@ -67,10 +65,8 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
     isMaster,
     subagents,
     folders,
-    viewMode,
     isSplitPane,
     hasSplitOpen,
-    onToggleViewMode,
     onSelectSession,
     onOrganize,
     onReloadTranscript,
@@ -137,18 +133,6 @@ export const SessionHeader: React.FC<SessionHeaderProps> = React.memo(
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {session.tmuxTarget && (
-            <Button
-              size="xs"
-              variant={viewMode === 'tmux' ? 'secondary' : 'ghost'}
-              onClick={onToggleViewMode}
-              title={viewMode === 'tmux' ? 'Switch to Chat' : 'View live tmux terminal'}
-              iconLeft={<Terminal className="w-3.5 h-3.5" />}
-            >
-              {viewMode === 'tmux' ? 'Chat' : 'Terminal'}
-            </Button>
-          )}
-
           {subagents.length > 0 && (
             <div className="relative flex items-center">
               <span ref={subagentsTriggerRef} className="flex items-center">

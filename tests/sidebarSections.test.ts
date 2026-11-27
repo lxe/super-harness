@@ -164,3 +164,42 @@ describe('Sidebar section drag-and-drop restrictions', () => {
     expect(sidebarSrc).toContain('if (e.buttons === 0)');
   });
 });
+
+describe('Project view coalescing across harnesses', () => {
+  it('merges same-named sections from different harnesses and a matching cwd project into one group', () => {
+    const agy = makeSession({
+      id: 'antigravity:a',
+      harness: 'antigravity',
+      harnessGroup: 'antigravity',
+      cwd: '/home/lxe',
+      projectName: 'Antigravity',
+      nativeSection: 'bluebubbles-native',
+      updatedAt: 3000,
+    });
+    const codex = makeSession({
+      id: 'codex:b',
+      cwd: '/home/lxe',
+      projectName: 'Home (~)',
+      nativeSection: 'bluebubbles-native',
+      updatedAt: 2500,
+    });
+    // A future session started in ~/bluebubbles-native with no section of its own.
+    const claude = makeSession({
+      id: 'claude:c',
+      harness: 'claude',
+      harnessGroup: 'claude',
+      cwd: '/home/lxe/bluebubbles-native',
+      projectName: 'BlueBubbles_Native',
+      nativeSection: 'Ungrouped',
+      updatedAt: 2000,
+    });
+    const other = makeSession({ id: 'codex:d', projectName: 'elsewhere', nativeSection: undefined });
+
+    const groups = groupSessionsForSidebar([agy, codex, claude, other], 'project', [], 'all');
+    const bb = groups.filter((g) => g.label.toLowerCase().includes('bluebubbles'));
+    expect(bb).toHaveLength(1);
+    expect(bb[0].label).toBe('bluebubbles-native');
+    expect(bb[0].items?.map((s) => s.id)).toEqual(['antigravity:a', 'codex:b', 'claude:c']);
+    expect(groups.find((g) => g.label === 'elsewhere')?.items?.map((s) => s.id)).toEqual(['codex:d']);
+  });
+});

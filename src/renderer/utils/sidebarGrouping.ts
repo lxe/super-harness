@@ -425,16 +425,46 @@ export function groupSessionsForSidebar(
     return out;
   }
 
-  // Unified cross-harness by Project
-  const projMap = new Map<string, UnifiedSession[]>();
+  // Unified cross-harness by Project: same-named sections from every harness coalesce into one group.
+  const projMap = new Map<string, { label: string; fromSection: boolean; items: UnifiedSession[] }>();
   for (const s of rest) {
-    const key = s.projectName || 'General';
-    if (!projMap.has(key)) projMap.set(key, []);
-    projMap.get(key)!.push(s);
+    const { key, label, fromSection } = projectGroupFor(s);
+    let entry = projMap.get(key);
+    if (!entry) {
+      entry = { label, fromSection, items: [] };
+      projMap.set(key, entry);
+    } else if (fromSection && !entry.fromSection) {
+      // A named section's spelling wins over a folder-derived project name.
+      entry.label = label;
+      entry.fromSection = true;
+    }
+    entry.items.push(s);
   }
   return Array.from(projMap.entries())
-    .map(([label, items]) => ({ id: `proj:${label}`, label, items }))
+    .map(([key, { label, items }]) => ({ id: `proj:${key}`, label, items }))
     .sort((a, b) => (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0));
+}
+
+/** Folds case, spaces and underscores so "BlueBubbles Native" and "bluebubbles_native" match "bluebubbles-native". */
+export function normalizeProjectKey(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+/**
+ * The Project view group of a session: its section (assigned with sh_organize move_section, or the
+ * harness's own section) when it has one, otherwise the project derived from its working folder.
+ */
+export function projectGroupFor(s: UnifiedSession): { key: string; label: string; fromSection: boolean } {
+  const section = s.nativeSection?.trim();
+  if (section && section !== 'Ungrouped' && section !== 'Pinned') {
+    return { key: normalizeProjectKey(section), label: section, fromSection: true };
+  }
+  const label = s.projectName?.trim() || 'General';
+  return { key: normalizeProjectKey(label), label, fromSection: false };
 }
 
 /**

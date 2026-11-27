@@ -36,12 +36,18 @@ import {
 import {
   cleanTextPreview,
   getBinaryVersion,
-  isPidAlive,
+  isSameProcessAlive,
   normalizeTimestamp,
   projectNameFromCwd,
   whichBinary,
   type ProcessRow,
 } from '../utils/system';
+import {
+  claudeTmuxRecords,
+  listTmuxSessionNames,
+  MAX_ARGV_PROMPT,
+  type ClaudeTmuxRecord,
+} from './claudeTmuxRevival';
 import {
   computeFileFingerprint,
   createUniqueIdGenerator,
@@ -162,6 +168,8 @@ interface ActiveClaudeSessionJson {
   nameSource?: string;
   status?: string;
   bridgeSessionId?: string;
+  /** Process start time (/proc/<pid>/stat field 22); guards against PID reuse after a reboot. */
+  procStart?: string;
 }
 
 interface ClaudeDesktopMetaJson {
@@ -681,7 +689,7 @@ export async function detectClaude(
           continue;
         }
         if (!data.sessionId || !data.pid) continue;
-        if (!isPidAlive(Number(data.pid))) continue;
+        if (!isSameProcessAlive(Number(data.pid), data.procStart)) continue;
         activeFiles.push(data);
       }
 
@@ -1895,7 +1903,7 @@ export function findLiveClaudeOwners(
       }
       if (data.sessionId !== nativeSessionId || !data.pid) continue;
       const pid = Number(data.pid);
-      if (!Number.isFinite(pid) || !isPidAlive(pid)) continue;
+      if (!Number.isFinite(pid) || !isSameProcessAlive(pid, data.procStart)) continue;
       owners.push({
         pid,
         sessionId: data.sessionId,
@@ -2414,8 +2422,47 @@ export function createClaudeDriver(): HarnessDriver {
         }
       };
 
+      // A tmux session that died (reboot, tmux server killed): start it again with this
+      // message as Claude's first prompt instead of typing into a pane that isn't there.
+      const reviveInTmux = async (rec: ClaudeTmuxRecord): Promise<SendMessageResult> => {
+        streamPool.abort(session.id, ctx.emitStream);
+        const inArgv = promptWithImages.trim().length <= MAX_ARGV_PROMPT;
+        const res = await claudeTmuxRecords.revive(rec, inArgv ? { prompt: promptWithImages } : {});
+        if (!res.ok) {
+          return { ok: false, error: `Restarting tmux session ${rec.tmuxSessionName} failed: ${res.error}` };
+        }
+        if (!inArgv) {
+          setTimeout(() => {
+            void typeIntoClaudeTmux(rec.tmuxSessionName, promptWithImages)
+              .then(() =>
+                execFileAsync('tmux', ['send-keys', '-t', rec.tmuxSessionName, 'C-m'], { timeout: 4000 })
+              )
+              .catch(() => {});
+          }, 4000);
+        }
+        ctx.triggerRefresh(1500);
+        ctx.triggerRefresh(4000);
+        return { ok: true, dispatchedVia: `restarted tmux ${rec.tmuxSessionName} (claude --resume)` };
+      };
+
       // Live tmux-backed Claude session -> direct tmux send-keys with TUI-safe Enter delay
       if (session.dispatchMode === 'tmux-send' && session.tmuxTarget) {
+        const tmuxName = session.tmuxSessionName || session.tmuxTarget.split(':')[0];
+        if (!(await listTmuxSessionNames()).has(tmuxName)) {
+          return reviveInTmux(
+            claudeTmuxRecords.get(session.nativeId) ?? {
+              nativeId: session.nativeId,
+              tmuxSessionName: tmuxName,
+              cwd: session.cwd,
+              model: session.model,
+              reasoningEffort: session.reasoningEffort,
+              permissionMode: session.permissionMode,
+              remoteControl: session.tags?.includes('remote-control') ?? true,
+              bootId: '',
+              seenAt: Date.now(),
+            }
+          );
+        }
         return sendViaTmux(session.tmuxTarget);
       }
 
@@ -2432,6 +2479,18 @@ export function createClaudeDriver(): HarnessDriver {
       }
       if (decision.action === 'block' && !opts?.force) {
         return { ok: false, error: decision.reason };
+      }
+      // Nothing owns this chat right now, but it last ran in tmux (e.g. before a reboot):
+      // bring it back in tmux rather than answering through a headless worker.
+      if (decision.action === 'resume') {
+        const rec = claudeTmuxRecords.get(session.nativeId);
+        if (
+          rec &&
+          !streamPool.hasActiveTurn(session.id) &&
+          !(await listTmuxSessionNames()).has(rec.tmuxSessionName)
+        ) {
+          return reviveInTmux(rec);
+        }
       }
       if (opts?.force && streamPool.hasActiveTurn(session.id)) {
         streamPool.abort(session.id, ctx.emitStream);

@@ -43,6 +43,8 @@ import { ConfigStore } from './store/configStore';
 import { closeSqlitePool } from './utils/sqlite';
 import { notificationTextFromMarkdown } from './utils/notificationText';
 import { whichBinary } from './utils/system';
+import { claudeTmuxRecords } from './adapters/claudeTmuxRevival';
+import { ensureLoginAutostart } from './services/loginAutostart';
 
 // Expose our Electron PID to child agent processes (Codex, Claude, Antigravity, Muse)
 // so running `scripts/launch-electron.mjs` or `npm run restart` from inside a session
@@ -462,6 +464,7 @@ async function refreshAndBroadcast() {
       ).sort();
       const decorated = { ...result, sessions };
       sessionSummarizer.noteSessions(sessions);
+      void claudeTmuxRecords.noteSessions(sessions).catch(() => {});
       broadcastToRenderer('sh:sessions-updated', decorated);
       broadcastSessionsDeltaToMobile(result.harnesses, sessions, activeWorkingSessionIds);
       lastBroadcastWorkingKey = activeWorkingSessionIds.join(',');
@@ -1206,6 +1209,22 @@ app.whenReady().then(async () => {
   createWindow();
   liveSync.start();
   schedulePolling(store.getState().settings.pollIntervalMs);
+  // Claude tmux sessions that died with the last boot come back in tmux sessions of the same name.
+  void claudeTmuxRecords
+    .reviveAfterReboot()
+    .then((names) => {
+      if (names.length > 0) {
+        setTimeout(() => void refreshAndBroadcast(), 2500);
+        setTimeout(() => void refreshAndBroadcast(), 8000);
+      }
+    })
+    .catch((err) => console.error('[claude-tmux] revival failed', err));
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    ensureLoginAutostart({
+      execLine: [process.execPath, ...process.argv.slice(1)].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' '),
+      log: (m) => console.log(m),
+    });
+  }
   void refreshUsageAndBroadcast();
   usageTimer = setInterval(() => {
     void refreshUsageAndBroadcast();

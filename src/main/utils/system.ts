@@ -68,6 +68,25 @@ export function isPidAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Like isPidAlive, but when the recorded process start time (`/proc/<pid>/stat`
+ * field 22, which Claude Code writes as `procStart`) is known, also checks the
+ * live process is the same one. After a reboot PIDs get reused, so a bare
+ * liveness check makes dead sessions look alive.
+ */
+export function isSameProcessAlive(pid: number, procStart?: string | number): boolean {
+  if (!isPidAlive(pid)) return false;
+  if (procStart === undefined || procStart === null || procStart === '') return true;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    // fields[0] is field 3 (state), so field 22 (starttime) is fields[19]
+    return fields[19] === String(procStart);
+  } catch {
+    return true; // no /proc (macOS): fall back to the plain liveness check
+  }
+}
+
 export interface ProcessRow {
   pid: number;
   comm: string;

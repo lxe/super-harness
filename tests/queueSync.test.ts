@@ -247,7 +247,7 @@ describe('Persistent Super Harness queue storage', () => {
 
     expect(draftSrc).toContain('onPaste={(e) => void handlePaste(e)}');
     expect(draftSrc).toContain('window.superHarness.readClipboardImage()');
-    expect(draftSrc).toContain('window.superHarness.pickImageFiles()');
+    expect(draftSrc).toContain('window.superHarness.pickAttachmentFiles()');
     expect(draftSrc).toContain('attachments: attachments.length > 0 ? attachments : undefined');
     expect(agySrc).toContain('req.attachments');
     expect(claudeSrc).toContain("formatPromptWithImagePaths(req.prompt?.trim() || '', req.attachments)");

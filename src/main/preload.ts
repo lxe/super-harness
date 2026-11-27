@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   HarnessDetection,
   HarnessGroup,
@@ -25,7 +25,14 @@ const api: SuperHarnessApi = {
   saveAttachment: (dataUrl: string, filename?: string) =>
     ipcRenderer.invoke('sh:save-attachment', dataUrl, filename),
   readClipboardImage: () => ipcRenderer.invoke('sh:read-clipboard-image'),
-  pickImageFiles: () => ipcRenderer.invoke('sh:pick-image-files'),
+  pickAttachmentFiles: () => ipcRenderer.invoke('sh:pick-attachment-files'),
+  getPathForFile: (file: File) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
   sendMessage: (
     sessionId: string,
     prompt: string,

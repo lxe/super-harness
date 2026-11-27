@@ -614,7 +614,10 @@ export interface SuperHarnessApi {
     filename?: string
   ) => Promise<ImageAttachment>;
   readClipboardImage: () => Promise<ImageAttachment | null>;
-  pickImageFiles: () => Promise<ImageAttachment[]>;
+  /** Opens a file picker for any file type; images come back with an inline preview. */
+  pickAttachmentFiles: () => Promise<ImageAttachment[]>;
+  /** Absolute path of a dropped/pasted File, or null when it has none (e.g. dragged from a browser). */
+  getPathForFile: (file: File) => string | null;
   sendMessage: (
     sessionId: string,
     prompt: string,

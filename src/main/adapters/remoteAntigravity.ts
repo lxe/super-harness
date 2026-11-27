@@ -13,7 +13,7 @@ import type {
 import { cleanUserPreview } from '../utils/lastUserText';
 import { cleanTextPreview, normalizeTimestamp, projectNameFromCwd } from '../utils/system';
 import { loadRemoteHosts, shQuote, type RemoteHostConfig } from './remoteClaude';
-import { formatPromptWithImagePaths, type DispatchContext } from './types';
+import { formatPromptWithImagePaths, isImageAttachment, type DispatchContext } from './types';
 import { parseAntigravityJsonlLines } from './antigravityAdapter';
 
 /**
@@ -600,7 +600,24 @@ export class RemoteAntigravityMirror {
     if (e.originApp === 'antigravity-app' && e.hubAvailable) {
       try {
         const media: Array<{ mediaId: string; mimeType: string; inlineData: string }> = [];
-        for (const att of attachments ?? []) {
+        // The hub only takes inline images; copy other files to the host and reference their paths.
+        const fileAtts = (attachments ?? []).filter(
+          (a) => !isImageAttachment(a) && a.path && fs.existsSync(a.path)
+        );
+        let hubText = prompt;
+        if (fileAtts.length > 0) {
+          const remoteDir = '.cache/super-harness/attachments';
+          await ssh(e.host, `mkdir -p ${remoteDir}`);
+          const home = (await ssh(e.host, 'printf %s "$HOME"')).trim();
+          const copied: ImageAttachment[] = [];
+          for (const a of fileAtts) {
+            const rel = `${remoteDir}/${path.basename(a.path)}`;
+            await scp(a.path, e.host, rel);
+            copied.push({ ...a, path: `${home}/${rel}` });
+          }
+          hubText = formatPromptWithImagePaths(prompt, copied);
+        }
+        for (const att of (attachments ?? []).filter(isImageAttachment)) {
           if (!att.path || !fs.existsSync(att.path)) continue;
           media.push({
             mediaId: att.name || path.basename(att.path),
@@ -612,7 +629,7 @@ export class RemoteAntigravityMirror {
         const payload = JSON.stringify({
           action: 'send',
           cascadeId: e.sessionId,
-          text: prompt,
+          text: hubText,
           modelSlug: session.model,
           media,
         });

@@ -38,6 +38,7 @@ import { QueuedMessagesTray } from './QueuedMessagesTray';
 import { SessionComposer } from './SessionComposer';
 import { SessionHeader } from './SessionHeader';
 import { reconcileById } from '../utils/reconcile';
+import { filesToAttachments, isImageAttachment } from '../utils/attachments';
 
 interface FailedUserEntry {
   msg: UnifiedMessage;
@@ -178,8 +179,6 @@ export const SessionPane: React.FC<Props> = ({
   const [liveActivity, setLiveActivity] = useState<LiveActivityState | undefined>(undefined);
   const [limit, setLimit] = useState(DEFAULT_TRANSCRIPT_LIMIT);
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'chat' | 'tmux'>('chat');
-  const [tmuxOutput, setTmuxOutput] = useState('');
 
   const [sending, setSending] = useState(false);
   const [dispatchNote, setDispatchNote] = useState<string | null>(null);
@@ -325,7 +324,6 @@ export const SessionPane: React.FC<Props> = ({
   // Hydrate instantly from renderer LRU cache on session switch (stale-while-revalidate)
   // so revisiting or clicking a prefetched chat has zero loading flash.
   useEffect(() => {
-    setViewMode('chat');
     setDispatchNote(null);
     setStreamError(null);
     setStreamingText('');
@@ -451,20 +449,6 @@ export const SessionPane: React.FC<Props> = ({
     };
   }, [paneId, sessionId, limit, isMaster]);
 
-  // Live tmux capture when Terminal view is selected
-  useEffect(() => {
-    if (!session || isMaster) return;
-    if (viewMode === 'tmux' && session.tmuxTarget) {
-      const fetchTmux = async () => {
-        const res = await window.superHarness.captureTmux(session.tmuxTarget!);
-        setTmuxOutput(res.error ? `[tmux error] ${res.error}` : res.content);
-      };
-      void fetchTmux();
-      const t = setInterval(fetchTmux, 1000);
-      return () => clearInterval(t);
-    }
-  }, [session?.id, session?.tmuxTarget, viewMode, isMaster]);
-
   // Direct IPC stream listener (never drops error/delta/done events)
   useEffect(() => {
     if (!sessionId) return;
@@ -522,8 +506,6 @@ export const SessionPane: React.FC<Props> = ({
     streamingBlocks.length,
     isStreaming,
     isStreamingGlobal,
-    tmuxOutput,
-    viewMode,
     liveActivity?.isWorking,
     liveActivity?.focus,
   ]);
@@ -551,26 +533,17 @@ export const SessionPane: React.FC<Props> = ({
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, []);
 
-  // Image paste / drop helper (captures targetSessionId + uses functional draft updates)
-  const ingestImageFiles = useCallback(
+  // File paste / drop helper (captures targetSessionId + uses functional draft updates)
+  const ingestFiles = useCallback(
     async (files: FileList | File[]) => {
       const targetSessionId = currentSessionRef.current;
       if (!targetSessionId) return;
-      const list = Array.from(files).filter((f) => f.type.startsWith('image/'));
-      for (const file of list) {
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || ''));
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(file);
-        });
-        if (!dataUrl) continue;
-        const saved = await window.superHarness.saveAttachment(dataUrl, file.name || undefined);
-        onDraftChange(targetSessionId, (prev) => ({
-          ...prev,
-          attachments: [...prev.attachments, saved],
-        }));
-      }
+      const saved = await filesToAttachments(files);
+      if (saved.length === 0) return;
+      onDraftChange(targetSessionId, (prev) => ({
+        ...prev,
+        attachments: [...prev.attachments, ...saved],
+      }));
     },
     [onDraftChange]
   );
@@ -580,33 +553,29 @@ export const SessionPane: React.FC<Props> = ({
       const targetSessionId = currentSessionRef.current;
       if (!targetSessionId) return;
 
-      const imageFiles: File[] = [];
+      const pastedFiles: File[] = [];
       const seen = new Set<string>();
-      const pushIfImage = (f: File | null) => {
-        if (!f || !f.type.startsWith('image/')) return;
+      const pushFile = (f: File | null) => {
+        if (!f) return;
         const key = `${f.name}:${f.size}:${f.type}`;
         if (seen.has(key)) return;
         seen.add(key);
-        imageFiles.push(f);
+        pastedFiles.push(f);
       };
 
       const items = e.clipboardData?.items;
       if (items) {
         for (const item of Array.from(items)) {
-          if (item.type.startsWith('image/')) {
-            pushIfImage(item.getAsFile());
-          }
+          if (item.kind === 'file') pushFile(item.getAsFile());
         }
       }
-      if (imageFiles.length === 0 && e.clipboardData?.files?.length) {
-        for (const f of Array.from(e.clipboardData.files)) {
-          pushIfImage(f);
-        }
+      if (pastedFiles.length === 0 && e.clipboardData?.files?.length) {
+        for (const f of Array.from(e.clipboardData.files)) pushFile(f);
       }
 
-      if (imageFiles.length > 0) {
+      if (pastedFiles.length > 0) {
         e.preventDefault();
-        await ingestImageFiles(imageFiles);
+        await ingestFiles(pastedFiles);
         return;
       }
 
@@ -622,11 +591,11 @@ export const SessionPane: React.FC<Props> = ({
         }
       }
     },
-    [ingestImageFiles, onDraftChange]
+    [ingestFiles, onDraftChange]
   );
 
   const handlePickImages = useCallback(async () => {
-    const picked = await window.superHarness.pickImageFiles();
+    const picked = await window.superHarness.pickAttachmentFiles();
     if (picked.length > 0) {
       setAttachments((prev) => [...prev, ...picked]);
     }
@@ -660,14 +629,19 @@ export const SessionPane: React.FC<Props> = ({
 
       let optimisticId: string | null = null;
       if (!isMaster) {
+        const fileRefs = msgAttachments
+          .filter((a) => !isImageAttachment(a))
+          .map((a) => `[Attached file: ${a.path}]`)
+          .join('\n');
+        const shownText = [fileRefs, prompt].filter(Boolean).join('\n\n');
         const optimisticBlocks: UnifiedBlock[] = [
-          ...msgAttachments.map((a) => ({
+          ...msgAttachments.filter(isImageAttachment).map((a) => ({
             type: 'image' as const,
             path: a.path,
             name: a.name,
             dataUrl: a.previewDataUrl,
           })),
-          ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+          ...(shownText ? [{ type: 'text' as const, text: shownText }] : []),
         ];
         const sentAt = Date.now();
         const optMsg: UnifiedMessage = {
@@ -912,19 +886,15 @@ export const SessionPane: React.FC<Props> = ({
     [setInput]
   );
 
-  const handleToggleViewMode = useCallback(() => {
-    setViewMode((v) => (v === 'chat' ? 'tmux' : 'chat'));
-  }, []);
-
   const handleReloadTranscript = useCallback(() => {
     void loadTranscript(false);
   }, [loadTranscript]);
 
   const handleDropFiles = useCallback(
     (files: FileList) => {
-      void ingestImageFiles(files);
+      void ingestFiles(files);
     },
-    [ingestImageFiles]
+    [ingestFiles]
   );
 
   const handlePreviewImage = useCallback((images: PreviewImageItem[], index: number) => {
@@ -974,10 +944,8 @@ export const SessionPane: React.FC<Props> = ({
         isMaster={isMaster}
         subagents={subagents}
         folders={folders}
-        viewMode={viewMode}
         isSplitPane={isSplitPane}
         hasSplitOpen={hasSplitOpen}
-        onToggleViewMode={handleToggleViewMode}
         onSelectSession={onSelectSession}
         onOrganize={onOrganize}
         onReloadTranscript={handleReloadTranscript}
@@ -1001,182 +969,174 @@ export const SessionPane: React.FC<Props> = ({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-6 py-6"
       >
-        {viewMode === 'tmux' && session.tmuxTarget ? (
-          <div className="max-w-4xl mx-auto h-full flex flex-col">
-            <pre className="flex-1 bg-surface-code border border-line-hairline rounded-xl p-4 font-mono text-caption text-ink-secondary leading-relaxed whitespace-pre-wrap overflow-y-auto">
-              {tmuxOutput || 'Connecting to tmux pane…'}
-            </pre>
-          </div>
-        ) : (
-          <div className="max-w-[740px] mx-auto space-y-6 pb-12">
-            {totalCount > messages.length && (
-              <div className="flex justify-center">
-                <Button size="xs" variant="ghost" onClick={() => setLimit((prev) => prev + 60)}>
-                  Load earlier ({totalCount - messages.length})
-                </Button>
-              </div>
-            )}
+        <div className="max-w-[740px] mx-auto space-y-6 pb-12">
+          {totalCount > messages.length && (
+            <div className="flex justify-center">
+              <Button size="xs" variant="ghost" onClick={() => setLimit((prev) => prev + 60)}>
+                Load earlier ({totalCount - messages.length})
+              </Button>
+            </div>
+          )}
 
-            {loading && messages.length === 0 ? (
-              <div className="py-16 flex items-center justify-center gap-2 text-caption text-ink-muted">
-                <WorkingOrb tone={session.harnessGroup} size="md" />
-                Loading…
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="py-20 text-center text-body text-ink-muted">
-                Start a conversation below. Paste or drop images anytime.
-              </div>
-            ) : (
-              messages.map((msg) => {
-                if (msg.role === 'user') {
-                  return (
-                    <UserMessageView
-                      key={msg.id}
-                      msg={msg}
-                      onOpenPath={handleMessageOpenPath}
-                      onOpenSessionLink={onOpenSessionLink}
-                      onPreviewImage={handlePreviewImage}
-                      onRetryFailed={handleRetryFailed}
-                      onDismissFailed={handleDismissFailed}
-                    />
-                  );
-                }
-
-                if (msg.role === 'system') {
-                  return (
-                    <div key={msg.id} className="flex justify-center">
-                      {msg.blocks.map((b, i) => (
-                        <CoalescedBlockView
-                          key={i}
-                          block={b}
-                          onOpenPath={handleMessageOpenPath}
-                          onOpenSessionLink={onOpenSessionLink}
-                          onPreviewImage={handlePreviewImage}
-                        />
-                      ))}
-                    </div>
-                  );
-                }
-
+          {loading && messages.length === 0 ? (
+            <div className="py-16 flex items-center justify-center gap-2 text-caption text-ink-muted">
+              <WorkingOrb tone={session.harnessGroup} size="md" />
+              Loading…
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="py-20 text-center text-body text-ink-muted">
+              Start a conversation below. Paste or drop images anytime.
+            </div>
+          ) : (
+            messages.map((msg) => {
+              if (msg.role === 'user') {
                 return (
-                  <AssistantMessageView
+                  <UserMessageView
                     key={msg.id}
                     msg={msg}
                     onOpenPath={handleMessageOpenPath}
                     onOpenSessionLink={onOpenSessionLink}
-                    onQuickReply={handleQuickReply}
                     onPreviewImage={handlePreviewImage}
+                    onRetryFailed={handleRetryFailed}
+                    onDismissFailed={handleDismissFailed}
                   />
                 );
-              })
-            )}
+              }
 
-            {/* Live streaming assistant reply (deduped against live-synced persisted turns) */}
-            {!isMaster && isStreaming && (
-              <div className="space-y-2.5">
-                {visibleStreaming.showBlocks.length > 0 && (
-                  <CollapsedTraceGroup blocks={visibleStreaming.showBlocks.filter(isTraceBlock)} />
-                )}
-                {visibleStreaming.showText && (
-                  <CoalescedBlockView block={{ type: 'text', text: visibleStreaming.showText }} />
-                )}
-              </div>
-            )}
-
-            {/* Working indicator + running background tasks (stacked cleanly) */}
-            {!isMaster && (() => {
-              const showWorking = isStreaming || effectiveStreaming || Boolean(liveActivity?.isWorking);
-              const tasks = liveActivity?.runningTasks ?? [];
-              const hasTasks = tasks.length > 0;
-              if (!showWorking && !hasTasks) return null;
-
-              const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user' && m.timestamp);
-              const turnStartedAt =
-                lastUserMsg?.timestamp && Date.now() - lastUserMsg.timestamp < 2 * 60 * 60 * 1000
-                  ? lastUserMsg.timestamp
-                  : undefined;
+              if (msg.role === 'system') {
+                return (
+                  <div key={msg.id} className="flex justify-center">
+                    {msg.blocks.map((b, i) => (
+                      <CoalescedBlockView
+                        key={i}
+                        block={b}
+                        onOpenPath={handleMessageOpenPath}
+                        onOpenSessionLink={onOpenSessionLink}
+                        onPreviewImage={handlePreviewImage}
+                      />
+                    ))}
+                  </div>
+                );
+              }
 
               return (
-                <div className="pt-0.5 space-y-1.5">
-                  {showWorking && (
-                    <WorkingIndicator
-                      tone={session.harnessGroup}
-                      focus={liveActivity?.focus}
-                      startedAt={turnStartedAt}
-                    />
-                  )}
-                  {hasTasks && (
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => setTasksExpanded((v) => !v)}
-                        className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5 px-1 -mx-1 rounded-md outline-none focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
-                        <span>
-                          {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'} running
-                        </span>
-                        {tasksExpanded ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
-                        )}
-                      </button>
-                      {tasksExpanded && (
-                        <div className="mt-1.5 rounded-xl border border-line-hairline bg-surface-subtle/80 divide-y divide-line-hairline overflow-hidden">
-                          {tasks.map((task) => (
-                            <div
-                              key={task.id}
-                              className="px-3 py-2 flex items-start justify-between gap-2.5 text-caption"
-                            >
-                              <div className="min-w-0 flex-1 space-y-0.5">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <Terminal className="w-3 h-3 text-ink-faint shrink-0" />
-                                  <span className="text-ink-secondary font-medium truncate">
-                                    {task.summary}
-                                  </span>
-                                  {task.isDaemon && <Badge tone="neutral">daemon</Badge>}
-                                </div>
-                                {task.command && (
-                                  <div className="text-micro font-mono text-ink-faint truncate">
-                                    {task.command}
-                                  </div>
-                                )}
+                <AssistantMessageView
+                  key={msg.id}
+                  msg={msg}
+                  onOpenPath={handleMessageOpenPath}
+                  onOpenSessionLink={onOpenSessionLink}
+                  onQuickReply={handleQuickReply}
+                  onPreviewImage={handlePreviewImage}
+                />
+              );
+            })
+          )}
+
+          {/* Live streaming assistant reply (deduped against live-synced persisted turns) */}
+          {!isMaster && isStreaming && (
+            <div className="space-y-2.5">
+              {visibleStreaming.showBlocks.length > 0 && (
+                <CollapsedTraceGroup blocks={visibleStreaming.showBlocks.filter(isTraceBlock)} />
+              )}
+              {visibleStreaming.showText && (
+                <CoalescedBlockView block={{ type: 'text', text: visibleStreaming.showText }} />
+              )}
+            </div>
+          )}
+
+          {/* Working indicator + running background tasks (stacked cleanly) */}
+          {!isMaster && (() => {
+            const showWorking = isStreaming || effectiveStreaming || Boolean(liveActivity?.isWorking);
+            const tasks = liveActivity?.runningTasks ?? [];
+            const hasTasks = tasks.length > 0;
+            if (!showWorking && !hasTasks) return null;
+
+            const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user' && m.timestamp);
+            const turnStartedAt =
+              lastUserMsg?.timestamp && Date.now() - lastUserMsg.timestamp < 2 * 60 * 60 * 1000
+                ? lastUserMsg.timestamp
+                : undefined;
+
+            return (
+              <div className="pt-0.5 space-y-1.5">
+                {showWorking && (
+                  <WorkingIndicator
+                    tone={session.harnessGroup}
+                    focus={liveActivity?.focus}
+                    startedAt={turnStartedAt}
+                  />
+                )}
+                {hasTasks && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setTasksExpanded((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-caption text-ink-muted hover:text-ink-primary transition-colors cursor-pointer py-0.5 px-1 -mx-1 rounded-md outline-none focus:outline-none focus-visible:shadow-none focus-visible:bg-white/[0.05]"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse shrink-0" />
+                      <span>
+                        {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'} running
+                      </span>
+                      {tasksExpanded ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
+                      )}
+                    </button>
+                    {tasksExpanded && (
+                      <div className="mt-1.5 rounded-xl border border-line-hairline bg-surface-subtle/80 divide-y divide-line-hairline overflow-hidden">
+                        {tasks.map((task) => (
+                          <div
+                            key={task.id}
+                            className="px-3 py-2 flex items-start justify-between gap-2.5 text-caption"
+                          >
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <Terminal className="w-3 h-3 text-ink-faint shrink-0" />
+                                <span className="text-ink-secondary font-medium truncate">
+                                  {task.summary}
+                                </span>
+                                {task.isDaemon && <Badge tone="neutral">daemon</Badge>}
                               </div>
-                              {task.logPath && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleMessageOpenPath(task.logPath!)}
-                                  className="inline-flex items-center gap-1 text-micro text-ink-muted hover:text-ink-primary px-1.5 py-0.5 rounded hover:bg-white/[0.06] shrink-0 cursor-pointer outline-none focus:outline-none"
-                                  title="Inspect task log"
-                                >
-                                  <FileText className="w-3 h-3" />
-                                  <span>Log</span>
-                                </button>
+                              {task.command && (
+                                <div className="text-micro font-mono text-ink-faint truncate">
+                                  {task.command}
+                                </div>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {streamError && (
-              <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-caption text-rose-300 font-mono whitespace-pre-wrap">
-                {streamError}
+                            {task.logPath && (
+                              <button
+                                type="button"
+                                onClick={() => handleMessageOpenPath(task.logPath!)}
+                                className="inline-flex items-center gap-1 text-micro text-ink-muted hover:text-ink-primary px-1.5 py-0.5 rounded hover:bg-white/[0.06] shrink-0 cursor-pointer outline-none focus:outline-none"
+                                title="Inspect task log"
+                              >
+                                <FileText className="w-3 h-3" />
+                                <span>Log</span>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            );
+          })()}
+
+          {streamError && (
+            <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-caption text-rose-300 font-mono whitespace-pre-wrap">
+              {streamError}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Bottom Composer Dock */}
       <div className="relative z-10 px-6 pb-5 pt-2 shrink-0 bg-surface-canvas">
         <div className="pointer-events-none absolute -top-8 left-0 right-2 h-8 sh-scroll-fade-bottom" />
-        {showScrollToBottom && viewMode !== 'tmux' && (
+        {showScrollToBottom && (
           <button
             type="button"
             onClick={scrollToBottom}

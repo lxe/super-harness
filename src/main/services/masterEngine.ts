@@ -14,6 +14,7 @@ import type {
   UnifiedMessage,
 } from '../../shared/types';
 import type { HarnessRegistry } from '../adapters/registry';
+import { formatPromptWithImagePaths, isImageAttachment } from '../adapters/types';
 import type { ConfigStore } from '../store/configStore';
 import { resolveCodexBinary, whichBinary } from '../utils/system';
 import type { ControlServer } from './controlServer';
@@ -100,7 +101,7 @@ export class MasterEngine {
 
     const userBlocks: UnifiedBlock[] = [];
     if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
+      for (const att of attachments.filter(isImageAttachment)) {
         userBlocks.push({
           type: 'image',
           path: att.path,
@@ -109,7 +110,12 @@ export class MasterEngine {
         });
       }
     }
-    if (trimmed) userBlocks.push({ type: 'text', text: trimmed });
+    const fileRefs = (attachments ?? [])
+      .filter((a) => !isImageAttachment(a))
+      .map((a) => `[Attached file: ${a.path}]`)
+      .join('\n');
+    const shownText = [fileRefs, trimmed].filter(Boolean).join('\n\n');
+    if (shownText) userBlocks.push({ type: 'text', text: shownText });
 
     const userMsg: UnifiedMessage = {
       id: `m-u-${crypto.randomBytes(4).toString('hex')}`,
@@ -119,10 +125,7 @@ export class MasterEngine {
     };
     this.store.appendMasterMessage(userMsg);
 
-    const effectivePrompt =
-      attachments && attachments.length > 0
-        ? `${attachments.map((a) => `[Attached image: ${a.path}]`).join('\n')}\n\n${trimmed || 'Inspect the attached image(s).'}`
-        : trimmed;
+    const effectivePrompt = formatPromptWithImagePaths(trimmed, attachments);
 
     // 1. Built-in instant slash commands for zero-latency control
     if (trimmed.startsWith('/')) {

@@ -239,6 +239,30 @@ function classifyAttachmentKind(mimeType: string): 'image' | 'video' | 'file' {
   return 'file';
 }
 
+const MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  heic: 'image/heic',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  pdf: 'application/pdf',
+  json: 'application/json',
+  zip: 'application/zip',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  csv: 'text/csv',
+  html: 'text/html',
+};
+
+function mimeTypeForPath(fp: string): string {
+  return MIME_BY_EXT[path.extname(fp).toLowerCase().slice(1)] || 'application/octet-stream';
+}
+
 function saveRawBufferAttachment(
   buffer: Buffer,
   mimeType: string,
@@ -787,28 +811,30 @@ function registerIpcHandlers(): void {
     return null;
   });
 
-  ipcMain.handle('sh:pick-image-files', async (): Promise<ImageAttachment[]> => {
+  // Attach any file. Images get an inline preview; other files are referenced by their path
+  // (never copied or read here), and the dispatcher hands agents the path.
+  ipcMain.handle('sh:pick-attachment-files', async (): Promise<ImageAttachment[]> => {
     if (!mainWindow) return [];
     const res = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
     });
     if (res.canceled) return [];
     const out: ImageAttachment[] = [];
     for (const fp of res.filePaths) {
       try {
-        const ext = path.extname(fp).toLowerCase().slice(1);
-        const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext || 'png'}`;
-        const buf = fs.readFileSync(fp);
+        const mimeType = mimeTypeForPath(fp);
+        const isImage = mimeType.startsWith('image/');
         out.push({
           id: crypto.randomBytes(6).toString('hex'),
           name: path.basename(fp),
           path: fp,
           mimeType,
-          previewDataUrl: `data:${mimeType};base64,${buf.toString('base64')}`,
+          previewDataUrl: isImage
+            ? `data:${mimeType};base64,${fs.readFileSync(fp).toString('base64')}`
+            : undefined,
         });
       } catch {
-        // ignore unreadable image
+        // ignore unreadable file
       }
     }
     return out;

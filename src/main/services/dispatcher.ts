@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types';
 import type { HarnessRegistry } from '../adapters/registry';
 import type { DaemonControlAction, DispatchContext } from '../adapters/types';
+import { moveFileAttachmentsIntoPrompt } from '../adapters/types';
 import type { ConfigStore } from '../store/configStore';
 
 function harnessGroupForStartRequest(harness: StartSessionRequest['harness']): HarnessGroup {
@@ -113,6 +114,11 @@ export class HarnessDispatcher {
       return { ok: false, error: `No driver registered for ${session.harnessGroup}` };
     }
 
+    // Remote-host adapters copy every attachment to their host themselves; local ones get
+    // non-image files as path references in the prompt.
+    if (!session.tags?.includes('remote-host')) {
+      ({ prompt, attachments } = moveFileAttachmentsIntoPrompt(prompt, attachments));
+    }
     const res = await driver.sendMessage(session, prompt, attachments, this.createContext(), opts);
     if (!res.ok) {
       console.error(
@@ -148,6 +154,9 @@ export class HarnessDispatcher {
       return { ok: false, error: `Native queueing not supported for ${session.harnessGroup}` };
     }
 
+    if (!session.tags?.includes('remote-host')) {
+      ({ prompt, attachments } = moveFileAttachmentsIntoPrompt(prompt, attachments));
+    }
     const res = await driver.queueMessage(session, prompt, attachments, this.createContext());
     if (!res) {
       return { ok: false, error: `Native queueing not supported for ${session.harnessGroup}` };
@@ -165,7 +174,11 @@ export class HarnessDispatcher {
     if (!driver) {
       return { ok: false, error: `Unknown harness: ${req.harness}` };
     }
-    return driver.startSession(req, this.createContext());
+    const moved = moveFileAttachmentsIntoPrompt(req.prompt ?? '', req.attachments);
+    return driver.startSession(
+      { ...req, prompt: moved.prompt, attachments: moved.attachments },
+      this.createContext()
+    );
   }
 
   /**

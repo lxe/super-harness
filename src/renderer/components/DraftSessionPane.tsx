@@ -8,7 +8,7 @@ import {
   FolderOpen,
   FolderPlus,
   HelpCircle,
-  ImagePlus,
+  Plus,
   Radio,
   Search,
   Sparkles,
@@ -30,6 +30,8 @@ import {
 } from '../utils/modelOptions';
 import { DictationButton } from './DictationButton';
 import { HarnessLogo } from './HarnessLogo';
+import { AttachmentFileTile } from './AttachmentFileTile';
+import { filesToAttachments, isImageAttachment } from '../utils/attachments';
 import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
 
 export interface DraftConversation {
@@ -267,37 +269,8 @@ export const DraftSessionPane: React.FC<Props> = ({
   };
 
   const ingestFiles = async (files: FileList | File[]) => {
-    const all = Array.from(files);
-    const savedImages: ImageAttachment[] = [];
-    const nonImagePaths: string[] = [];
-
-    for (const file of all) {
-      if (file.type.startsWith('image/')) {
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || ''));
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(file);
-        });
-        if (!dataUrl) continue;
-        const saved = await window.superHarness.saveAttachment(dataUrl, file.name || undefined);
-        savedImages.push(saved);
-      } else {
-        const filePath = (file as File & { path?: string }).path;
-        if (filePath) nonImagePaths.push(filePath);
-      }
-    }
-
-    if (savedImages.length > 0) {
-      appendAttachments(savedImages);
-    }
-    if (nonImagePaths.length > 0) {
-      const curPrompt = draftRef.current.prompt;
-      const suffix = nonImagePaths.join('\n');
-      onUpdateDraft({
-        prompt: curPrompt.trim() ? `${curPrompt}\n${suffix}` : suffix,
-      });
-    }
+    const saved = await filesToAttachments(files);
+    if (saved.length > 0) appendAttachments(saved);
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -338,7 +311,7 @@ export const DraftSessionPane: React.FC<Props> = ({
   };
 
   const handlePickImages = async () => {
-    const picked = await window.superHarness.pickImageFiles();
+    const picked = await window.superHarness.pickAttachmentFiles();
     if (picked.length > 0) {
       appendAttachments(picked);
     }
@@ -558,40 +531,45 @@ export const DraftSessionPane: React.FC<Props> = ({
           >
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 px-3.5 pt-3">
-                {attachments.map((att, idx) => (
+                {attachments.map((att) => (
                   <div
                     key={att.id}
                     className="relative group rounded-lg overflow-hidden border border-line-subtle bg-black/40 w-16 h-16"
                   >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setLightbox({
-                          images: attachments.map((a) => ({
-                            src: a.previewDataUrl || mediaUrlForPath(a.path),
-                            name: a.name,
-                            path: a.path,
-                          })),
-                          index: idx,
-                        })
-                      }
-                      title={`Preview ${att.name}`}
-                      className="w-full h-full block cursor-pointer"
-                    >
-                      <img
-                        src={att.previewDataUrl || mediaUrlForPath(att.path)}
-                        alt={att.name}
-                        className="w-full h-full object-cover hover:brightness-110 transition-all"
-                      />
-                    </button>
+                    {isImageAttachment(att) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const images = attachments.filter(isImageAttachment);
+                          setLightbox({
+                            images: images.map((a) => ({
+                              src: a.previewDataUrl || mediaUrlForPath(a.path),
+                              name: a.name,
+                              path: a.path,
+                            })),
+                            index: images.indexOf(att),
+                          });
+                        }}
+                        title={`Preview ${att.name}`}
+                        className="w-full h-full block cursor-pointer"
+                      >
+                        <img
+                          src={att.previewDataUrl || mediaUrlForPath(att.path)}
+                          alt={att.name}
+                          className="w-full h-full object-cover hover:brightness-110 transition-all"
+                        />
+                      </button>
+                    ) : (
+                      <AttachmentFileTile attachment={att} />
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleRemoveAttachment(att.id);
                       }}
-                      title="Remove image"
-                      aria-label="Remove image"
+                      title={`Remove ${att.name}`}
+                      aria-label={`Remove ${att.name}`}
                       className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/80 text-ink-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     >
                       <X className="w-2.5 h-2.5" />
@@ -624,10 +602,10 @@ export const DraftSessionPane: React.FC<Props> = ({
             <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-1 flex-wrap min-w-0">
                 <IconButton
-                  label="Attach image (or Ctrl+V to paste)"
+                  label="Attach files (or paste / drop them)"
                   onClick={() => void handlePickImages()}
                 >
-                  <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  <Plus className="w-4 h-4" strokeWidth={1.75} />
                 </IconButton>
                 <DictationButton
                   textareaRef={textareaRef}

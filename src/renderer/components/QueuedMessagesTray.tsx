@@ -4,6 +4,8 @@ import type { QueuedMessageItem } from '../../shared/types';
 import { Badge, IconButton } from '../ui';
 import { mediaUrlForPath } from '../utils/format';
 import type { PreviewImageItem } from './ImageLightbox';
+import { AttachmentFileTile } from './AttachmentFileTile';
+import { isImageAttachment } from '../utils/attachments';
 
 interface Props {
   items: QueuedMessageItem[];
@@ -67,7 +69,8 @@ export const QueuedMessagesTray: React.FC<Props> = ({
       {!collapsed && (
         <div className="border-t border-white/[0.04] divide-y divide-white/[0.04] max-h-48 overflow-y-auto">
           {items.map((item) => {
-            const itemImages: PreviewImageItem[] = (item.attachments ?? []).map((att) => ({
+            const imageAtts = (item.attachments ?? []).filter(isImageAttachment);
+            const itemImages: PreviewImageItem[] = imageAtts.map((att) => ({
               src: att.previewDataUrl || mediaUrlForPath(att.path),
               name: att.name,
               path: att.path,
@@ -79,27 +82,36 @@ export const QueuedMessagesTray: React.FC<Props> = ({
               >
                 {item.attachments && item.attachments.length > 0 && (
                   <div className="flex items-center gap-1 shrink-0">
-                    {item.attachments.slice(0, 3).map((att, idx) => (
-                      <button
-                        key={att.id}
-                        type="button"
-                        onClick={() => onPreviewImage?.(itemImages, idx)}
-                        className="rounded-md overflow-hidden border border-line-subtle bg-black/40 hover:border-white/30 transition-colors cursor-pointer"
-                        title={att.name}
-                      >
-                        <img
-                          src={att.previewDataUrl || mediaUrlForPath(att.path)}
-                          alt={att.name}
-                          className="w-8 h-8 object-cover block"
-                        />
-                      </button>
-                    ))}
+                    {item.attachments.slice(0, 3).map((att) =>
+                      isImageAttachment(att) ? (
+                        <button
+                          key={att.id}
+                          type="button"
+                          onClick={() => onPreviewImage?.(itemImages, imageAtts.indexOf(att))}
+                          className="rounded-md overflow-hidden border border-line-subtle bg-black/40 hover:border-white/30 transition-colors cursor-pointer"
+                          title={att.name}
+                        >
+                          <img
+                            src={att.previewDataUrl || mediaUrlForPath(att.path)}
+                            alt={att.name}
+                            className="w-8 h-8 object-cover block"
+                          />
+                        </button>
+                      ) : (
+                        <div
+                          key={att.id}
+                          className="w-8 h-8 rounded-md overflow-hidden border border-line-subtle"
+                        >
+                          <AttachmentFileTile attachment={att} />
+                        </div>
+                      )
+                    )}
                   </div>
                 )}
 
                 <div className="flex-1 min-w-0">
                   <p className="text-body text-ink-primary line-clamp-2 leading-snug break-words">
-                    {item.text || '(attached image)'}
+                    {item.text || '(attachment)'}
                   </p>
                 </div>
 

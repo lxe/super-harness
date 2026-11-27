@@ -205,15 +205,43 @@ export function computeFileFingerprint(filePath: string | undefined): string {
  * Formats a prompt with inline file path references for CLI harnesses that
  * inspect attached images from disk rather than multimodal protocol blocks.
  */
+export function isImageAttachment(a: Pick<ImageAttachment, 'mimeType'>): boolean {
+  return (a.mimeType || '').toLowerCase().startsWith('image/');
+}
+
+/** `[Attached image: …]` for images, `[Attached file: …]` for anything else. */
+function attachmentRef(a: ImageAttachment): string {
+  return isImageAttachment(a) ? `[Attached image: ${a.path}]` : `[Attached file: ${a.path}]`;
+}
+
 export function formatPromptWithImagePaths(
   prompt: string,
   attachments?: ImageAttachment[]
 ): string {
   if (!attachments || attachments.length === 0) return prompt;
-  const refs = attachments.map((a) => `[Attached image: ${a.path}]`).join('\n');
-  return prompt.trim()
-    ? `${refs}\n\n${prompt}`
-    : `${refs}\n\nPlease inspect the attached image(s).`;
+  const refs = attachments.map(attachmentRef).join('\n');
+  if (prompt.trim()) return `${refs}\n\n${prompt}`;
+  return attachments.every(isImageAttachment)
+    ? `${refs}\n\nPlease inspect the attached image(s).`
+    : `${refs}\n\nPlease look at the attached file(s).`;
+}
+
+/**
+ * Harness wires only carry images natively. Non-image attachments (PDFs,
+ * logs, archives…) are moved into the prompt as `[Attached file: /path]`
+ * lines so the agent reads them from disk; images stay as attachments.
+ */
+export function moveFileAttachmentsIntoPrompt(
+  prompt: string,
+  attachments: ImageAttachment[] | undefined
+): { prompt: string; attachments: ImageAttachment[] | undefined } {
+  const files = (attachments ?? []).filter((a) => !isImageAttachment(a));
+  if (files.length === 0) return { prompt, attachments };
+  const images = (attachments ?? []).filter(isImageAttachment);
+  return {
+    prompt: formatPromptWithImagePaths(prompt, files),
+    attachments: images.length > 0 ? images : undefined,
+  };
 }
 
 /**

@@ -4,7 +4,7 @@ import {
   Brain,
   Check,
   ChevronDown,
-  ImagePlus,
+  Plus,
   Search,
   X,
 } from 'lucide-react';
@@ -34,6 +34,8 @@ import {
 } from '../utils/modelOptions';
 import { DictationButton } from './DictationButton';
 import { HarnessLogo } from './HarnessLogo';
+import { AttachmentFileTile } from './AttachmentFileTile';
+import { isImageAttachment } from '../utils/attachments';
 import { MasterEngineMenu } from './MasterEngineMenu';
 import type { PreviewImageItem } from './ImageLightbox';
 
@@ -207,40 +209,45 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
       >
         {attachments.length > 0 && (
           <div className="px-3.5 pt-3 pb-1 flex items-center gap-2 flex-wrap">
-            {attachments.map((att, idx) => (
+            {attachments.map((att) => (
               <div
                 key={att.id}
                 className="relative group w-14 h-14 rounded-xl overflow-hidden border border-line-subtle hover:border-line-strong bg-black/40 transition-colors"
               >
-                <button
-                  type="button"
-                  onClick={() =>
-                    onPreviewImage?.(
-                      attachments.map((a) => ({
-                        src: a.previewDataUrl || mediaUrlForPath(a.path),
-                        name: a.name,
-                        path: a.path,
-                      })),
-                      idx
-                    )
-                  }
-                  title={`Preview ${att.name}`}
-                  className="w-full h-full block cursor-pointer"
-                >
-                  <img
-                    src={att.previewDataUrl || mediaUrlForPath(att.path)}
-                    alt={att.name}
-                    className="w-full h-full object-cover hover:brightness-110 transition-all"
-                  />
-                </button>
+                {isImageAttachment(att) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const images = attachments.filter(isImageAttachment);
+                      onPreviewImage?.(
+                        images.map((a) => ({
+                          src: a.previewDataUrl || mediaUrlForPath(a.path),
+                          name: a.name,
+                          path: a.path,
+                        })),
+                        images.indexOf(att)
+                      );
+                    }}
+                    title={`Preview ${att.name}`}
+                    className="w-full h-full block cursor-pointer"
+                  >
+                    <img
+                      src={att.previewDataUrl || mediaUrlForPath(att.path)}
+                      alt={att.name}
+                      className="w-full h-full object-cover hover:brightness-110 transition-all"
+                    />
+                  </button>
+                ) : (
+                  <AttachmentFileTile attachment={att} />
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onRemoveAttachment(att.id);
                   }}
-                  title="Remove image"
-                  aria-label="Remove image"
+                  title={`Remove ${att.name}`}
+                  aria-label={`Remove ${att.name}`}
                   className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/80 text-ink-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                 >
                   <X className="w-2.5 h-2.5" />
@@ -276,8 +283,8 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
 
         <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1 min-w-0 h-7">
-            <IconButton label="Attach image (or Ctrl+V to paste)" onClick={onPickImages}>
-              <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <IconButton label="Attach files (or paste / drop them)" onClick={onPickImages}>
+              <Plus className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
             <DictationButton textareaRef={textareaRef} value={input} onChange={onInputChange} />
 

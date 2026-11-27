@@ -253,7 +253,7 @@ private struct CompactTraceRowView: View {
                     .background(SHColor.surfaceCode)
                 }
             }
-            .shRecessedWell(cornerRadius: SHRadius.md)
+            .shRecessedWell(cornerRadius: SHRadius.lg)
 
         case .thinking(let text, let summary):
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -305,7 +305,7 @@ private struct CompactTraceRowView: View {
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.md, elevation: .tile)
+                    .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg, elevation: .tile)
                     .padding(.bottom, 6)
                 }
             }
@@ -367,7 +367,7 @@ private struct CompactTraceRowView: View {
                         .padding(9)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .shRecessedWell(cornerRadius: SHRadius.md)
+                    .shRecessedWell(cornerRadius: SHRadius.lg)
                 }
             }
 
@@ -564,9 +564,9 @@ private struct CoalescedFileListCard: View {
             }
         }
         .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.75)
         )
     }
@@ -805,7 +805,7 @@ private struct VideoBlockView: View, Equatable {
     var body: some View {
         HStack(spacing: SHSpacing.md) {
             ZStack {
-                RoundedRectangle(cornerRadius: SHRadius.sm + 2, style: .continuous)
+                RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
                     .fill(SHColor.accentInfo.opacity(0.16))
                     .frame(width: 40, height: 40)
                 Image(systemName: "play.rectangle.fill")
@@ -864,7 +864,7 @@ private struct VideoBlockView: View, Equatable {
         }
         .padding(13)
         .background(SHColor.surfaceCode)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 }
 
@@ -1013,7 +1013,7 @@ struct CommandBlockView: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .shRecessedWell(cornerRadius: SHRadius.md)
+        .shRecessedWell(cornerRadius: SHRadius.lg)
     }
 
     /// Status words that mean the command finished normally; nothing is shown for these.
@@ -1395,7 +1395,7 @@ private struct QuestionBlockView: View {
                                 .padding(.horizontal, 13)
                                 .padding(.vertical, 10)
                                 .background(isChosen ? SHColor.statusSuccess.opacity(0.14) : SHColor.surfaceRaised)
-                                .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.lg, inset: 14), style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .disabled(answered)
@@ -1407,10 +1407,10 @@ private struct QuestionBlockView: View {
         .padding(14)
         .background(SHColor.surfacePopover)
         .overlay(
-            RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
                 .stroke(answered ? Color.clear : SHColor.statusWarning.opacity(0.28), lineWidth: 0.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 }
 
@@ -1444,7 +1444,7 @@ private struct NoticeBlockView: View, Equatable {
         }
         .padding(12)
         .background(SHColor.accentInfo.opacity(0.09))
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 }
 

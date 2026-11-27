@@ -52,13 +52,13 @@ public struct QueuedMessagesTrayView: View {
                     .padding(.horizontal, 9)
                     .padding(.vertical, 6)
                     .background(SHColor.surfaceRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.sm, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.lg, inset: 9), style: .continuous))
                 }
             }
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
         .background(SHColor.surfaceSubtle)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 }

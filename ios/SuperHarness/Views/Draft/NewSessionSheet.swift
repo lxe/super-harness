@@ -215,10 +215,10 @@ public struct NewSessionSheet: View {
             .padding(.vertical, 13)
             .background(isSelected ? color.opacity(0.15) : SHColor.surfaceSubtle)
             .overlay(
-                RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
                     .stroke(isSelected ? color.opacity(0.40) : Color.clear, lineWidth: 0.5)
             )
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         }
         .buttonStyle(.plain)
     }

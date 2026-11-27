@@ -900,7 +900,7 @@ struct SessionNoticeRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SHColor.statusDanger.opacity(0.09), in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .background(SHColor.statusDanger.opacity(0.09), in: RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("session.notice")
     }
@@ -1153,7 +1153,7 @@ private struct ThreadInfoTopSheet: View {
         HStack(alignment: .center, spacing: 12) {
             HarnessLogoView(harness: session.harness, size: 20)
                 .frame(width: 40, height: 40)
-                .background(accentTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(accentTint.opacity(0.16), in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(session.displayTitle)

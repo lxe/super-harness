@@ -330,7 +330,7 @@ private struct SHAttachmentThumbTile: View {
     private var fileTile: some View {
         HStack(spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.md, inset: 8), style: .continuous)
                     .fill(SHColor.surfaceBubble)
                     .frame(width: 32, height: 32)
                 if item.isUploading {
@@ -893,7 +893,7 @@ struct SHChoiceBar<Value: Hashable>: View {
                         .frame(height: 40)
                         .background(
                             isSelected ? Color.white.opacity(0.14) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.lg, inset: 4), style: .continuous)
                         )
                         .contentShape(Rectangle())
                 }
@@ -902,6 +902,6 @@ struct SHChoiceBar<Value: Hashable>: View {
             }
         }
         .padding(4)
-        .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 }

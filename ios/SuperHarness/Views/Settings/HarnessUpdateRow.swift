@@ -96,7 +96,7 @@ struct HarnessUpdateRow: View {
                 .foregroundStyle(SHColor.inkPrimary)
                 .padding(.horizontal, 12)
                 .frame(height: 30)
-                .shRaisedSurface(SHColor.surfaceBubble, cornerRadius: 15, elevation: .tile)
+                .shRaisedSurface(SHColor.surfaceBubble, cornerRadius: SHRadius.pill, elevation: .tile)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("harness.update.\(group.rawValue).\(title.lowercased())")

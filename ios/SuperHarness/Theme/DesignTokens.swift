@@ -108,6 +108,13 @@ public enum SHRadius {
     /// The composer and floating panels.
     public static let panel: CGFloat = 22
     public static let pill: CGFloat = 999
+
+    /// Radius for a shape nested inside another rounded shape, so the two corners stay
+    /// concentric: the outer radius minus the gap between them, never tighter than `sm`.
+    /// Standalone surfaces in the chat, lists and sheets use `lg`.
+    public static func concentric(_ outer: CGFloat, inset: CGFloat) -> CGFloat {
+        max(outer - inset, sm)
+    }
 }
 
 public enum SHTypography {

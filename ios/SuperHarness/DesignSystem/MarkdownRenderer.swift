@@ -770,9 +770,9 @@ private struct SHMarkdownTableView: View {
                 }
             }
             .background(SHColor.surfaceCode)
-            .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
                     .strokeBorder(SHColor.lineSubtle, lineWidth: 0.75)
             )
         }
@@ -828,9 +828,9 @@ public struct SHCodeFenceCard: View {
             }
         }
         .background(SHColor.surfaceCode)
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
                 .strokeBorder(SHColor.lineHairline, lineWidth: 0.75)
         )
     }

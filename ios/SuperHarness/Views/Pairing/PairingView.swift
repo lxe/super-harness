@@ -286,7 +286,7 @@ public struct PairingView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
     }
 
     // MARK: Actions

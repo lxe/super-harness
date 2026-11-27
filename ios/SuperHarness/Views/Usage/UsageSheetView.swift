@@ -141,7 +141,7 @@ public struct UsageSheetView: View {
                 HarnessUpdateRow(store: store, group: info.harness)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.md, elevation: .tile)
+                    .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.lg, elevation: .tile)
             }
             // Header
             HStack(alignment: .firstTextBaseline) {

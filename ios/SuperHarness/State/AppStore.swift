@@ -718,6 +718,7 @@ public final class AppStore {
             applyBootstrap(payload)
             hasBootstrapped = true
             clearStaleTranscriptActivity()
+            Task { [weak self] in await self?.refreshHarnessUpdateJobs() }
             scheduleSnapshotPersist()
             lastError = nil
             if connectionMode == .live {
@@ -1178,6 +1179,8 @@ public final class AppStore {
                 lastError = nil
             }
             stopAutoReconnectLoop()
+            // Every connect and reconnect: pick up update runs that progressed meanwhile.
+            Task { [weak self] in await self?.refreshHarnessUpdateJobs() }
             if recoveringFromOffline && mode == .live {
                 Task { [weak self] in
                     guard let self else { return }
@@ -2958,7 +2961,36 @@ public final class AppStore {
             }
         } catch {
             if handleAuthFailure(error) { return }
-            harnessUpdateJobs[group] = HarnessUpdateJob(id: "local", harness: group, phase: .failed, message: SHErrorPresentation.friendlyMessage(for: error.localizedDescription))
+            harnessUpdateJobs[group] = HarnessUpdateJob(id: "local", harness: group, phase: .failed, message: Self.updateErrorText(error))
+        }
+    }
+
+    /// The host refuses an update with a readable reason in the reply body, for example when
+    /// one is already running (409) or the host cannot update (404). That reason is shown as
+    /// it is; anything else gets the app's usual wording.
+    nonisolated static func updateErrorText(_ error: Error) -> String {
+        struct Refusal: Decodable { let error: String? }
+        switch error {
+        case SuperHarnessAPIError.httpError(_, let body):
+            if let parsed = try? JSONDecoder().decode(Refusal.self, from: Data(body.utf8)), let reason = parsed.error, !reason.isEmpty {
+                return reason
+            }
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, !trimmed.hasPrefix("{"), !trimmed.hasPrefix("<") { return trimmed }
+            return "The update could not be started"
+        case SuperHarnessAPIError.notFound:
+            return "Updates are not available on this host."
+        default:
+            return SHErrorPresentation.friendlyMessage(for: error.localizedDescription)
+        }
+    }
+
+    /// Loads the update runs the host knows about, so one that was already running when the
+    /// phone connected shows its progress at once instead of at its next step.
+    public func refreshHarnessUpdateJobs() async {
+        guard let jobs = try? await client.fetchHarnessUpdateJobs() else { return }
+        for job in jobs {
+            harnessUpdateJobs[job.harness] = job
         }
     }
 

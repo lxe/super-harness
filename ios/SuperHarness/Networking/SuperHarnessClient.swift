@@ -78,6 +78,8 @@ public protocol SuperHarnessClientProtocol: Sendable {
     /// Asks the host to run a harness's own updater. Progress arrives as `.harnessUpdate` events.
     func startHarnessUpdate(harness: HarnessGroup) async throws -> HarnessUpdateStartResponse
     func cancelHarnessUpdate(harness: HarnessGroup) async throws
+    /// Update runs the host knows about, including one already running when the phone connects.
+    func fetchHarnessUpdateJobs() async throws -> [HarnessUpdateJob]
     func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment
     func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment
     func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool
@@ -113,6 +115,7 @@ public extension SuperHarnessClientProtocol {
         HarnessUpdateStartResponse(ok: false, job: nil, error: "Updates are not available here.")
     }
     func cancelHarnessUpdate(harness: HarnessGroup) async throws {}
+    func fetchHarnessUpdateJobs() async throws -> [HarnessUpdateJob] { [] }
 }
 
 private final class LockedEventIdBox: @unchecked Sendable {
@@ -551,6 +554,12 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
     public func startHarnessUpdate(harness: HarnessGroup) async throws -> HarnessUpdateStartResponse {
         struct Empty: Encodable {}
         return try await request(path: "/api/harnesses/\(harness.rawValue)/update", method: "POST", body: Empty())
+    }
+
+    public func fetchHarnessUpdateJobs() async throws -> [HarnessUpdateJob] {
+        struct Reply: Decodable { let jobs: [HarnessUpdateJob]? }
+        let reply: Reply = try await request(path: "/api/harnesses/updates", method: "GET")
+        return reply.jobs ?? []
     }
 
     public func cancelHarnessUpdate(harness: HarnessGroup) async throws {

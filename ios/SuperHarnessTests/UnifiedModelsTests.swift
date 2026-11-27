@@ -1182,4 +1182,11 @@ final class UnifiedModelsTests: XCTestCase {
         let manual = HarnessUpdateInfo(current: "1", latest: "2", updateAvailable: true, method: "manual", manualHint: "Update from the app's own menu.")
         XCTAssertEqual(HarnessUpdateRow.content(info: manual, job: nil), .available(change: "1 → 2", canRun: false, hint: "Update from the app's own menu."))
     }
+
+    func testAHostRefusalOfAnUpdateShowsTheHostsOwnReason() {
+        XCTAssertEqual(AppStore.updateErrorText(SuperHarnessAPIError.httpError(409, #"{"ok":false,"error":"Pi is already updating."}"#)), "Pi is already updating.")
+        XCTAssertEqual(AppStore.updateErrorText(SuperHarnessAPIError.httpError(409, "Pi is already updating.")), "Pi is already updating.")
+        XCTAssertEqual(AppStore.updateErrorText(SuperHarnessAPIError.httpError(500, "")), "The update could not be started")
+        XCTAssertEqual(AppStore.updateErrorText(SuperHarnessAPIError.notFound("/api/harnesses/pi/update")), "Updates are not available on this host.")
+    }
 }

@@ -83,15 +83,11 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 .note { margin-top: 22px; font-size: 0.86rem; color: var(--ink-4); max-width: 36em; }
 
 .hero-art { position: relative; padding-bottom: 40px; }
-.window { margin: 0; border-radius: 14px; overflow: hidden; background: var(--rail); box-shadow: var(--deep), inset 0 1px 0 rgba(255, 255, 255, 0.07); }
-.window-bar { height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 12px; background: var(--subtle); }
-.window-bar i { width: 10px; height: 10px; border-radius: 50%; background: #2c2f38; }
-.phone {
-  margin: 0; position: relative; border-radius: 13.5% / 6.2%; padding: 2.6%;
-  background: linear-gradient(160deg, #3a3d46, #17191f 40%, #0c0d11);
-  box-shadow: var(--deep), inset 0 1px 1px rgba(255, 255, 255, 0.16);
-}
-.phone img { border-radius: 11.6% / 5.35%; width: 100%; background: var(--canvas); }
+/* Screenshots sit in a plain hairline border: no window bar, no phone body. */
+.window { margin: 0; border-radius: 12px; overflow: hidden; background: var(--rail); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: var(--deep); }
+.window img { display: block; width: 100%; }
+.phone { margin: 0; border-radius: 26px; overflow: hidden; background: var(--canvas); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: var(--deep); }
+.phone img { display: block; width: 100%; }
 .hero-phone { position: absolute; width: 27%; right: -3%; bottom: 0; }
 
 /* harness strip */

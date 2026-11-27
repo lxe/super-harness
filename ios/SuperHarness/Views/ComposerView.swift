@@ -436,6 +436,16 @@ public struct ComposerView: View {
                 .padding(.bottom, 11)
             }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 14, coordinateSpace: .local)
+                .onEnded { value in
+                    let dy = value.translation.height
+                    let dx = abs(value.translation.width)
+                    if dy > 22 && dy > dx * 1.25 {
+                        dismissKeyboard()
+                    }
+                }
+        )
         .photosPicker(
             isPresented: $isPhotoPickerPresented,
             selection: $selectedMediaItems,
@@ -923,6 +933,20 @@ public struct ComposerView: View {
         #endif
     }
 
+    private func dismissKeyboard() {
+        #if canImport(UIKit)
+        let resigned = UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        if resigned {
+            triggerHaptic(.light)
+        }
+        #endif
+    }
+
     private static func shortModelName(_ label: String) -> String {
         // Strip trailing parenthesized effort "(Medium)" when effort is already shown alongside.
         if let idx = label.range(of: " (") {
@@ -999,8 +1023,34 @@ enum ClipboardAttachables {
 // MARK: - Paste-Aware Auto-Sizing Composer Input (Supports Pasting Images, Videos, Files & Text)
 
 #if canImport(UIKit)
-private final class SHPasteInterceptingTextView: UITextView {
+private final class SHPasteInterceptingTextView: UITextView, UIGestureRecognizerDelegate {
     var onPasteMedia: (() -> Void)?
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDownToDismiss))
+        swipeDown.direction = .down
+        swipeDown.delegate = self
+        addGestureRecognizer(swipeDown)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func handleSwipeDownToDismiss() {
+        guard isFirstResponder, !isScrollEnabled || contentOffset.y <= 1 else { return }
+        resignFirstResponder()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
 
     private func clipboardHasAttachableMedia() -> Bool {
         let pb = UIPasteboard.general

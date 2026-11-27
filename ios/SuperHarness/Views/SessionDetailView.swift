@@ -270,6 +270,7 @@ public struct SessionDetailView: View {
                 uploadingAttachmentIds: store.uploadingAttachmentIds,
                 availableModels: availableModels,
                 reasoningLevels: availableReasoningLevels,
+                harnessDefaultEffort: HarnessGroup(rawValue: currentSession.harnessGroup.rawValue).flatMap { store.catalog?.defaultReasoning(for: $0) },
                 isSending: false,
                 isStreaming: isStreaming,
                 isAgentBusy: isBusy,

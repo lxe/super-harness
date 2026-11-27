@@ -28,6 +28,9 @@ public struct ComposerView: View {
     public let uploadingAttachmentIds: Set<String>
     public let availableModels: [HarnessModelOption]
     public let reasoningLevels: [String]
+    /// The harness's own default effort from the host's catalog, used when neither the session
+    /// nor its model names one.
+    public let harnessDefaultEffort: String?
     public let isSending: Bool
     public let isStreaming: Bool
     public let isAgentBusy: Bool
@@ -63,6 +66,7 @@ public struct ComposerView: View {
         uploadingAttachmentIds: Set<String> = [],
         availableModels: [HarnessModelOption] = [],
         reasoningLevels: [String] = [],
+        harnessDefaultEffort: String? = nil,
         isSending: Bool,
         isStreaming: Bool,
         isAgentBusy: Bool,
@@ -84,6 +88,7 @@ public struct ComposerView: View {
         self.uploadingAttachmentIds = uploadingAttachmentIds
         self.availableModels = availableModels
         self.reasoningLevels = reasoningLevels
+        self.harnessDefaultEffort = harnessDefaultEffort
         self.isSending = isSending
         self.isStreaming = isStreaming
         self.isAgentBusy = isAgentBusy
@@ -170,12 +175,46 @@ public struct ComposerView: View {
         return HarnessVisual.forKind(session.harness).label
     }
 
+    /// The effort the session is using. A session that reports none (most do: a harness only
+    /// records an effort that was set explicitly) runs at its model's default, or else the
+    /// harness's default. When none of these is known there is no effort to show; the highest
+    /// offered level is never assumed.
+    nonisolated static func resolvedEffort(
+        embedded: String?,
+        sessionEffort: String?,
+        modelDefault: String?,
+        harnessDefault: String?
+    ) -> String? {
+        for candidate in [embedded, sessionEffort, modelDefault, harnessDefault] {
+            if let candidate, !candidate.isEmpty { return candidate }
+        }
+        return nil
+    }
+
+    /// The catalog entry for the session's model, or the harness's default model when the
+    /// session names none.
+    private var currentModelOption: HarnessModelOption? {
+        if let raw = session.model, !raw.isEmpty {
+            return availableModels.first(where: { $0.matches(raw) })
+        }
+        return availableModels.first(where: { $0.isDefault == true })
+    }
+
+    private var activeEffort: String? {
+        Self.resolvedEffort(
+            embedded: Self.embeddedEffort(from: session.model),
+            sessionEffort: session.reasoningEffort,
+            modelDefault: currentModelOption?.defaultReasoningLevel,
+            harnessDefault: harnessDefaultEffort
+        )
+    }
+
     private var currentEffortLabel: String? {
         if let embedded = Self.embeddedEffort(from: session.model) {
             return embedded.capitalized
         }
         guard !reasoningLevels.isEmpty else { return nil }
-        return (session.reasoningEffort ?? reasoningLevels.last)?.capitalized
+        return activeEffort?.capitalized
     }
 
     /// Height of every control in the composer's bottom row (and the width of the round ones).
@@ -318,7 +357,6 @@ public struct ComposerView: View {
     private var combinedModelEffortPill: some View {
         if !availableModels.isEmpty, let onSelectModel {
             let currentStem = session.model.map(Self.baseModelStem)
-            let activeEffort = Self.embeddedEffort(from: session.model) ?? session.reasoningEffort ?? reasoningLevels.last
             let options = menuModelOptions
             SHModelEffortMenu(
                 models: options.map { item in

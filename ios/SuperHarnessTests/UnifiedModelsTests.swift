@@ -1189,4 +1189,15 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(AppStore.updateErrorText(SuperHarnessAPIError.httpError(500, "")), "The update could not be started")
         XCTAssertEqual(AppStore.updateErrorText(SuperHarnessAPIError.notFound("/api/harnesses/pi/update")), "Updates are not available on this host.")
     }
+
+    func testASessionWithoutAnEffortShowsItsDefaultNeverTheHighestLevel() {
+        // lxe started a session at medium and the composer showed Xhigh: the session reported
+        // no effort for a moment and the label fell back to the highest offered level.
+        XCTAssertEqual(ComposerView.resolvedEffort(embedded: nil, sessionEffort: "medium", modelDefault: "high", harnessDefault: "xhigh"), "medium")
+        XCTAssertEqual(ComposerView.resolvedEffort(embedded: nil, sessionEffort: nil, modelDefault: "high", harnessDefault: "medium"), "high")
+        XCTAssertEqual(ComposerView.resolvedEffort(embedded: nil, sessionEffort: nil, modelDefault: nil, harnessDefault: "medium"), "medium")
+        XCTAssertEqual(ComposerView.resolvedEffort(embedded: nil, sessionEffort: "", modelDefault: nil, harnessDefault: "medium"), "medium")
+        XCTAssertNil(ComposerView.resolvedEffort(embedded: nil, sessionEffort: nil, modelDefault: nil, harnessDefault: nil), "nothing known: no effort label")
+        XCTAssertEqual(ComposerView.resolvedEffort(embedded: "low", sessionEffort: "high", modelDefault: nil, harnessDefault: nil), "low", "an effort in the model id wins")
+    }
 }

@@ -40,6 +40,7 @@ import { SessionComposer } from './SessionComposer';
 import { SessionHeader } from './SessionHeader';
 import { reconcileById } from '../utils/reconcile';
 import { filesToAttachments, isImageAttachment } from '../utils/attachments';
+import { useStableCallback } from '../utils/useStableCallback';
 
 interface FailedUserEntry {
   msg: UnifiedMessage;
@@ -903,6 +904,17 @@ export const SessionPane: React.FC<Props> = ({
     setLightbox({ images, index });
   }, []);
 
+  // Stable identities for the memoized message views: these handlers close over `session`,
+  // which changes on every status refresh and would otherwise re-render the whole transcript.
+  const stableOpenPath = useStableCallback(handleMessageOpenPath);
+  const stableQuickReply = useStableCallback(handleQuickReply);
+  const stablePreviewImage = useStableCallback(handlePreviewImage);
+  const stableRetryFailed = useStableCallback(handleRetryFailed);
+  const stableDismissFailed = useStableCallback(handleDismissFailed);
+  const stableOpenSessionLink = useStableCallback((...args: Parameters<NonNullable<typeof onOpenSessionLink>>) =>
+    onOpenSessionLink?.(...args)
+  );
+
   const runPromoteToTmux = useCallback(async () => {
     if (!session) return;
     setRestartInTmuxBusy(true);
@@ -995,11 +1007,11 @@ export const SessionPane: React.FC<Props> = ({
                   <UserMessageView
                     key={msg.id}
                     msg={msg}
-                    onOpenPath={handleMessageOpenPath}
-                    onOpenSessionLink={onOpenSessionLink}
-                    onPreviewImage={handlePreviewImage}
-                    onRetryFailed={handleRetryFailed}
-                    onDismissFailed={handleDismissFailed}
+                    onOpenPath={stableOpenPath}
+                    onOpenSessionLink={stableOpenSessionLink}
+                    onPreviewImage={stablePreviewImage}
+                    onRetryFailed={stableRetryFailed}
+                    onDismissFailed={stableDismissFailed}
                   />
                 );
               }
@@ -1011,9 +1023,9 @@ export const SessionPane: React.FC<Props> = ({
                       <CoalescedBlockView
                         key={i}
                         block={b}
-                        onOpenPath={handleMessageOpenPath}
-                        onOpenSessionLink={onOpenSessionLink}
-                        onPreviewImage={handlePreviewImage}
+                        onOpenPath={stableOpenPath}
+                        onOpenSessionLink={stableOpenSessionLink}
+                        onPreviewImage={stablePreviewImage}
                       />
                     ))}
                   </div>
@@ -1024,10 +1036,10 @@ export const SessionPane: React.FC<Props> = ({
                 <AssistantMessageView
                   key={msg.id}
                   msg={msg}
-                  onOpenPath={handleMessageOpenPath}
-                  onOpenSessionLink={onOpenSessionLink}
-                  onQuickReply={handleQuickReply}
-                  onPreviewImage={handlePreviewImage}
+                  onOpenPath={stableOpenPath}
+                  onOpenSessionLink={stableOpenSessionLink}
+                  onQuickReply={stableQuickReply}
+                  onPreviewImage={stablePreviewImage}
                 />
               );
             })

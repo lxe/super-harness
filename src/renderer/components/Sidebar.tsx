@@ -145,6 +145,119 @@ const DropInsertionLine: React.FC<{ placement: ReorderPlacement; className?: str
   </div>
 );
 
+interface SessionRowApi {
+  openMenu: (s: UnifiedSession, x: number, y: number) => void;
+  pointerDown: (s: UnifiedSession, e: React.PointerEvent) => void;
+  click: (s: UnifiedSession, e: React.MouseEvent) => void;
+  hoverStart: (s: UnifiedSession) => void;
+  hoverEnd: () => void;
+}
+
+interface SessionRowProps {
+  session: UnifiedSession;
+  showLogo: boolean;
+  showPin: boolean;
+  isPrimary: boolean;
+  isSplit: boolean;
+  isMultiSelected: boolean;
+  isBeingDragged: boolean;
+  workingTone: ReturnType<typeof resolveHarnessOrbTone>;
+  apiRef: React.MutableRefObject<SessionRowApi>;
+}
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * One sidebar conversation row. Memoized on plain props (the session object
+ * is kept identical across IPC updates when unchanged), so background
+ * refreshes, hover cards and menus re-render only the rows that changed.
+ */
+const SessionRow = React.memo(function SessionRow({
+  session: s,
+  showLogo,
+  showPin,
+  isPrimary,
+  isSplit,
+  isMultiSelected,
+  isBeingDragged,
+  workingTone,
+  apiRef,
+}: SessionRowProps) {
+  const showInlinePin = showPin && showLogo;
+  const leadingIcon = showLogo ? (
+    <HarnessLogo harness={s.harness} size={15} />
+  ) : showPin ? (
+    <HarnessPinIcon className="w-3 h-3 text-ink-muted" />
+  ) : undefined;
+  const titleBadge = showInlinePin ? (
+    <span title="Pinned in harness" className="text-ink-muted">
+      <HarnessPinIcon className="w-3 h-3" />
+    </span>
+  ) : undefined;
+  const isOldThread = Boolean(s.updatedAt && Date.now() - s.updatedAt > SEVEN_DAYS_MS);
+
+  return (
+    <NavRow
+      data-session-id={s.id}
+      aria-current={isPrimary ? 'page' : undefined}
+      icon={leadingIcon}
+      unread={Boolean(s.unread)}
+      title={s.title}
+      tooltip={s.summary ? `${s.title}\n${s.summary}` : s.lastUserText ? `${s.title}\n${s.lastUserText}` : s.title}
+      titleBadge={titleBadge}
+      active={isPrimary}
+      secondaryActive={isSplit}
+      selected={isMultiSelected}
+      working={s.status === 'running'}
+      workingTone={workingTone}
+      className={isBeingDragged ? 'opacity-45' : undefined}
+      onPointerDown={(e) => apiRef.current.pointerDown(s, e)}
+      meta={
+        s.hostAddress || isOldThread ? (
+          <>
+            {isOldThread && (
+              <span title="Older than 7 days" className="text-ink-faint">
+                <Hourglass className="w-3 h-3" />
+              </span>
+            )}
+            {s.hostAddress ? (
+              <span
+                title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
+                className="text-ink-muted"
+              >
+                <Laptop className="w-3.5 h-3.5" />
+              </span>
+            ) : null}
+          </>
+        ) : undefined
+      }
+      hoverActions={
+        <button
+          type="button"
+          aria-label="Conversation actions"
+          title="Conversation actions"
+          className="w-6 h-6 inline-flex items-center justify-center text-ink-muted hover:text-ink-primary transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            apiRef.current.openMenu(s, rect.right - 220, rect.bottom + 4);
+          }}
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
+      }
+      onClick={(e) => apiRef.current.click(s, e)}
+      onMouseEnter={() => apiRef.current.hoverStart(s)}
+      onMouseLeave={() => apiRef.current.hoverEnd()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        apiRef.current.openMenu(s, e.clientX, e.clientY);
+      }}
+    />
+  );
+});
+
 const PINNED_ORDER_STORAGE_KEY = 'sh:pinnedOrder:v1';
 /** Drop-target id of the pinned strip (any chat dropped there is pinned at the drop position). */
 const PIN_DROP_ID = '__pinned__';
@@ -316,7 +429,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const didRevealInitialRef = useRef(false);
   const overlayThumbRef = useRef<HTMLDivElement | null>(null);
   const overlayScrollTimerRef = useRef<number | null>(null);
-  const [sidebarScrolling, setSidebarScrolling] = useState(false);
   const [sidebarThumbDragging, setSidebarThumbDragging] = useState(false);
 
   // Manual ordering for global pinned chats (never auto-reordered on activity)
@@ -415,6 +527,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
     window.addEventListener('pointercancel', onUp);
   };
 
+  const rowApiRef = useRef<SessionRowApi>(null as unknown as SessionRowApi);
+
   const scheduleHoverPrefetch = (sessionId: string) => {
     if (prefetchTimerRef.current !== null) {
       window.clearTimeout(prefetchTimerRef.current);
@@ -465,15 +579,17 @@ export const Sidebar: React.FC<Props> = React.memo(({
       thumb.style.height = `${thumbH}px`;
       thumb.style.transform = `translateY(${thumbTop}px)`;
     };
+    // Shows the thumb while scrolling via a data attribute, so scrolling never re-renders the sidebar.
     const onScroll = () => {
       syncThumb();
-      setSidebarScrolling(true);
+      const thumb = overlayThumbRef.current;
+      if (thumb && thumb.dataset.scrolling !== 'true') thumb.dataset.scrolling = 'true';
       if (overlayScrollTimerRef.current !== null) {
         window.clearTimeout(overlayScrollTimerRef.current);
       }
       overlayScrollTimerRef.current = window.setTimeout(() => {
         overlayScrollTimerRef.current = null;
-        setSidebarScrolling(false);
+        if (overlayThumbRef.current) delete overlayThumbRef.current.dataset.scrolling;
       }, 700);
     };
     syncThumb();
@@ -1342,6 +1458,48 @@ export const Sidebar: React.FC<Props> = React.memo(({
     });
   };
 
+  // Row handlers read the latest sidebar state through this ref, so memoized rows never hold stale closures.
+  rowApiRef.current = {
+    openMenu: (s, x, y) => {
+      let targets: UnifiedSession[];
+      if (selectedIds.size > 1 && selectedIds.has(s.id)) {
+        targets = visibleOrderedSessions.filter((xItem) => selectedIds.has(xItem.id));
+      } else {
+        if (selectedIds.size > 0) setSelectedIds(new Set());
+        targets = [s];
+      }
+      const maxY = window.innerHeight - 280;
+      const maxX = window.innerWidth - 230;
+      setCtxMenu({
+        x: Math.max(8, Math.min(x, maxX)),
+        y: Math.max(8, Math.min(y, maxY)),
+        sessions: targets,
+      });
+    },
+    pointerDown: (s, e) => {
+      if (e.button !== 0 || s.harnessGroup === 'master' || s.pinnedToTop) return;
+      if ((e.target as HTMLElement | null)?.closest('button, input, textarea')) return;
+      const draggedSessions =
+        selectedIds.size > 1 && selectedIds.has(s.id)
+          ? visibleOrderedSessions.filter(
+              (x) => selectedIds.has(x.id) && x.harnessGroup === s.harnessGroup
+            )
+          : [s];
+      pendingDragRef.current = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        sessions: draggedSessions.length > 0 ? draggedSessions : [s],
+        harnessGroup: s.harnessGroup,
+      };
+    },
+    click: (s, e) => handleRowClick(e, s),
+    hoverStart: (s) => {
+      if (s.id !== activeSessionId) scheduleHoverPrefetch(s.id);
+    },
+    hoverEnd: cancelHoverPrefetch,
+  };
+
   const renderSessionRow = (
     s: UnifiedSession,
     opts: { showLogo?: boolean; showPin?: boolean } = {}
@@ -1369,117 +1527,18 @@ export const Sidebar: React.FC<Props> = React.memo(({
       );
     }
 
-    const openRowMenu = (x: number, y: number) => {
-      let targets: UnifiedSession[];
-      if (selectedIds.size > 1 && selectedIds.has(s.id)) {
-        targets = visibleOrderedSessions.filter((xItem) => selectedIds.has(xItem.id));
-      } else {
-        if (selectedIds.size > 0) setSelectedIds(new Set());
-        targets = [s];
-      }
-      const maxY = window.innerHeight - 280;
-      const maxX = window.innerWidth - 230;
-      setCtxMenu({
-        x: Math.max(8, Math.min(x, maxX)),
-        y: Math.max(8, Math.min(y, maxY)),
-        sessions: targets,
-      });
-    };
-
-    const showInlinePin = showPin && showLogo;
-    const leadingIcon = showLogo ? (
-      <HarnessLogo harness={s.harness} size={15} />
-    ) : showPin ? (
-      <HarnessPinIcon className="w-3 h-3 text-ink-muted" />
-    ) : undefined;
-    const titleBadge = showInlinePin ? (
-      <span title="Pinned in harness" className="text-ink-muted">
-        <HarnessPinIcon className="w-3 h-3" />
-      </span>
-    ) : undefined;
-
-    const isOldThread = Boolean(
-      s.updatedAt && Date.now() - s.updatedAt > 7 * 24 * 60 * 60 * 1000
-    );
-    const isBeingDragged = Boolean(activeDrag?.sessions.some((d) => d.id === s.id));
-
     return (
-      <NavRow
+      <SessionRow
         key={s.id}
-        data-session-id={s.id}
-        aria-current={isPrimary ? 'page' : undefined}
-        icon={leadingIcon}
-        unread={Boolean(s.unread)}
-        title={s.title}
-        tooltip={s.summary ? `${s.title}\n${s.summary}` : s.lastUserText ? `${s.title}\n${s.lastUserText}` : s.title}
-        titleBadge={titleBadge}
-        active={isPrimary}
-        secondaryActive={isSplit}
-        selected={isMultiSelected}
-        working={s.status === 'running'}
+        session={s}
+        showLogo={showLogo}
+        showPin={showPin}
+        isPrimary={isPrimary}
+        isSplit={isSplit}
+        isMultiSelected={isMultiSelected}
+        isBeingDragged={Boolean(activeDrag?.sessions.some((d) => d.id === s.id))}
         workingTone={resolveHarnessOrbTone(s.harnessGroup, usage)}
-        className={isBeingDragged ? 'opacity-45' : undefined}
-        onPointerDown={(e) => {
-          if (e.button !== 0 || s.harnessGroup === 'master' || s.pinnedToTop) return;
-          if ((e.target as HTMLElement | null)?.closest('button, input, textarea')) return;
-          const draggedSessions =
-            selectedIds.size > 1 && selectedIds.has(s.id)
-              ? visibleOrderedSessions.filter(
-                  (x) => selectedIds.has(x.id) && x.harnessGroup === s.harnessGroup
-                )
-              : [s];
-          pendingDragRef.current = {
-            pointerId: e.pointerId,
-            startX: e.clientX,
-            startY: e.clientY,
-            sessions: draggedSessions.length > 0 ? draggedSessions : [s],
-            harnessGroup: s.harnessGroup,
-          };
-        }}
-        meta={
-          s.hostAddress || isOldThread ? (
-            <>
-              {isOldThread && (
-                <span title="Older than 7 days" className="text-ink-faint">
-                  <Hourglass className="w-3 h-3" />
-                </span>
-              )}
-              {s.hostAddress ? (
-                <span
-                  title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-                  className="text-ink-muted"
-                >
-                  <Laptop className="w-3.5 h-3.5" />
-                </span>
-              ) : null}
-            </>
-          ) : undefined
-        }
-        hoverActions={
-          <button
-            type="button"
-            aria-label="Conversation actions"
-            title="Conversation actions"
-            className="w-6 h-6 inline-flex items-center justify-center text-ink-muted hover:text-ink-primary transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none"
-            onClick={(e) => {
-              e.stopPropagation();
-              const rect = e.currentTarget.getBoundingClientRect();
-              openRowMenu(rect.right - 220, rect.bottom + 4);
-            }}
-          >
-            <MoreHorizontal className="w-3.5 h-3.5" />
-          </button>
-        }
-        onClick={(e) => handleRowClick(e, s)}
-        onMouseEnter={() => {
-          if (s.id !== activeSessionId) scheduleHoverPrefetch(s.id);
-        }}
-        onMouseLeave={cancelHoverPrefetch}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          openRowMenu(e.clientX, e.clientY);
-        }}
+        apiRef={rowApiRef}
       />
     );
   };
@@ -2063,9 +2122,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
           onPointerDown={handleOverlayThumbPointerDown}
           style={{ display: 'none' }}
           className={`group/thumb absolute right-0 top-0 z-30 w-3 flex justify-end pr-[2px] cursor-grab active:cursor-grabbing select-none transition-opacity duration-200 ${
-            sidebarScrolling || sidebarThumbDragging
+            sidebarThumbDragging
               ? 'opacity-100'
-              : 'opacity-0 group-hover/sb:opacity-100'
+              : 'opacity-0 group-hover/sb:opacity-100 data-[scrolling=true]:opacity-100'
           }`}
         >
           <div

@@ -1680,7 +1680,8 @@ struct SHModelEffortMenu: View, Equatable {
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
         let thinkingSectionHeight: CGFloat = efforts.isEmpty ? 0 : (14 + 24 + 10 + 56 + 12 + 1)
-        let modelHeaderHeight: CGFloat = (efforts.isEmpty ? 12 : 10) + 14 + 4
+        // The model list needs no heading; a little space separates it from the Thinking section.
+        let modelHeaderHeight: CGFloat = 6
         let totalHeight = thinkingSectionHeight + modelHeaderHeight + listHeight
 
         return VStack(alignment: .leading, spacing: 0) {
@@ -1733,14 +1734,7 @@ struct SHModelEffortMenu: View, Equatable {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                Text("MODEL")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(SHColor.inkFaint)
-                    .frame(height: 14, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.top, efforts.isEmpty ? 12 : 10)
-                    .padding(.bottom, 4)
+                Color.clear.frame(height: modelHeaderHeight)
 
                 ScrollViewReader { proxy in
                     ScrollView {

@@ -1405,12 +1405,8 @@ private struct QuestionBlockView: View {
             }
         }
         .padding(14)
-        .background(SHColor.surfacePopover)
-        .overlay(
-            RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
-                .stroke(answered ? Color.clear : SHColor.statusWarning.opacity(0.28), lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+        // Raised like the other chat cards; the amber "Input Requested" label marks it, not an outline.
+        .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.lg)
     }
 }
 

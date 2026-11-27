@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { codexTurnPolicy } from '../adapters/sessionConfig';
 import fs from 'node:fs';
 import http from 'node:http';
-import type { Socket } from 'node:net';
+import net, { type Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ImageAttachment, QueuedMessageItem, StreamEvent } from '../../shared/types';
@@ -306,6 +306,25 @@ export class CodexAppServerClient {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Whether a daemon is actually listening on the socket. The socket file outlives a daemon
+   * that was killed or lost in a reboot, and connecting to such a leftover file fails with
+   * ECONNREFUSED, so the file's existence alone does not mean the daemon is up.
+   */
+  isSocketAlive(timeoutMs = 800): Promise<boolean> {
+    if (!this.isSocketAvailable()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const probe = net.createConnection(this.socketPath);
+      const finish = (alive: boolean) => {
+        probe.destroy();
+        resolve(alive);
+      };
+      probe.once('connect', () => finish(true));
+      probe.once('error', () => finish(false));
+      probe.setTimeout(timeoutMs, () => finish(false));
+    });
   }
 
   hasActiveTurn(nativeThreadId: string): boolean {

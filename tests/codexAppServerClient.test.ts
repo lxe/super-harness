@@ -181,3 +181,35 @@ describe('WsFrameDecoder chunked large frames', () => {
     expect(frames[0].payload.equals(body)).toBe(true);
   });
 });
+
+describe('isSocketAlive', () => {
+  it('is false for a missing socket, false for a leftover file, true while something listens', async () => {
+    const fs = await import('node:fs');
+    const net = await import('node:net');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-sock-'));
+    try {
+      const missing = new CodexAppServerClient(path.join(dir, 'missing.sock'));
+      expect(await missing.isSocketAlive()).toBe(false);
+
+      // A daemon that died leaves its socket path behind; nothing answers there.
+      const stalePath = path.join(dir, 'stale.sock');
+      fs.writeFileSync(stalePath, '');
+      const stale = new CodexAppServerClient(stalePath);
+      expect(stale.isSocketAvailable()).toBe(true);
+      expect(await stale.isSocketAlive()).toBe(false);
+
+      const livePath = path.join(dir, 'live.sock');
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(livePath, resolve));
+      try {
+        expect(await new CodexAppServerClient(livePath).isSocketAlive()).toBe(true);
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

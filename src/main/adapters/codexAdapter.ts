@@ -1163,9 +1163,13 @@ export function createCodexDriver(): HarnessDriver {
     }
   );
 
-  /** Starts the managed app-server daemon if its socket is missing. */
+  /**
+   * Makes sure the managed app-server daemon is listening, starting it when it is not. A
+   * socket file left behind by a daemon that died counts as not running: `daemon start`
+   * replaces it.
+   */
   const ensureDaemon = async (): Promise<boolean> => {
-    if (appServer.isSocketAvailable()) return true;
+    if (await appServer.isSocketAlive()) return true;
     const bin = await resolveCodexBinary();
     if (!bin) return false;
     try {
@@ -1174,10 +1178,10 @@ export function createCodexDriver(): HarnessDriver {
       // fall through to socket check
     }
     for (let i = 0; i < 20; i++) {
-      if (appServer.isSocketAvailable()) return true;
+      if (await appServer.isSocketAlive()) return true;
       await new Promise((r) => setTimeout(r, 250));
     }
-    return appServer.isSocketAvailable();
+    return appServer.isSocketAlive();
   };
 
   return {

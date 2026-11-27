@@ -333,6 +333,26 @@ export function collectClaudeModels(): HarnessModelOption[] {
   return out;
 }
 
+let claudeRowsCache: { at: number; rows: HarnessModelOption[] } | null = null;
+
+/**
+ * The Claude picker row ID for a model a session reports, e.g. `claude-opus-5-5` → `opus[1m]`
+ * when that is the Opus row. Sessions log bare model names; clients (the iOS app in particular)
+ * match the current model to a row by exact ID, so an unmapped name shows no checkmark and no
+ * effort levels. Unknown models (e.g. an older Opus) are returned unchanged.
+ */
+export function canonicalClaudeModelId(model: string | undefined): string | undefined {
+  if (!model) return model;
+  const now = Date.now();
+  if (!claudeRowsCache || now - claudeRowsCache.at > 30_000) {
+    claudeRowsCache = { at: now, rows: collectClaudeModels() };
+  }
+  for (const row of claudeRowsCache.rows) {
+    if (row.id === model || row.aliases?.includes(model)) return row.id;
+  }
+  return model;
+}
+
 /**
  * Deduplicates and ranks project directories discovered across Codex, Claude,
  * and Antigravity into one clean list.

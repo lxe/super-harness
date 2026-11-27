@@ -55,3 +55,21 @@ describe('Claude model list mirrors the Claude Code /model picker', () => {
     expect(models.some((m) => m.isDefault)).toBe(false);
   });
 });
+
+describe('canonicalClaudeModelId', () => {
+  it('maps a bare model name a session reports to its picker row ID', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-claude-canon-'));
+    homes.push(home);
+    fs.mkdirSync(path.join(home, '.claude'));
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ model: 'opus[1m]' }));
+    fs.writeFileSync(path.join(home, '.claude.json'), '{}');
+    vi.stubEnv('HOME', home);
+    vi.resetModules();
+    const { canonicalClaudeModelId } = await import('../src/main/services/catalogService');
+    expect(canonicalClaudeModelId('claude-opus-5-5')).toBe('opus[1m]');
+    expect(canonicalClaudeModelId('claude-opus-5-5[1m]')).toBe('opus[1m]');
+    expect(canonicalClaudeModelId('claude-sonnet-5-5')).toBe('claude-sonnet-5-5');
+    expect(canonicalClaudeModelId('claude-opus-4-8')).toBe('claude-opus-4-8');
+    expect(canonicalClaudeModelId(undefined)).toBeUndefined();
+  });
+});

@@ -1403,6 +1403,8 @@ public struct HarnessModelOption: Codable, Identifiable, Sendable, Equatable, Ha
     public var group: String?
     public var reasoningLevels: [String]?
     public var defaultReasoningLevel: String?
+    /// Other IDs that mean this same model (e.g. `claude-opus-5-5` for the `opus[1m]` row).
+    public var aliases: [String]?
 
     public init(
         id: String,
@@ -1411,7 +1413,8 @@ public struct HarnessModelOption: Codable, Identifiable, Sendable, Equatable, Ha
         isDefault: Bool? = nil,
         group: String? = nil,
         reasoningLevels: [String]? = nil,
-        defaultReasoningLevel: String? = nil
+        defaultReasoningLevel: String? = nil,
+        aliases: [String]? = nil
     ) {
         self.id = id
         self.label = label
@@ -1420,6 +1423,12 @@ public struct HarnessModelOption: Codable, Identifiable, Sendable, Equatable, Ha
         self.group = group
         self.reasoningLevels = reasoningLevels
         self.defaultReasoningLevel = defaultReasoningLevel
+        self.aliases = aliases
+    }
+
+    /// True when a session's reported model refers to this option.
+    public func matches(_ modelId: String) -> Bool {
+        id == modelId || label == modelId || (aliases?.contains(modelId) ?? false)
     }
 }
 

@@ -159,7 +159,7 @@ public struct ComposerView: View {
 
     private var currentModelLabel: String {
         if let raw = session.model, !raw.isEmpty {
-            if let match = availableModels.first(where: { $0.id == raw || $0.label == raw }) {
+            if let match = availableModels.first(where: { $0.matches(raw) }) {
                 return Self.cleanBaseDisplayLabel(match.label)
             }
             return Self.cleanBaseDisplayLabel(Self.baseModelStem(raw))
@@ -325,7 +325,7 @@ public struct ComposerView: View {
                     SHModelEffortMenu.ModelItem(
                         id: item.stem,
                         label: item.displayLabel,
-                        isSelected: currentStem == item.stem || session.model == item.representative.id || session.model == item.representative.label
+                        isSelected: currentStem == item.stem || (session.model.map { item.representative.matches($0) } ?? false)
                     )
                 },
                 efforts: onSelectReasoningEffort == nil ? [] : reasoningLevels.map { level in

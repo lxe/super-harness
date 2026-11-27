@@ -51,7 +51,7 @@ public struct SessionDetailView: View {
             guard let currentId = currentSession.model else {
                 return availableModels.first(where: { $0.isDefault == true }) ?? availableModels.first
             }
-            return availableModels.first(where: { $0.id == currentId || $0.label == currentId })
+            return availableModels.first(where: { $0.matches(currentId) })
         }()
         let availableReasoningLevels = currentSession.isMaster ? [] : ReasoningEffortPolicy.offered(
             currentModelOption?.reasoningLevels ?? [],

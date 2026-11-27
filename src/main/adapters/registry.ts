@@ -7,6 +7,7 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 import { TranscriptCache } from '../services/transcriptCache';
+import { canonicalClaudeModelId } from '../services/catalogService';
 import type { ConfigStore } from '../store/configStore';
 import { listProcesses } from '../utils/system';
 import { captureTmuxPane } from './claudeAdapter';
@@ -115,14 +116,19 @@ export class HarnessRegistry {
       .map((raw) => {
         const lastUserText = raw.lastUserText ?? readLastUserText(raw.transcriptPath, raw.harnessGroup);
         const summary = this.summaryLookup(raw.id);
-        const s = lastUserText || summary ? { ...raw, lastUserText, summary } : raw;
+        const withText = lastUserText || summary ? { ...raw, lastUserText, summary } : raw;
+        // Claude sessions log bare model names; report the picker row's ID so clients match it.
+        const canonModel =
+          withText.harnessGroup === 'claude' ? canonicalClaudeModelId(withText.model) : withText.model;
+        const s = canonModel !== withText.model ? { ...withText, model: canonModel } : withText;
         const ov = state.overrides[s.id];
         if (!ov) return s;
         return {
           ...s,
           customTitle: ov.customTitle ?? s.customTitle,
           title: ov.customTitle || s.title,
-          model: ov.model || s.model,
+          model:
+            s.harnessGroup === 'claude' && ov.model ? canonicalClaudeModelId(ov.model) : ov.model || s.model,
           reasoningEffort: ov.reasoningEffort || s.reasoningEffort,
           permissionMode: ov.permissionMode || s.permissionMode,
           folderId: ov.folderId !== undefined ? ov.folderId : s.folderId,

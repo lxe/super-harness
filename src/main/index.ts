@@ -30,6 +30,7 @@ import { SessionSummarizer } from './services/sessionSummarizer';
 import { UsageService } from './services/usageService';
 import { ConfigStore } from './store/configStore';
 import { closeSqlitePool } from './utils/sqlite';
+import { notificationTextFromMarkdown } from './utils/notificationText';
 import { whichBinary } from './utils/system';
 
 // Expose our Electron PID to child agent processes (Codex, Claude, Antigravity, Muse)
@@ -510,11 +511,12 @@ const liveSync = new LiveSyncService(
           const sess = registry.getSession(transcript.sessionId);
           const lastAssistant = [...transcript.messages].reverse().find((m) => m.role === 'assistant');
           const snippet =
-            lastAssistant?.blocks
-              .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-              .map((b) => b.text.trim())
-              .join(' ')
-              .slice(0, 140) || 'Task completed';
+            notificationTextFromMarkdown(
+              lastAssistant?.blocks
+                .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                .map((b) => b.text.trim())
+                .join('\n\n') ?? ''
+            ) || 'Task completed';
           void pushNotifier.notify({
             kind: 'task_completed',
             sessionId: transcript.sessionId,

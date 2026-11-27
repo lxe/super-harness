@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { SessionStats } from '../../shared/types';
 import {
   priceAntigravityTokens,
@@ -20,6 +23,32 @@ export function inferContextWindowTokens(model?: string, harnessGroup?: string):
 }
 
 const KNOWN_CONTEXT_WINDOWS = [200_000, 400_000, 1_000_000, 2_000_000];
+
+let claudeDefaultCache: { file: string; mtimeMs: number; family: string | null } | null = null;
+
+/**
+ * The Claude model family (`opus`, `sonnet`…) whose default in ~/.claude/settings.json asks for
+ * the 1M window (e.g. `opus[1m]`), or null. Claude transcripts log a bare `claude-opus-5-5`
+ * whether or not the 1M window is on, so this is the only local signal for a fresh session.
+ */
+export function claudeLongContextDefaultFamily(settingsPath = path.join(os.homedir(), '.claude', 'settings.json')): string | null {
+  try {
+    const { mtimeMs } = fs.statSync(settingsPath);
+    if (claudeDefaultCache?.file === settingsPath && claudeDefaultCache.mtimeMs === mtimeMs) {
+      return claudeDefaultCache.family;
+    }
+    const model = String((JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as { model?: unknown }).model ?? '');
+    const family = /\[1m\]$/i.test(model) ? claudeModelFamily(model) : null;
+    claudeDefaultCache = { file: settingsPath, mtimeMs, family };
+    return family;
+  } catch {
+    return null;
+  }
+}
+
+function claudeModelFamily(model: string): string | null {
+  return model.toLowerCase().match(/^(?:claude-)?(opus|sonnet|haiku|fable)\b/)?.[1] ?? null;
+}
 
 /**
  * The inferred window, raised to the smallest known window that holds the most context the
@@ -93,7 +122,10 @@ export function computeAntigravitySessionStats(lines: string[]): SessionStats | 
  * Extracts per-session token totals, latest context window fill, and estimated API cost
  * from Claude JSONL lines (`assistant` messages with `message.usage`, deduplicated by message id).
  */
-export function computeClaudeSessionStats(lines: string[]): SessionStats | undefined {
+export function computeClaudeSessionStats(
+  lines: string[],
+  opts: { longContextFamily?: string | null } = {}
+): SessionStats | undefined {
   const seenMsgIds = new Map<
     string,
     { model: string; input: number; cacheWrite: number; cacheRead: number; output: number }
@@ -161,7 +193,11 @@ export function computeClaudeSessionStats(lines: string[]): SessionStats | undef
     totalTokens: inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens,
     contextUsedTokens: lastContextUsed,
     contextWindowTokens: contextWindowFittingPeak(
-      inferContextWindowTokens(lastModel, 'claude'),
+      lastModel && claudeModelFamily(lastModel) !== null &&
+        claudeModelFamily(lastModel) ===
+          ('longContextFamily' in opts ? opts.longContextFamily : claudeLongContextDefaultFamily())
+        ? 1_000_000
+        : inferContextWindowTokens(lastModel, 'claude'),
       peakContextUsed
     ),
     estimatedCostUsd: Number(estimatedCostUsd.toFixed(4)),

@@ -298,4 +298,29 @@ final class LiveE2ETests: XCTestCase {
         XCTAssertTrue(statusPill.waitForExistence(timeout: 4.0), "Native swipe-back must pop SessionDetailView back to SessionListView")
         XCTAssertFalse(composer.exists, "Composer must be gone after popping back")
     }
+
+    func testNewChatSendButtonStartsSession() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["SH_CONNECTION_MODE"] = "demo"
+        app.launch()
+
+        let newChat = app.buttons["New Chat"].firstMatch
+        XCTAssertTrue(newChat.waitForExistence(timeout: 6.0), "New Chat button should appear on the session list")
+        newChat.tap()
+
+        let input = app.descendants(matching: .any)["composer.input"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5.0), "New Chat page should show the composer")
+        input.tap()
+        input.typeText("Send button regression check")
+
+        let hero = app.descendants(matching: .any)["draft.project"].firstMatch
+        let send = app.descendants(matching: .any)["composer.send"].firstMatch
+        XCTAssertTrue(send.waitForExistence(timeout: 2.0))
+        send.tap()
+
+        // Tapping send starts the session and leaves the New Chat page.
+        let left = NSPredicate(format: "exists == false")
+        expectation(for: left, evaluatedWith: hero)
+        waitForExpectations(timeout: 6.0)
+    }
 }

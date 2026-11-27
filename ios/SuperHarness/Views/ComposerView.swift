@@ -681,7 +681,10 @@ public struct ComposerView: View {
                         triggerHaptic(.light)
                         handleSendTap(.steer)
                     } label: {
-                        Color.clear.frame(width: Self.controlSize, height: Self.controlSize)
+                        // Color.clear alone takes no taps: the shape makes the whole circle the hit area.
+                        Color.clear
+                            .frame(width: Self.controlSize, height: Self.controlSize)
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .disabled(!canSend)
@@ -691,7 +694,9 @@ public struct ComposerView: View {
                     triggerHaptic(.light)
                     handleSendTap(.steer)
                 } label: {
-                    Color.clear.frame(width: Self.controlSize, height: Self.controlSize)
+                    Color.clear
+                        .frame(width: Self.controlSize, height: Self.controlSize)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)

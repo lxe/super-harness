@@ -16,7 +16,8 @@ import type {
 import { DraftSessionPane, type DraftConversation } from './components/DraftSessionPane';
 import { FilePreviewDrawer, type PreviewTarget } from './components/FilePreviewDrawer';
 import { SessionPane, type ComposerDraft } from './components/SessionPane';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsModal, type SettingsTab } from './components/SettingsModal';
+import { DictationProvider } from './components/DictationButton';
 import { Sidebar, type SidebarFilterTab } from './components/Sidebar';
 import { resolveSessionLink } from './utils/format';
 import {
@@ -228,6 +229,11 @@ export const App: React.FC = () => {
   }, [resizingSidebar, sidebarWidth]);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
+  const openDictationSetup = useCallback(() => {
+    setSettingsTab('dictation');
+    setShowSettings(true);
+  }, []);
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -976,6 +982,7 @@ export const App: React.FC = () => {
   const masterMessages = state?.masterMessages ?? [];
 
   return (
+    <DictationProvider settings={state?.settings.dictation} openSetup={openDictationSetup}>
     <div className="h-screen w-screen flex overflow-hidden bg-surface-canvas text-ink-primary">
       <Sidebar
         width={sidebarWidth}
@@ -1204,12 +1211,17 @@ export const App: React.FC = () => {
           harnesses={harnesses}
           state={state}
           controlPort={controlPort}
-          onClose={() => setShowSettings(false)}
+          initialTab={settingsTab}
+          onClose={() => {
+            setShowSettings(false);
+            setSettingsTab(undefined);
+          }}
           onRefresh={() => void handleRefresh()}
           onUpdateSettings={(p) => void handleUpdateSettings(p)}
           onOrganize={(a) => void handleOrganize(a)}
         />
       )}
     </div>
+    </DictationProvider>
   );
 };

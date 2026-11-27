@@ -34,6 +34,7 @@ import {
   resolveModelSelectionChange,
   resolveSessionModelControls,
 } from '../utils/modelOptions';
+import { DictationButton } from './DictationButton';
 import { HarnessLogo } from './HarnessLogo';
 import { MasterEngineMenu } from './MasterEngineMenu';
 import type { PreviewImageItem } from './ImageLightbox';
@@ -280,6 +281,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
             <IconButton label="Attach image (or Ctrl+V to paste)" onClick={onPickImages}>
               <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
             </IconButton>
+            <DictationButton textareaRef={textareaRef} value={input} onChange={onInputChange} />
 
             {isMaster && masterConfig && onChangeMasterEngine ? (
               <MasterEngineMenu

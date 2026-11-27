@@ -29,6 +29,7 @@ import {
   resolveModelSelectionChange,
   resolveSessionModelControls,
 } from '../utils/modelOptions';
+import { DictationButton } from './DictationButton';
 import { HarnessLogo } from './HarnessLogo';
 import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
 
@@ -732,6 +733,11 @@ export const DraftSessionPane: React.FC<Props> = ({
                 >
                   <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
                 </IconButton>
+                <DictationButton
+                  textareaRef={textareaRef}
+                  value={draft.prompt}
+                  onChange={(prompt) => onUpdateDraft({ prompt })}
+                />
                 {/* Project Selector Popover */}
                 <div className="relative">
                   <button

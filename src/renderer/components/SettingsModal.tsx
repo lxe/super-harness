@@ -41,6 +41,8 @@ import {
   UnitNumberInput,
 } from '../ui';
 import { DictationSettingsPane } from './DictationSettingsPane';
+import { ShortcutRecorder } from './ShortcutRecorder';
+import { DEFAULT_DICTATION_SHORTCUT } from '../utils/shortcut';
 import { HarnessLogo } from './HarnessLogo';
 import { SuperHarnessMark } from './SuperHarnessMark';
 
@@ -1124,7 +1126,27 @@ export const SettingsModal: React.FC<Props> = ({
 
             {/* DICTATION */}
             {tab === 'dictation' && (
-              <DictationSettingsPane settings={settings} onUpdateSettings={onUpdateSettings} />
+              <DictationSettingsPane
+                settings={settings}
+                onUpdateSettings={onUpdateSettings}
+                extraRows={
+                  <SettingsRow
+                    label="Keyboard shortcut"
+                    description="Starts and stops dictation in the composer you're typing in"
+                    control={
+                      <ShortcutRecorder
+                        value={settings.dictation?.shortcut || DEFAULT_DICTATION_SHORTCUT}
+                        defaultValue={DEFAULT_DICTATION_SHORTCUT}
+                        onChange={(shortcut) =>
+                          onUpdateSettings({
+                            dictation: { ...(settings.dictation ?? { baseUrl: '' }), shortcut },
+                          })
+                        }
+                      />
+                    }
+                  />
+                }
+              />
             )}
 
             {/* MASTER AGENT */}

@@ -46,6 +46,7 @@ import { notificationTextFromMarkdown } from './utils/notificationText';
 import { ensureRichPath, whichBinary } from './utils/system';
 import { claudeTmuxRecords } from './adapters/claudeTmuxRevival';
 import { ensureLoginAutostart } from './services/loginAutostart';
+import { staleWorkingIds } from './utils/workingSet';
 
 // Ensure macOS/Linux GUI-launched packaged builds inherit Homebrew & user CLI bins
 ensureRichPath();
@@ -378,6 +379,8 @@ let liveSyncRef: LiveSyncService | null = null;
 
 const activeStreamingSessionIds = new Set<string>();
 const liveWorkingSessionIds = new Set<string>();
+/** When each id entered liveWorkingSessionIds (see staleWorkingIds). */
+const liveWorkingAddedAt = new Map<string, number>();
 let lastBroadcastWorkingKey = '';
 
 function getActiveWorkingSessionIds(): string[] {
@@ -462,6 +465,19 @@ async function refreshAndBroadcast() {
   refreshInFlight = registry
     .discover()
     .then((result) => {
+      // Drop sessions stuck as working because nothing watched them when they went idle.
+      const byId = new Map(result.sessions.map((s) => [s.id, s]));
+      for (const id of staleWorkingIds({
+        working: liveWorkingSessionIds,
+        addedAt: liveWorkingAddedAt,
+        watched: liveSyncRef?.getWatchedSessionIds() ?? new Set(),
+        discoveredRunning: (id) => (byId.has(id) ? byId.get(id)!.status === 'running' : undefined),
+        now: Date.now(),
+      })) {
+        liveWorkingSessionIds.delete(id);
+        liveWorkingAddedAt.delete(id);
+        sessionWorkingSinceMs.delete(id);
+      }
       const activeSet = new Set<string>([...activeStreamingSessionIds, ...liveWorkingSessionIds]);
       const sessions = result.sessions.map((s) =>
         !s.id.startsWith('master:') && activeSet.has(s.id) ? { ...s, status: 'running' as const } : s
@@ -553,6 +569,7 @@ const controlServer = new ControlServer(
     onMessageSent: (sessionId) => {
       if (!sessionId.startsWith('master:')) {
         liveWorkingSessionIds.add(sessionId);
+        liveWorkingAddedAt.set(sessionId, Date.now());
         broadcastActivityIfChanged();
       }
       if (liveSyncRef) {
@@ -614,6 +631,7 @@ const liveSync = new LiveSyncService(
       const wasWorking = liveWorkingSessionIds.has(transcript.sessionId);
       if (transcript.liveActivity.isWorking) {
         liveWorkingSessionIds.add(transcript.sessionId);
+        if (!wasWorking) liveWorkingAddedAt.set(transcript.sessionId, Date.now());
         if (!wasWorking) {
           sessionWorkingSinceMs.set(transcript.sessionId, Date.now());
           sessionNotifiedInputIds.delete(transcript.sessionId);

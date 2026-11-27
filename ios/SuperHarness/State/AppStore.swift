@@ -2214,6 +2214,13 @@ public final class AppStore {
         await dispatchPendingMessage(sessionId: sessionId, pending: pending)
     }
 
+    /// Drops a message that failed to send, removing its bubble without sending it.
+    public func dismissPendingMessage(for sessionId: String, messageId: String) {
+        guard var list = pendingOutgoingBySessionId[sessionId] else { return }
+        list.removeAll { $0.messageId == messageId }
+        pendingOutgoingBySessionId[sessionId] = list.isEmpty ? nil : list
+    }
+
     public func retryPendingMessage(for sessionId: String, messageId: String) {
         guard var list = pendingOutgoingBySessionId[sessionId],
               let idx = list.firstIndex(where: { $0.messageId == messageId }) else {

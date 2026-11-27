@@ -1223,3 +1223,16 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
   });
 
 });
+
+describe('Claude driver queueing', () => {
+  it('queues by sending without force, so the running turn is never interrupted', async () => {
+    const { createClaudeDriver } = await import('../src/main/adapters/claudeAdapter');
+    const driver = createClaudeDriver();
+    expect(typeof driver.queueMessage).toBe('function');
+    const calls: unknown[] = [];
+    const fake = { ...driver, sendMessage: async (...args: unknown[]) => (calls.push(args[4]), { ok: true }) };
+    const res = await driver.queueMessage!.call(fake, { id: 'claude:x' } as never, 'hi', undefined, {} as never);
+    expect(res).toEqual({ ok: true });
+    expect(calls).toEqual([{ force: false }]);
+  });
+});

@@ -123,6 +123,9 @@ public struct SessionDetailView: View {
                                         },
                                         onRetryPending: {
                                             store.retryPendingMessage(for: session.id, messageId: message.id)
+                                        },
+                                        onDismissPending: {
+                                            store.dismissPendingMessage(for: session.id, messageId: message.id)
                                         }
                                     )
                                     .equatable()
@@ -695,6 +698,7 @@ private struct MessageBubbleView: View, Equatable {
     let onTapImage: (LightboxPayload) -> Void
     let onLoadMedia: ((String) async -> Data?)?
     let onRetryPending: (() -> Void)?
+    var onDismissPending: (() -> Void)? = nil
 
     nonisolated static func == (lhs: MessageBubbleView, rhs: MessageBubbleView) -> Bool {
         lhs.message == rhs.message
@@ -770,22 +774,25 @@ private struct MessageBubbleView: View, Equatable {
                 }
 
                 if case .failed = pendingDeliveryState {
-                    Button {
-                        onRetryPending?()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.circle.fill")
-                                .font(.system(size: 10.5))
-                            Text("Not delivered · Retry")
-                                .font(SHTypography.micro.weight(.medium))
-                        }
-                        .foregroundStyle(SHColor.statusDanger)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 4)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 10.5))
+                        Text("Not delivered ·")
+                        Button("Retry") { onRetryPending?() }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                            .accessibilityIdentifier("message.retry")
+                        Text("·")
+                        Button("Dismiss") { onDismissPending?() }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                            .accessibilityIdentifier("message.dismiss")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("message.retry")
+                    .font(SHTypography.micro.weight(.medium))
+                    .foregroundStyle(SHColor.statusDanger)
+                    .padding(.trailing, 4)
                 }
             }
         }

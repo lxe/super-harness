@@ -2335,6 +2335,20 @@ export function createClaudeDriver(): HarnessDriver {
       return files;
     },
 
+    /**
+     * Queue for after the current turn. Claude queues natively on every path: a tmux TUI holds
+     * input typed while it works, and a stream-json worker puts user frames sent mid-turn into
+     * the CLI's input queue. So queueing is a send that never interrupts (no `force`).
+     */
+    async queueMessage(
+      session: UnifiedSession,
+      prompt: string,
+      attachments: ImageAttachment[] | undefined,
+      ctx: DispatchContext
+    ): Promise<SendMessageResult> {
+      return this.sendMessage(session, prompt, attachments, ctx, { force: false });
+    },
+
     async sendMessage(
       session: UnifiedSession,
       prompt: string,

@@ -1730,6 +1730,13 @@ public final class AppStore {
         return "Ungrouped"
     }
 
+    /// Folds case, spaces and underscores so "BlueBubbles Native" and "bluebubbles_native" match "bluebubbles-native".
+    static func normalizedProjectKey(_ name: String) -> String {
+        let lowered = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let dashed = lowered.replacingOccurrences(of: "[\\s_]+", with: "-", options: .regularExpression)
+        return dashed.replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+    }
+
     private func buildNativeSections(for group: HarnessGroup, items: [UnifiedSession], isAllView: Bool) -> [SessionListSection] {
         var result: [SessionListSection] = []
         let nativePinned = items.filter(\.pinned).sorted { $0.updatedAt > $1.updatedAt }
@@ -1810,25 +1817,39 @@ public final class AppStore {
             }
 
         case .project:
-            let dict = Dictionary(grouping: sorted) { Self.resolvedProjectSectionLabel(for: $0) }
+            // Same-named sections from every harness (and a matching folder project) coalesce into one group,
+            // keyed like the desktop's normalizeProjectKey.
+            let dict = Dictionary(grouping: sorted) {
+                Self.normalizedProjectKey(Self.resolvedProjectSectionLabel(for: $0))
+            }
+            var labels: [String: String] = [:]
+            for (key, items) in dict {
+                let fromSection = items.first { s in
+                    guard let sec = s.nativeSection?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+                    return !sec.isEmpty && sec != "Ungrouped"
+                }
+                labels[key] = Self.resolvedProjectSectionLabel(for: fromSection ?? items[0])
+            }
+            let ungroupedKey = Self.normalizedProjectKey("Ungrouped")
             let orderedKeys = dict.keys.sorted { lhs, rhs in
-                let lUngrouped = lhs == "Ungrouped"
-                let rUngrouped = rhs == "Ungrouped"
+                let lUngrouped = lhs == ungroupedKey
+                let rUngrouped = rhs == ungroupedKey
                 if lUngrouped != rUngrouped { return !lUngrouped }
                 let lTime = dict[lhs]?.map(\.updatedAt).max() ?? 0
                 let rTime = dict[rhs]?.map(\.updatedAt).max() ?? 0
                 if lTime != rTime { return lTime > rTime }
                 return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
             }
-            return orderedKeys.map { name in
-                let items = (dict[name] ?? []).sorted { a, b in
+            return orderedKeys.map { key in
+                let items = (dict[key] ?? []).sorted { a, b in
                     if a.pinned != b.pinned { return a.pinned }
                     return a.updatedAt > b.updatedAt
                 }
+                let name = labels[key] ?? key
                 return SessionListSection(
-                    id: "project-\(name)",
-                    title: name == "Ungrouped" ? "Conversations" : name,
-                    isProjectOrSectionGroup: name != "Ungrouped",
+                    id: "project-\(key)",
+                    title: key == ungroupedKey ? "Conversations" : name,
+                    isProjectOrSectionGroup: key != ungroupedKey,
                     sessions: items
                 )
             }

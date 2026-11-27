@@ -1193,6 +1193,17 @@ final class AppStoreTests: XCTestCase {
         }
     }
 
+    func testThinkingSliderLabelsSitUnderTheirDots() {
+        // Row 300 wide, dots at 16, 105.33, 194.67, 284.
+        let leading = { (i: Int, x: CGFloat, w: CGFloat) in
+            SHThinkingEffortSlider.stopLabelLeading(index: i, count: 4, stopX: x, labelWidth: w, rowWidth: 300)
+        }
+        XCTAssertEqual(leading(0, 16, 24), 0)                       // first label flush left
+        XCTAssertEqual(leading(3, 284, 36), 264)                    // last label flush right
+        XCTAssertEqual(leading(1, 105.33, 24), 93.33, accuracy: 0.01) // centred under its dot
+        XCTAssertEqual(leading(2, 290, 40), 260)                    // pulled in rather than past the end
+    }
+
     func testThinkingSliderStopsAndCoalescedModelEffortResolution() {
         // Discrete stop snapping & clamping
         XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: -10, trackWidth: 200, count: 4), 0)

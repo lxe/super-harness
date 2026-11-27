@@ -1357,6 +1357,17 @@ public struct SHThinkingEffortSlider: View {
         }
     }
 
+    /// Leading x of a stop label: the first and last labels are flush with the row's ends, and a
+    /// middle label is centred on its dot at `stopX`, kept inside the row.
+    public nonisolated static func stopLabelLeading(
+        index: Int, count: Int, stopX: CGFloat, labelWidth: CGFloat, rowWidth: CGFloat
+    ) -> CGFloat {
+        let maxLeading = max(0, rowWidth - labelWidth)
+        if index == 0 { return 0 }
+        if index == count - 1 { return maxLeading }
+        return min(max(stopX - labelWidth / 2, 0), maxLeading)
+    }
+
     /// Maps a horizontal touch location inside `trackWidth` to the nearest discrete stop index.
     public nonisolated static func nearestStopIndex(x: CGFloat, trackWidth: CGFloat, count: Int) -> Int {
         guard count > 1, trackWidth > 0 else { return 0 }
@@ -1525,33 +1536,41 @@ public struct SHThinkingEffortSlider: View {
                 }
             }
 
-            // Tappable discrete stop labels aligned across the track (fixed weight & height to prevent layout shift)
-            HStack(spacing: 0) {
-                ForEach(Array(levels.enumerated()), id: \.offset) { offset, level in
-                    let isSelected = offset == idx
-                    Button {
-                        if offset != idx {
-                            #if canImport(UIKit)
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            #endif
-                            onSelect(level)
+            // Tappable stop labels: the end labels sit flush with the track's ends, and each middle
+            // label is centred under its own dot (pulled in only if it would run past an end).
+            GeometryReader { geo in
+                let rowWidth = max(trackHeight, geo.size.width)
+                let usableWidth = max(1, rowWidth - travelPadding * 2)
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(levels.enumerated()), id: \.offset) { offset, level in
+                        let isSelected = offset == idx
+                        let stopX = travelPadding + usableWidth * (count > 1 ? CGFloat(offset) / CGFloat(count - 1) : 0)
+                        Button {
+                            if offset != idx {
+                                #if canImport(UIKit)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
+                                onSelect(level)
+                            }
+                        } label: {
+                            Text(Self.compactStopLabel(for: level, totalStops: count))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkFaint)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .frame(height: 18)
+                                .contentShape(Rectangle().inset(by: -6))
                         }
-                    } label: {
-                        Text(Self.compactStopLabel(for: level, totalStops: count))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkFaint)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .frame(
-                                maxWidth: .infinity,
-                                alignment: offset == 0 ? .leading : (offset == count - 1 ? .trailing : .center)
+                        .buttonStyle(.plain)
+                        .alignmentGuide(.leading) { d in
+                            -Self.stopLabelLeading(
+                                index: offset, count: count, stopX: stopX, labelWidth: d.width, rowWidth: rowWidth
                             )
-                            .frame(height: 18)
-                            .contentShape(Rectangle())
+                        }
+                        .accessibilityIdentifier("thinking.stop.\(level.lowercased())")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("thinking.stop.\(level.lowercased())")
                 }
+                .frame(width: rowWidth, height: 18, alignment: .topLeading)
             }
             .frame(height: 18)
         }

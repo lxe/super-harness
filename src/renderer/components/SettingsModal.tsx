@@ -8,6 +8,7 @@ import {
   Cpu,
   FolderOpen,
   GripVertical,
+  Mic,
   Pencil,
   Plus,
   RefreshCw,
@@ -39,10 +40,11 @@ import {
   Switch,
   UnitNumberInput,
 } from '../ui';
+import { DictationSettingsPane } from './DictationSettingsPane';
 import { HarnessLogo } from './HarnessLogo';
 import { SuperHarnessMark } from './SuperHarnessMark';
 
-export type SettingsTab = 'workspace' | 'apps' | 'harnesses' | 'master';
+export type SettingsTab = 'workspace' | 'apps' | 'dictation' | 'harnesses' | 'master';
 
 interface Props {
   harnesses: HarnessDetection[];
@@ -77,6 +79,13 @@ const NAV_ITEMS: NavItem[] = [
     section: 'General',
     keywords: 'editor terminal file manager links click previewer',
     Icon: AppWindow,
+  },
+  {
+    id: 'dictation',
+    label: 'Dictation',
+    section: 'General',
+    keywords: 'dictation voice speech microphone mic transcription whisper yapyap server shortcut',
+    Icon: Mic,
   },
   {
     id: 'harnesses',
@@ -1111,6 +1120,11 @@ export const SettingsModal: React.FC<Props> = ({
                   />
                 </SettingsGroup>
               </div>
+            )}
+
+            {/* DICTATION */}
+            {tab === 'dictation' && (
+              <DictationSettingsPane settings={settings} onUpdateSettings={onUpdateSettings} />
             )}
 
             {/* MASTER AGENT */}

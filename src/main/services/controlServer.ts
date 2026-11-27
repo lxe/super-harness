@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { ORCHESTRATOR_MEMORY_PATH, readOrchestratorMemory, writeOrchestratorMemory } from './orchestratorMemory';
+import { DictationError, audioExtensionFor, checkDictationServer, transcribeAudio } from './dictation';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -135,38 +136,26 @@ interface BufferedEvent {
 
 const SESSION_SCOPED_EVENTS = new Set(['transcript', 'transcript_updated']);
 
-interface DictationServerConfig {
-  url: string;
-  token: string;
+/**
+ * The state sent to phones and MCP clients: settings minus secrets (the legacy mobile token,
+ * the dictation API key). The desktop renderer gets the full state over IPC instead.
+ */
+export function redactStateForClients<T extends { settings?: SuperHarnessSettings }>(state: T): T {
+  if (!state || typeof state !== 'object' || !state.settings) return state;
+  const settings = { ...state.settings };
+  if (settings.mobileApi) {
+    const { token: _token, ...mobileRest } = settings.mobileApi;
+    settings.mobileApi = mobileRest as typeof settings.mobileApi;
+  }
+  if (settings.dictation) {
+    const { apiKey, ...dictRest } = settings.dictation;
+    settings.dictation = { ...dictRest, ...(apiKey ? { hasApiKey: true } : {}) } as typeof settings.dictation;
+  }
+  return { ...state, settings };
 }
 
-function readLocalYapYapConfig(): DictationServerConfig | null {
-  try {
-    const cfgPath = path.join(os.homedir(), '.config', 'yapyap', 'config.toml');
-    if (!fs.existsSync(cfgPath)) return null;
-    const raw = fs.readFileSync(cfgPath, 'utf8');
-    let inServer = false;
-    let url = '';
-    let token = '';
-    for (const rawLine of raw.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith('#')) continue;
-      if (line.startsWith('[')) {
-        inServer = line === '[server]';
-        continue;
-      }
-      if (!inServer) continue;
-      const urlMatch = line.match(/^url\s*=\s*["']([^"']+)["']/);
-      if (urlMatch) url = urlMatch[1].replace(/\/+$/, '');
-      const tokMatch = line.match(/^token\s*=\s*["']([^"']+)["']/);
-      if (tokMatch) token = tokMatch[1];
-    }
-    if (!url) return null;
-    return { url, token };
-  } catch {
-    return null;
-  }
-}
+/** Settings a phone may not change through POST /api/settings. */
+const HOST_ONLY_SETTING_KEYS = ['mobileApi', 'dictation'] as const;
 
 const MEDIA_MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -328,6 +317,9 @@ export class ControlServer {
 
     // Cap mobile SSE transcript payloads to the tail 20 messages and compact collapsed command/tool output.
     let payload: unknown = data;
+    if (event === 'state' && data && typeof data === 'object') {
+      payload = redactStateForClients(data as { settings?: SuperHarnessSettings });
+    }
     if (event === 'transcript' && data && typeof data === 'object') {
       const tr = data as { messages?: unknown[]; hasMore?: boolean };
       const capped =
@@ -453,98 +445,34 @@ export class ControlServer {
         }
 
         if (req.method === 'GET' && url.pathname === '/api/dictate/status') {
-          const overrideUrl = String(req.headers['x-dictation-url'] || '').trim().replace(/\/+$/, '');
-          const cfg = overrideUrl
-            ? { url: overrideUrl, token: String(req.headers['x-dictation-token'] || '') }
-            : readLocalYapYapConfig();
-          if (!cfg) {
-            sendJson({ ok: true, configured: false, healthy: false });
-            return;
-          }
-          try {
-            const ac = new AbortController();
-            const timer = setTimeout(() => ac.abort(), 3000);
-            const hRes = await fetch(`${cfg.url}/health`, { signal: ac.signal });
-            clearTimeout(timer);
-            const info = hRes.ok ? ((await hRes.json().catch(() => ({}))) as Record<string, unknown>) : {};
-            sendJson({
-              ok: true,
-              configured: true,
-              url: cfg.url,
-              healthy: hRes.ok,
-              model: typeof info.model === 'string' ? info.model : undefined,
-            });
-          } catch (err) {
-            sendJson({
-              ok: true,
-              configured: true,
-              url: cfg.url,
-              healthy: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          sendJson(await checkDictationServer(this.store.getState().settings.dictation, 3000));
           return;
         }
 
         if (req.method === 'POST' && url.pathname === '/api/dictate') {
-          const overrideUrl = String(req.headers['x-dictation-url'] || '').trim().replace(/\/+$/, '');
-          const overrideToken = String(req.headers['x-dictation-token'] || '').trim();
-          const localCfg = readLocalYapYapConfig();
-          const targetUrl = overrideUrl || localCfg?.url || '';
-          const targetToken = overrideUrl ? overrideToken : localCfg?.token || '';
-          if (!targetUrl) {
-            sendJson({ ok: false, error: 'Dictation server not configured on host (~/.config/yapyap/config.toml)' }, 503);
-            return;
-          }
           const t0 = Date.now();
           const audioBuf = await readRawBody();
           const readMs = Date.now() - t0;
-          if (audioBuf.length === 0) {
-            sendJson({ ok: false, error: 'Empty audio payload' }, 400);
-            return;
-          }
-          const contentType = String(req.headers['content-type'] || 'audio/wav').split(';')[0].trim();
-          const ext = contentType.includes('m4a') || contentType.includes('mp4')
-            ? 'm4a'
-            : contentType.includes('ogg')
-              ? 'ogg'
-              : 'wav';
-          const language = url.searchParams.get('language') || '';
-          const prompt = url.searchParams.get('prompt') || '';
-
-          const form = new FormData();
-          form.append('file', new Blob([new Uint8Array(audioBuf)], { type: contentType }), `dictation.${ext}`);
-          if (language) form.append('language', language);
-          if (prompt) form.append('prompt', prompt);
-          form.append('response_format', 'json');
-
-          const headers: Record<string, string> = {};
-          if (targetToken) headers.Authorization = `Bearer ${targetToken}`;
-
-          const tUp = Date.now();
-          const upRes = await fetch(`${targetUrl}/v1/audio/transcriptions`, {
-            method: 'POST',
-            headers,
-            body: form,
-          });
-          const rawText = await upRes.text();
-          const yapyapMs = Date.now() - tUp;
-          console.log(
-            `[ControlServer] /api/dictate ${ext} ${audioBuf.length}B read=${readMs}ms yapyap=${yapyapMs}ms status=${upRes.status}`
-          );
-          if (!upRes.ok) {
-            sendJson({ ok: false, error: `YapYap HTTP ${upRes.status}: ${rawText.slice(0, 240)}` }, 502);
-            return;
-          }
-          let text = rawText.trim();
+          const contentType = String(req.headers['content-type'] || 'audio/wav');
           try {
-            const parsed = JSON.parse(rawText) as { text?: string };
-            if (typeof parsed.text === 'string') text = parsed.text.trim();
-          } catch {
-            // plain text response
+            const result = await transcribeAudio(this.store.getState().settings.dictation, audioBuf, contentType, {
+              language: url.searchParams.get('language') || undefined,
+              prompt: url.searchParams.get('prompt') || undefined,
+            });
+            console.log(
+              `[ControlServer] /api/dictate ${audioExtensionFor(contentType)} ${audioBuf.length}B read=${readMs}ms upstream=${result.timing.upstreamMs}ms`
+            );
+            // `timing` lets clients separate transcription time from network/proxy overhead
+            // (`yapyapMs` is the older name for `upstreamMs`, kept for existing phone builds).
+            sendJson({
+              ok: true,
+              text: result.text,
+              timing: { readMs, upstreamMs: result.timing.upstreamMs, yapyapMs: result.timing.upstreamMs },
+            });
+          } catch (err) {
+            const status = err instanceof DictationError ? err.statusCode : 502;
+            sendJson({ ok: false, error: err instanceof Error ? err.message : String(err) }, status);
           }
-          // `timing` lets clients separate YapYap time from network/proxy overhead.
-          sendJson({ ok: true, text, timing: { readMs, yapyapMs } });
           return;
         }
 
@@ -653,7 +581,7 @@ export class ControlServer {
             harnesses,
             sessions,
             activeWorkingSessionIds,
-            state: this.store.getState(),
+            state: redactStateForClients(this.store.getState()),
             usage,
             catalog,
           });
@@ -1069,9 +997,10 @@ export class ControlServer {
 
         if (req.method === 'POST' && url.pathname === '/api/settings') {
           const body = await readBody();
+          for (const key of HOST_ONLY_SETTING_KEYS) delete body[key];
           const state = this.store.updateSettings(body as Partial<SuperHarnessSettings>);
           await this.triggerRefresh();
-          sendJson({ ok: true, settings: state.settings });
+          sendJson({ ok: true, settings: redactStateForClients(state).settings });
           return;
         }
 

@@ -64,6 +64,10 @@ const api: SuperHarnessApi = {
   openExternalUrl: (url: string) => ipcRenderer.invoke('sh:open-external', url),
   getUsage: (force?: boolean) => ipcRenderer.invoke('sh:get-usage', force),
   restartApp: (opts?: { build?: boolean }) => ipcRenderer.invoke('sh:restart-app', opts),
+  getDictationStatus: (draft?: import('../shared/types').DictationSettings) =>
+    ipcRenderer.invoke('sh:dictation-status', draft),
+  transcribeAudio: (audio: Uint8Array, mimeType: string) =>
+    ipcRenderer.invoke('sh:dictate', audio, mimeType),
 
   onStreamEvent: (cb: (ev: StreamEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: StreamEvent) => cb(payload);

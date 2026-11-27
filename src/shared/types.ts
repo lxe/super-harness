@@ -379,7 +379,38 @@ export interface MobileApiSettings {
   enabled: boolean;
   bindHost: string;
   port: number;
+  /** Legacy shared Bearer token (phones set up before pairing). Still accepted on every route. */
   token: string;
+}
+
+/**
+ * The desktop's one dictation server: an OpenAI-compatible transcription endpoint
+ * (POST {baseUrl}/v1/audio/transcriptions). Phones never talk to it directly; they send
+ * audio to the host's /api/dictate, which proxies it here.
+ */
+export interface DictationSettings {
+  baseUrl: string;
+  /** Sent as `Authorization: Bearer <apiKey>` when set. */
+  apiKey?: string;
+  model?: string;
+  language?: string;
+  /** Desktop shortcut that toggles recording in the focused composer (default Ctrl+Shift+Space). */
+  shortcut?: string;
+}
+
+export interface DictationStatus {
+  ok: boolean;
+  configured: boolean;
+  healthy: boolean;
+  model?: string;
+  error?: string;
+}
+
+export interface DictationResult {
+  ok: boolean;
+  text?: string;
+  error?: string;
+  timing?: { upstreamMs: number };
 }
 
 export interface SuperHarnessSettings {
@@ -398,6 +429,7 @@ export interface SuperHarnessSettings {
   defaultNewSessionCwd: string;
   apps: ExternalAppsSettings;
   mobileApi?: MobileApiSettings;
+  dictation?: DictationSettings;
   /** Background one-line thread summaries for list rows (default: enabled, Claude Haiku). */
   summaries?: SummarySettings;
 }
@@ -620,6 +652,10 @@ export interface SuperHarnessApi {
   openExternalUrl: (url: string) => Promise<{ ok: boolean }>;
   getUsage: (force?: boolean) => Promise<UsageSnapshot>;
   restartApp: (opts?: { build?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+  /** Checks the saved dictation server, or `draft` settings when given (Settings → Test). */
+  getDictationStatus: (draft?: DictationSettings) => Promise<DictationStatus>;
+  /** Sends recorded audio to the main process, which proxies it to the dictation server. */
+  transcribeAudio: (audio: Uint8Array, mimeType: string) => Promise<DictationResult>;
   onStreamEvent: (cb: (ev: StreamEvent) => void) => () => void;
   onTranscriptUpdated: (cb: (result: SessionTranscriptResult) => void) => () => void;
   onStateChanged: (cb: (state: SuperHarnessState) => void) => () => void;

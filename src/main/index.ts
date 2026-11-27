@@ -7,6 +7,8 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import type {
+  DictationResult,
+  DictationSettings,
   HarnessGroup,
   ImageAttachment,
   OrganizeAction,
@@ -17,6 +19,7 @@ import type {
 import { HarnessRegistry } from './adapters/registry';
 import { createProjectDirectory, HarnessCatalogService } from './services/catalogService';
 import { ControlServer } from './services/controlServer';
+import { checkDictationServer, transcribeAudio } from './services/dictation';
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';
@@ -894,6 +897,23 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('sh:refresh-summaries', async () => sessionSummarizer.refresh({ force: true }));
+
+  ipcMain.handle('sh:dictation-status', async (_ev, draft?: DictationSettings) =>
+    checkDictationServer(draft ?? store.getState().settings.dictation)
+  );
+
+  ipcMain.handle(
+    'sh:dictate',
+    async (_ev, audio: Uint8Array, mimeType: string): Promise<DictationResult> => {
+      try {
+        const buf = Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength);
+        const res = await transcribeAudio(store.getState().settings.dictation, buf, mimeType);
+        return { ok: true, text: res.text, timing: res.timing };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  );
 
   ipcMain.handle('sh:clear-master', async () => {
     return store.clearMasterMessages();

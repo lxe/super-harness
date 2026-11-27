@@ -9,6 +9,7 @@ import type {
   SuperHarnessState,
   UnifiedMessage,
 } from '../../shared/types';
+import { readYapYapConfig } from '../services/dictation';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'super-harness');
 const STATE_FILE = path.join(CONFIG_DIR, 'state.json');
@@ -93,6 +94,7 @@ export class ConfigStore {
   constructor() {
     const hadStateFile = fs.existsSync(STATE_FILE);
     this.state = this.load();
+    if (this.migrateDictationFromYapYap()) this.save();
     if (hadStateFile) {
       try {
         const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) as Partial<SuperHarnessState>;
@@ -103,6 +105,18 @@ export class ConfigStore {
         // ignore parse errors
       }
     }
+  }
+
+  /**
+   * Before settings.dictation existed the host read its dictation server from
+   * ~/.config/yapyap/config.toml. Copy that into settings once so existing setups keep working.
+   */
+  private migrateDictationFromYapYap(): boolean {
+    if (this.state.settings.dictation) return false;
+    const yap = readYapYapConfig();
+    if (!yap) return false;
+    this.state.settings.dictation = { baseUrl: yap.baseUrl, ...(yap.apiKey ? { apiKey: yap.apiKey } : {}) };
+    return true;
   }
 
   private load(): SuperHarnessState {
@@ -211,6 +225,11 @@ export class ConfigStore {
         token: this.state.settings.mobileApi?.token || crypto.randomBytes(24).toString('hex'),
         ...(patch.mobileApi ?? {}),
       },
+      // Partial patches merge; an empty baseUrl means "not configured" (kept, so the one-time
+      // YapYap prefill doesn't come back).
+      dictation: patch.dictation
+        ? { ...(this.state.settings.dictation ?? { baseUrl: '' }), ...patch.dictation }
+        : this.state.settings.dictation,
     };
     this.save();
     this.emit();

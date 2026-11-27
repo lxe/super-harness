@@ -433,8 +433,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                         ignoreRef={thinkingTriggerRef}
                         className="absolute left-0 bottom-full mb-2 z-50 w-72"
                       >
-                        <MenuSectionLabel>Thinking effort</MenuSectionLabel>
-                        <div className="space-y-1 mt-1">
+                        <div className="space-y-1">
                           {modelControls.thinkingLevels.map((lvl) => {
                             const isSelected = modelControls.activeEffort === lvl;
                             const isDefault = modelControls.defaultEffort === lvl;

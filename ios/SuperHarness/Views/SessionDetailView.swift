@@ -918,7 +918,7 @@ struct SessionNoticeRow: View {
 private struct SHClearTopScrollEdgeModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.scrollEdgeEffectStyle(.none, for: .top)
+            content.scrollEdgeEffectHidden(true, for: .all)
         } else {
             content
         }

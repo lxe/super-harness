@@ -1171,6 +1171,9 @@ public struct StreamEvent: Codable, Sendable, Equatable {
     public var text: String?
     public var block: UnifiedBlock?
     public var error: String?
+    /// On a text delta: the id of the text item it belongs to. A new id means a new
+    /// paragraph. Harnesses that do not send one leave it nil, which means "same item".
+    public var itemId: String?
 
     public init(
         sessionId: String,
@@ -1178,7 +1181,8 @@ public struct StreamEvent: Codable, Sendable, Equatable {
         kind: Kind,
         text: String? = nil,
         block: UnifiedBlock? = nil,
-        error: String? = nil
+        error: String? = nil,
+        itemId: String? = nil
     ) {
         self.sessionId = sessionId
         self.runId = runId
@@ -1186,6 +1190,7 @@ public struct StreamEvent: Codable, Sendable, Equatable {
         self.text = text
         self.block = block
         self.error = error
+        self.itemId = itemId
     }
 }
 

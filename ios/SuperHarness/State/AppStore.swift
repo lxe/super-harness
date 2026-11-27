@@ -298,6 +298,8 @@ public final class AppStore {
     private var streamBaselineBySessionId: [String: StreamTurnBaseline] = [:]
     private var streamingBlocksBySessionId: [String: [UnifiedBlock]] = [:]
     private var streamingTextBySessionId: [String: String] = [:]
+    /// The text item the last streamed delta belonged to, for sessions whose harness says.
+    private var streamingItemIdBySessionId: [String: String] = [:]
     public var pendingOutgoingBySessionId: [String: [PendingOutgoingMessage]] = [:]
     public var sendingSessionIds: Set<String> = []
     /// Unsent composer text per session id, plus `newThreadDraftKey` for the New Chat page.
@@ -1414,6 +1416,7 @@ public final class AppStore {
         streamBaselineBySessionId.removeValue(forKey: sessionId)
         streamingBlocksBySessionId.removeValue(forKey: sessionId)
         streamingTextBySessionId.removeValue(forKey: sessionId)
+        streamingItemIdBySessionId.removeValue(forKey: sessionId)
     }
 
     /// Ends the current paragraph of streamed text, if there is one and it is not ended yet.
@@ -1503,6 +1506,7 @@ public final class AppStore {
             streamBaselineBySessionId[ev.sessionId] = Self.captureStreamTurnBaseline(messages: persisted)
             streamingBlocksBySessionId[ev.sessionId] = []
             streamingTextBySessionId[ev.sessionId] = ""
+            streamingItemIdBySessionId.removeValue(forKey: ev.sessionId)
             streamingMessagesBySessionId[ev.sessionId] = UnifiedMessage(
                 id: "stream-\(ev.runId)",
                 role: .assistant,
@@ -1551,7 +1555,15 @@ public final class AppStore {
                 let persisted = transcriptsBySessionId[ev.sessionId]?.messages ?? []
                 streamBaselineBySessionId[ev.sessionId] = Self.captureStreamTurnBaseline(messages: persisted)
             }
-            let existingText = streamingTextBySessionId[ev.sessionId] ?? ""
+            // Two text items can follow each other with no step between them. A delta whose
+            // item id differs from the previous delta's starts a new paragraph.
+            let startsNewItem: Bool = {
+                guard let itemId = ev.itemId, let previous = streamingItemIdBySessionId[ev.sessionId] else { return false }
+                return itemId != previous
+            }()
+            if let itemId = ev.itemId { streamingItemIdBySessionId[ev.sessionId] = itemId }
+            var existingText = streamingTextBySessionId[ev.sessionId] ?? ""
+            if startsNewItem { existingText = Self.endingStreamParagraph(existingText) }
             streamingTextBySessionId[ev.sessionId] = existingText + chunk
             var msg = streamingMessagesBySessionId[ev.sessionId] ?? UnifiedMessage(
                 id: "stream-\(ev.runId)",
@@ -1560,7 +1572,7 @@ public final class AppStore {
                 blocks: [],
                 streaming: true
             )
-            if case .text(let existing) = msg.blocks.last {
+            if !startsNewItem, case .text(let existing) = msg.blocks.last {
                 msg.blocks[msg.blocks.count - 1] = .text(text: existing + chunk)
             } else {
                 msg.blocks.append(.text(text: chunk))

@@ -901,4 +901,35 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(AppStore.endingStreamParagraph("abc\n\n"), "abc\n\n")
         XCTAssertEqual(AppStore.endingStreamParagraph(""), "")
     }
+
+    /// Two text items with no step between them: only the delta's item id tells them apart.
+    func testADeltaFromANewTextItemStartsANewParagraph() async {
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "sh.tests.stream.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        let sid = "codex:two-items"
+        let user = UnifiedMessage(id: "u-1", role: .user, timestamp: 1000, blocks: [.text(text: "go")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: sid, messages: [user], totalCount: 1, hasMore: false, liveActivity: LiveActivityState(isWorking: true)))
+
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r", kind: .start))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r", kind: .delta, text: "First ", itemId: "i1"))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r", kind: .delta, text: "item.", itemId: "i1"))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r", kind: .delta, text: "Second item.", itemId: "i2"))
+        XCTAssertEqual(store.messages(for: sid).last?.blocks, [.text(text: "First item."), .text(text: "Second item.")])
+
+        // Once the host saves both, neither is shown again.
+        let saved = UnifiedMessage(id: "a-1", role: .assistant, timestamp: 2000, blocks: [.text(text: "First item."), .text(text: "Second item.")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: sid, messages: [user, saved], totalCount: 2, hasMore: false, liveActivity: LiveActivityState(isWorking: true)))
+        XCTAssertEqual(store.messages(for: sid).map(\.id), ["u-1", "a-1"])
+
+        // A harness that sends no item id keeps appending to the same paragraph.
+        let other = "claude:no-item-id"
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: other, messages: [user], totalCount: 1, hasMore: false, liveActivity: LiveActivityState(isWorking: true)))
+        store.applyStreamEvent(StreamEvent(sessionId: other, runId: "r2", kind: .start))
+        store.applyStreamEvent(StreamEvent(sessionId: other, runId: "r2", kind: .delta, text: "One "))
+        store.applyStreamEvent(StreamEvent(sessionId: other, runId: "r2", kind: .delta, text: "paragraph."))
+        XCTAssertEqual(store.messages(for: other).last?.blocks, [.text(text: "One paragraph.")])
+
+        let decoded = try? JSONDecoder().decode(StreamEvent.self, from: Data(#"{"sessionId":"s","runId":"r","kind":"delta","text":"x","itemId":"i9"}"#.utf8))
+        XCTAssertEqual(decoded?.itemId, "i9")
+    }
 }

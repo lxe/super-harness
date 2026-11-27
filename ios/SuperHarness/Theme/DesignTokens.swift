@@ -430,17 +430,18 @@ public extension View {
         // dims a touch.
         self
             .background(
-                shape.fill(
-                    fill
-                        .shadow(.inner(color: .black.opacity(0.18), radius: 1.25, y: 0.75))
-                )
-                .overlay(shape.fill(Color.black.opacity(0.06)))
+                shape.fill(Color.black.opacity(0.16))
+                    .background(
+                        shape.fill(
+                            fill.shadow(.inner(color: .black.opacity(0.42), radius: 1.75, y: 1.25))
+                        )
+                    )
             )
             .overlay {
                 shape
                     .strokeBorder(
                         LinearGradient(
-                            colors: [.white.opacity(0), .white.opacity(0.055)],
+                            colors: [.white.opacity(0), .white.opacity(0.07)],
                             startPoint: .center,
                             endPoint: .bottom
                         ),

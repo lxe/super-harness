@@ -20,6 +20,7 @@ import { HarnessRegistry } from './adapters/registry';
 import { createProjectDirectory, HarnessCatalogService } from './services/catalogService';
 import { ControlServer } from './services/controlServer';
 import { checkDictationServer, transcribeAudio } from './services/dictation';
+import { PairingService } from './services/pairing';
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';
@@ -284,6 +285,14 @@ function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachm
 }
 
 const pushNotifier = new PushNotifier(() => store.getState().settings.mobileApi?.token ?? '');
+const pairingService = new PairingService(store, {
+  version: app.getVersion(),
+  onEvent: (ev) => broadcastToRenderer('sh:pairing-event', ev),
+  onRevoke: (deviceId) => {
+    controlServer.dropDeviceConnections(deviceId);
+    pushNotifier.removePairedDevice(deviceId);
+  },
+});
 const sessionWorkingSinceMs = new Map<string, number>();
 const sessionNotifiedInputIds = new Set<string>();
 
@@ -468,6 +477,7 @@ const controlServer = new ControlServer(
       return dispatcher.queueToSession(sessionId, prompt, attachments);
     },
     registerPushDevice: (opts) => pushNotifier.registerDevice(opts),
+    pairing: pairingService,
     sendTestPush: (opts) =>
       pushNotifier.notify(
         {
@@ -914,6 +924,11 @@ function registerIpcHandlers(): void {
       }
     }
   );
+
+  // Pairing codes go to the renderer only (shown in Settings → Mobile); never logged.
+  ipcMain.handle('sh:pairing-open', async () => pairingService.open());
+  ipcMain.handle('sh:pairing-close', async () => pairingService.close('cancelled'));
+  ipcMain.handle('sh:revoke-device', async (_ev, deviceId: string) => pairingService.revoke(deviceId));
 
   ipcMain.handle('sh:clear-master', async () => {
     return store.clearMasterMessages();

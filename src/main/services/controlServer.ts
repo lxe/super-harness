@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { ORCHESTRATOR_MEMORY_PATH, readOrchestratorMemory, writeOrchestratorMemory } from './orchestratorMemory';
 import { DictationError, audioExtensionFor, checkDictationServer, transcribeAudio } from './dictation';
+import type { AuthResult, PairingService } from './pairing';
+import type net from 'node:net';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -112,7 +114,17 @@ export interface ControlServerHooks {
     prompt: string,
     attachments?: ImageAttachment[]
   ) => Promise<SendMessageResult>;
-  registerPushDevice?: (opts: { rid?: string; relayUrl?: string; enabled?: boolean }) => unknown;
+  registerPushDevice?: (opts: {
+    rid?: string;
+    relayUrl?: string;
+    enabled?: boolean;
+    /** The Bearer token the phone authenticated with; the push relay key is derived from it. */
+    authToken?: string;
+    /** Set when that token belongs to a paired device, so revoking it drops the push key. */
+    pairedDeviceId?: string;
+  }) => unknown;
+  /** Phone pairing (/api/pair, per-device tokens). Without it only the legacy token works. */
+  pairing?: PairingService;
   sendTestPush?: (opts?: { title?: string; body?: string }) => Promise<unknown>;
   readFilePreview?: (
     filePath: string,
@@ -144,8 +156,13 @@ export function redactStateForClients<T extends { settings?: SuperHarnessSetting
   if (!state || typeof state !== 'object' || !state.settings) return state;
   const settings = { ...state.settings };
   if (settings.mobileApi) {
-    const { token: _token, ...mobileRest } = settings.mobileApi;
-    settings.mobileApi = mobileRest as typeof settings.mobileApi;
+    const { token: _token, pairedDevices, ...mobileRest } = settings.mobileApi;
+    settings.mobileApi = {
+      ...mobileRest,
+      ...(pairedDevices
+        ? { pairedDevices: pairedDevices.map(({ tokenHash: _hash, ...d }) => d) }
+        : {}),
+    } as typeof settings.mobileApi;
   }
   if (settings.dictation) {
     const { apiKey, ...dictRest } = settings.dictation;
@@ -195,6 +212,8 @@ export class ControlServer {
   private sseClientIdByRes = new Map<http.ServerResponse, string>();
   private watchedSessionByClient = new Map<string, string | null>();
   private webpInFlight = new Map<string, Promise<string | null>>();
+  /** Open sockets per paired device, so revoking a device cuts its SSE stream and keep-alives. */
+  private socketsByDevice = new Map<string, Set<net.Socket>>();
   private sseKeepaliveTimer: NodeJS.Timeout | null = null;
   private eventSeq = 0;
   private eventBuffer: BufferedEvent[] = [];
@@ -367,7 +386,32 @@ export class ControlServer {
     this.sseKeepaliveTimer.unref?.();
   }
 
-  private createRequestHandler(expectedToken: string): http.RequestListener {
+  /** Closes every open connection of a paired device (after it was revoked). */
+  dropDeviceConnections(deviceId: string): void {
+    const sockets = this.socketsByDevice.get(deviceId);
+    if (!sockets) return;
+    this.socketsByDevice.delete(deviceId);
+    for (const sock of sockets) sock.destroy();
+  }
+
+  private trackDeviceSocket(deviceId: string, sock: net.Socket): void {
+    let set = this.socketsByDevice.get(deviceId);
+    if (!set) {
+      set = new Set();
+      this.socketsByDevice.set(deviceId, set);
+    }
+    if (set.has(sock)) return;
+    set.add(sock);
+    sock.once('close', () => {
+      set!.delete(sock);
+      if (set!.size === 0 && this.socketsByDevice.get(deviceId) === set) this.socketsByDevice.delete(deviceId);
+    });
+  }
+
+  private createRequestHandler(
+    authenticate: (bearer: string) => AuthResult | null,
+    opts: { mobile: boolean } = { mobile: false }
+  ): http.RequestListener {
     return async (req, res) => {
       const acceptsGzip = String(req.headers['accept-encoding'] || '').includes('gzip');
       const sendJson = (payload: unknown, statusCode = 200): void => {
@@ -408,13 +452,44 @@ export class ControlServer {
         }
       };
 
-      const auth = req.headers.authorization;
-      if (!expectedToken || auth !== `Bearer ${expectedToken}`) {
-        sendJson({ error: 'Unauthorized' }, 401);
+      const url = new URL(req.url || '/', 'http://127.0.0.1');
+
+      // Pairing routes are the only unauthenticated ones, and only on the phone listener.
+      const pairing = this.hooks.pairing;
+      if (opts.mobile && pairing && url.pathname === '/api/pair/info' && req.method === 'GET') {
+        sendJson({ ...pairing.info(), protocolVersion: MOBILE_PROTOCOL_VERSION });
+        return;
+      }
+      if (opts.mobile && pairing && url.pathname === '/api/pair' && req.method === 'POST') {
+        let body: Record<string, unknown> = {};
+        try {
+          const chunks: Buffer[] = [];
+          let total = 0;
+          for await (const c of req) {
+            total += (c as Buffer).length;
+            if (total > 4096) throw new Error('too large');
+            chunks.push(c as Buffer);
+          }
+          const raw = Buffer.concat(chunks).toString('utf8').trim();
+          body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        } catch {
+          sendJson({ ok: false, error: 'Invalid request body' }, 400);
+          return;
+        }
+        const result = pairing.attempt(body, req.socket.remoteAddress || 'unknown');
+        console.log(`[ControlServer] /api/pair from ${req.socket.remoteAddress} → ${result.status}`);
+        sendJson(result.body, result.status);
         return;
       }
 
-      const url = new URL(req.url || '/', 'http://127.0.0.1');
+      const authHeader = String(req.headers.authorization || '');
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const authResult = bearer ? authenticate(bearer) : null;
+      if (!authResult) {
+        sendJson({ error: 'Unauthorized' }, 401);
+        return;
+      }
+      if (authResult.kind === 'device') this.trackDeviceSocket(authResult.deviceId, req.socket);
       const readRawBody = async (maxBytes = 55 * 1024 * 1024): Promise<Buffer> => {
         const chunks: Buffer[] = [];
         let total = 0;
@@ -959,6 +1034,8 @@ export class ControlServer {
             rid: typeof body.rid === 'string' ? body.rid : undefined,
             relayUrl: typeof body.relayUrl === 'string' ? body.relayUrl : undefined,
             enabled: typeof body.enabled === 'boolean' ? body.enabled : true,
+            authToken: bearer,
+            pairedDeviceId: authResult.kind === 'device' ? authResult.deviceId : undefined,
           });
           sendJson({ ok: Boolean(record), device: record });
           return;
@@ -1060,7 +1137,9 @@ export class ControlServer {
 
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
-      const srv = http.createServer(this.createRequestHandler(this.token));
+      const srv = http.createServer(
+        this.createRequestHandler((bearer) => (bearer === this.token ? { kind: 'legacy' } : null))
+      );
       srv.listen(0, '127.0.0.1', () => {
         const addr = srv.address();
         if (addr && typeof addr === 'object') {
@@ -1076,7 +1155,7 @@ export class ControlServer {
   }
 
   async syncMobileListener(cfg?: MobileApiSettings): Promise<number> {
-    if (!cfg || !cfg.enabled || !cfg.token) {
+    if (!cfg || !cfg.enabled) {
       this.closeMobileListener();
       return 0;
     }
@@ -1090,7 +1169,18 @@ export class ControlServer {
     this.closeMobileListener();
 
     return new Promise((resolve) => {
-      const srv = http.createServer(this.createRequestHandler(cfg.token));
+      const legacyToken = cfg.token;
+      const srv = http.createServer(
+        this.createRequestHandler(
+          (bearer) =>
+            this.hooks.pairing
+              ? this.hooks.pairing.authenticate(bearer, legacyToken)
+              : legacyToken && bearer === legacyToken
+                ? { kind: 'legacy' }
+                : null,
+          { mobile: true }
+        )
+      );
       // Keep phone connections open between requests. Node's 5s default closes the connection
       // between a mic tap and the audio upload, so every dictation paid for a new handshake.
       srv.keepAliveTimeout = 75_000;

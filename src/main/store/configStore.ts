@@ -45,8 +45,10 @@ export function createDefaultState(): SuperHarnessState {
         fileManagerCommand: '',
         terminalCommand: '',
       },
+      // Phones can connect only after "Allow phones to connect" is turned on in Settings → Mobile.
+      // Existing installs keep their saved value.
       mobileApi: {
-        enabled: true,
+        enabled: false,
         bindHost: '0.0.0.0',
         port: 47890,
         token: crypto.randomBytes(24).toString('hex'),
@@ -219,7 +221,7 @@ export class ConfigStore {
         ...(patch.apps ?? {}),
       },
       mobileApi: {
-        enabled: this.state.settings.mobileApi?.enabled ?? true,
+        enabled: this.state.settings.mobileApi?.enabled ?? false,
         bindHost: this.state.settings.mobileApi?.bindHost ?? '0.0.0.0',
         port: this.state.settings.mobileApi?.port ?? 47890,
         token: this.state.settings.mobileApi?.token || crypto.randomBytes(24).toString('hex'),

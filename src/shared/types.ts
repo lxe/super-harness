@@ -381,6 +381,19 @@ export interface MobileApiSettings {
   port: number;
   /** Legacy shared Bearer token (phones set up before pairing). Still accepted on every route. */
   token: string;
+  /** Stable random id for this desktop, carried in the pairing QR code and Bonjour TXT record. */
+  hostId?: string;
+  /** Phones paired with a one-time code; each has its own token, stored only as a hash. */
+  pairedDevices?: PairedDevice[];
+}
+
+export interface PairedDevice {
+  id: string;
+  name: string;
+  /** sha256 (hex) of the device's Bearer token. */
+  tokenHash: string;
+  createdAt: number;
+  lastSeenAt?: number;
 }
 
 /**

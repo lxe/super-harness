@@ -8,6 +8,14 @@ export interface RegisteredPushDevice {
   relayUrl: string;
   enabled: boolean;
   updatedAt: number;
+  /**
+   * Relay signing key (hex) derived from the token the phone registered with. Paired phones
+   * each have their own token, so each needs its own key; legacy registrations omit it and
+   * use the key derived from settings.mobileApi.token.
+   */
+  keyHex?: string;
+  /** The paired device this registration belongs to (dropped when that device is revoked). */
+  pairedDeviceId?: string;
 }
 
 export type PushNotificationKind = 'task_completed' | 'input_needed' | 'background_sync' | 'test';
@@ -81,6 +89,8 @@ export class PushNotifier {
               relayUrl: (d.relayUrl || DEFAULT_RELAY_URL).replace(/\/+$/, ''),
               enabled: d.enabled !== false,
               updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : Date.now(),
+              ...(typeof d.keyHex === 'string' && /^[0-9a-f]{64}$/.test(d.keyHex) ? { keyHex: d.keyHex } : {}),
+              ...(typeof d.pairedDeviceId === 'string' ? { pairedDeviceId: d.pairedDeviceId } : {}),
             });
           }
         }
@@ -93,16 +103,23 @@ export class PushNotifier {
   private saveDevices(): void {
     try {
       fs.mkdirSync(path.dirname(this.devicesFile), { recursive: true });
-      fs.writeFileSync(this.devicesFile, JSON.stringify([...this.devices.values()], null, 2));
+      fs.writeFileSync(this.devicesFile, JSON.stringify([...this.devices.values()], null, 2), { mode: 0o600 });
     } catch {
       // ignore write errors
     }
   }
 
-  registerDevice(opts: { rid?: string; relayUrl?: string; enabled?: boolean }): RegisteredPushDevice | null {
-    const token = this.getMobileToken().trim();
-    if (!token) return null;
-    const derived = deriveRelayCredentials(token);
+  registerDevice(opts: {
+    rid?: string;
+    relayUrl?: string;
+    enabled?: boolean;
+    authToken?: string;
+    pairedDeviceId?: string;
+  }): RegisteredPushDevice | null {
+    const legacy = this.getMobileToken().trim();
+    const authToken = opts.authToken?.trim() || legacy;
+    if (!authToken) return null;
+    const derived = deriveRelayCredentials(authToken);
     const rid = (opts.rid || derived.rid).trim();
     const relayUrl = (opts.relayUrl || DEFAULT_RELAY_URL).trim().replace(/\/+$/, '');
     const record: RegisteredPushDevice = {
@@ -110,19 +127,33 @@ export class PushNotifier {
       relayUrl,
       enabled: opts.enabled !== false,
       updatedAt: Date.now(),
+      ...(authToken !== legacy ? { keyHex: derived.key.toString('hex') } : {}),
+      ...(opts.pairedDeviceId ? { pairedDeviceId: opts.pairedDeviceId } : {}),
     };
     this.devices.set(rid, record);
     this.saveDevices();
-    return record;
+    return { ...record, keyHex: undefined };
+  }
+
+  /** Forgets push registrations of a revoked paired device. */
+  removePairedDevice(pairedDeviceId: string): void {
+    let changed = false;
+    for (const [rid, dev] of this.devices) {
+      if (dev.pairedDeviceId === pairedDeviceId) {
+        this.devices.delete(rid);
+        changed = true;
+      }
+    }
+    if (changed) this.saveDevices();
   }
 
   getRegisteredDevices(): RegisteredPushDevice[] {
-    return [...this.devices.values()];
+    return [...this.devices.values()].map(({ keyHex: _key, ...d }) => d);
   }
 
   async notify(payload: PushSendPayload, opts?: { bypassCooldown?: boolean }): Promise<{ sent: number; results: Array<{ rid: string; status: number; reason?: string }> }> {
     const token = this.getMobileToken().trim();
-    if (!token || this.devices.size === 0) {
+    if (this.devices.size === 0) {
       return { sent: 0, results: [] };
     }
 
@@ -136,13 +167,15 @@ export class PushNotifier {
       this.lastSentByKey.set(dedupeKey, now);
     }
 
-    const { key } = deriveRelayCredentials(token);
+    const legacyKey = token ? deriveRelayCredentials(token).key : null;
     const bodyBuf = Buffer.from(JSON.stringify(payload), 'utf8');
     const results: Array<{ rid: string; status: number; reason?: string }> = [];
     let sent = 0;
 
     for (const dev of this.devices.values()) {
       if (!dev.enabled) continue;
+      const key = dev.keyHex ? Buffer.from(dev.keyHex, 'hex') : legacyKey;
+      if (!key) continue;
       const urlPath = `/v1/push/${encodeURIComponent(dev.rid)}`;
       const headers = {
         'content-type': 'application/json',

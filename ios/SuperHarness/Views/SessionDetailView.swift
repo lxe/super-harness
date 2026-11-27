@@ -143,6 +143,12 @@ public struct SessionDetailView: View {
                                 .padding(.top, messages.last?.role == .assistant ? -(store.chatMetrics.messageGap - store.chatMetrics.blockGap) : 0)
                             }
 
+                            // A problem with this session (the harness failed, the transcript
+                            // could not load) is shown here, in its thread.
+                            if let notice = store.sessionNotices[session.id] {
+                                SessionNoticeRow(notice: notice) { store.dismissSessionNotice(for: session.id) }
+                            }
+
                             // Manually queued tray inside transcript (never native steering echoes).
                             if !stableQueuedMessages.isEmpty {
                                 QueuedMessagesTrayView(items: stableQueuedMessages)
@@ -774,7 +780,7 @@ private struct MessageBubbleView: View, Equatable {
                     )
                 }
 
-                if case .failed = pendingDeliveryState {
+                if case .failed(let reason) = pendingDeliveryState {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.circle.fill")
                             .font(.system(size: 10.5))
@@ -794,6 +800,17 @@ private struct MessageBubbleView: View, Equatable {
                     .font(SHTypography.micro.weight(.medium))
                     .foregroundStyle(SHColor.statusDanger)
                     .padding(.trailing, 4)
+
+                    // Why it was not delivered, in the host's or harness's own words.
+                    if !reason.isEmpty, reason != "Message not delivered" {
+                        Text(SHErrorPresentation.friendlyMessage(for: reason))
+                            .font(SHTypography.micro)
+                            .foregroundStyle(SHColor.statusDanger.opacity(0.85))
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.trailing, 4)
+                            .accessibilityIdentifier("message.failureReason")
+                    }
                 }
             }
         }
@@ -852,6 +869,58 @@ private struct MessageBubbleView: View, Equatable {
                 }
             }
         }
+    }
+}
+
+/// A problem with one session, shown inside its thread: what went wrong in a sentence, the raw
+/// error behind a chevron, and Dismiss. It uses the look of the failed-send line.
+struct SessionNoticeRow: View {
+    let notice: AppStore.SessionNotice
+    let onDismiss: () -> Void
+    @State private var showsDetail = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 12))
+                Text(notice.message)
+                    .font(SHTypography.caption.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if notice.detail != notice.message {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { showsDetail.toggle() }
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .rotationEffect(.degrees(showsDetail ? 90 : 0))
+                            .frame(width: 28, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(showsDetail ? "Hide details" : "Show details")
+                }
+                Button("Dismiss", action: onDismiss)
+                    .buttonStyle(.plain)
+                    .font(SHTypography.micro.weight(.medium))
+                    .accessibilityIdentifier("session.notice.dismiss")
+            }
+            if showsDetail {
+                Text(notice.detail)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .foregroundStyle(SHColor.statusDanger)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SHColor.statusDanger.opacity(0.09), in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("session.notice")
     }
 }
 

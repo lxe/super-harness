@@ -1262,6 +1262,36 @@ public final class AppStore {
     /// Applies a Protocol v2 `sessions_delta` incrementally in place, mutating a local copy and
     /// assigning `sessions` once only when the list actually changed.
     /// Records a user-visible error, ignoring benign cancellations from reconnects or superseded requests.
+    // MARK: Errors that belong to one session
+
+    /// A problem with one session, shown in that session's thread instead of the list banner.
+    public struct SessionNotice: Equatable, Sendable {
+        public var message: String
+        /// The raw error, for the details disclosure.
+        public var detail: String
+    }
+
+    /// The newest problem per session (key: session id, or `newThreadDraftKey` for New Chat).
+    public private(set) var sessionNotices: [String: SessionNotice] = [:]
+
+    public func dismissSessionNotice(for sessionId: String) {
+        sessionNotices.removeValue(forKey: sessionId)
+    }
+
+    /// Records a failed request for one session. The list banner is for failures that concern
+    /// the connection as a whole; this is for "that message", "that transcript", "that model".
+    func reportSessionError(_ raw: String, sessionId: String) {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        sessionNotices[sessionId] = SessionNotice(message: SHErrorPresentation.friendlyMessage(for: text), detail: text)
+    }
+
+    func reportSessionError(_ error: Error, sessionId: String) {
+        if error is CancellationError { return }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return }
+        reportSessionError(error.localizedDescription, sessionId: sessionId)
+    }
+
     func reportError(_ error: Error) {
         if error is CancellationError { return }
         if let urlError = error as? URLError, urlError.code == .cancelled { return }
@@ -1507,6 +1537,8 @@ public final class AppStore {
             streamingBlocksBySessionId[ev.sessionId] = []
             streamingTextBySessionId[ev.sessionId] = ""
             streamingItemIdBySessionId.removeValue(forKey: ev.sessionId)
+            // A new turn is running: an earlier problem in this session is no longer current.
+            sessionNotices.removeValue(forKey: ev.sessionId)
             streamingMessagesBySessionId[ev.sessionId] = UnifiedMessage(
                 id: "stream-\(ev.runId)",
                 role: .assistant,
@@ -1586,7 +1618,8 @@ public final class AppStore {
             clearStreamingState(for: ev.sessionId)
             hostWorkingSessionIds.remove(ev.sessionId)
             if let err = ev.error {
-                lastError = err
+                // The harness failed inside this session: say so in its thread.
+                reportSessionError(err, sessionId: ev.sessionId)
             }
         }
     }
@@ -2146,7 +2179,8 @@ public final class AppStore {
             let result = try await client.fetchTranscript(sessionId: sessionId, limit: resolvedLimit)
             _ = applyTranscriptUpdate(result)
         } catch {
-            reportError(error)
+            if handleAuthFailure(error) { return }
+            reportSessionError(error, sessionId: sessionId)
         }
     }
 
@@ -2391,14 +2425,13 @@ public final class AppStore {
                     scheduleFallbackTranscriptLoad(for: sessionId, baselineRevision: revisionBeforeSend)
                 }
             } else {
+                // The reason shows under the message itself, with Retry and Dismiss.
                 let err = result.error ?? "Message not delivered"
                 updatePendingState(sessionId: sessionId, pendingId: pending.id, to: .failed(err))
-                lastError = err
             }
         } catch {
             let err = error.localizedDescription
             updatePendingState(sessionId: sessionId, pendingId: pending.id, to: .failed(err))
-            lastError = err
         }
     }
 
@@ -2524,7 +2557,7 @@ public final class AppStore {
                 }
             }
         } catch {
-            reportError(error)
+            reportSessionError(error, sessionId: sessionId)
         }
     }
 
@@ -2762,7 +2795,7 @@ public final class AppStore {
                 if let reasoningEffort { session.reasoningEffort = reasoningEffort }
             }
         } catch {
-            reportError(error)
+            reportSessionError(error, sessionId: sessionId)
         }
     }
 
@@ -2790,8 +2823,10 @@ public final class AppStore {
     public func startSession(_ request: StartSessionRequest) async -> String? {
         do {
             let resp = try await client.startSession(request)
+            sessionNotices.removeValue(forKey: Self.newThreadDraftKey)
             guard resp.ok else {
-                lastError = resp.error ?? "Failed to start session"
+                // Shown on the New Chat page, where the session was being started.
+                reportSessionError(resp.error ?? "Failed to start session", sessionId: Self.newThreadDraftKey)
                 return nil
             }
             if let sid = resp.sessionId {
@@ -2838,7 +2873,7 @@ public final class AppStore {
                 return sid
             }
         } catch {
-            reportError(error)
+            reportSessionError(error, sessionId: Self.newThreadDraftKey)
         }
         return nil
     }

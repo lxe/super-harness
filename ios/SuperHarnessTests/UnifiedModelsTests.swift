@@ -1200,4 +1200,17 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertNil(ComposerView.resolvedEffort(embedded: nil, sessionEffort: nil, modelDefault: nil, harnessDefault: nil), "nothing known: no effort label")
         XCTAssertEqual(ComposerView.resolvedEffort(embedded: "low", sessionEffort: "high", modelDefault: nil, harnessDefault: nil), "low", "an effort in the model id wins")
     }
+
+    func testErrorsShowWhatTheHostSaid() {
+        // A harness's own message is shown as it is.
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "Pi could not reach its model server at 127.0.0.1:8080"), "Pi could not reach its model server at 127.0.0.1:8080")
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: #"HTTP 500: {"ok":false,"error":"The model server did not answer."}"#), "The model server did not answer.")
+        XCTAssertEqual(SHErrorPresentation.hostMessage(in: #"HTTP 409: {"ok":false,"error":"Session is busy with another turn."}"#), "Session is busy with another turn.")
+        // System network errors keep the app's clearer wording.
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "Could not connect to the server."), "Can't reach your host. Check that Superharness is running there.")
+        // Nothing readable: the general wording stays.
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "HTTP 500: "), "Your host hit a problem handling that. Try again.")
+        XCTAssertNil(SHErrorPresentation.hostMessage(in: "<html><body>502</body></html>"))
+        XCTAssertNil(SHErrorPresentation.hostMessage(in: "EPIPE"))
+    }
 }

@@ -1503,6 +1503,11 @@ public enum SHErrorPresentation {
         if has("failed to start") {
             return "The new session didn't start."
         }
+        // What the host or the harness said, when it said something readable, beats any
+        // general wording of ours.
+        if let said = hostMessage(in: raw) {
+            return said
+        }
         if has("http 5", "status 5", "500", "502", "503", "internal server error") {
             return "Your host hit a problem handling that. Try again."
         }
@@ -1510,6 +1515,28 @@ public enum SHErrorPresentation {
             return "Your host sent something this app version doesn't understand."
         }
         return "Something went wrong talking to your host."
+    }
+
+    /// The readable message inside an error from the host: the `error` field of a JSON reply
+    /// ("HTTP 500: {"ok":false,"error":"…"}"), or a plain sentence the host or harness sent.
+    /// Nil for system errors and anything that is not a sentence a person can use.
+    public static func hostMessage(in raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = text.range(of: #"^HTTP \d{3}:\s*"#, options: .regularExpression) {
+            text.removeSubrange(range)
+        }
+        if let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end,
+           let object = try? JSONSerialization.jsonObject(with: Data(text[start...end].utf8)) as? [String: Any] {
+            guard let said = (object["error"] ?? object["message"]) as? String else { return nil }
+            text = said.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // A sentence, not a code or a stack: has a space, is not huge, and is not one of the
+        // system's own network descriptions, which have clearer wording above.
+        guard text.count >= 8, text.count <= 400, text.contains(" "),
+              !text.hasPrefix("<"), !text.lowercased().contains("nsurlerrordomain"),
+              !text.lowercased().hasPrefix("the operation couldn"),
+              !text.lowercased().hasPrefix("response decoding error") else { return nil }
+        return text
     }
 }
 

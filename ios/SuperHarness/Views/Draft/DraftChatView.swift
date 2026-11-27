@@ -107,10 +107,16 @@ public struct DraftChatView: View {
         .scrollDismissesKeyboard(.interactively)
         .background(SHColor.surfaceCanvas.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerDock
-                .padding(.horizontal, SHSpacing.md)
-                .padding(.bottom, SHSpacing.sm)
-                .padding(.top, SHSpacing.xs)
+            VStack(spacing: SHSpacing.sm) {
+                // Why the new session did not start, shown where it was being started.
+                if let notice = store.sessionNotices[AppStore.newThreadDraftKey] {
+                    SessionNoticeRow(notice: notice) { store.dismissSessionNotice(for: AppStore.newThreadDraftKey) }
+                }
+                composerDock
+            }
+            .padding(.horizontal, SHSpacing.md)
+            .padding(.bottom, SHSpacing.sm)
+            .padding(.top, SHSpacing.xs)
         }
         .navigationTitle("New Chat")
         .navigationBarTitleDisplayMode(.inline)

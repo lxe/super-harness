@@ -932,4 +932,23 @@ final class AppStoreTests: XCTestCase {
         let decoded = try? JSONDecoder().decode(StreamEvent.self, from: Data(#"{"sessionId":"s","runId":"r","kind":"delta","text":"x","itemId":"i9"}"#.utf8))
         XCTAssertEqual(decoded?.itemId, "i9")
     }
+
+    /// A harness error during a turn belongs in that session's thread, not in the list banner.
+    func testAStreamErrorShowsInItsSessionAndClearsWhenANewTurnStarts() async {
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "sh.tests.notice.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        let sid = "pi:model-down"
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r", kind: .start))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r", kind: .error, error: "Pi could not reach its model server at 127.0.0.1:8080"))
+        XCTAssertEqual(store.sessionNotices[sid]?.message, "Pi could not reach its model server at 127.0.0.1:8080")
+        XCTAssertNil(store.lastError, "no list banner for a problem inside one session")
+        XCTAssertFalse(store.isSessionBusy(sid), "the session no longer looks busy")
+
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r2", kind: .start))
+        XCTAssertNil(store.sessionNotices[sid], "a new turn clears the old problem")
+
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r2", kind: .error, error: "again"))
+        store.dismissSessionNotice(for: sid)
+        XCTAssertNil(store.sessionNotices[sid])
+    }
 }

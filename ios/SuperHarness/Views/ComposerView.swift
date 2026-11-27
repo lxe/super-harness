@@ -1881,7 +1881,7 @@ private struct SHModelEffortPopoverBody: View {
     var body: some View {
         let activeEffort = draft.effort
         let rowHeight: CGFloat = 46
-        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight - 2 + 6, 330)
+        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight - 2 + 8, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
         let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12)
@@ -1901,7 +1901,7 @@ private struct SHModelEffortPopoverBody: View {
                         }
                     )
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 6)
                 .padding(.top, 14)
                 .padding(.bottom, 12)
             }
@@ -1959,7 +1959,7 @@ private struct SHModelEffortPopoverBody: View {
                         // The last row sits the same 6pt from the bottom edge as from the sides,
                         // so its corners follow the popover's.
                         .padding(.horizontal, 6)
-                        .padding(.bottom, 6)
+                        .padding(.bottom, 8)
                     }
                     .frame(height: listHeight)
                     .onAppear {

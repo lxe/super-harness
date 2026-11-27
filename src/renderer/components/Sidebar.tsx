@@ -84,6 +84,9 @@ interface Props {
   /** Saved harness order (gauge strip and All-view sections); see settings.harnessOrder. */
   harnessOrder?: HarnessGroup[];
   onChangeHarnessOrder?: (order: HarnessGroup[]) => void;
+  /** Shared order of pinned chats (settings.pinnedOrder, synced with the phone). */
+  pinnedOrderSetting?: string[];
+  onChangePinnedOrder?: (order: string[]) => void;
   onOrganize: (actions: OrganizeAction[]) => void;
   onArchiveSession: (session: UnifiedSession, killTmux?: boolean) => void;
   onArchiveMany: (sessions: UnifiedSession[], killTmux?: boolean) => void;
@@ -143,6 +146,8 @@ const DropInsertionLine: React.FC<{ placement: ReorderPlacement; className?: str
 );
 
 const PINNED_ORDER_STORAGE_KEY = 'sh:pinnedOrder:v1';
+/** Drop-target id of the pinned strip (any chat dropped there is pinned at the drop position). */
+const PIN_DROP_ID = '__pinned__';
 const SECTION_ORDER_STORAGE_KEY = 'sh:sectionOrder:v1';
 
 function loadStringArray(key: string): string[] {
@@ -206,6 +211,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
   onChangeGroupBy,
   harnessOrder,
   onChangeHarnessOrder,
+  pinnedOrderSetting,
+  onChangePinnedOrder,
   onOrganize,
   onArchiveSession,
   onArchiveMany,
@@ -314,8 +321,40 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
   // Manual ordering for global pinned chats (never auto-reordered on activity)
   const [pinnedOrder, setPinnedOrder] = useState<string[]>(() =>
-    loadStringArray(PINNED_ORDER_STORAGE_KEY)
+    pinnedOrderSetting && pinnedOrderSetting.length > 0
+      ? pinnedOrderSetting
+      : loadStringArray(PINNED_ORDER_STORAGE_KEY)
   );
+  const onChangePinnedOrderRef = useRef(onChangePinnedOrder);
+  onChangePinnedOrderRef.current = onChangePinnedOrder;
+  // The shared setting is the source of truth: follow it when the phone (or another window) changes it.
+  const pinnedOrderSettingKey = (pinnedOrderSetting ?? []).join('\n');
+  useEffect(() => {
+    if (!pinnedOrderSetting || pinnedOrderSetting.length === 0) return;
+    setPinnedOrder((prev) => (prev.join('\n') === pinnedOrderSettingKey ? prev : pinnedOrderSetting));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedOrderSettingKey]);
+  // One-time migration: a desktop-only order saved before the setting existed is published once.
+  useEffect(() => {
+    if ((!pinnedOrderSetting || pinnedOrderSetting.length === 0) && pinnedOrder.length > 0) {
+      onChangePinnedOrderRef.current?.(pinnedOrder);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const commitPinnedOrder = (next: string[]) => {
+    setPinnedOrder(next);
+    onChangePinnedOrderRef.current?.(next);
+  };
+  // Where a chat dragged from the list would land among the pinned chats.
+  const [pinDropSlot, setPinDropSlot] = useState<{ overId: string; placement: ReorderPlacement } | null>(
+    null
+  );
+  const pinSlotAtRef = useRef<(y: number) => { overId: string; placement: ReorderPlacement } | null>(
+    () => null
+  );
+  const pinDropCommitRef = useRef<
+    (ids: string[], slot: { overId: string; placement: ReorderPlacement } | null) => void
+  >(() => {});
   const [pinDrag, setPinDrag] = useState<ReorderDragState | null>(null);
   const suppressPinClickRef = useRef(false);
 
@@ -677,6 +716,31 @@ export const Sidebar: React.FC<Props> = React.memo(({
     return { overId: targetId, placement };
   };
 
+  pinSlotAtRef.current = (y: number) => {
+    const nodes = asideRef.current?.querySelectorAll<HTMLElement>('[data-global-pin-id]');
+    if (!nodes || nodes.length === 0) return null;
+    let last: { overId: string; placement: ReorderPlacement } | null = null;
+    for (const el of nodes) {
+      const id = el.getAttribute('data-global-pin-id');
+      if (!id) continue;
+      const r = el.getBoundingClientRect();
+      if (y < (r.top + r.bottom) / 2) return { overId: id, placement: 'before' };
+      last = { overId: id, placement: 'after' };
+    }
+    return last;
+  };
+  pinDropCommitRef.current = (ids, slot) => {
+    if (ids.length === 0) return;
+    let order = allGlobalPinned.map((s) => s.id).filter((id) => !ids.includes(id));
+    let at = order.length;
+    if (slot) {
+      const idx = order.indexOf(slot.overId);
+      if (idx >= 0) at = slot.placement === 'before' ? idx : idx + 1;
+    }
+    order = [...order.slice(0, at), ...ids, ...order.slice(at)];
+    commitPinnedOrder(order);
+  };
+
   const startPinnedRowDrag = (e: React.PointerEvent<HTMLElement>, sessionId: string) => {
     if (e.button !== 0 || query.trim()) return;
     if ((e.target as HTMLElement | null)?.closest('button, input, textarea')) return;
@@ -721,7 +785,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
           suppressPinClickRef.current = false;
         }, 0);
         if (commit && currentOver) {
-          setPinnedOrder(moveIdToPlacement(baseOrder, sessionId, currentOver, currentPlacement));
+          commitPinnedOrder(moveIdToPlacement(baseOrder, sessionId, currentOver, currentPlacement));
         }
       }
       setPinDrag(null);
@@ -960,6 +1024,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
       const els = document.elementsFromPoint(clientX, clientY);
       for (const el of els) {
         const htmlEl = el as HTMLElement;
+        if (htmlEl.closest?.('[data-drop-pinned="true"]')) {
+          const pinnable = draggedSessions.some((s) => s.harnessGroup !== 'master' && !s.pinnedToTop);
+          return { id: PIN_DROP_ID, valid: pinnable, label: 'Pinned' };
+        }
         if (htmlEl.closest?.('[data-harness-separator="true"]')) {
           return { id: null, valid: false, label: null };
         }
@@ -1021,6 +1089,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
       const hit = resolveHitTarget(e.clientX, e.clientY, current.sessions);
       document.body.style.cursor = hit.id ? (hit.valid ? 'grabbing' : 'not-allowed') : 'grabbing';
+      const pinSlot = hit.id === PIN_DROP_ID && hit.valid ? pinSlotAtRef.current(e.clientY) : null;
+      setPinDropSlot((prev) =>
+        prev?.overId === pinSlot?.overId && prev?.placement === pinSlot?.placement ? prev : pinSlot
+      );
 
       const next = {
         ...current,
@@ -1050,6 +1122,19 @@ export const Sidebar: React.FC<Props> = React.memo(({
       }, 120);
 
       const hit = resolveHitTarget(e.clientX, e.clientY, current.sessions);
+      setPinDropSlot(null);
+      if (hit.id === PIN_DROP_ID && hit.valid) {
+        const toPin = current.sessions.filter((d) => d.harnessGroup !== 'master' && !d.pinnedToTop);
+        const slot = pinSlotAtRef.current(e.clientY);
+        onOrganizeRef.current(toPin.map((d) => ({ type: 'pin_top', sessionId: d.id })));
+        pinDropCommitRef.current(
+          toPin.map((d) => d.id),
+          slot
+        );
+        activeDragRef.current = null;
+        setActiveDrag(null);
+        return;
+      }
       const target = hit.id ? dropTargetMapRef.current.get(hit.id) : undefined;
       if (hit.id && hit.valid && target) {
         const movable = current.sessions.filter((d) => canDropSessionIntoSection(d, target));
@@ -1083,6 +1168,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && (pendingDragRef.current || activeDragRef.current)) {
+        setPinDropSlot(null);
         cancelDrag();
       }
     };
@@ -1602,11 +1688,26 @@ export const Sidebar: React.FC<Props> = React.memo(({
         );
       })()}
 
-      {/* Global Top-Pinned Chats (manual order — drag up/down to reorder) */}
+      {/* Global Top-Pinned Chats (manual order — drag up/down to reorder; drop any chat here to pin it) */}
+      {globalPinnedSessions.length === 0 && activeDrag && !query.trim() && (
+        <div data-drop-pinned="true" className="px-2.5 py-2 border-b border-line-hairline">
+          <div
+            className={`h-9 rounded-lg border border-dashed flex items-center justify-center gap-1.5 text-caption transition-colors ${
+              activeDrag.overTargetId === PIN_DROP_ID
+                ? 'border-line-strong bg-white/[0.06] text-ink-primary'
+                : 'border-line-subtle text-ink-muted'
+            }`}
+          >
+            <Pin aria-hidden="true" strokeWidth={2.25} className="w-3 h-3" />
+            Drop to pin
+          </div>
+        </div>
+      )}
       {globalPinnedSessions.length > 0 && (
         <div
+          data-drop-pinned="true"
           className={`px-2.5 py-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline ${
-            pinDrag ? '[&_*]:pointer-events-none' : ''
+            pinDrag || activeDrag ? '[&_*]:pointer-events-none' : ''
           }`}
         >
           {globalPinnedSessions.map((s) => {
@@ -1614,7 +1715,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
             const dropPlacement =
               pinDrag && pinDrag.overId === s.id && pinDrag.draggedId !== s.id
                 ? pinDrag.placement
-                : null;
+                : pinDropSlot && pinDropSlot.overId === s.id
+                  ? pinDropSlot.placement
+                  : null;
             return (
               <div
                 key={s.id}

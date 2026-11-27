@@ -683,6 +683,13 @@ export const App: React.FC = () => {
     [handleUpdateSettings]
   );
 
+  const handleChangePinnedOrder = useCallback(
+    (order: string[]) => {
+      void handleUpdateSettings({ pinnedOrder: order });
+    },
+    [handleUpdateSettings]
+  );
+
   const handleChangeHarnessOrder = useCallback(
     (order: HarnessGroup[]) => {
       void handleUpdateSettings({ harnessOrder: order });
@@ -994,6 +1001,8 @@ export const App: React.FC = () => {
         groupBy={state?.settings.sidebarGroupBy ?? 'native'}
         harnessOrder={state?.settings.harnessOrder}
         onChangeHarnessOrder={handleChangeHarnessOrder}
+        pinnedOrderSetting={state?.settings.pinnedOrder}
+        onChangePinnedOrder={handleChangePinnedOrder}
         activeSessionId={activeSessionId}
         splitSessionId={splitSessionId}
         searchInputRef={searchInputRef}

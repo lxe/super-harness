@@ -1256,3 +1256,25 @@ describe('Claude launch flags', () => {
     expect(parseClaudeLaunchFlags(['claude', '--resume', 'abc'])).toEqual({});
   });
 });
+
+describe('Claude interrupt notice', () => {
+  const marker = (ts: number) =>
+    JSON.stringify({ type: 'user', uuid: `m${ts}`, timestamp: ts, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } });
+  const said = (ts: number, text: string) =>
+    JSON.stringify({ type: 'user', uuid: `u${ts}`, timestamp: ts, message: { role: 'user', content: text } });
+  const notices = (lines: string[]) =>
+    parseClaudeJsonlLines(lines, 'claude:t', Date.now(), 60).messages.filter((m) =>
+      m.blocks.some((b) => b.type === 'notice' && b.title === 'Turn interrupted')
+    ).length;
+
+  const t0 = 1_795_800_000_000; // real epoch milliseconds
+
+  it('hides the notice when a steer follows the interruption at once', () => {
+    expect(notices([said(t0, 'start'), marker(t0 + 4000), said(t0 + 4400, 'steer this way')])).toBe(0);
+  });
+
+  it('keeps the notice for a real stop', () => {
+    expect(notices([said(t0, 'start'), marker(t0 + 4000)])).toBe(1);
+    expect(notices([said(t0, 'start'), marker(t0 + 4000), said(t0 + 10 * 60_000, 'later')])).toBe(1);
+  });
+});

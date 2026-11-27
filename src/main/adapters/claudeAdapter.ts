@@ -1242,6 +1242,20 @@ export function parseClaudeJsonlLines(
 ): SessionTranscriptResult {
   const messages: UnifiedMessage[] = [];
   const uniqueId = createUniqueIdGenerator();
+  // An interruption followed at once by a message from the user is how Superharness delivers a
+  // steer to a background Claude process (stop, then send). That is not a stop the user asked
+  // for, so its notice is dropped when the steer arrives.
+  let pendingInterrupt: { index: number; ts: number } | null = null;
+  const dropSteerInterrupt = (userTs: number) => {
+    if (
+      pendingInterrupt &&
+      messages[pendingInterrupt.index]?.role === 'system' &&
+      userTs - pendingInterrupt.ts <= STEER_INTERRUPT_WINDOW_MS
+    ) {
+      messages.splice(pendingInterrupt.index, 1);
+    }
+    pendingInterrupt = null;
+  };
   const toolBlockById = new Map<string, UnifiedBlock>();
   const toolReadPathById = new Map<string, string>();
   let lastUserImagePaths = new Set<string>();
@@ -1333,6 +1347,7 @@ export function parseClaudeJsonlLines(
           if (extracted.text.trim()) blocks.push({ type: 'text', text: extracted.text });
           if (blocks.length > 0) {
             currentAssistant = null;
+            dropSteerInterrupt(normalizeTimestamp(obj.timestamp));
             messages.push({
               id: uniqueId(String(obj.uuid || `cq-${seq++}`)),
               role: 'user',
@@ -1447,6 +1462,7 @@ export function parseClaudeJsonlLines(
             timestamp: ts,
             blocks: [{ type: 'notice', title: 'Turn interrupted', detail: 'The Stop button or Esc stopped Claude here.' }],
           });
+          pendingInterrupt = { index: messages.length - 1, ts };
           return;
         }
 
@@ -1511,6 +1527,7 @@ export function parseClaudeJsonlLines(
         } else if (!isMeta) {
           lastUserImagePaths = new Set();
         }
+        if (!isMeta) dropSteerInterrupt(ts);
         messages.push({
           id: uniqueId(String(obj.uuid || `cu-${seq++}`)),
           role: 'user',
@@ -2249,6 +2266,9 @@ function claudeLaunchFlagsForPid(pid: number): { model?: string; effort?: string
     return {};
   }
 }
+
+/** How soon after an interruption a user message must follow for it to count as a steer. */
+const STEER_INTERRUPT_WINDOW_MS = 15_000;
 
 /** The line Claude Code records in place of a user message when a turn is interrupted. */
 export function isClaudeInterruptMarker(text: string): boolean {

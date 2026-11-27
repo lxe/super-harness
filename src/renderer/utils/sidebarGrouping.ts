@@ -190,13 +190,63 @@ export function computeThreadRecencyOpacity(updatedAt: number, now = Date.now())
 }
 
 /**
- * Returns all Super Harness top-pinned chats across every harness (rendered
- * directly below Master Orchestrator and above the harness switcher).
+ * Returns all Super Harness top-pinned chats across every harness in strict
+ * manual order (never auto-reordering on message activity). Any newly pinned
+ * chat not yet in `pinnedOrder` appends stably by creation time / ID.
  */
-export function getGlobalPinnedSessions(workerSessions: UnifiedSession[]): UnifiedSession[] {
-  return workerSessions
-    .filter((s) => s.pinnedToTop)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+export function getGlobalPinnedSessions(
+  workerSessions: UnifiedSession[],
+  pinnedOrder?: readonly string[] | null
+): UnifiedSession[] {
+  const pinned = workerSessions.filter((s) => s.pinnedToTop);
+  const rank = new Map((pinnedOrder ?? []).map((id, i) => [id, i]));
+  return [...pinned].sort((a, b) => {
+    const ra = rank.get(a.id);
+    const rb = rank.get(b.id);
+    if (ra !== undefined && rb !== undefined) return ra - rb;
+    if (ra !== undefined) return -1;
+    if (rb !== undefined) return 1;
+    const ca = a.createdAt || 0;
+    const cb = b.createdAt || 0;
+    if (ca !== cb) return ca - cb;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/** Moves `draggedId` to the position of `targetId` within `ids`. */
+export function reorderIds(
+  ids: readonly string[],
+  draggedId: string,
+  targetId: string
+): string[] {
+  if (draggedId === targetId) return [...ids];
+  const list = [...ids];
+  const from = list.indexOf(draggedId);
+  const to = list.indexOf(targetId);
+  if (from === -1 || to === -1) return list;
+  const [moved] = list.splice(from, 1);
+  list.splice(to, 0, moved);
+  return list;
+}
+
+/** Applies a manual group/section order (leaving headless strips on top and unseen groups in relative order). */
+export function applyManualGroupOrder(
+  groups: TopGroup[],
+  manualOrder?: readonly string[] | null
+): TopGroup[] {
+  if (!manualOrder || manualOrder.length === 0) return groups;
+  const rank = new Map(manualOrder.map((id, i) => [id, i]));
+  const headless = groups.filter((g) => g.headless);
+  const rest = groups.filter((g) => !g.headless);
+  const ordered = [...rest].sort((a, b) => {
+    const ra = rank.get(a.id);
+    const rb = rank.get(b.id);
+    if (ra !== undefined && rb !== undefined) return ra - rb;
+    if (ra !== undefined) return -1;
+    if (rb !== undefined) return 1;
+    return 0;
+  });
+  return [...headless, ...ordered];
 }
 
 export function filterSidebarSessions(
@@ -438,13 +488,14 @@ export function sortSidebarGroups(groups: TopGroup[], sortBy: SidebarSortBy): To
   const newest = (items: UnifiedSession[]) => items.reduce((m, s) => Math.max(m, key(s)), 0);
 
   const sorted = groups.map((g) => {
+    // Keep headless pinned strips and per-harness pinnedItems in their manual/stable order
+    if (g.headless) return g;
     const sections = g.sections
       ?.map((sec) => ({ ...sec, items: sortItems(sec.items) }))
       .sort((a, b) => newest(b.items) - newest(a.items));
     return {
       ...g,
       items: g.items ? sortItems(g.items) : undefined,
-      pinnedItems: g.pinnedItems ? sortItems(g.pinnedItems) : undefined,
       sections,
     };
   });
@@ -456,11 +507,13 @@ export function sortSidebarGroups(groups: TopGroup[], sortBy: SidebarSortBy): To
     );
   const headless = sorted.filter((g) => g.headless);
   const rest = sorted.filter((g) => !g.headless);
-  // Top-level harness sections always match the user's saved harness gauge order.
+  // Top-level harness sections and custom folders always preserve their manual order.
   const isHarnessTopLevel = rest.length > 0 && rest.every((g) => Boolean(g.harnessLogo));
-  const orderedRest = isHarnessTopLevel
-    ? rest
-    : [...rest].sort((a, b) => groupNewest(b) - groupNewest(a));
+  const isCustomFoldersTopLevel = rest.length > 0 && rest.every((g) => g.folderId !== undefined);
+  const orderedRest =
+    isHarnessTopLevel || isCustomFoldersTopLevel
+      ? rest
+      : [...rest].sort((a, b) => groupNewest(b) - groupNewest(a));
   return [...headless, ...orderedRest];
 }
 

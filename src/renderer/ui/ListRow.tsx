@@ -24,6 +24,8 @@ export interface SectionHeaderProps {
   sticky?: boolean;
   dropTarget?: boolean;
   onContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  reorderSectionId?: string;
   className?: string;
 }
 
@@ -42,6 +44,8 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   sticky = true,
   dropTarget = false,
   onContextMenu,
+  onPointerDown,
+  reorderSectionId,
   className,
 }) => {
   const isTopLevel = variant === 'separator';
@@ -49,7 +53,9 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   const pillContent = (
     <div
       data-harness-separator={variant === 'separator' ? 'true' : undefined}
+      data-reorder-section-id={reorderSectionId}
       onContextMenu={onContextMenu}
+      onPointerDown={onPointerDown}
       className={cn(
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel

@@ -153,7 +153,6 @@ public struct SessionListView: View {
     @State private var isManageFoldersPresented: Bool = false
     @State private var isSearchActive: Bool = false
     @State private var isErrorDetailExpanded: Bool = false
-    @State private var showPinnedChipsBar: Bool = false
     @FocusState private var isSearchFieldFocused: Bool
 
     private var collapsedSectionIds: Set<String> {
@@ -465,8 +464,7 @@ public struct SessionListView: View {
 
 
 
-            // Globally Pinned-to-Top section (headless — no header or manual collapse;
-            // scrolling down automatically animates these into a floating top chip strip)
+            // Globally Pinned-to-Top section (headless — no header)
             let topPinned = store.pinnedToTopSessions
             if !topPinned.isEmpty {
                 Section {
@@ -497,9 +495,13 @@ public struct SessionListView: View {
                     .listRowSeparator(.hidden)
                 }
             } else {
-                ForEach(sections) { section in
+                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                    let showTopRule = index > 0 || !topPinned.isEmpty
                     if section.isHeadless {
                         Section {
+                            if showTopRule {
+                                sectionDividerRow
+                            }
                             ForEach(section.sessions) { session in
                                 sessionRowButton(session)
                             }
@@ -507,6 +509,9 @@ public struct SessionListView: View {
                     } else {
                         let isCollapsed = collapsedSectionIds.contains(section.id)
                         Section {
+                            if showTopRule {
+                                sectionDividerRow
+                            }
                             Button {
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     toggleCollapsed(section.id)
@@ -595,66 +600,6 @@ public struct SessionListView: View {
             }
         }
         .listStyle(.plain)
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y + geo.contentInsets.top
-        } action: { _, offset in
-            // Hysteresis prevents flicker near the threshold while keeping the transition crisp.
-            if !showPinnedChipsBar && offset > 44 {
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                    showPinnedChipsBar = true
-                }
-            } else if showPinnedChipsBar && offset < 16 {
-                withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
-                    showPinnedChipsBar = false
-                }
-            }
-        }
-        .overlay(alignment: .top) {
-            let topPinned = store.pinnedToTopSessions
-            if showPinnedChipsBar && !topPinned.isEmpty && !isSearchActive {
-                PinnedSessionsFloatingStrip(
-                    sessions: topPinned,
-                    selectedSessionId: store.selectedSessionId,
-                    isBusy: { store.isSessionBusy($0) },
-                    onSelect: onSelectSession,
-                    onToggleUnread: { session in
-                        Task { await store.setUnread(sessionId: session.id, unread: !session.isUnread) }
-                    },
-                    onRename: { session in
-                        renameDraft = session.displayTitle
-                        renamingSession = session
-                    },
-                    onUnpinTop: { session in
-                        Task { await store.togglePinToTop(session) }
-                    },
-                    onArchive: { session in
-                        Task { await store.archiveSession(session) }
-                    }
-                )
-                .padding(.top, 4)
-                .padding(.bottom, 14)
-                // Rows scrolling underneath fade out behind the chips; without this their text
-                // shows through and between the translucent chips and both become hard to read.
-                .background(alignment: .top) {
-                    LinearGradient(
-                        stops: [
-                            .init(color: SHColor.surfaceCanvas, location: 0),
-                            .init(color: SHColor.surfaceCanvas, location: 0.9),
-                            .init(color: SHColor.surfaceCanvas.opacity(0), location: 1),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .padding(.top, -120)
-                    .allowsHitTesting(false)
-                }
-                .transition(
-                    .move(edge: .top)
-                    .combined(with: .opacity)
-                    .combined(with: .scale(scale: 0.94, anchor: .top))
-                )
-            }
-        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if isSearchActive {
                 inlineSearchField
@@ -675,6 +620,15 @@ public struct SessionListView: View {
         }
     }
 
+    private var sectionDividerRow: some View {
+        Rectangle()
+            .fill(SHColor.lineHairline)
+            .frame(height: 0.5)
+            .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 2, trailing: 20))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+
     @ViewBuilder
     private func sessionRowButton(_ session: UnifiedSession, isPinned: Bool = false) -> some View {
         let isSelected = store.selectedSessionId == session.id
@@ -690,14 +644,10 @@ public struct SessionListView: View {
             )
             .padding(.horizontal, 8)
             .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
-                    .fill(isSelected ? SHColor.surfaceRaised : Color.clear)
-            )
             .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SHRowTapButtonStyle(isSelected: isSelected))
         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
@@ -849,130 +799,22 @@ private struct MasterSessionRow: View {
     }
 }
 
-// MARK: - Floating Scroll-Driven Pinned Sessions Strip
+// MARK: - Session Row Tap Feedback
 
-private struct PinnedSessionsFloatingStrip: View {
-    let sessions: [UnifiedSession]
-    let selectedSessionId: String?
-    let isBusy: (String) -> Bool
-    let onSelect: (String) -> Void
-    let onToggleUnread: (UnifiedSession) -> Void
-    let onRename: (UnifiedSession) -> Void
-    let onUnpinTop: (UnifiedSession) -> Void
-    let onArchive: (UnifiedSession) -> Void
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(SHColor.brandMaster)
-                    .padding(.leading, 4)
-                    .padding(.trailing, 2)
-
-                ForEach(sessions) { session in
-                    PinnedSessionPill(
-                        session: session,
-                        isSelected: selectedSessionId == session.id,
-                        isBusy: isBusy(session.id),
-                        onSelect: { onSelect(session.id) }
-                    )
-                    .contextMenu {
-                        Button {
-                            onToggleUnread(session)
-                        } label: {
-                            if session.isUnread {
-                                Label("Mark as Read", systemImage: "envelope.open")
-                            } else {
-                                Label("Mark as Unread", systemImage: "envelope.badge")
-                            }
-                        }
-                        Button {
-                            onRename(session)
-                        } label: {
-                            Label("Rename", systemImage: "pencil")
-                        }
-                        Button {
-                            onUnpinTop(session)
-                        } label: {
-                            Label("Remove from Top", systemImage: "pin.slash")
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            onArchive(session)
-                        } label: {
-                            Label("Archive Session", systemImage: "archivebox")
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-        }
-        .accessibilityIdentifier("pinned.pillGrid")
-    }
-}
-
-private struct PinnedSessionPill: View {
-    let session: UnifiedSession
+private struct SHRowTapButtonStyle: ButtonStyle {
     let isSelected: Bool
-    let isBusy: Bool
-    let onSelect: () -> Void
 
-    var body: some View {
-        let vis = HarnessVisual.forKind(session.harness)
-        let label = SessionRowFormatting.compactPillLabel(for: session)
-
-        Button(action: onSelect) {
-            HStack(spacing: 5) {
-                ZStack {
-                    if session.status == .waitingInput, !isBusy {
-                        Image(systemName: "questionmark.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(SHColor.statusWarning)
-                    } else {
-                        HarnessLogoView(harness: session.harness, size: 13)
-                    }
-                }
-                .frame(width: 14, height: 14)
-
-                // A working session shimmers its title, the same signal the full rows use.
-                if isBusy {
-                    SHShimmerText(text: label, font: .system(size: 11.5, weight: .medium), isActive: true)
-                } else {
-                    Text(label)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(isSelected || session.isUnread ? SHColor.inkPrimary : SHColor.inkSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(minHeight: 34, maxHeight: 34)
-            .frame(maxWidth: 118)
-            .modifier(SHGlassSurfaceModifier(shape: Capsule()))
-            .overlay(
-                Capsule()
-                    .strokeBorder(
-                        isBusy
-                            ? vis.color.opacity(0.45)
-                            : (session.isUnread ? SHColor.brandMaster.opacity(0.45) : Color.clear),
-                        lineWidth: isBusy || session.isUnread ? 1 : 0
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous)
+                    .fill(
+                        configuration.isPressed
+                            ? Color.white.opacity(0.08)
+                            : (isSelected ? SHColor.surfaceRaised : Color.clear)
                     )
             )
-            .overlay(alignment: .topTrailing) {
-                if session.isUnread {
-                    Circle()
-                        .fill(SHColor.brandMaster)
-                        .frame(width: 6, height: 6)
-                        .offset(x: -1, y: 1)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(session.displayTitle)
-        .accessibilityValue(isBusy ? "working" : (session.isUnread ? "unread" : ""))
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -1179,9 +1021,15 @@ private struct SessionListRow: View {
         let subtitle = SessionRowFormatting.subtitle(for: session)
 
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 7) {
                 HarnessLogoView(harness: session.harness, size: 15)
                     .frame(width: 16, height: 16)
+
+                if isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(SHColor.inkSecondary)
+                }
 
                 SHShimmerText(
                     text: session.displayTitle,
@@ -1204,12 +1052,7 @@ private struct SessionListRow: View {
                         .foregroundStyle(SHColor.statusWarning)
                         .accessibilityLabel("Question pending")
                 } else {
-                    HStack(spacing: 5) {
-                        if isPinned {
-                            Image(systemName: "pin.fill")
-                                .font(.system(size: 8.5, weight: .semibold))
-                                .foregroundStyle(SHColor.brandMaster.opacity(0.7))
-                        }
+                    HStack(spacing: 6) {
                         Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
                             .font(SHTypography.micro.monospacedDigit())
                             .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)

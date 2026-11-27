@@ -631,6 +631,7 @@ function createWindow(): void {
     minWidth: 980,
     minHeight: 640,
     title: 'Super Harness',
+    icon: path.join(app.getAppPath(), 'resources', 'icon.png'),
     backgroundColor: '#16171b',
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,

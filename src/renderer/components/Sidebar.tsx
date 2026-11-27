@@ -6,7 +6,6 @@ import {
   HelpCircle,
   Hourglass,
   Laptop,
-  Layers,
   MoreHorizontal,
   Pin,
   Search,
@@ -54,6 +53,7 @@ import {
 import { prefetchSessionTranscript } from '../utils/transcriptCache';
 import type { DraftConversation } from './DraftSessionPane';
 import { HarnessLogo } from './HarnessLogo';
+import { SuperHarnessMark } from './SuperHarnessMark';
 import { HarnessUsageHoverCard } from './HarnessUsageHoverCard';
 import { SidebarContextMenu } from './SidebarContextMenu';
 
@@ -1120,7 +1120,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       {/* Top Bar (draggable window region): Logo (Settings) | Master, Search, Filter, New */}
       <div className="sh-drag-region h-12 px-3 flex items-center justify-between">
         <IconButton label="Settings" onClick={onOpenSettings}>
-          <Layers className="w-4 h-4" strokeWidth={1.75} />
+          <SuperHarnessMark size={18} className="text-ink-primary" />
         </IconButton>
         <div className="flex items-center gap-0.5 relative">
           {masterSession && (

@@ -192,7 +192,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
             onDropFiles(e.dataTransfer.files);
           }
         }}
-        className={`relative rounded-2xl transition-all ${
+        className={`relative rounded-[22px] transition-all ${
           dragOver
             ? 'bg-surface-raised ring-1 ring-inset ring-white/15 sh-shadow-card-focus'
             : 'bg-[#1c1e24] sh-shadow-card focus-within:bg-[#1e2027] focus-within:sh-shadow-card-focus'

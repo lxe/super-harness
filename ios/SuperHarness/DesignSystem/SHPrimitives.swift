@@ -177,7 +177,7 @@ public struct SHGlassActionCapsule<MenuContent: View>: View {
 
 // MARK: - Grounded Composer Surface
 
-/// Tactile elevated dark surface with soft shadow that stays anchored flush at the bottom.
+/// Tactile elevated dark surface matching desktop's borderless 22px squircle composer.
 public struct SHComposerSurface<Content: View>: View {
     @ViewBuilder public let content: () -> Content
 
@@ -187,13 +187,7 @@ public struct SHComposerSurface<Content: View>: View {
 
     public var body: some View {
         content()
-            .background(SHColor.surfaceRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
-            )
-            .shadow(color: Color.black.opacity(0.42), radius: 16, x: 0, y: 4)
+            .shRaisedSurface(SHColor.surfaceRaised, cornerRadius: 22, elevation: .card)
     }
 }
 

@@ -66,11 +66,12 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 .lede { margin-top: 22px; font-size: 1.14rem; color: var(--ink-2); max-width: 34em; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; align-items: center; }
 .button {
-  display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 22px; border-radius: 14px;
+  display: inline-flex; align-items: center; gap: 9px; height: 52px; padding: 0 20px; border-radius: 14px;
   background: var(--ink); color: #15171d; font-weight: 640; text-decoration: none;
   box-shadow: 0 10px 24px -12px rgba(238, 240, 245, 0.45), inset 0 -2px 0 rgba(0, 0, 0, 0.12);
 }
 .button:hover { background: #fff; }
+.cta-store { margin-top: 12px; }
 .store {
   display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 18px 0 14px; border-radius: 14px;
   background: var(--raised); color: var(--ink); text-decoration: none; box-shadow: var(--raise-hi);
@@ -88,7 +89,7 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 .window img { display: block; width: 100%; }
 .phone { margin: 0; border-radius: 26px; overflow: hidden; background: var(--canvas); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: var(--deep); }
 .phone img { display: block; width: 100%; }
-.hero-phone { position: absolute; width: 27%; right: -3%; bottom: 0; }
+.hero-phone { position: absolute; width: 34%; right: -4%; bottom: -9%; }
 
 /* harness strip */
 .harnesses { margin-top: 84px !important; text-align: center; }

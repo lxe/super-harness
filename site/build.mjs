@@ -5,7 +5,10 @@ import { cpSync, rmSync, readFileSync, writeFileSync, readdirSync, statSync } fr
 import { join } from "node:path";
 
 const SITE = "https://superharness.tech";
-const GITHUB = "https://github.com/lxe/super-harness";
+const GITHUB = "https://github.com/lxe/superharness";
+// Every desktop download button goes to the latest GitHub release, which lists the files
+// for each system.
+const RELEASES = `${GITHUB}/releases/latest`;
 
 // The App Store link. Leave it empty while the app is in review: the badge then
 // reads "Coming soon to the App Store" and links nowhere. When the app is live,
@@ -24,6 +27,7 @@ const appStoreBadge = APP_STORE_URL
 const vars = {
   SITE,
   GITHUB,
+  RELEASES,
   APP_STORE_BADGE: appStoreBadge,
   BUILD: Date.now().toString(36),
   HEADER: partial("header"),

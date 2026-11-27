@@ -1049,7 +1049,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
           };
         }}
         meta={
-          s.hostAddress || s.harness === 'claude-tmux' || isOldThread ? (
+          s.hostAddress || isOldThread ? (
             <>
               {isOldThread && (
                 <span title="Older than 7 days" className="text-ink-faint">
@@ -1059,13 +1059,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
               {s.hostAddress ? (
                 <span
                   title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-                  className="text-ink-muted"
-                >
-                  <Laptop className="w-3.5 h-3.5" />
-                </span>
-              ) : s.harness === 'claude-tmux' ? (
-                <span
-                  title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'local'}`}
                   className="text-ink-muted"
                 >
                   <Laptop className="w-3.5 h-3.5" />

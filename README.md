@@ -1,13 +1,15 @@
-# Super Harness
-
-> [!WARNING]
-> **Alpha software for personal use.** Super Harness is an active personal project built for my own Linux + macOS + iOS multi-agent workflow. Expect breaking changes, rough edges, and no stability guarantees.
-
-Unified multiplexer for all your Coding Harnesses and ADEs. 
+<div align="center">
+  <img src="./resources/icon.png" alt="Super Harness" width="104" height="104" />
+  <h1>Super Harness</h1>
+  <p><strong>The unified multiplexer for all your coding harnesses and ADEs.</strong></p>
+</div>
 
 <p align="center">
   <img src="./docs/screenshots/desktop-app.png" alt="Super Harness Desktop App (2-pane Split View)" width="100%" />
 </p>
+
+> [!WARNING]
+> **Alpha software for personal use.** Super Harness is an active personal project built for my own Linux + macOS + iOS multi-agent workflow. Expect breaking changes, rough edges, and no stability guarantees.
 
 ## iPhoneApp
 

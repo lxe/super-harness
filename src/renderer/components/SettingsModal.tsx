@@ -47,6 +47,8 @@ import { MobileSettingsPane } from './MobileSettingsPane';
 import { DEFAULT_DICTATION_SHORTCUT } from '../utils/shortcut';
 import { HarnessLogo } from './HarnessLogo';
 import { SuperHarnessMark } from './SuperHarnessMark';
+import { HarnessUpdateAction, HarnessUpdateDetails, HarnessUpdateStatus } from './HarnessUpdateControls';
+import { useHarnessUpdateJobs } from '../utils/harnessUpdates';
 
 export type SettingsTab = 'workspace' | 'apps' | 'dictation' | 'mobile' | 'harnesses' | 'master';
 
@@ -172,6 +174,14 @@ export const SettingsModal: React.FC<Props> = ({
   const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [summaryRefreshNote, setSummaryRefreshNote] = useState<string | null>(null);
   const [busyHarness, setBusyHarness] = useState<string | null>(null);
+  const updates = useHarnessUpdateJobs();
+  const [updateErrors, setUpdateErrors] = useState<Partial<Record<HarnessGroup, string>>>({});
+  const startUpdate = (id: HarnessGroup) => {
+    setUpdateErrors((prev) => ({ ...prev, [id]: undefined }));
+    void updates.start(id).then((error) => {
+      if (error) setUpdateErrors((prev) => ({ ...prev, [id]: error }));
+    });
+  };
   const [copiedBin, setCopiedBin] = useState<string | null>(null);
   const [expandedHarness, setExpandedHarness] = useState<Record<string, boolean>>({});
   const [scannedAt, setScannedAt] = useState<number>(() => Date.now());
@@ -436,6 +446,7 @@ export const SettingsModal: React.FC<Props> = ({
                   onClick={() => {
                     setScannedAt(Date.now());
                     onRefresh();
+                    void window.superHarness.checkHarnessUpdates();
                   }}
                   iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
                 >
@@ -853,6 +864,13 @@ export const SettingsModal: React.FC<Props> = ({
 
                         {/* Compact inline right controls: remote state + single action + switch */}
                         <div className="flex items-center gap-3.5 shrink-0">
+                          {h.installed && (
+                            <HarnessUpdateAction
+                              harness={h}
+                              job={updates.jobs[h.id]}
+                              onStart={() => startUpdate(h.id)}
+                            />
+                          )}
                           {h.installed && h.capabilities.canControlDaemon && (
                             <>
                               <span className="inline-flex items-center gap-1.5 text-caption text-ink-muted whitespace-nowrap">
@@ -916,6 +934,17 @@ export const SettingsModal: React.FC<Props> = ({
                         </div>
                       </div>
 
+                      {updates.jobs[h.id] && (
+                        <HarnessUpdateStatus
+                          job={updates.jobs[h.id]!}
+                          onCancel={() => void updates.cancel(h.id)}
+                          onDismiss={() => updates.dismiss(h.id)}
+                        />
+                      )}
+                      {updateErrors[h.id] && (
+                        <p className="pl-[52px] pb-4 -mt-1 text-caption text-status-danger">{updateErrors[h.id]}</p>
+                      )}
+
                       {/* Progressive disclosure: clean key-value details aligned under title */}
                       {h.installed && isExpanded && (
                         <div className="pl-[52px] pb-4 pt-0.5 space-y-2 text-caption">
@@ -925,6 +954,11 @@ export const SettingsModal: React.FC<Props> = ({
                               <span className="text-ink-secondary">{h.notes}</span>
                             </div>
                           )}
+                          <HarnessUpdateDetails
+                            harness={h}
+                            job={updates.jobs[h.id]}
+                            onStart={() => startUpdate(h.id)}
+                          />
                           <div className="grid grid-cols-[96px_1fr] gap-3 items-baseline">
                             <span className="text-ink-faint">Processes</span>
                             <span className="tabular-nums text-ink-secondary">

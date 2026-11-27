@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { ExternalLink, RotateCcw } from 'lucide-react';
 import type {
   DailySpendPoint,
+  HarnessDetection,
   HarnessGroup,
   HarnessUsageSummary,
   UsageQuotaWindow,
   UsageSnapshot,
 } from '../../shared/types';
-import { PopoverSurface, ProgressBar } from '../ui';
+import { Button, PopoverSurface, ProgressBar } from '../ui';
+import { isUpdateRunning, useHarnessUpdateJobs } from '../utils/harnessUpdates';
 import { HarnessLogo } from './HarnessLogo';
 import { HARNESS_TITLES } from '../utils/harnessMeta';
 
@@ -289,9 +291,71 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
   );
 };
 
+/** "Update available 1.4.0 → 1.6.1 [Update]", then the update's progress and outcome. */
+const HarnessUpdateNotice: React.FC<{ detection: HarnessDetection }> = ({ detection }) => {
+  const { jobs, start } = useHarnessUpdateJobs();
+  const [error, setError] = useState<string | null>(null);
+  const u = detection.update;
+  const latestJob = jobs[detection.id];
+  const running = isUpdateRunning(latestJob);
+  // A finished update stays on show until something new needs attention (a failure stays, to retry).
+  const job =
+    running ||
+    latestJob?.phase === 'failed' ||
+    (latestJob?.phase === 'done' && !u?.updateAvailable && !u?.staleDaemon)
+      ? latestJob
+      : undefined;
+  if (!u) return null;
+  if (!job && !u.updateAvailable && !u.staleDaemon) return null;
+
+  let text: string;
+  let tone = 'text-ink-secondary';
+  if (job && running) {
+    const lastLine = job.log.filter((l) => !l.startsWith('$ ')).at(-1);
+    text =
+      job.phase === 'waiting'
+        ? (job.message ?? 'Waiting for working sessions to finish.')
+        : job.phase === 'restarting'
+          ? 'Restarting…'
+          : lastLine || `Running ${job.step ?? 'the updater'}…`;
+  } else if (job && (job.phase === 'done' || job.phase === 'failed')) {
+    text = job.message ?? '';
+    tone = job.phase === 'failed' ? 'text-status-danger' : 'text-status-success';
+  } else if (u.updateAvailable) {
+    text = `Update available · ${u.current} → ${u.latest}`;
+  } else {
+    text = u.staleDaemon?.detail ?? '';
+    tone = 'text-status-warning';
+  }
+  const canStart = !running && (u.updateAvailable || Boolean(u.staleDaemon));
+
+  return (
+    <div className="flex items-center justify-between gap-3 text-caption">
+      <span className={`min-w-0 ${tone} ${running ? 'truncate' : ''}`}>{error ?? text}</span>
+      {(canStart || running) && (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          loading={running}
+          disabled={running}
+          onClick={() => {
+            setError(null);
+            void start(detection.id).then((e) => setError(e));
+          }}
+        >
+          {running ? 'Updating' : u.updateAvailable ? 'Update' : 'Restart daemon'}
+        </Button>
+      )}
+    </div>
+  );
+};
+
 interface Props {
   target: HarnessGroup | 'all';
   usage: UsageSnapshot;
+  /** That harness's detection, for the update notice. */
+  detection?: HarnessDetection;
   anchorRect: { left: number; top?: number; bottom: number; width: number };
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -300,6 +364,7 @@ interface Props {
 export const HarnessUsageHoverCard: React.FC<Props> = ({
   target,
   usage,
+  detection,
   anchorRect,
   onMouseEnter,
   onMouseLeave,
@@ -584,6 +649,8 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
           tokens7d={info.tokens7d}
         />
       )}
+
+      {detection && <HarnessUpdateNotice detection={detection} />}
 
       {/* Quiet footer text links (no horizontal rule) */}
       {accountLinks.length > 0 && (

@@ -57,6 +57,7 @@ import { useComposerDraft } from '../utils/composerDraftStore';
 import type { DraftConversation } from './DraftSessionPane';
 import { HarnessLogo } from './HarnessLogo';
 import { SuperHarnessMark } from './SuperHarnessMark';
+import { harnessUpdateNotice } from '../utils/harnessUpdates';
 import { HarnessUsageHoverCard } from './HarnessUsageHoverCard';
 import { SidebarContextMenu } from './SidebarContextMenu';
 
@@ -2212,6 +2213,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   label: 'AGY',
                   icon: <HarnessLogo harness="antigravity" size={tabLogoSize} />,
                   working: workingByHarness.antigravity,
+                  notice: harnessUpdateNotice(harnesses.find((h) => h.id === 'antigravity')),
                   progress: {
                     value: usage?.antigravity?.barPercent ?? null,
                     tone: 'antigravity',
@@ -2223,6 +2225,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   label: 'Codex',
                   icon: <HarnessLogo harness="codex" size={tabLogoSize} />,
                   working: workingByHarness.codex,
+                  notice: harnessUpdateNotice(harnesses.find((h) => h.id === 'codex')),
                   progress: {
                     value: usage?.codex?.barPercent ?? null,
                     tone: 'codex',
@@ -2234,6 +2237,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   label: 'Claude',
                   icon: <HarnessLogo harness="claude" size={tabLogoSize} />,
                   working: workingByHarness.claude,
+                  notice: harnessUpdateNotice(harnesses.find((h) => h.id === 'claude')),
                   progress: {
                     value: usage?.claude?.barPercent ?? null,
                     tone: 'claude',
@@ -2247,6 +2251,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   // at an integer offset in the 32px gauge, so it needs no pixel nudge.
                   icon: <HarnessLogo harness="muse" size={16} />,
                   working: workingByHarness.muse,
+                  notice: harnessUpdateNotice(harnesses.find((h) => h.id === 'muse')),
                   progress: {
                     value: usage?.muse?.barPercent ?? null,
                     tone: 'muse',
@@ -2258,6 +2263,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   label: 'Pi',
                   icon: <HarnessLogo harness="pi" size={tabLogoSize} />,
                   working: workingByHarness.pi,
+                  notice: harnessUpdateNotice(harnesses.find((h) => h.id === 'pi')),
                   progress: {
                     value: usage?.pi?.barPercent ?? null,
                     tone: 'pi',
@@ -2279,6 +2285,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
         <HarnessUsageHoverCard
           target={hoveredUsage.target}
           usage={usage}
+          detection={
+            hoveredUsage.target === 'all' ? undefined : harnesses.find((h) => h.id === hoveredUsage.target)
+          }
           anchorRect={hoveredUsage.rect}
           onMouseEnter={cancelCloseUsageHover}
           onMouseLeave={scheduleCloseUsageHover}

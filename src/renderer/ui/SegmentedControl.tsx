@@ -9,6 +9,8 @@ export interface SegmentedItem<T extends string> {
   label: string;
   icon?: React.ReactNode;
   working?: boolean;
+  /** Gauge variant: a quiet dot on the item (e.g. "Update available"); the text is its accessible name. */
+  notice?: string;
   progress?: {
     value: number | null;
     tone: ProgressTone;
@@ -295,7 +297,7 @@ export function SegmentedControl<T extends string>({
               data-gauge-id={item.id}
               role="tab"
               aria-selected={active}
-              aria-label={item.label}
+              aria-label={item.notice ? `${item.label}, ${item.notice}` : item.label}
               title={!onItemMouseEnter ? item.label : undefined}
               type="button"
               onClick={() => {
@@ -481,6 +483,12 @@ export function SegmentedControl<T extends string>({
                     </span>
                   )}
                 </span>
+                {item.notice && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-0 right-0 z-20 w-1.5 h-1.5 rounded-full bg-indigo-300 pointer-events-none"
+                  />
+                )}
               </span>
             </button>
           );

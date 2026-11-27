@@ -83,6 +83,18 @@ final class PairingTests: XCTestCase {
         }
     }
 
+    func testInfoReplyFromTheHostDecodesAndHostErrorTextIsShown() throws {
+        // The live host's reply, including a field this app does not use.
+        let body = Data(#"{"ok":true,"hostId":"0d3e47acf766bbac","hostName":"archlinux","version":"0.1.0","pairingOpen":false,"protocolVersion":2}"#.utf8)
+        let info = try JSONDecoder().decode(PairInfo.self, from: body)
+        XCTAssertEqual(info.hostName, "archlinux")
+        XCTAssertEqual(info.hostId, "0d3e47acf766bbac")
+        XCTAssertEqual(info.pairingOpen, false)
+
+        XCTAssertEqual(PairingError.wrongCode("Pairing isn’t open.").errorDescription, "Pairing isn’t open.")
+        XCTAssertEqual(PairingError.wrongCode(nil).errorDescription?.hasPrefix("That code didn’t work"), true)
+    }
+
     // MARK: Choosing an address
 
     func testPairingUsesTheBestRankedAddressThatAnswers() async throws {
@@ -172,7 +184,8 @@ final class PairingTests: XCTestCase {
         let keychain = InMemoryKeychainStore()
         let defaults = freshDefaults()
         // SH_MOCK_PAIRING: after pairing the app loads demo data instead of calling a real host.
-        let store = AppStore(keychain: keychain, defaults: defaults, environment: ["SH_MOCK_PAIRING": "1"], pairingService: MockPairingService(hostId: "h1", hostName: "Studio"))
+        let service = MockPairingService(hostId: "h1", hostName: "Studio")
+        let store = AppStore(keychain: keychain, defaults: defaults, environment: ["SH_MOCK_PAIRING": "1"], pairingService: service)
         defer { store.stopEventStream() }
         XCTAssertTrue(store.needsPairing)
 
@@ -191,7 +204,9 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "sh.pairedHostName"), "Studio")
         XCTAssertFalse(store.sessions.isEmpty, "sessions load after pairing")
 
-        store.unpair()
+        await store.unpairFromDesktop()
+        XCTAssertEqual(service.unpairCalls.map(\.token), ["mock-device-token"], "the desktop is told to drop this phone")
+        XCTAssertEqual(service.unpairCalls.first?.url.absoluteString, "http://studio.local:47890")
         XCTAssertTrue(store.needsPairing)
         XCTAssertNil(keychain.loadToken(for: "desktop-control-server"))
         XCTAssertNil(defaults.string(forKey: "sh.hostURL"))

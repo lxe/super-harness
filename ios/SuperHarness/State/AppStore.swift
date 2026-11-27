@@ -2737,6 +2737,17 @@ public final class AppStore {
         PushNotificationCoordinator.shared.syncCurrentTokenIfAvailable()
     }
 
+    /// Unpair chosen by the person: tell the desktop to drop this phone, then forget the
+    /// desktop. The phone forgets it even when the desktop cannot be reached.
+    public func unpairFromDesktop() async {
+        if connectionMode == .live || !bearerToken.isEmpty,
+           !bearerToken.isEmpty,
+           let url = try? LiveSuperHarnessClient.normalizeBaseURL(hostURLString) {
+            await pairingService.unpair(baseURL: url, token: bearerToken)
+        }
+        unpair()
+    }
+
     /// Forgets the desktop and returns to the pairing screen. `reason` is shown there.
     public func unpair(reason: String? = nil) {
         stopEventStream()

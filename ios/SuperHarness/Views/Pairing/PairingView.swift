@@ -89,7 +89,8 @@ public struct PairingView: View {
             PairingCodeSheet(
                 title: "Enter Manually",
                 desktopName: nil,
-                asksForAddress: true
+                asksForAddress: true,
+                lookUpName: { url in await store.pairingInfo(at: url)?.hostName }
             ) { address, code in
                 isManualEntryPresented = false
                 guard let url = PairingAddress.baseURL(from: address) else {
@@ -102,9 +103,10 @@ public struct PairingView: View {
         }
         .sheet(item: $codeEntryDesktop) { desktop in
             PairingCodeSheet(
-                title: "Enter Code",
+                title: "Pair with \(desktop.name)",
                 desktopName: desktop.name,
-                asksForAddress: false
+                asksForAddress: false,
+                lookUpName: nil
             ) { _, code in
                 codeEntryDesktop = nil
                 pair(with: desktop, code: code)
@@ -303,11 +305,16 @@ private struct PairingCodeSheet: View {
     let title: String
     let desktopName: String?
     let asksForAddress: Bool
+    /// Asks the desktop at a typed address for its name, so the prompt can say what is being
+    /// paired with. Nil when the name is already known.
+    let lookUpName: ((URL) async -> String?)?
     let onSubmit: (_ address: String, _ code: String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
     @State private var code = ""
+    @State private var foundName: String?
+    @State private var isLookingUp = false
     @FocusState private var focus: Field?
 
     private enum Field { case address, code }
@@ -331,6 +338,23 @@ private struct PairingCodeSheet: View {
                             .submitLabel(.next)
                             .onSubmit { focus = .code }
                             .accessibilityIdentifier("pairing.address")
+                        if isLookingUp || foundName != nil {
+                            HStack(spacing: 8) {
+                                if let foundName {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(SHColor.statusSuccess)
+                                    Text("Found \(foundName)")
+                                        .font(SHTypography.caption)
+                                        .foregroundStyle(SHColor.inkPrimary)
+                                } else {
+                                    SHActivityPulse(tint: SHColor.inkMuted, size: 16)
+                                    Text("Looking for a desktop at this address…")
+                                        .font(SHTypography.caption)
+                                        .foregroundStyle(SHColor.inkMuted)
+                                }
+                            }
+                            .accessibilityIdentifier("pairing.foundName")
+                        }
                     } header: {
                         Text("Desktop address")
                     } footer: {
@@ -338,6 +362,21 @@ private struct PairingCodeSheet: View {
                             .foregroundStyle(SHColor.inkFaint)
                     }
                     .listRowBackground(SHColor.surfaceSubtle)
+                    // Look the desktop up once typing pauses, so the prompt can name it.
+                    .task(id: address) {
+                        foundName = nil
+                        guard let lookUpName, let url = PairingAddress.baseURL(from: address) else {
+                            isLookingUp = false
+                            return
+                        }
+                        try? await Task.sleep(nanoseconds: 600_000_000)
+                        guard !Task.isCancelled else { return }
+                        isLookingUp = true
+                        let name = await lookUpName(url)
+                        guard !Task.isCancelled else { return }
+                        isLookingUp = false
+                        foundName = (name?.isEmpty == false) ? name : nil
+                    }
                 }
 
                 Section {
@@ -353,7 +392,7 @@ private struct PairingCodeSheet: View {
                         }
                         .accessibilityIdentifier("pairing.code")
                 } header: {
-                    Text(desktopName.map { "Code shown on \($0)" } ?? "6-digit code")
+                    Text((desktopName ?? foundName).map { "Code shown on \($0)" } ?? "6-digit code")
                 } footer: {
                     Text("Shown under the QR code on the desktop. It works once and expires after 10 minutes.")
                         .foregroundStyle(SHColor.inkFaint)
@@ -363,7 +402,8 @@ private struct PairingCodeSheet: View {
             .scrollContentBackground(.hidden)
             .background(SHColor.surfaceCanvas)
             .tint(SHColor.inkPrimary)
-            .navigationTitle(title)
+            // Once the desktop at a typed address answers, the title names it.
+            .navigationTitle(foundName.map { "Pair with \($0)" } ?? title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

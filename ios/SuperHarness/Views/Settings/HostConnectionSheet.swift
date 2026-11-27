@@ -52,7 +52,7 @@ public struct HostConnectionSheet: View {
                 titleVisibility: .visible
             ) {
                 Button("Unpair", role: .destructive) {
-                    store.unpair()
+                    Task { await store.unpairFromDesktop() }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {

@@ -171,7 +171,11 @@ public enum PairingError: Error, Equatable, LocalizedError, Sendable {
             return "That address belongs to a different desktop from the one showing the code."
         case .pairingClosed:
             return "The desktop isn’t showing a pairing code. In Super Harness on the desktop, open Settings → Mobile and choose Pair a phone."
-        case .wrongCode:
+        case .wrongCode(let hostMessage):
+            // The desktop says exactly what is wrong (expired, not open, mistyped) when it can.
+            if let hostMessage, !hostMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return hostMessage
+            }
             return "That code didn’t work. Codes expire after 10 minutes; show a new one on the desktop and try again."
         case .tooManyAttempts:
             return "Too many attempts. Show a new code on the desktop and try again."
@@ -191,6 +195,9 @@ public protocol PairingServiceProtocol: Sendable {
     /// Throws when the address does not answer in time.
     func info(baseURL: URL) async throws -> PairInfo
     func pair(baseURL: URL, code: String, deviceName: String, deviceId: String) async throws -> PairGrant
+    /// Tells the desktop to drop this phone (`POST /api/unpair`, authenticated by the phone's
+    /// own token). Best effort: the phone forgets the desktop whether or not this succeeds.
+    func unpair(baseURL: URL, token: String) async
 }
 
 public struct HTTPPairingService: PairingServiceProtocol {
@@ -236,6 +243,16 @@ public struct HTTPPairingService: PairingServiceProtocol {
         }
         guard let http = response as? HTTPURLResponse else { throw PairingError.unreachable }
         return try Self.grant(status: http.statusCode, body: data, baseURL: baseURL)
+    }
+
+    public func unpair(baseURL: URL, token: String) async {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/unpair"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
+        _ = try? await session.data(for: request)
     }
 
     /// Maps the host's reply to a grant or a `PairingError`. Separate so it can be tested
@@ -331,6 +348,7 @@ public final class MockPairingService: PairingServiceProtocol, @unchecked Sendab
     private let lock = NSLock()
     private var wrongAttempts = 0
     public private(set) var pairCalls: [(url: URL, code: String)] = []
+    public private(set) var unpairCalls: [(url: URL, token: String)] = []
 
     public init(
         reachableHosts: Set<String> = [],
@@ -360,6 +378,16 @@ public final class MockPairingService: PairingServiceProtocol, @unchecked Sendab
         guard answers(baseURL) else { throw PairingError.unreachable }
         try record(url: baseURL, code: code)
         return PairGrant(token: "mock-device-token", hostId: hostId, hostName: hostName, baseURL: baseURL)
+    }
+
+    public func unpair(baseURL: URL, token: String) async {
+        recordUnpair(url: baseURL, token: token)
+    }
+
+    private func recordUnpair(url: URL, token: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        unpairCalls.append((url, token))
     }
 
     /// Counts the attempt and throws when the code is wrong or the code has been burned.

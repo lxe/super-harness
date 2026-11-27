@@ -77,6 +77,8 @@ public struct SHInlineDisclosureRow: View {
     /// The title shimmers, as a working chat's title does, while the icon stays put.
     public var isShimmering: Bool = false
     public var isExpanded: Bool = false
+    /// False when there is nothing to open: the row then has no chevron and does not respond to taps.
+    public var isExpandable: Bool = true
     public let action: () -> Void
 
     public init(
@@ -88,6 +90,7 @@ public struct SHInlineDisclosureRow: View {
         isSpinning: Bool = false,
         isShimmering: Bool = false,
         isExpanded: Bool = false,
+        isExpandable: Bool = true,
         action: @escaping () -> Void
     ) {
         self.icon = icon
@@ -98,11 +101,12 @@ public struct SHInlineDisclosureRow: View {
         self.isSpinning = isSpinning
         self.isShimmering = isShimmering
         self.isExpanded = isExpanded
+        self.isExpandable = isExpandable
         self.action = action
     }
 
     public var body: some View {
-        Button(action: action) {
+        Button(action: { if isExpandable { action() } }) {
             HStack(spacing: 7) {
                 if isSpinning {
                     SHActivityPulse(tint: tint, size: 12)
@@ -134,10 +138,12 @@ public struct SHInlineDisclosureRow: View {
                         .clipShape(Capsule())
                 }
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(SHColor.inkFaint)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                if isExpandable {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(SHColor.inkFaint)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
 
                 Spacer(minLength: 8)
 

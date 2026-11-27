@@ -25,6 +25,9 @@ public struct LiveStepsBarView: View {
         activity.isWorking || runningTasks.contains(where: { $0.isDaemon != true })
     }
 
+    /// Steps or tasks to list under the row. Without any, the row has nothing to open.
+    private var hasDetails: Bool { !steps.isEmpty || !runningTasks.isEmpty }
+
     private var titleText: String {
         if let focus = activity.focus, !focus.isEmpty {
             return focus
@@ -66,12 +69,13 @@ public struct LiveStepsBarView: View {
                 trailingBadge: progressBadge,
                 tint: isActivelyWorking ? accentColor : SHColor.inkMuted,
                 isShimmering: isActivelyWorking,
-                isExpanded: isExpanded
+                isExpanded: isExpanded && hasDetails,
+                isExpandable: hasDetails
             ) {
                 isExpanded.toggle()
             }
 
-            if isExpanded {
+            if isExpanded && hasDetails {
                 VStack(alignment: .leading, spacing: SHLayout.itemGap) {
                     ForEach(steps) { step in
                         HStack(spacing: 7) {

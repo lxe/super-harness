@@ -1637,8 +1637,21 @@ struct SHModelEffortMenu: View, Equatable {
     @State private var frozenEffortLabel: String? = nil
     @State private var initialModelId: String? = nil
     @State private var initialEffort: String? = nil
-    @State private var draftEffort: String? = nil
-    @State private var pendingPickedModelId: String? = nil
+    /// The popover's pending choices. The popover's content observes this object itself, so
+    /// it redraws on a pick even when the system does not refresh it from the presenting view.
+    @StateObject private var draft = SHModelEffortDraft()
+    /// True from the moment the popover starts closing, so the chip un-presses and shows the
+    /// committed values at once instead of after the dismissal animation.
+    @State private var isClosing = false
+
+    private var draftEffort: String? {
+        get { draft.effort }
+        nonmutating set { draft.effort = newValue }
+    }
+    private var pendingPickedModelId: String? {
+        get { draft.pickedModelId }
+        nonmutating set { draft.pickedModelId = newValue }
+    }
 
     nonisolated static func == (lhs: SHModelEffortMenu, rhs: SHModelEffortMenu) -> Bool {
         lhs.models == rhs.models
@@ -1691,10 +1704,6 @@ struct SHModelEffortMenu: View, Equatable {
 
     private var displayedEfforts: [EffortItem] {
         hasActiveDraftSession ? frozenEfforts : efforts
-    }
-
-    private var displayedEffortLevel: String? {
-        hasActiveDraftSession ? draftEffort : liveActiveEffortLevel
     }
 
     private var accentColor: Color {
@@ -1754,6 +1763,7 @@ struct SHModelEffortMenu: View, Equatable {
             #endif
             if !isPopoverPresented {
                 beginDraftSession()
+                isClosing = false
                 isPopoverPresented = true
             } else {
                 isPopoverPresented = false
@@ -1778,7 +1788,7 @@ struct SHModelEffortMenu: View, Equatable {
             .padding(.horizontal, 13)
             .frame(height: ComposerView.controlSize)
         }
-        .buttonStyle(SHControlPressStyle(fill: SHColor.surfaceBubble, shape: Capsule(), isOn: isPopoverPresented))
+        .buttonStyle(SHControlPressStyle(fill: SHColor.surfaceBubble, shape: Capsule(), isOn: isPopoverPresented && !isClosing))
         .accessibilityLabel(accessibilityText)
         .accessibilityValue([pillTitle, pillEffort ?? ""].filter { !$0.isEmpty }.joined(separator: " "))
         .accessibilityIdentifier(identifier)
@@ -1795,14 +1805,38 @@ struct SHModelEffortMenu: View, Equatable {
         .onChange(of: isPopoverPresented) { _, presented in
             if !presented {
                 commitDraftSession()
+                isClosing = false
             }
         }
     }
 
     private var popoverContent: some View {
-        let activeModels = displayedModels
-        let activeEfforts = displayedEfforts
-        let activeEffort = displayedEffortLevel
+        SHModelEffortPopoverBody(
+            draft: draft,
+            activeModels: displayedModels,
+            activeEfforts: displayedEfforts,
+            initialModelId: initialModelId,
+            accentColor: accentColor,
+            onWillClose: {
+                isClosing = true
+                commitDraftSession()
+            }
+        )
+    }
+}
+/// The model and Thinking popover's content. It observes the draft itself, so a pick or a slider
+/// move redraws it directly.
+private struct SHModelEffortPopoverBody: View {
+    @ObservedObject var draft: SHModelEffortDraft
+    let activeModels: [SHModelEffortMenu.ModelItem]
+    let activeEfforts: [SHModelEffortMenu.EffortItem]
+    let initialModelId: String?
+    let accentColor: Color
+    /// Called when the popover starts to close (before its dismissal animation).
+    let onWillClose: () -> Void
+
+    var body: some View {
+        let activeEffort = draft.effort
         let rowHeight: CGFloat = 46
         let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight + 7, 330)
         // Deterministic height independent of the active effort label so moving the slider
@@ -1820,7 +1854,7 @@ struct SHModelEffortMenu: View, Equatable {
                         selectedLevel: activeEffort,
                         accentColor: accentColor,
                         onSelect: { level in
-                            draftEffort = level
+                            draft.effort = level
                         }
                     )
                 }
@@ -1842,9 +1876,9 @@ struct SHModelEffortMenu: View, Equatable {
                                     #endif
                                     // The popover stays open so the slider can still be set for the new
                                     // model; both are committed when the popover closes.
-                                    pendingPickedModelId = item.id
+                                    draft.pickedModelId = item.id
                                 } label: {
-                                    let isChecked = (pendingPickedModelId ?? initialModelId) == item.id
+                                    let isChecked = (draft.pickedModelId ?? initialModelId) == item.id
                                     HStack(spacing: 10) {
                                         Text(item.label)
                                             .font(.system(size: 14.5, weight: isChecked ? .semibold : .regular))
@@ -1869,6 +1903,7 @@ struct SHModelEffortMenu: View, Equatable {
                                 }
                                 .buttonStyle(.plain)
                                 .id(item.id)
+                                .accessibilityAddTraits((draft.pickedModelId ?? initialModelId) == item.id ? .isSelected : [])
                                 .accessibilityIdentifier("model.option.\(item.id)")
                             }
                         }
@@ -1888,8 +1923,47 @@ struct SHModelEffortMenu: View, Equatable {
         }
         .frame(width: 296, height: totalHeight, alignment: .top)
         .animation(nil, value: activeEffort)
+        .background(SHWillDisappearHook(action: onWillClose))
     }
 }
+
+/// Pending model and thinking level while the model popover is open.
+@MainActor
+final class SHModelEffortDraft: ObservableObject {
+    @Published var pickedModelId: String?
+    @Published var effort: String?
+}
+
+#if canImport(UIKit)
+/// Calls `action` when the hosting view controller is about to disappear, which for a popover is
+/// the start of its dismissal rather than the end.
+private struct SHWillDisappearHook: UIViewControllerRepresentable {
+    let action: () -> Void
+
+    func makeUIViewController(context: Context) -> Controller { Controller(action: action) }
+    func updateUIViewController(_ controller: Controller, context: Context) { controller.action = action }
+
+    final class Controller: UIViewController {
+        var action: () -> Void
+        init(action: @escaping () -> Void) {
+            self.action = action
+            super.init(nibName: nil, bundle: nil)
+        }
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            action()
+        }
+    }
+}
+#else
+private struct SHWillDisappearHook: View {
+    let action: () -> Void
+    var body: some View { Color.clear }
+}
+#endif
 
 #if canImport(UIKit)
 /// Native UIKit button overlay for Send: short tap steers immediately, long press opens

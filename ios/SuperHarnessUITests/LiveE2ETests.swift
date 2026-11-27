@@ -349,6 +349,12 @@ final class LiveE2ETests: XCTestCase {
         let targetLabel = target.label
         target.tap()
 
+        // The checkmark moves to the picked row at once.
+        let selectedNow = NSPredicate(format: "isSelected == true")
+        expectation(for: selectedNow, evaluatedWith: target)
+        waitForExpectations(timeout: 2)
+        XCTAssertEqual(options.matching(NSPredicate(format: "isSelected == true")).count, 1, "exactly one row is checked")
+
         // The popover stays open and the chip already shows the pick.
         let low = app.buttons["thinking.stop.low"].firstMatch
         XCTAssertTrue(low.waitForExistence(timeout: 2), "slider stays visible after picking a model")

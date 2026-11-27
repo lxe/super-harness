@@ -292,7 +292,7 @@ const SpendTrendSection: React.FC<SpendChartProps> = ({
 interface Props {
   target: HarnessGroup | 'all';
   usage: UsageSnapshot;
-  anchorRect: { left: number; bottom: number; width: number };
+  anchorRect: { left: number; top?: number; bottom: number; width: number };
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }
@@ -305,7 +305,10 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
   onMouseLeave,
 }) => {
   const left = Math.max(10, Math.min(anchorRect.left, window.innerWidth - 350));
-  const top = anchorRect.bottom + 8;
+  const openAbove = anchorRect.top !== undefined && anchorRect.bottom > window.innerHeight * 0.55;
+  const posStyle: React.CSSProperties = openAbove
+    ? { left, bottom: Math.max(10, window.innerHeight - (anchorRect.top ?? anchorRect.bottom) + 8) }
+    : { left, top: anchorRect.bottom + 8 };
 
   if (target === 'all') {
     const list: HarnessUsageSummary[] = [
@@ -343,7 +346,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
     return (
       <PopoverSurface
         width="auto"
-        style={{ left, top }}
+        style={posStyle}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
         className="fixed z-50 w-[336px] p-4 space-y-4"
@@ -463,7 +466,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
   return (
     <PopoverSurface
       width="auto"
-      style={{ left, top }}
+      style={posStyle}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       className="fixed z-50 w-[336px] p-4 space-y-4"

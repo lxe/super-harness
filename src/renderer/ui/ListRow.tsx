@@ -54,11 +54,11 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel
           ? cn(
-              'h-8 px-4 rounded-none bg-[#15171d] hover:bg-[#1a1c23] shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_1px_rgba(0,0,0,0.14)] text-[13px] font-semibold tracking-[-0.01em] text-ink-primary',
+              'h-8 px-4 rounded-none bg-[#15171d] hover:bg-[#1a1c23] border-b border-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] text-[13px] font-semibold tracking-[-0.01em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
           : 'h-7 px-2 rounded-lg bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-medium text-ink-secondary/80 hover:text-ink-primary',
-        !isTopLevel && sticky && 'sticky top-9 z-10',
+        !isTopLevel && sticky && 'sticky top-8 z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
@@ -103,7 +103,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
   if (isTopLevel && sticky) {
     return (
-      <div className="sticky top-0 z-20 -mx-2.5 pt-1.5 bg-surface-rail">
+      <div className="sticky top-0 z-20 -mx-2.5 bg-surface-rail">
         {pillContent}
       </div>
     );

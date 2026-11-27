@@ -89,6 +89,14 @@ body,
   background: rgba(255, 255, 255, 0.24);
 }
 
+/* Full-bleed scroll container without a reserved scrollbar gutter (lets full-width headers touch the right edge) */
+.sh-scroll-hidden {
+  scrollbar-width: none;
+}
+.sh-scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 /* Clean, calm Antigravity-grade markdown prose */
 @layer base {
   *,

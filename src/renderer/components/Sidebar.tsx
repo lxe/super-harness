@@ -11,9 +11,7 @@ import {
   Layers,
   MoreHorizontal,
   Pin,
-  RotateCw,
   Search,
-  Settings,
   SlidersHorizontal,
   SquarePen,
   X,
@@ -251,7 +249,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
   onOrganizeRef.current = onOrganize;
   const [hoveredUsage, setHoveredUsage] = useState<{
     target: HarnessGroup | 'all';
-    rect: { left: number; bottom: number; width: number };
+    rect: { left: number; top: number; bottom: number; width: number };
   } | null>(null);
   const hoverCloseTimerRef = useRef<number | null>(null);
   const prefetchTimerRef = useRef<number | null>(null);
@@ -295,7 +293,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
     const r = el.getBoundingClientRect();
     setHoveredUsage({
       target,
-      rect: { left: r.left, bottom: r.bottom, width: r.width },
+      rect: { left: r.left, top: r.top, bottom: r.bottom, width: r.width },
     });
   };
 
@@ -1161,112 +1159,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
       {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar) */}
       {globalPinnedSessions.length > 0 && (
-        <div className="px-2.5 pb-2.5 space-y-0.5 max-h-[32vh] overflow-y-auto">
+        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline/60">
           {globalPinnedSessions.map((s) =>
             renderSessionRow(s, { showLogo: true, showPin: false })
           )}
         </div>
-      )}
-
-      {/* Top Harness Switcher Bar (Antigravity | Codex | Claude | Muse | Pi) with toggle-to-deselect */}
-      {(() => {
-        const tabLogoSize = 14;
-        return (
-          <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-gradient-to-t before:from-black/22 before:to-transparent after:pointer-events-none after:content-[''] after:absolute after:inset-x-0 after:-bottom-2.5 after:h-2.5 after:bg-gradient-to-b after:from-black/26 after:to-transparent">
-            <SegmentedControl<FilterTab>
-              variant="gauge"
-              className="bg-transparent shadow-none rounded-none !p-0"
-              value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
-              onChange={(tab) => {
-                setFilter((prev) => (prev === tab ? 'all' : tab));
-                dismissUsageHover();
-              }}
-              onItemMouseEnter={(id, el) => {
-                if (!usage) return;
-                const target: HarnessGroup | 'all' =
-                  id === 'antigravity' || id === 'codex' || id === 'claude' || id === 'muse' || id === 'pi'
-                    ? id
-                    : 'all';
-                openUsageHover(target, el);
-              }}
-              onItemMouseLeave={scheduleCloseUsageHover}
-              items={orderGaugeItems([
-                {
-                  id: 'antigravity',
-                  label: 'AGY',
-                  icon: <HarnessLogo harness="antigravity" size={tabLogoSize} />,
-                  working: workingByHarness.antigravity,
-                  progress: {
-                    value: usage?.antigravity?.barPercent ?? null,
-                    tone: 'antigravity',
-                    estimated: usage?.antigravity?.barIsEstimated,
-                  },
-                },
-                {
-                  id: 'codex',
-                  label: 'Codex',
-                  icon: <HarnessLogo harness="codex" size={tabLogoSize} />,
-                  working: workingByHarness.codex,
-                  progress: {
-                    value: usage?.codex?.barPercent ?? null,
-                    tone: 'codex',
-                    estimated: usage?.codex?.barIsEstimated,
-                  },
-                },
-                {
-                  id: 'claude',
-                  label: 'Claude',
-                  icon: <HarnessLogo harness="claude" size={tabLogoSize} />,
-                  working: workingByHarness.claude,
-                  progress: {
-                    value: usage?.claude?.barPercent ?? null,
-                    tone: 'claude',
-                    estimated: usage?.claude?.barIsEstimated,
-                  },
-                },
-                {
-                  id: 'muse',
-                  label: 'Muse',
-                  // The Muse mark is drawn centered on its 24x24 box and the 16px icon sits
-                  // at an integer offset in the 32px gauge, so it needs no pixel nudge.
-                  icon: <HarnessLogo harness="muse" size={16} />,
-                  working: workingByHarness.muse,
-                  progress: {
-                    value: usage?.muse?.barPercent ?? null,
-                    tone: 'muse',
-                    estimated: usage?.muse?.barIsEstimated,
-                  },
-                },
-                {
-                  id: 'pi',
-                  label: 'Pi',
-                  icon: <HarnessLogo harness="pi" size={tabLogoSize} />,
-                  working: workingByHarness.pi,
-                  progress: {
-                    value: usage?.pi?.barPercent ?? null,
-                    tone: 'pi',
-                    estimated: usage?.pi?.barIsEstimated,
-                  },
-                },
-              ], harnessOrder)}
-              canReorder={(id) => id !== 'all'}
-              onReorder={(dragged, target) => {
-                if (dragged === 'all' || target === 'all') return;
-                onChangeHarnessOrder?.(moveHarness(harnessOrder ?? [], dragged as HarnessGroup, target as HarnessGroup));
-              }}
-            />
-          </div>
-        );
-      })()}
-
-      {hoveredUsage && usage && (
-        <HarnessUsageHoverCard
-          target={hoveredUsage.target}
-          usage={usage}
-          anchorRect={hoveredUsage.rect}
-          onMouseEnter={cancelCloseUsageHover}
-          onMouseLeave={scheduleCloseUsageHover}
-        />
       )}
 
       {/* Inline Search */}
@@ -1373,7 +1270,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       {/* Structured Conversation Tree with Sticky Two-Tier Headers */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-2.5 pb-4"
+        className="flex-1 overflow-y-auto sh-scroll-hidden px-2.5 pb-4"
       >
         {/* Inline unsent draft conversations (? when harness undecided, or harness logo when chosen) */}
         {draftConversations.length > 0 && (
@@ -1417,7 +1314,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             No conversations found
           </div>
         ) : (
-          <div className="space-y-0.5 pt-0.5">
+          <div>
             {topGroups.map((grp, grpIdx) => {
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
@@ -1426,7 +1323,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   <div
                     key={grp.id}
                     className={`space-y-0.5 ${grpIdx === 0 ? 'pt-1.5' : ''} ${
-                      grpIdx < topGroups.length - 1 ? 'pb-1' : ''
+                      grpIdx < topGroups.length - 1 ? 'pb-1.5 border-b border-line-hairline/60' : ''
                     }`}
                   >
                     {(grp.items ?? []).map((s) =>
@@ -1513,7 +1410,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   />
 
                   {!isTopClosed && (
-                    <div className="mt-1 space-y-1.5">
+                    <div className="py-1.5 space-y-1.5">
                       {/* Individual harness pins right below the harness separator (no extra Pinned section) */}
                       {grp.pinnedItems && grp.pinnedItems.length > 0 && (
                         <div className="space-y-0.5">
@@ -1599,25 +1496,106 @@ export const Sidebar: React.FC<Props> = React.memo(({
         )}
       </div>
 
-      {/* Settings & Restart Footer */}
-      <div className="p-2.5 border-t border-line-hairline flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="flex-1 min-w-0 flex items-center gap-2 px-2.5 h-8 rounded-lg text-[13px] text-ink-secondary hover:text-ink-primary hover:bg-white/[0.05] transition-colors cursor-pointer"
-        >
-          <Settings className="w-4 h-4 text-ink-muted shrink-0" />
-          <span className="truncate">Settings</span>
-        </button>
-        <IconButton
-          label="Restart Super Harness"
-          onClick={() => {
-            void window.superHarness.restartApp();
-          }}
-        >
-          <RotateCw className="w-4 h-4" strokeWidth={1.75} />
-        </IconButton>
-      </div>
+      {/* Bottom Harness Switcher Bar (Antigravity | Codex | Claude | Muse | Pi) with toggle-to-deselect */}
+      {(() => {
+        const tabLogoSize = 14;
+        return (
+          <div className="relative z-10 bg-[#181a20] px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] before:pointer-events-none before:content-[''] before:absolute before:inset-x-0 before:-top-2.5 before:h-2.5 before:bg-gradient-to-t before:from-black/26 before:to-transparent">
+            <SegmentedControl<FilterTab>
+              variant="gauge"
+              className="bg-transparent shadow-none rounded-none !p-0"
+              value={filter === 'live' || filter === 'tmux' ? 'all' : filter}
+              onChange={(tab) => {
+                setFilter((prev) => (prev === tab ? 'all' : tab));
+                dismissUsageHover();
+              }}
+              onItemMouseEnter={(id, el) => {
+                if (!usage) return;
+                const target: HarnessGroup | 'all' =
+                  id === 'antigravity' || id === 'codex' || id === 'claude' || id === 'muse' || id === 'pi'
+                    ? id
+                    : 'all';
+                openUsageHover(target, el);
+              }}
+              onItemMouseLeave={scheduleCloseUsageHover}
+              items={orderGaugeItems([
+                {
+                  id: 'antigravity',
+                  label: 'AGY',
+                  icon: <HarnessLogo harness="antigravity" size={tabLogoSize} />,
+                  working: workingByHarness.antigravity,
+                  progress: {
+                    value: usage?.antigravity?.barPercent ?? null,
+                    tone: 'antigravity',
+                    estimated: usage?.antigravity?.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'codex',
+                  label: 'Codex',
+                  icon: <HarnessLogo harness="codex" size={tabLogoSize} />,
+                  working: workingByHarness.codex,
+                  progress: {
+                    value: usage?.codex?.barPercent ?? null,
+                    tone: 'codex',
+                    estimated: usage?.codex?.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'claude',
+                  label: 'Claude',
+                  icon: <HarnessLogo harness="claude" size={tabLogoSize} />,
+                  working: workingByHarness.claude,
+                  progress: {
+                    value: usage?.claude?.barPercent ?? null,
+                    tone: 'claude',
+                    estimated: usage?.claude?.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'muse',
+                  label: 'Muse',
+                  // The Muse mark is drawn centered on its 24x24 box and the 16px icon sits
+                  // at an integer offset in the 32px gauge, so it needs no pixel nudge.
+                  icon: <HarnessLogo harness="muse" size={16} />,
+                  working: workingByHarness.muse,
+                  progress: {
+                    value: usage?.muse?.barPercent ?? null,
+                    tone: 'muse',
+                    estimated: usage?.muse?.barIsEstimated,
+                  },
+                },
+                {
+                  id: 'pi',
+                  label: 'Pi',
+                  icon: <HarnessLogo harness="pi" size={tabLogoSize} />,
+                  working: workingByHarness.pi,
+                  progress: {
+                    value: usage?.pi?.barPercent ?? null,
+                    tone: 'pi',
+                    estimated: usage?.pi?.barIsEstimated,
+                  },
+                },
+              ], harnessOrder)}
+              canReorder={(id) => id !== 'all'}
+              onReorder={(dragged, target) => {
+                if (dragged === 'all' || target === 'all') return;
+                onChangeHarnessOrder?.(moveHarness(harnessOrder ?? [], dragged as HarnessGroup, target as HarnessGroup));
+              }}
+            />
+          </div>
+        );
+      })()}
+
+      {hoveredUsage && usage && (
+        <HarnessUsageHoverCard
+          target={hoveredUsage.target}
+          usage={usage}
+          anchorRect={hoveredUsage.rect}
+          onMouseEnter={cancelCloseUsageHover}
+          onMouseLeave={scheduleCloseUsageHover}
+        />
+      )}
 
       {/* Floating Pointer-Drag Preview Pill */}
       {activeDrag && (

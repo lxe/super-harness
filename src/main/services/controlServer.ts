@@ -95,6 +95,8 @@ export const MOBILE_PROTOCOL_VERSION = 2;
 
 export interface ControlServerHooks {
   getUsage?: (force: boolean) => Promise<UsageSnapshot>;
+  /** Told about every batch of organize actions a client posts (after they are stored). */
+  onOrganize?: (actions: OrganizeAction[]) => void;
   getCatalog?: (force: boolean) => Promise<HarnessCatalog>;
   sendMessage?: (
     sessionId: string,
@@ -1049,6 +1051,7 @@ export class ControlServer {
             ? (body.actions as OrganizeAction[])
             : [body as unknown as OrganizeAction];
           const state = this.store.applyOrganize(actions);
+          this.hooks.onOrganize?.(actions);
           await this.triggerRefresh();
           sendJson({ ok: true, folders: state.folders, state });
           return;

@@ -22,6 +22,7 @@ import type {
 import { HarnessRegistry } from './adapters/registry';
 import { createProjectDirectory, HarnessCatalogService } from './services/catalogService';
 import { ControlServer } from './services/controlServer';
+import { LiveModelApplier } from './services/liveModelApplier';
 import { checkDictationServer, transcribeAudio } from './services/dictation';
 import { PairingService } from './services/pairing';
 import { BonjourAdvertiser } from './services/bonjourAdvertiser';
@@ -659,6 +660,12 @@ const dispatcher = new HarnessDispatcher(registry, store, emitStream, () => {
   void refreshAndBroadcast();
 });
 
+// A model or effort picked for a terminal Claude takes effect by restarting it in place when idle.
+const liveModelApplier = new LiveModelApplier({
+  getSession: (id) => registry.getSession(id),
+  apply: (id, change) => dispatcher.updateSessionConfig(id, change),
+});
+
 const controlServer = new ControlServer(
   store,
   registry,
@@ -668,6 +675,7 @@ const controlServer = new ControlServer(
   },
   {
     getUsage: async (force) => usageService.getUsage(force),
+    onOrganize: (actions) => liveModelApplier.note(actions),
     getCatalog: async (force) => {
       let { sessions } = registry.getCached();
       if (sessions.length === 0) {
@@ -1112,6 +1120,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('sh:organize', async (_ev, actions: OrganizeAction[]) => {
     const next = store.applyOrganize(actions);
+    liveModelApplier.note(actions);
     // Propagate native section moves upstream to drivers that support it (e.g. Codex app-server)
     for (const act of actions) {
       if (act.type === 'move_section' && act.sessionId) {

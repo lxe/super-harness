@@ -602,6 +602,7 @@ export const DraftSessionPane: React.FC<Props> = ({
             <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-1 flex-wrap min-w-0">
                 <IconButton
+                  shape="circle"
                   label="Attach files (or paste / drop them)"
                   onClick={() => void handlePickImages()}
                 >

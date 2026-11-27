@@ -283,7 +283,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
 
         <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1 min-w-0 h-7">
-            <IconButton label="Attach files (or paste / drop them)" onClick={onPickImages}>
+            <IconButton shape="circle" label="Attach files (or paste / drop them)" onClick={onPickImages}>
               <Plus className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
 

@@ -76,15 +76,16 @@ Button.displayName = 'Button';
 
 export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   size?: 'xs' | 'sm' | 'md';
+  shape?: 'square' | 'circle';
   active?: boolean;
   tone?: 'default' | 'accent' | 'warning' | 'danger';
   label: string;
 }
 
 const ICON_SIZE_CLASSES = {
-  xs: 'w-6 h-6 rounded-md',
-  sm: 'w-7 h-7 rounded-md',
-  md: 'w-8 h-8 rounded-lg',
+  xs: 'w-6 h-6',
+  sm: 'w-7 h-7',
+  md: 'w-8 h-8',
 };
 
 const ICON_TONE_CLASSES = {
@@ -98,6 +99,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
   (
     {
       size = 'sm',
+      shape = 'square',
       active = false,
       tone = 'default',
       label,
@@ -117,6 +119,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
         className={cn(
           'inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed',
           ICON_SIZE_CLASSES[size],
+          shape === 'circle' ? 'rounded-full' : size === 'md' ? 'rounded-lg' : 'rounded-md',
           active
             ? 'text-ink-primary bg-white/[0.1]'
             : ICON_TONE_CLASSES[tone],

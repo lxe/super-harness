@@ -319,7 +319,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ textareaRef, v
   const notice = phase.kind === 'notice' ? phase : null;
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0 flex items-center">
       {phase.kind === 'recording' ? (
         <button
           ref={triggerRef}
@@ -327,7 +327,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ textareaRef, v
           onClick={() => stop(false)}
           title={`Stop and transcribe (${shortcut}) · Esc to cancel`}
           aria-label="Stop recording and transcribe"
-          className="h-7 px-2 rounded-md inline-flex items-center gap-1.5 text-ink-primary bg-white/[0.1] hover:bg-white/[0.14] transition-colors cursor-pointer"
+          className="h-7 px-2.5 rounded-full inline-flex items-center gap-1.5 text-ink-primary bg-white/[0.1] hover:bg-white/[0.14] transition-colors cursor-pointer"
         >
           <span className="flex items-center gap-[2px] h-3.5" aria-hidden="true">
             {levels.map((lv, i) => (
@@ -343,6 +343,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ textareaRef, v
       ) : phase.kind === 'transcribing' || phase.kind === 'starting' ? (
         <IconButton
           ref={triggerRef}
+          shape="circle"
           label={phase.kind === 'starting' ? 'Opening microphone' : 'Transcribing'}
           onClick={() => phase.kind === 'starting' && stop(true)}
         >
@@ -351,11 +352,12 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ textareaRef, v
       ) : (
         <IconButton
           ref={triggerRef}
+          shape="circle"
           label={configured ? `Dictate (${shortcut})` : 'Dictation isn’t set up'}
           onClick={toggle}
           className={configured ? undefined : 'opacity-45 hover:opacity-100'}
         >
-          <Mic className="w-3.5 h-3.5" strokeWidth={1.75} />
+          <Mic className="w-4 h-4" strokeWidth={1.75} />
         </IconButton>
       )}
 

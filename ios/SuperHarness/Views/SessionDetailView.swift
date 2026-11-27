@@ -950,9 +950,10 @@ private struct ExpandableUserBubbleContent: View {
         VStack(alignment: .trailing, spacing: 6) {
             if isCollapsible && !isExpanded {
                 Text(combinedPlainText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .font(SHTypography.body)
+                    // Same font and spacing as the expanded message, so collapsing never resizes the text.
+                    .font(metrics.body)
                     .foregroundStyle(SHColor.inkPrimary)
-                    .lineSpacing(3)
+                    .lineSpacing(metrics.lineSpacing)
                     .lineLimit(Self.collapsedPreviewLines)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -105,8 +105,8 @@ public struct CollapsedTraceGroupView: View, Equatable {
                         )
                     }
                 }
+                // The expanded rows start at the same left edge as the row that opens them.
                 .padding(.top, 2)
-                .padding(.leading, 10)
             }
         }
     }

@@ -351,4 +351,31 @@ describe('ConfigStore pairing persistence across settings updates and restarts',
       vi.resetModules();
     }
   });
+
+  it('deduplicates push registrations for the same pairedDeviceId on register and on load', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-push-dedupe-'));
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const push = new PushNotifier(() => LEGACY);
+      push.registerDevice({ authToken: 'token-old', pairedDeviceId: 'phone-1', relayUrl: 'http://127.0.0.1:1' });
+      push.registerDevice({ authToken: 'token-new', pairedDeviceId: 'phone-1', relayUrl: 'http://127.0.0.1:1' });
+      expect(push.getRegisteredDevices()).toHaveLength(1);
+      expect(push.getRegisteredDevices()[0].rid).toBe(deriveRelayCredentials('token-new').rid);
+
+      // Simulate legacy file with multiple stale entries for the same pairedDeviceId
+      const file = path.join(home, '.config', 'super-harness', 'push-devices.json');
+      fs.writeFileSync(
+        file,
+        JSON.stringify([
+          { rid: 'older-rid', relayUrl: 'http://127.0.0.1:1', enabled: true, updatedAt: 100, pairedDeviceId: 'phone-1' },
+          { rid: 'newer-rid', relayUrl: 'http://127.0.0.1:1', enabled: true, updatedAt: 200, pairedDeviceId: 'phone-1' },
+        ])
+      );
+      const reloaded = new PushNotifier(() => LEGACY);
+      expect(reloaded.getRegisteredDevices().map((d) => d.rid)).toEqual(['newer-rid']);
+    } finally {
+      process.env.HOME = prevHome;
+    }
+  });
 });

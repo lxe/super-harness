@@ -82,17 +82,38 @@ export class PushNotifier {
       if (!fs.existsSync(this.devicesFile)) return;
       const raw = JSON.parse(fs.readFileSync(this.devicesFile, 'utf8')) as RegisteredPushDevice[];
       if (Array.isArray(raw)) {
+        const latestByPairedId = new Map<string, RegisteredPushDevice>();
+        let hadDuplicates = false;
         for (const d of raw) {
           if (d && typeof d.rid === 'string' && d.rid.length > 0) {
-            this.devices.set(d.rid, {
+            const normalized: RegisteredPushDevice = {
               rid: d.rid,
               relayUrl: (d.relayUrl || DEFAULT_RELAY_URL).replace(/\/+$/, ''),
               enabled: d.enabled !== false,
               updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : Date.now(),
               ...(typeof d.keyHex === 'string' && /^[0-9a-f]{64}$/.test(d.keyHex) ? { keyHex: d.keyHex } : {}),
               ...(typeof d.pairedDeviceId === 'string' ? { pairedDeviceId: d.pairedDeviceId } : {}),
-            });
+            };
+            if (normalized.pairedDeviceId) {
+              const prev = latestByPairedId.get(normalized.pairedDeviceId);
+              if (prev) {
+                hadDuplicates = true;
+                if (normalized.updatedAt >= prev.updatedAt) {
+                  this.devices.delete(prev.rid);
+                  latestByPairedId.set(normalized.pairedDeviceId, normalized);
+                  this.devices.set(normalized.rid, normalized);
+                }
+              } else {
+                latestByPairedId.set(normalized.pairedDeviceId, normalized);
+                this.devices.set(normalized.rid, normalized);
+              }
+            } else {
+              this.devices.set(normalized.rid, normalized);
+            }
           }
+        }
+        if (hadDuplicates) {
+          this.saveDevices();
         }
       }
     } catch {
@@ -130,6 +151,14 @@ export class PushNotifier {
       ...(authToken !== legacy ? { keyHex: derived.key.toString('hex') } : {}),
       ...(opts.pairedDeviceId ? { pairedDeviceId: opts.pairedDeviceId } : {}),
     };
+    // Replace any stale registrations for the same paired device so re-pairing never sends duplicate pushes
+    if (record.pairedDeviceId) {
+      for (const [existingRid, existing] of this.devices) {
+        if (existingRid !== rid && existing.pairedDeviceId === record.pairedDeviceId) {
+          this.devices.delete(existingRid);
+        }
+      }
+    }
     this.devices.set(rid, record);
     this.saveDevices();
     return { ...record, keyHex: undefined };

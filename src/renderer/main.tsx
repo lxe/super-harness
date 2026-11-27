@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/inter';
 import { App } from './App';
 import { installWindowVisibilityPause } from './ui/animationVisibility';
+import { installAnimationClock } from './ui/animationClock';
 import './styles.css';
 
 installWindowVisibilityPause();
@@ -59,6 +60,8 @@ class RootErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
+
+installAnimationClock();
 
 const rootEl = document.getElementById('root');
 if (rootEl) {

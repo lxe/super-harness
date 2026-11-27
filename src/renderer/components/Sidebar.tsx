@@ -258,6 +258,41 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const overlayThumbRef = useRef<HTMLDivElement | null>(null);
   const overlayScrollTimerRef = useRef<number | null>(null);
   const [sidebarScrolling, setSidebarScrolling] = useState(false);
+  const [sidebarThumbDragging, setSidebarThumbDragging] = useState(false);
+
+  const handleOverlayThumbPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = scrollContainerRef.current;
+    if (!el || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startScrollTop = el.scrollTop;
+    const { scrollHeight, clientHeight } = el;
+    const overflow = scrollHeight - clientHeight;
+    if (overflow <= 0) return;
+    const trackPad = 4;
+    const trackH = Math.max(1, clientHeight - trackPad * 2);
+    const thumbH = Math.max(28, (clientHeight / scrollHeight) * trackH);
+    const maxTop = Math.max(1, trackH - thumbH);
+
+    setSidebarThumbDragging(true);
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      const deltaY = ev.clientY - startY;
+      el.scrollTop = Math.max(0, Math.min(overflow, startScrollTop + (deltaY / maxTop) * overflow));
+    };
+    const onUp = () => {
+      setSidebarThumbDragging(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
 
   const scheduleHoverPrefetch = (sessionId: string) => {
     if (prefetchTimerRef.current !== null) {
@@ -300,7 +335,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
         thumb.style.display = 'none';
         return;
       }
-      thumb.style.display = 'block';
+      thumb.style.display = 'flex';
       const trackPad = 4;
       const trackH = Math.max(0, clientHeight - trackPad * 2);
       const thumbH = Math.max(28, (clientHeight / scrollHeight) * trackH);
@@ -1551,17 +1586,25 @@ export const Sidebar: React.FC<Props> = React.memo(({
           </div>
         )}
         </div>
-        {/* Floating overlay scrollbar thumb (floats above full-bleed section headers without stealing width) */}
+        {/* Draggable floating overlay scrollbar thumb (12px hit target, floats above full-bleed headers) */}
         <div
           ref={overlayThumbRef}
-          aria-hidden="true"
+          onPointerDown={handleOverlayThumbPointerDown}
           style={{ display: 'none' }}
-          className={`pointer-events-none absolute right-[2px] top-0 z-30 w-[4px] rounded-full transition-opacity duration-200 ${
-            sidebarScrolling
-              ? 'opacity-100 bg-white/[0.24]'
-              : 'opacity-0 group-hover/sb:opacity-100 bg-white/[0.15]'
+          className={`group/thumb absolute right-0 top-0 z-30 w-3 flex justify-end pr-[2px] cursor-grab active:cursor-grabbing select-none transition-opacity duration-200 ${
+            sidebarScrolling || sidebarThumbDragging
+              ? 'opacity-100'
+              : 'opacity-0 group-hover/sb:opacity-100'
           }`}
-        />
+        >
+          <div
+            className={`h-full rounded-full transition-[width,background-color] duration-150 ${
+              sidebarThumbDragging
+                ? 'w-[6px] bg-white/[0.34]'
+                : 'w-[4px] bg-white/[0.18] group-hover/thumb:w-[6px] group-hover/thumb:bg-white/[0.30]'
+            }`}
+          />
+        </div>
       </div>
 
       {/* Bottom Harness Switcher Bar (Antigravity | Codex | Claude | Muse | Pi) with toggle-to-deselect */}

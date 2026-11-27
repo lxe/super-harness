@@ -1,7 +1,8 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type {
   DetectedAppOption,
   DetectedSystemApps,
@@ -10,6 +11,8 @@ import type {
   UnifiedSession,
 } from '../../shared/types';
 import { whichBinary } from '../utils/system';
+
+const execFileAsync = promisify(execFile);
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp', '.ico']);
 const MARKDOWN_EXTS = new Set(['.md', '.mdx', '.markdown']);
@@ -332,6 +335,123 @@ export async function openPathWithApp(
   }
 }
 
+function shSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function findDesktopExecBinary(desktopNames: string[]): string | null {
+  if (process.platform !== 'linux') return null;
+  const dirs = [
+    path.join(os.homedir(), '.local', 'share', 'applications'),
+    '/usr/local/share/applications',
+    '/usr/share/applications',
+  ];
+  for (const name of desktopNames) {
+    for (const dir of dirs) {
+      const p = path.join(dir, name);
+      if (!fs.existsSync(p)) continue;
+      try {
+        const text = fs.readFileSync(p, 'utf8');
+        const match = text.match(/^Exec=(.+)$/m);
+        if (!match) continue;
+        const tokens = match[1]
+          .trim()
+          .split(/\s+/)
+          .filter((t) => !/^%[a-zA-Z]$/.test(t));
+        let idx = 0;
+        if (tokens[0] === 'env') {
+          idx = 1;
+          while (idx < tokens.length && tokens[idx].includes('=')) idx++;
+        }
+        const bin = tokens[idx]?.replace(/^["']|["']$/g, '');
+        if (bin && (!bin.startsWith('/') || fs.existsSync(bin))) {
+          return bin;
+        }
+      } catch {
+        // ignore unreadable desktop entries
+      }
+    }
+  }
+  return null;
+}
+
+async function focusDesktopWindowByClass(classes: string[]): Promise<boolean> {
+  if (process.platform !== 'linux') return false;
+  const targets = classes.map((c) => c.toLowerCase());
+  if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+    try {
+      const { stdout } = await execFileAsync('hyprctl', ['clients', '-j'], { timeout: 2000 });
+      const clients = JSON.parse(stdout) as Array<{
+        address?: string;
+        class?: string;
+        initialClass?: string;
+      }>;
+      const hit = clients.find((c) => {
+        const cls = (c.class || '').toLowerCase();
+        const init = (c.initialClass || '').toLowerCase();
+        return targets.includes(cls) || targets.includes(init);
+      });
+      if (hit?.address) {
+        await execFileAsync('hyprctl', ['dispatch', 'focuswindow', `address:${hit.address}`], {
+          timeout: 2000,
+        });
+        return true;
+      }
+    } catch {
+      // ignore compositor errors
+    }
+  }
+  return false;
+}
+
+async function focusExistingTmuxClientWindow(tmuxSessionName: string): Promise<boolean> {
+  if (process.platform !== 'linux' || !process.env.HYPRLAND_INSTANCE_SIGNATURE) return false;
+  try {
+    const { stdout: clientOut } = await execFileAsync(
+      'tmux',
+      ['list-clients', '-t', tmuxSessionName, '-F', '#{client_pid}'],
+      { timeout: 2000 }
+    );
+    const clientPids = clientOut
+      .split('\n')
+      .map((l) => Number.parseInt(l.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 1);
+    if (clientPids.length === 0) return false;
+
+    const ancestorPids = new Set<number>();
+    for (const startPid of clientPids) {
+      let pid = startPid;
+      for (let depth = 0; depth < 8 && pid > 1; depth++) {
+        ancestorPids.add(pid);
+        try {
+          const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+          const afterComm = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+          const ppid = Number.parseInt(afterComm[1] || '', 10);
+          if (!Number.isFinite(ppid) || ppid <= 1 || ppid === pid) break;
+          pid = ppid;
+        } catch {
+          break;
+        }
+      }
+    }
+
+    const { stdout: hyprOut } = await execFileAsync('hyprctl', ['clients', '-j'], { timeout: 2000 });
+    const clients = JSON.parse(hyprOut) as Array<{ address?: string; pid?: number }>;
+    const hit = clients.find(
+      (c) => c.address && typeof c.pid === 'number' && ancestorPids.has(c.pid)
+    );
+    if (hit?.address) {
+      await execFileAsync('hyprctl', ['dispatch', 'focuswindow', `address:${hit.address}`], {
+        timeout: 2000,
+      });
+      return true;
+    }
+  } catch {
+    // fall back to spawning a new terminal attached to the tmux session
+  }
+  return false;
+}
+
 async function launchTerminalWithCommand(
   cmdArgv: string[],
   cwd: string,
@@ -345,7 +465,9 @@ async function launchTerminalWithCommand(
     'kitty --directory {cwd}';
   const argv = splitCommandArgs(tpl, { cwd: safeCwd, path: safeCwd });
   const firstBin = path.basename(argv[0] || '');
-  if (firstBin === 'wezterm') {
+  if (firstBin === 'kitty') {
+    argv.push(...cmdArgv);
+  } else if (firstBin === 'wezterm') {
     argv.push('--', ...cmdArgv);
   } else {
     argv.push('-e', ...cmdArgv);
@@ -355,18 +477,32 @@ async function launchTerminalWithCommand(
 
 /**
  * Opens a session directly in its native external harness (desktop app deep link
- * when available, or configured terminal attached to tmux / CLI resume).
+ * with compositor focus on Hyprland/Wayland, or configured terminal attached to
+ * tmux / CLI resume).
  */
 export async function openSessionInHarness(
   session: UnifiedSession,
   apps: ExternalAppsSettings
 ): Promise<{ ok: boolean; via?: string; error?: string }> {
   const cwd = session.cwd && fs.existsSync(session.cwd) ? session.cwd : os.homedir();
-  const openUrl = async (url: string): Promise<boolean> => {
+
+  const openDesktopDeepLink = async (
+    url: string,
+    desktopNames: string[],
+    windowClasses: string[]
+  ): Promise<boolean> => {
+    const directBin = findDesktopExecBinary(desktopNames);
+    if (directBin) {
+      spawnDetached([directBin, url], cwd);
+      // Wayland compositors (e.g. Hyprland) block background apps from stealing focus; focus explicitly
+      void focusDesktopWindowByClass(windowClasses);
+      return true;
+    }
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { shell } = require('electron') as typeof import('electron');
       await shell.openExternal(url);
+      void focusDesktopWindowByClass(windowClasses);
       return true;
     } catch {
       return false;
@@ -376,29 +512,48 @@ export async function openSessionInHarness(
   try {
     // 1. Live tmux session (Claude tmux or Muse tmux, local or remote SSH)
     if (session.tmuxSessionName) {
+      const tmuxSession = session.tmuxSessionName.split(':')[0];
       if (session.hostAddress) {
+        const remoteCmd = `export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; exec tmux attach-session -t ${shSingleQuote(tmuxSession)}`;
         await launchTerminalWithCommand(
-          ['ssh', '-t', session.hostAddress, 'tmux', 'attach-session', '-t', session.tmuxSessionName],
+          ['ssh', '-t', session.hostAddress, remoteCmd],
           os.homedir(),
           apps
         );
         return { ok: true, via: `ssh tmux (${session.hostAddress})` };
       }
+
+      // Select the exact window/pane if tmuxTarget includes one
+      if (session.tmuxTarget && session.tmuxTarget.includes(':')) {
+        try {
+          await execFileAsync('tmux', ['select-window', '-t', session.tmuxTarget], { timeout: 1500 });
+          await execFileAsync('tmux', ['select-pane', '-t', session.tmuxTarget], { timeout: 1500 });
+        } catch {
+          // ignore if session has only one pane
+        }
+      }
+
+      if (await focusExistingTmuxClientWindow(tmuxSession)) {
+        return { ok: true, via: `focused tmux:${tmuxSession}` };
+      }
+
       await launchTerminalWithCommand(
-        ['tmux', 'attach-session', '-t', session.tmuxSessionName],
+        ['tmux', 'attach-session', '-t', tmuxSession],
         cwd,
         apps
       );
-      return { ok: true, via: `tmux:${session.tmuxSessionName}` };
+      return { ok: true, via: `tmux:${tmuxSession}` };
     }
 
     // 2. OpenAI Codex: deep-link Codex Desktop straight to the thread, fallback to CLI resume
     if (session.harness === 'codex') {
+      const codexUrl = `codex://threads/${encodeURIComponent(session.nativeId)}`;
       const hasCodexDesktop =
-        fs.existsSync('/usr/bin/codex-desktop') ||
-        fs.existsSync('/usr/share/applications/codex-desktop.desktop') ||
-        process.platform === 'darwin';
-      if (hasCodexDesktop && (await openUrl(`codex://threads/${encodeURIComponent(session.nativeId)}`))) {
+        Boolean(findDesktopExecBinary(['codex-desktop.desktop'])) || process.platform === 'darwin';
+      if (
+        hasCodexDesktop &&
+        (await openDesktopDeepLink(codexUrl, ['codex-desktop.desktop'], ['codex-desktop', 'ChatGPT']))
+      ) {
         return { ok: true, via: 'Codex Desktop' };
       }
       const codexBin = (await whichBinary('codex')) || 'codex';
@@ -408,11 +563,13 @@ export async function openSessionInHarness(
 
     // 3. Google Antigravity: deep-link Antigravity Desktop to conversation, fallback to agy CLI
     if (session.harness === 'antigravity') {
+      const agyUrl = `antigravity://conversation/${encodeURIComponent(session.nativeId)}`;
       const hasAgyDesktop =
-        fs.existsSync(path.join(os.homedir(), '.local/share/applications/antigravity.desktop')) ||
-        fs.existsSync('/usr/share/applications/antigravity.desktop') ||
-        process.platform === 'darwin';
-      if (hasAgyDesktop && (await openUrl(`antigravity://conversation/${encodeURIComponent(session.nativeId)}`))) {
+        Boolean(findDesktopExecBinary(['antigravity.desktop'])) || process.platform === 'darwin';
+      if (
+        hasAgyDesktop &&
+        (await openDesktopDeepLink(agyUrl, ['antigravity.desktop'], ['antigravity', 'Antigravity']))
+      ) {
         return { ok: true, via: 'Antigravity Desktop' };
       }
       const agyBin = (await whichBinary('agy')) || 'agy';
@@ -420,16 +577,35 @@ export async function openSessionInHarness(
       return { ok: true, via: 'Antigravity CLI' };
     }
 
-    // 4. Claude Desktop
+    // 4. Claude Desktop: deep-link directly to the Claude Code session when nativeId is present
     if (session.harness === 'claude-desktop') {
-      if (await openUrl('claude://')) {
+      const claudeUrl = session.nativeId
+        ? `claude://code/continue?session=${encodeURIComponent(session.nativeId)}`
+        : 'claude://';
+      if (
+        await openDesktopDeepLink(
+          claudeUrl,
+          ['com.anthropic.Claude.desktop', 'claude-desktop.desktop'],
+          ['com.anthropic.Claude', 'claude-desktop', 'Claude']
+        )
+      ) {
         return { ok: true, via: 'Claude Desktop' };
       }
       return { ok: false, error: 'Could not open Claude Desktop' };
     }
 
-    // 5. Claude CLI
+    // 5. Claude CLI (local or remote SSH)
     if (session.harness === 'claude-cli' || session.harness === 'claude-tmux') {
+      if (session.hostAddress) {
+        const remoteDir = session.cwd ? `cd ${shSingleQuote(session.cwd)} && ` : '';
+        const remoteCmd = `export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; ${remoteDir}exec claude --resume ${shSingleQuote(session.nativeId)}`;
+        await launchTerminalWithCommand(
+          ['ssh', '-t', session.hostAddress, remoteCmd],
+          os.homedir(),
+          apps
+        );
+        return { ok: true, via: `ssh claude (${session.hostAddress})` };
+      }
       const claudeBin = (await whichBinary('claude')) || 'claude';
       await launchTerminalWithCommand([claudeBin, '--resume', session.nativeId], cwd, apps);
       return { ok: true, via: 'Claude CLI' };

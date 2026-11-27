@@ -28,6 +28,7 @@ public struct SessionListSection: Identifiable, Sendable, Equatable {
     public let accentHex: String?
     public let folderId: String?
     public let isProjectOrSectionGroup: Bool
+    public let projectPath: String?
     public let isHeadless: Bool
     public let sessions: [UnifiedSession]
 
@@ -38,6 +39,7 @@ public struct SessionListSection: Identifiable, Sendable, Equatable {
         accentHex: String? = nil,
         folderId: String? = nil,
         isProjectOrSectionGroup: Bool = false,
+        projectPath: String? = nil,
         isHeadless: Bool = false,
         sessions: [UnifiedSession]
     ) {
@@ -47,6 +49,7 @@ public struct SessionListSection: Identifiable, Sendable, Equatable {
         self.accentHex = accentHex
         self.folderId = folderId
         self.isProjectOrSectionGroup = isProjectOrSectionGroup
+        self.projectPath = projectPath
         self.isHeadless = isHeadless
         self.sessions = sessions
     }
@@ -1785,11 +1788,31 @@ public final class AppStore {
                     title: displayTitle,
                     harnessGroup: group,
                     isProjectOrSectionGroup: isProjectGroup,
+                    projectPath: isProjectGroup ? resolvedProjectPath(for: sectionItems) : nil,
                     sessions: sectionItems
                 )
             )
         }
         return result
+    }
+
+    private func resolvedProjectPath(for items: [UnifiedSession]) -> String? {
+        let catalogPaths = Set((catalog?.projects ?? []).map(\.path))
+        if !catalogPaths.isEmpty {
+            for s in items {
+                let cwd = s.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cwd.isEmpty && catalogPaths.contains(cwd) {
+                    return cwd
+                }
+            }
+        }
+        for s in items {
+            let cwd = s.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cwd.isEmpty {
+                return cwd
+            }
+        }
+        return nil
     }
 
     public var groupedSections: [SessionListSection] {
@@ -1846,10 +1869,12 @@ public final class AppStore {
                     return a.updatedAt > b.updatedAt
                 }
                 let name = labels[key] ?? key
+                let isProject = key != ungroupedKey
                 return SessionListSection(
                     id: "project-\(key)",
-                    title: key == ungroupedKey ? "Conversations" : name,
-                    isProjectOrSectionGroup: key != ungroupedKey,
+                    title: isProject ? name : "Conversations",
+                    isProjectOrSectionGroup: isProject,
+                    projectPath: isProject ? resolvedProjectPath(for: items) : nil,
                     sessions: items
                 )
             }
@@ -3376,10 +3401,16 @@ public final class AppStore {
         await bootstrap()
     }
 
-    public func openDraftChat(for harness: HarnessGroup? = nil) {
+    public func openDraftChat(for harness: HarnessGroup? = nil, projectPath: String? = nil) {
         // An explicit harness (filter chip, long-press) wins; otherwise reopen the draft where it was left.
         if let harness, newThreadConfig.harness.harnessGroup != harness {
             newThreadConfig.harness = harness.defaultStartHarness
+        }
+        if let projectPath {
+            let trimmed = projectPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                newThreadConfig.projectPath = trimmed
+            }
         }
         let kind = newThreadConfig.harness
         selectedSessionId = nil

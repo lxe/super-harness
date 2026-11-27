@@ -1144,4 +1144,102 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("Gemini 4 Neon (High)"), "Gemini 4 Neon")
         XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("GPT-OSS 120B (Medium)"), "GPT-OSS 120B")
     }
+
+    func testProjectSectionCarriesProjectPathAndOpensDraftWithPreselectedProject() {
+        let suite = "sh.tests.projectdraft.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        store.groupBy = .project
+        store.sessions = [
+            UnifiedSession(
+                id: "claude:dsx-1",
+                harness: .claudeTmux,
+                harnessGroup: .claude,
+                title: "DSX on .102",
+                cwd: "/home/lxe/DSX",
+                projectName: "DSX",
+                status: .idle,
+                createdAt: now,
+                updatedAt: now
+            ),
+            UnifiedSession(
+                id: "codex:sh-1",
+                harness: .codex,
+                harnessGroup: .codex,
+                title: "Superharness",
+                cwd: "/home/lxe/super-harness",
+                projectName: "super-harness",
+                status: .idle,
+                createdAt: now - 1000,
+                updatedAt: now - 1000
+            ),
+        ]
+
+        let dsxSection = store.groupedSections.first(where: { $0.title == "DSX" })
+        XCTAssertNotNil(dsxSection)
+        XCTAssertEqual(dsxSection?.isProjectOrSectionGroup, true)
+        XCTAssertEqual(dsxSection?.projectPath, "/home/lxe/DSX")
+        XCTAssertNil(dsxSection?.harnessGroup)
+
+        store.openDraftChat(for: dsxSection?.harnessGroup, projectPath: dsxSection?.projectPath)
+        XCTAssertEqual(store.newThreadConfig.projectPath, "/home/lxe/DSX")
+        if case .draft = store.detailRoute {
+            // expected
+        } else {
+            XCTFail("Expected detailRoute to be .draft, got \(String(describing: store.detailRoute))")
+        }
+    }
+
+    func testThinkingSliderStopsAndCoalescedModelEffortResolution() {
+        // Discrete stop snapping & clamping
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: -10, trackWidth: 200, count: 4), 0)
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: 0, trackWidth: 200, count: 4), 0)
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: 68, trackWidth: 200, count: 4), 1)
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: 132, trackWidth: 200, count: 4), 2)
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: 200, trackWidth: 200, count: 4), 3)
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: 250, trackWidth: 200, count: 4), 3)
+        XCTAssertEqual(SHThinkingEffortSlider.nearestStopIndex(x: 50, trackWidth: 200, count: 1), 0)
+
+        XCTAssertEqual(SHThinkingEffortSlider.displayName(for: "none"), "Off")
+        XCTAssertEqual(SHThinkingEffortSlider.displayName(for: "xhigh"), "XHigh")
+        XCTAssertEqual(SHThinkingEffortSlider.compactStopLabel(for: "medium", totalStops: 4), "Med")
+        XCTAssertEqual(SHThinkingEffortSlider.compactStopLabel(for: "medium", totalStops: 3), "Medium")
+
+        // Antigravity sibling slug switching + Orchestrator (no effort levels)
+        let agyModels = [
+            HarnessModelOption(id: "gemini-4-neon-low", label: "Gemini 4 Neon (Low)", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "low"),
+            HarnessModelOption(id: "gemini-4-neon-medium", label: "Gemini 4 Neon (Medium)", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "medium"),
+            HarnessModelOption(id: "gemini-4-neon-high", label: "Gemini 4 Neon (High)", reasoningLevels: ["low", "medium", "high", "xhigh"], defaultReasoningLevel: "high"),
+            HarnessModelOption(id: "gemini-pro-orchestrator-neon", label: "Orchestrator (Neon)"),
+        ]
+
+        let switchedEffort = ComposerView.resolveEffortSelection(
+            effort: "medium",
+            currentModel: "gemini-4-neon-high",
+            availableModels: agyModels
+        )
+        XCTAssertEqual(switchedEffort.modelId, "gemini-4-neon-medium")
+        XCTAssertEqual(switchedEffort.effort, "medium")
+
+        let pickedNeonWithExistingEffort = ComposerView.resolveModelSelection(
+            picked: agyModels[2],
+            currentEffort: "low",
+            availableModels: agyModels,
+            allowExtreme: false
+        )
+        XCTAssertEqual(pickedNeonWithExistingEffort.modelId, "gemini-4-neon-low")
+        XCTAssertEqual(pickedNeonWithExistingEffort.effort, "low")
+
+        let pickedOrch = ComposerView.resolveModelSelection(
+            picked: agyModels[3],
+            currentEffort: "high",
+            availableModels: agyModels,
+            allowExtreme: false
+        )
+        XCTAssertEqual(pickedOrch.modelId, "gemini-pro-orchestrator-neon")
+        XCTAssertNil(pickedOrch.effort)
+    }
 }

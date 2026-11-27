@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -15,8 +14,10 @@ public enum DraftProjectFilter {
 
 /// New Chat page pushed onto the main navigation stack (or shown in iPad's detail column).
 ///
-/// The page itself is the setup surface: pick the harness (and project) from the cards, then the
-/// composer at the bottom carries one combined model + thinking-effort pill, like `ComposerView`.
+/// The page itself is the setup surface: pick the harness (and project) from the cards, while
+/// the bottom dock renders the exact same `ComposerView` used by live chat threads — sharing
+/// dictation, send-while-dictating finalization, media/file attachments, clipboard paste, and
+/// the coalesced Model + Thinking slider popover.
 /// Text, attachments and the chosen setup live in `AppStore`, so leaving the page (back button or
 /// swipe) never discards them; they are cleared only after the session has been started.
 public struct DraftChatView: View {
@@ -24,12 +25,8 @@ public struct DraftChatView: View {
     public let initialHarness: StartHarnessKind
     public let onSessionCreated: (String) -> Void
 
-    @State private var selectedPhotoItems: [PhotosPickerItem] = []
-    @State private var isPhotoPickerPresented: Bool = false
     @State private var isStarting: Bool = false
     @State private var didApplyInitialHarness: Bool = false
-    @State private var dictation = DictationController()
-    @FocusState private var isInputFocused: Bool
 
     public init(
         store: AppStore,
@@ -58,7 +55,19 @@ public struct DraftChatView: View {
     }
 
     private var availableProjects: [HarnessProjectOption] {
-        DraftProjectFilter.projects(for: selectedHarness.harnessGroup, in: store.catalog)
+        let filtered = DraftProjectFilter.projects(for: selectedHarness.harnessGroup, in: store.catalog)
+        let current = selectedProjectPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !current.isEmpty, !filtered.contains(where: { $0.path == current }) else {
+            return filtered
+        }
+        // Keep a project pre-selected from the Projects list visible even when switching to a
+        // harness that hasn't opened a thread in that directory yet.
+        let custom = HarnessProjectOption(
+            name: projectDisplayName,
+            path: current,
+            harnesses: [selectedHarness.harnessGroup]
+        )
+        return [custom] + filtered
     }
 
     private var availableModels: [HarnessModelOption] {
@@ -66,11 +75,19 @@ public struct DraftChatView: View {
     }
 
     private var currentModel: HarnessModelOption? {
-        availableModels.first(where: { $0.id == selectedModelId }) ?? availableModels.first
+        if !selectedModelId.isEmpty,
+           let match = availableModels.first(where: { $0.matches(selectedModelId) }) {
+            return match
+        }
+        return availableModels.first(where: { $0.isDefault == true }) ?? availableModels.first
     }
 
     private var reasoningLevels: [String] {
-        ReasoningEffortPolicy.offered(currentModel?.reasoningLevels ?? [], allowExtreme: store.allowExtremeReasoning)
+        ReasoningEffortPolicy.offered(
+            currentModel?.reasoningLevels ?? [],
+            allowExtreme: store.allowExtremeReasoning,
+            keeping: selectedReasoning.isEmpty ? nil : selectedReasoning
+        )
     }
 
     private var projectDisplayName: String {
@@ -80,10 +97,6 @@ public struct DraftChatView: View {
         let trimmed = selectedProjectPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if trimmed.isEmpty || trimmed == "~" { return "Workspace" }
         return (trimmed as NSString).lastPathComponent
-    }
-
-    private var hasContent: Bool {
-        !promptText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
     public var body: some View {
@@ -112,7 +125,79 @@ public struct DraftChatView: View {
                 if let notice = store.sessionNotices[AppStore.newThreadDraftKey] {
                     SessionNoticeRow(notice: notice) { store.dismissSessionNotice(for: AppStore.newThreadDraftKey) }
                 }
-                composerDock
+                ComposerView(
+                    harness: selectedHarness.kind,
+                    model: selectedModelId.isEmpty ? currentModel?.id : selectedModelId,
+                    reasoningEffort: selectedReasoning.isEmpty ? nil : selectedReasoning,
+                    placeholder: "Message \(Self.cardTitle(selectedHarness))…",
+                    allowsQueueMenu: false,
+                    modelMenuIdentifier: "draft.model",
+                    text: promptText,
+                    attachments: attachments,
+                    uploadingAttachmentIds: store.uploadingAttachmentIds,
+                    availableModels: availableModels,
+                    reasoningLevels: reasoningLevels,
+                    harnessDefaultEffort: store.catalog?.defaultReasoning(for: selectedHarness.harnessGroup),
+                    isSending: isStarting,
+                    isStreaming: false,
+                    isAgentBusy: false,
+                    onPickPhotoData: { data, filename in
+                        Task { await store.addAttachment(for: draftKey, jpegData: data, filename: filename) }
+                    },
+                    onPickFileData: { data, mimeType, filename, previewData in
+                        Task {
+                            await store.addFileAttachment(
+                                for: draftKey,
+                                data: data,
+                                mimeType: mimeType,
+                                filename: filename,
+                                previewImageData: previewData
+                            )
+                        }
+                    },
+                    dictationUnavailableReason: store.dictationUnavailableReason,
+                    onRemoveAttachment: { attId in
+                        store.removeAttachment(for: draftKey, attachmentId: attId)
+                    },
+                    onTapAttachment: { att in
+                        store.lightboxPayload = LightboxPayload(
+                            title: att.name,
+                            dataUrl: att.previewDataUrl,
+                            path: att.path
+                        )
+                    },
+                    onSelectModel: { modelOption in
+                        let resolved = ComposerView.resolveModelSelection(
+                            picked: modelOption,
+                            currentEffort: selectedReasoning.isEmpty ? nil : selectedReasoning,
+                            availableModels: availableModels,
+                            allowExtreme: store.allowExtremeReasoning
+                        )
+                        store.newThreadConfig.modelId = resolved.modelId
+                        store.newThreadConfig.reasoning = resolved.effort ?? ""
+                    },
+                    onSelectReasoningEffort: { effort in
+                        let resolved = ComposerView.resolveEffortSelection(
+                            effort: effort,
+                            currentModel: selectedModelId.isEmpty ? currentModel?.id : selectedModelId,
+                            availableModels: availableModels
+                        )
+                        if let nextModel = resolved.modelId {
+                            store.newThreadConfig.modelId = nextModel
+                        }
+                        store.newThreadConfig.reasoning = resolved.effort
+                    },
+                    onTranscribeAudio: { wavData in
+                        try await store.transcribeDictation(wavData: wavData)
+                    },
+                    onDictationStart: {
+                        await store.prewarmDictation()
+                    },
+                    onSend: { _ in
+                        Task { await startAndSend() }
+                    },
+                    onAbort: {}
+                )
             }
             .padding(.horizontal, SHSpacing.md)
             .padding(.bottom, SHSpacing.sm)
@@ -120,18 +205,6 @@ public struct DraftChatView: View {
         }
         .navigationTitle("New Chat")
         .navigationBarTitleDisplayMode(.inline)
-        .photosPicker(
-            isPresented: $isPhotoPickerPresented,
-            selection: $selectedPhotoItems,
-            maxSelectionCount: 4,
-            matching: .images
-        )
-        .onChange(of: selectedPhotoItems) { _, newItems in
-            guard !newItems.isEmpty else { return }
-            let items = newItems
-            selectedPhotoItems = []
-            handlePickedPhotos(items)
-        }
         .onAppear {
             // The route's harness applies once per visit; after that the user's pick on this page wins.
             if !didApplyInitialHarness {
@@ -145,11 +218,6 @@ public struct DraftChatView: View {
         }
         .onChange(of: store.catalog) { _, _ in
             syncSetupForCurrentHarness()
-        }
-        .onDisappear {
-            if dictation.state == .recording {
-                dictation.cancel()
-            }
         }
     }
 
@@ -294,6 +362,7 @@ public struct DraftChatView: View {
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Select project")
+            .accessibilityIdentifier("draft.project")
 
             if selectedHarness.harnessGroup == .claude {
                 Rectangle()
@@ -324,256 +393,6 @@ public struct DraftChatView: View {
             .frame(width: 32, height: 32)
     }
 
-    // MARK: - Composer (same surface and controls as ComposerView)
-
-    private var composerDock: some View {
-        SHComposerSurface {
-            VStack(spacing: 0) {
-                if !attachments.isEmpty {
-                    SHAttachmentThumbStrip(
-                        items: attachments.map { att in
-                            SHAttachmentThumbItem(
-                                id: att.id,
-                                name: att.name,
-                                path: att.path,
-                                mimeType: att.mimeType,
-                                dataUrl: att.previewDataUrl,
-                                sizeBytes: att.sizeBytes,
-                                isUploading: false
-                            )
-                        },
-                        thumbSize: SHLayout.composerThumbSize,
-                        onTap: { item in
-                            if let match = attachments.first(where: { $0.id == item.id }) {
-                                store.lightboxPayload = LightboxPayload(
-                                    title: match.name,
-                                    dataUrl: match.previewDataUrl,
-                                    path: match.path
-                                )
-                            }
-                        },
-                        onRemove: { id in
-                            store.draftAttachments[draftKey]?.removeAll(where: { $0.id == id })
-                        }
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                    .padding(.bottom, 2)
-                }
-
-                if let err = dictation.errorMessage {
-                    HStack(spacing: 6) {
-                        Image(systemName: "mic.slash.fill")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(SHColor.statusDanger)
-                        Text(err)
-                            .font(SHTypography.micro)
-                            .foregroundStyle(SHColor.statusDanger)
-                            .lineLimit(1)
-                        Spacer()
-                        Button {
-                            dictation.errorMessage = nil
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 9.5, weight: .semibold))
-                                .foregroundStyle(SHColor.inkFaint)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 8)
-                }
-
-                TextField("Message \(Self.cardTitle(selectedHarness))…", text: promptText, axis: .vertical)
-                    .focused($isInputFocused)
-                    .lineLimit(1...6)
-                    .font(SHTypography.body)
-                    .foregroundStyle(SHColor.inkPrimary)
-                    .padding(.horizontal, 15)
-                    .padding(.top, 15)
-                    .padding(.bottom, 12)
-                    .accessibilityIdentifier("composer.input")
-
-                HStack(spacing: 8) {
-                    Button {
-                        isPhotoPickerPresented = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(SHColor.inkSecondary)
-                            .frame(width: 32, height: 32)
-                            .background(SHColor.surfaceBubble, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Attach image")
-                    .accessibilityIdentifier("composer.attach")
-
-                    modelEffortPill
-
-                    Spacer(minLength: 4)
-
-                    draftMicButton
-                    sendButton
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
-            }
-        }
-    }
-
-    /// One pill for model and thinking effort, mirroring the regular composer.
-    @ViewBuilder
-    private var modelEffortPill: some View {
-        if !availableModels.isEmpty {
-            SHModelEffortMenu(
-                models: availableModels.map { model in
-                    SHModelEffortMenu.ModelItem(id: model.id, label: model.label, isSelected: currentModel?.id == model.id)
-                },
-                efforts: reasoningLevels.map { level in
-                    SHModelEffortMenu.EffortItem(level: level, isSelected: selectedReasoning == level)
-                },
-                harness: selectedHarness.kind,
-                title: currentModel?.label ?? selectedHarness.label,
-                effortLabel: reasoningLevels.isEmpty ? nil : selectedReasoning.capitalized,
-                accessibilityText: "Select model and effort",
-                identifier: "draft.model",
-                onSelectModel: { modelId in
-                    store.newThreadConfig.modelId = modelId
-                    syncReasoningForCurrentModel()
-                },
-                onSelectEffort: { level in
-                    store.newThreadConfig.reasoning = level
-                }
-            )
-            .equatable()
-        } else {
-            HStack(spacing: 5) {
-                HarnessLogoView(harness: selectedHarness.kind, size: 12.5)
-                Text(selectedHarness.label)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(SHColor.inkMuted)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
-        }
-    }
-
-    private var sendButton: some View {
-        Button {
-            Task { await startAndSend() }
-        } label: {
-            Group {
-                if isStarting {
-                    SHActivityPulse(tint: SHColor.surfaceRail, size: 16)
-                } else {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(SHColor.surfaceRail)
-                }
-            }
-            .frame(width: 32, height: 32)
-            .background(SHColor.inkPrimary)
-            .opacity(hasContent && !isStarting ? 1.0 : 0.25)
-            .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!hasContent || isStarting)
-        .accessibilityLabel("Start chat and send")
-        .accessibilityIdentifier("composer.send")
-    }
-
-    // MARK: - Dictation Button
-
-    @ViewBuilder
-    private var draftMicButton: some View {
-        switch dictation.state {
-        case .idle:
-            if let reason = store.dictationUnavailableReason {
-                // Dictation is not set up on the desktop: a tap explains why.
-                Button {
-                    dictation.errorMessage = reason
-                } label: {
-                    Image(systemName: "mic.slash.fill")
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(SHColor.inkFaint)
-                        .frame(width: 32, height: 32)
-                        .background(SHColor.surfaceBubble.opacity(0.5), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Voice dictation unavailable")
-                .accessibilityHint(reason)
-                .accessibilityIdentifier("composer.mic.unavailable")
-            } else {
-                Button {
-                    #if canImport(UIKit)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    #endif
-                    Task { await handleDraftDictationTap() }
-                } label: {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(SHColor.inkMuted)
-                        .frame(width: 32, height: 32)
-                        .background(SHColor.surfaceBubble, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Start voice dictation")
-                .accessibilityIdentifier("composer.mic")
-            }
-
-        case .recording:
-            Button {
-                #if canImport(UIKit)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                #endif
-                Task { await handleDraftDictationTap() }
-            } label: {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(SHColor.statusDanger)
-                        .frame(width: 7, height: 7)
-                    Text(dictation.formattedDuration)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(SHColor.statusDanger)
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(SHColor.statusDanger)
-                }
-                .padding(.horizontal, 9)
-                .frame(height: 32)
-                .background(SHColor.statusDanger.opacity(0.16))
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Stop recording and transcribe")
-            .accessibilityIdentifier("composer.mic")
-
-        case .transcribing:
-            SHActivityPulse(tint: SHColor.accentInfo, size: 16)
-                .frame(width: 32, height: 32)
-                .background(SHColor.surfaceBubble, in: Circle())
-                .accessibilityIdentifier("composer.mic")
-        }
-    }
-
-    private func handleDraftDictationTap() async {
-        let spoken = await dictation.toggleRecording(
-            prewarm: { await store.prewarmDictation() },
-            transcribe: { audioData in
-                try await store.transcribeDictation(wavData: audioData)
-            }
-        )
-        guard let spoken, !spoken.isEmpty else { return }
-        let current = promptText.wrappedValue
-        if current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            promptText.wrappedValue = spoken
-        } else {
-            promptText.wrappedValue = current.hasSuffix(" ") || current.hasSuffix("\n") ? current + spoken : current + " " + spoken
-        }
-    }
-
     // MARK: - Actions & Sync
 
     private func selectHarness(_ kind: StartHarnessKind) {
@@ -583,20 +402,21 @@ public struct DraftChatView: View {
         syncSetupForCurrentHarness()
     }
 
-    /// Keeps the saved project, model and effort when they are valid for the selected harness,
-    /// and falls back to that harness's defaults when they are not.
+    /// Keeps an explicitly chosen project across harness switches (including one pre-selected by
+    /// long-tapping a project section), and syncs the model & reasoning defaults for the harness.
     private func syncSetupForCurrentHarness() {
-        let projects = availableProjects
-        if projects.isEmpty {
-            if selectedProjectPath.isEmpty {
+        let currentPath = selectedProjectPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if currentPath.isEmpty {
+            let projects = DraftProjectFilter.projects(for: selectedHarness.harnessGroup, in: store.catalog)
+            if let first = projects.first {
+                store.newThreadConfig.projectPath = first.path
+            } else {
                 store.newThreadConfig.projectPath = store.settings.defaultNewSessionCwd
             }
-        } else if !projects.contains(where: { $0.path == selectedProjectPath }) {
-            store.newThreadConfig.projectPath = projects[0].path
         }
 
         let models = availableModels
-        if !models.contains(where: { $0.id == selectedModelId }) {
+        if !models.contains(where: { $0.matches(selectedModelId) }) {
             let fallback = models.first(where: { $0.isDefault == true }) ?? models.first
             let nextId = fallback?.id ?? ""
             if selectedModelId != nextId {
@@ -614,7 +434,12 @@ public struct DraftChatView: View {
             }
             return
         }
-        guard !levels.contains(selectedReasoning) else { return }
+        if let matched = levels.first(where: { $0.lowercased() == selectedReasoning.lowercased() }) {
+            if selectedReasoning != matched {
+                store.newThreadConfig.reasoning = matched
+            }
+            return
+        }
         let preferred = currentModel?.defaultReasoningLevel
             ?? store.catalog?.defaultReasoning(for: selectedHarness.harnessGroup)
             ?? "high"
@@ -623,35 +448,10 @@ public struct DraftChatView: View {
         ) ?? ""
     }
 
-    private func handlePickedPhotos(_ items: [PhotosPickerItem]) {
-        Task {
-            for (index, item) in items.enumerated() {
-                guard let rawData = try? await item.loadTransferable(type: Data.self) else { continue }
-                let dataUrl = await Task.detached(priority: .userInitiated) {
-                    let jpeg = ComposerView.downscaledJPEG(from: rawData, maxDimension: 1600, quality: 0.75) ?? rawData
-                    return "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
-                }.value
-                var current = store.draftAttachments[draftKey] ?? []
-                current.append(
-                    ImageAttachment(
-                        name: "photo-\(current.count + index + 1).jpg",
-                        mimeType: "image/jpeg",
-                        previewDataUrl: dataUrl
-                    )
-                )
-                store.draftAttachments[draftKey] = current
-            }
-        }
-    }
-
     private func startAndSend() async {
         let trimmedPrompt = promptText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let pendingAttachments = attachments
         guard !trimmedPrompt.isEmpty || !pendingAttachments.isEmpty else { return }
-
-        #if canImport(UIKit)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        #endif
 
         isStarting = true
         defer { isStarting = false }

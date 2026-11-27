@@ -654,6 +654,15 @@ public struct SessionListView: View {
                             .accessibilityIdentifier("section.header.\(section.id)")
                             .accessibilityValue(isCollapsed ? "collapsed" : "expanded")
                             .contextMenu {
+                                if section.isProjectOrSectionGroup,
+                                   let projectPath = section.projectPath,
+                                   !projectPath.isEmpty {
+                                    Button {
+                                        store.openDraftChat(for: section.harnessGroup, projectPath: projectPath)
+                                    } label: {
+                                        Label("New Thread in \(section.title)", systemImage: "square.and.pencil")
+                                    }
+                                }
                                 if let fid = section.folderId,
                                    let folder = store.folders.first(where: { $0.id == fid }) {
                                     Button {

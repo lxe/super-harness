@@ -306,49 +306,31 @@ public struct SessionDetailView: View {
                     )
                 },
                 onSelectModel: { modelOption in
-                    let nextEffort: String?
-                    if let levels = modelOption.reasoningLevels, !levels.isEmpty {
-                        // Keep the current effort when the new model has it; otherwise use the
-                        // model's default, never "max"/"ultra" unless those are enabled in Settings.
-                        if let existing = currentSession.reasoningEffort, levels.contains(existing) {
-                            nextEffort = existing
-                        } else {
-                            nextEffort = ReasoningEffortPolicy.defaultLevel(
-                                from: levels,
-                                preferred: modelOption.defaultReasoningLevel,
-                                allowExtreme: store.allowExtremeReasoning
-                            )
-                        }
-                    } else {
-                        nextEffort = nil
-                    }
+                    let resolved = ComposerView.resolveModelSelection(
+                        picked: modelOption,
+                        currentEffort: currentSession.reasoningEffort,
+                        availableModels: availableModels,
+                        allowExtreme: store.allowExtremeReasoning
+                    )
                     Task {
                         await store.setSessionModel(
                             sessionId: session.id,
-                            model: modelOption.id,
-                            reasoningEffort: nextEffort
+                            model: resolved.modelId,
+                            reasoningEffort: resolved.effort
                         )
                     }
                 },
                 onSelectReasoningEffort: { effort in
-                    // For Antigravity, effort variants are sibling model slugs (e.g. gemini-4-neon-high -> gemini-4-neon-medium).
-                    var targetModel = currentSession.model
-                    if let raw = currentSession.model {
-                        let suffixes = ["-low", "-medium", "-high", "-xhigh", "-max"]
-                        let lower = raw.lowercased()
-                        for suf in suffixes where lower.hasSuffix(suf) {
-                            let candidate = String(raw.dropLast(suf.count)) + "-" + effort.lowercased()
-                            if availableModels.contains(where: { $0.id.lowercased() == candidate.lowercased() }) {
-                                targetModel = candidate
-                            }
-                            break
-                        }
-                    }
+                    let resolved = ComposerView.resolveEffortSelection(
+                        effort: effort,
+                        currentModel: currentSession.model,
+                        availableModels: availableModels
+                    )
                     Task {
                         await store.setSessionModel(
                             sessionId: session.id,
-                            model: targetModel,
-                            reasoningEffort: effort
+                            model: resolved.modelId,
+                            reasoningEffort: resolved.effort
                         )
                     }
                 },

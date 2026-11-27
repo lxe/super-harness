@@ -22,7 +22,12 @@ private struct VideoTransferable: Transferable {
 }
 
 public struct ComposerView: View {
-    public let session: UnifiedSession
+    public let harness: HarnessKind
+    public let model: String?
+    public let reasoningEffort: String?
+    public let placeholder: String
+    public let allowsQueueMenu: Bool
+    public let modelMenuIdentifier: String
     @Binding public var text: String
     public let attachments: [ImageAttachment]
     public let uploadingAttachmentIds: Set<String>
@@ -59,6 +64,66 @@ public struct ComposerView: View {
     /// Bumped when dictated text lands, so the text view scrolls to its end.
     @State private var scrollToEndToken: Int = 0
 
+    /// Unified initializer shared by both live chat threads and the New Thread draft view.
+    public init(
+        harness: HarnessKind,
+        model: String?,
+        reasoningEffort: String?,
+        placeholder: String? = nil,
+        allowsQueueMenu: Bool = true,
+        modelMenuIdentifier: String = "composer.model",
+        text: Binding<String>,
+        attachments: [ImageAttachment],
+        uploadingAttachmentIds: Set<String> = [],
+        availableModels: [HarnessModelOption] = [],
+        reasoningLevels: [String] = [],
+        harnessDefaultEffort: String? = nil,
+        isSending: Bool,
+        isStreaming: Bool = false,
+        isAgentBusy: Bool = false,
+        onPickPhotoData: @escaping (Data, String) -> Void,
+        onPickFileData: ((Data, String, String, Data?) -> Void)? = nil,
+        dictationUnavailableReason: String? = nil,
+        onRemoveAttachment: @escaping (String) -> Void,
+        onTapAttachment: @escaping (ImageAttachment) -> Void,
+        onSelectModel: ((HarnessModelOption) -> Void)? = nil,
+        onSelectReasoningEffort: ((String) -> Void)? = nil,
+        onTranscribeAudio: ((Data) async throws -> String)? = nil,
+        onDictationStart: (@MainActor () async -> Void)? = nil,
+        onSend: @escaping (SendMode) -> Void,
+        onAbort: @escaping () -> Void = {}
+    ) {
+        self.harness = harness
+        self.model = model
+        self.reasoningEffort = reasoningEffort
+        self.placeholder = placeholder
+            ?? (harness == .master
+                ? "Ask Master Orchestrator anything, or /status…"
+                : "Message \(HarnessVisual.forKind(harness).label)…")
+        self.allowsQueueMenu = allowsQueueMenu
+        self.modelMenuIdentifier = modelMenuIdentifier
+        self._text = text
+        self.attachments = attachments
+        self.uploadingAttachmentIds = uploadingAttachmentIds
+        self.availableModels = availableModels
+        self.reasoningLevels = reasoningLevels
+        self.harnessDefaultEffort = harnessDefaultEffort
+        self.isSending = isSending
+        self.isStreaming = isStreaming
+        self.isAgentBusy = isAgentBusy
+        self.onPickPhotoData = onPickPhotoData
+        self.onPickFileData = onPickFileData
+        self.dictationUnavailableReason = dictationUnavailableReason
+        self.onRemoveAttachment = onRemoveAttachment
+        self.onTapAttachment = onTapAttachment
+        self.onSelectModel = onSelectModel
+        self.onSelectReasoningEffort = onSelectReasoningEffort
+        self.onTranscribeAudio = onTranscribeAudio
+        self.onDictationStart = onDictationStart
+        self.onSend = onSend
+        self.onAbort = onAbort
+    }
+
     public init(
         session: UnifiedSession,
         text: Binding<String>,
@@ -82,27 +147,36 @@ public struct ComposerView: View {
         onSend: @escaping (SendMode) -> Void,
         onAbort: @escaping () -> Void
     ) {
-        self.session = session
-        self._text = text
-        self.attachments = attachments
-        self.uploadingAttachmentIds = uploadingAttachmentIds
-        self.availableModels = availableModels
-        self.reasoningLevels = reasoningLevels
-        self.harnessDefaultEffort = harnessDefaultEffort
-        self.isSending = isSending
-        self.isStreaming = isStreaming
-        self.isAgentBusy = isAgentBusy
-        self.onPickPhotoData = onPickPhotoData
-        self.onPickFileData = onPickFileData
-        self.dictationUnavailableReason = dictationUnavailableReason
-        self.onRemoveAttachment = onRemoveAttachment
-        self.onTapAttachment = onTapAttachment
-        self.onSelectModel = onSelectModel
-        self.onSelectReasoningEffort = onSelectReasoningEffort
-        self.onTranscribeAudio = onTranscribeAudio
-        self.onDictationStart = onDictationStart
-        self.onSend = onSend
-        self.onAbort = onAbort
+        self.init(
+            harness: session.harness,
+            model: session.model,
+            reasoningEffort: session.reasoningEffort,
+            placeholder: session.isMaster
+                ? "Ask Master Orchestrator anything, or /status…"
+                : "Message \(HarnessVisual.forKind(session.harness).label)…",
+            allowsQueueMenu: true,
+            modelMenuIdentifier: "composer.model",
+            text: text,
+            attachments: attachments,
+            uploadingAttachmentIds: uploadingAttachmentIds,
+            availableModels: availableModels,
+            reasoningLevels: reasoningLevels,
+            harnessDefaultEffort: harnessDefaultEffort,
+            isSending: isSending,
+            isStreaming: isStreaming,
+            isAgentBusy: isAgentBusy,
+            onPickPhotoData: onPickPhotoData,
+            onPickFileData: onPickFileData,
+            dictationUnavailableReason: dictationUnavailableReason,
+            onRemoveAttachment: onRemoveAttachment,
+            onTapAttachment: onTapAttachment,
+            onSelectModel: onSelectModel,
+            onSelectReasoningEffort: onSelectReasoningEffort,
+            onTranscribeAudio: onTranscribeAudio,
+            onDictationStart: onDictationStart,
+            onSend: onSend,
+            onAbort: onAbort
+        )
     }
 
     private var hasContent: Bool {
@@ -151,18 +225,75 @@ public struct ComposerView: View {
         return trimmed
     }
 
+    /// Resolves the model ID and next thinking effort when picking a model from the menu.
+    /// Shared by live chat sessions and the new-thread draft view.
+    nonisolated static func resolveModelSelection(
+        picked: HarnessModelOption,
+        currentEffort: String?,
+        availableModels: [HarnessModelOption],
+        allowExtreme: Bool
+    ) -> (modelId: String, effort: String?) {
+        let levels = ReasoningEffortPolicy.offered(picked.reasoningLevels ?? [], allowExtreme: allowExtreme)
+        guard !levels.isEmpty else {
+            return (picked.id, nil)
+        }
+        let nextEffort: String?
+        if let existing = currentEffort,
+           let matched = levels.first(where: { $0.lowercased() == existing.lowercased() }) {
+            nextEffort = matched
+        } else {
+            nextEffort = ReasoningEffortPolicy.defaultLevel(
+                from: levels,
+                preferred: picked.defaultReasoningLevel,
+                allowExtreme: allowExtreme
+            )
+        }
+        // If this harness encodes effort in sibling model slugs (e.g. Antigravity gemini-4-neon-high),
+        // map to the matching sibling slug for `nextEffort` when present.
+        if let nextEffort {
+            let resolved = resolveEffortSelection(
+                effort: nextEffort,
+                currentModel: picked.id,
+                availableModels: availableModels
+            )
+            return (resolved.modelId ?? picked.id, resolved.effort)
+        }
+        return (picked.id, nextEffort)
+    }
+
+    /// Resolves the target model slug and effort when scrubbing or tapping a thinking effort level.
+    /// For Antigravity, effort variants are sibling model slugs (e.g. `gemini-4-neon-high` -> `gemini-4-neon-medium`).
+    nonisolated static func resolveEffortSelection(
+        effort: String,
+        currentModel: String?,
+        availableModels: [HarnessModelOption]
+    ) -> (modelId: String?, effort: String) {
+        var targetModel = currentModel
+        if let raw = currentModel {
+            let lower = raw.lowercased()
+            for suf in effortSuffixes where lower.hasSuffix(suf) {
+                let candidate = String(raw.dropLast(suf.count)) + "-" + effort.lowercased()
+                if let match = availableModels.first(where: { $0.id.lowercased() == candidate.lowercased() }) {
+                    targetModel = match.id
+                }
+                break
+            }
+        }
+        return (targetModel, effort)
+    }
+
     /// Deduplicates sibling effort-suffixed slugs (e.g. Antigravity `gemini-4-neon-high` / `-medium`)
-    /// so the Model menu stays clean while the Thinking Effort section switches the effort variant.
+    /// so the Model menu stays clean while the Thinking Effort slider switches the effort variant.
     private var menuModelOptions: [(stem: String, displayLabel: String, representative: HarnessModelOption)] {
         var seen: [String] = []
         var byStem: [String: HarnessModelOption] = [:]
-        let activeStem = session.model.map(Self.baseModelStem)
+        let activeStem = model.map(Self.baseModelStem)
         for opt in availableModels {
             let stem = Self.baseModelStem(opt.id)
             if byStem[stem] == nil {
                 seen.append(stem)
                 byStem[stem] = opt
-            } else if stem == activeStem && opt.id == session.model {
+            } else if stem == activeStem && opt.id == model {
                 byStem[stem] = opt
             }
         }
@@ -173,7 +304,7 @@ public struct ComposerView: View {
     }
 
     private var currentModelLabel: String {
-        if let raw = session.model, !raw.isEmpty {
+        if let raw = model, !raw.isEmpty {
             if let match = availableModels.first(where: { $0.matches(raw) }) {
                 return Self.cleanBaseDisplayLabel(match.label)
             }
@@ -182,7 +313,7 @@ public struct ComposerView: View {
         if let def = availableModels.first(where: { $0.isDefault == true }) ?? availableModels.first {
             return Self.cleanBaseDisplayLabel(def.label)
         }
-        return HarnessVisual.forKind(session.harness).label
+        return HarnessVisual.forKind(harness).label
     }
 
     /// The effort the session is using. A session that reports none (most do: a harness only
@@ -201,10 +332,9 @@ public struct ComposerView: View {
         return nil
     }
 
-    /// The catalog entry for the session's model, or the harness's default model when the
-    /// session names none.
+    /// The catalog entry for the active model, or the harness's default model when none is set.
     private var currentModelOption: HarnessModelOption? {
-        if let raw = session.model, !raw.isEmpty {
+        if let raw = model, !raw.isEmpty {
             return availableModels.first(where: { $0.matches(raw) })
         }
         return availableModels.first(where: { $0.isDefault == true })
@@ -212,19 +342,19 @@ public struct ComposerView: View {
 
     private var activeEffort: String? {
         Self.resolvedEffort(
-            embedded: Self.embeddedEffort(from: session.model),
-            sessionEffort: session.reasoningEffort,
+            embedded: Self.embeddedEffort(from: model),
+            sessionEffort: reasoningEffort,
             modelDefault: currentModelOption?.defaultReasoningLevel,
             harnessDefault: harnessDefaultEffort
         )
     }
 
     private var currentEffortLabel: String? {
-        if let embedded = Self.embeddedEffort(from: session.model) {
-            return embedded.capitalized
+        if let embedded = Self.embeddedEffort(from: model) {
+            return SHThinkingEffortSlider.displayName(for: embedded)
         }
         guard !reasoningLevels.isEmpty else { return nil }
-        return activeEffort?.capitalized
+        return activeEffort.map(SHThinkingEffortSlider.displayName(for:))
     }
 
     /// Height of every control in the composer's bottom row (and the width of the round ones).
@@ -284,9 +414,7 @@ public struct ComposerView: View {
 
                 SHPasteableTextInput(
                     text: $text,
-                    placeholder: session.isMaster
-                        ? "Ask Master Orchestrator anything, or /status…"
-                        : "Message \(HarnessVisual.forKind(session.harness).label)…",
+                    placeholder: placeholder,
                     isLocked: dictation.state == .transcribing,
                     scrollToEndToken: scrollToEndToken,
                     onPasteMedia: { handleClipboardPaste() }
@@ -362,24 +490,24 @@ public struct ComposerView: View {
     @ViewBuilder
     private var combinedModelEffortPill: some View {
         if !availableModels.isEmpty, let onSelectModel {
-            let currentStem = session.model.map(Self.baseModelStem)
+            let currentStem = model.map(Self.baseModelStem)
             let options = menuModelOptions
             SHModelEffortMenu(
                 models: options.map { item in
                     SHModelEffortMenu.ModelItem(
                         id: item.stem,
                         label: item.displayLabel,
-                        isSelected: currentStem == item.stem || (session.model.map { item.representative.matches($0) } ?? false)
+                        isSelected: currentStem == item.stem || (model.map { item.representative.matches($0) } ?? false)
                     )
                 },
                 efforts: onSelectReasoningEffort == nil ? [] : reasoningLevels.map { level in
                     SHModelEffortMenu.EffortItem(level: level, isSelected: activeEffort?.lowercased() == level.lowercased())
                 },
-                harness: session.harness,
+                harness: harness,
                 title: currentModelLabel,
                 effortLabel: currentEffortLabel,
                 accessibilityText: "Switch model and effort",
-                identifier: "composer.model",
+                identifier: modelMenuIdentifier,
                 onSelectModel: { stem in
                     if let match = options.first(where: { $0.stem == stem }) {
                         onSelectModel(match.representative)
@@ -390,7 +518,7 @@ public struct ComposerView: View {
             .equatable()
         } else {
             HStack(spacing: 5) {
-                HarnessLogoView(harness: session.harness, size: 12.5)
+                HarnessLogoView(harness: harness, size: 12.5)
                 Text(currentModelLabel)
                     .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
@@ -535,18 +663,29 @@ public struct ComposerView: View {
                 .opacity(canSend ? 1.0 : 0.28)
 
                 #if canImport(UIKit)
-                SHSendMenuButton(
-                    isEnabled: canSend,
-                    onSteer: {
+                if allowsQueueMenu {
+                    SHSendMenuButton(
+                        isEnabled: canSend,
+                        onSteer: {
+                            triggerHaptic(.light)
+                            handleSendTap(.steer)
+                        },
+                        onQueue: {
+                            triggerHaptic(.light)
+                            handleSendTap(.queue)
+                        }
+                    )
+                    .frame(width: Self.controlSize, height: Self.controlSize)
+                } else {
+                    Button {
                         triggerHaptic(.light)
                         handleSendTap(.steer)
-                    },
-                    onQueue: {
-                        triggerHaptic(.light)
-                        handleSendTap(.queue)
+                    } label: {
+                        Color.clear.frame(width: Self.controlSize, height: Self.controlSize)
                     }
-                )
-                .frame(width: Self.controlSize, height: Self.controlSize)
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                }
                 #else
                 Button {
                     triggerHaptic(.light)
@@ -1112,12 +1251,212 @@ struct SHDotSpinner: View {
     }
 }
 
-/// The model and thinking-effort menu shared by the chat composer and the new-thread composer.
+/// Stepped discrete Thinking Effort slider displayed at the top of the coalesced Model + Thinking popover.
+public struct SHThinkingEffortSlider: View {
+    public let levels: [String]
+    public let selectedLevel: String?
+    public let accentColor: Color
+    public let onSelect: (String) -> Void
+
+    @State private var lastHapticIndex: Int?
+
+    public init(
+        levels: [String],
+        selectedLevel: String?,
+        accentColor: Color,
+        onSelect: @escaping (String) -> Void
+    ) {
+        self.levels = levels
+        self.selectedLevel = selectedLevel
+        self.accentColor = accentColor
+        self.onSelect = onSelect
+    }
+
+    public nonisolated static func displayName(for level: String) -> String {
+        switch level.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "none": return "Off"
+        case "off": return "Off"
+        case "minimal": return "Minimal"
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "XHigh"
+        case "max": return "Max"
+        case "ultra": return "Ultra"
+        default: return level.capitalized
+        }
+    }
+
+    public nonisolated static func compactStopLabel(for level: String, totalStops: Int) -> String {
+        let lower = level.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch lower {
+        case "none", "off": return "Off"
+        case "minimal": return totalStops >= 5 ? "Min" : "Minimal"
+        case "low": return "Low"
+        case "medium": return totalStops >= 4 ? "Med" : "Medium"
+        case "high": return "High"
+        case "xhigh": return totalStops >= 6 ? "XH" : "XHigh"
+        case "max": return "Max"
+        case "ultra": return totalStops >= 6 ? "Ult" : "Ultra"
+        default: return level.capitalized
+        }
+    }
+
+    /// Maps a horizontal touch location inside `trackWidth` to the nearest discrete stop index.
+    public nonisolated static func nearestStopIndex(x: CGFloat, trackWidth: CGFloat, count: Int) -> Int {
+        guard count > 1, trackWidth > 0 else { return 0 }
+        let clamped = min(max(x, 0), trackWidth)
+        let ratio = clamped / trackWidth
+        return min(count - 1, max(0, Int((ratio * CGFloat(count - 1)).rounded())))
+    }
+
+    private var selectedIndex: Int {
+        guard !levels.isEmpty else { return 0 }
+        if let sel = selectedLevel?.lowercased(),
+           let idx = levels.firstIndex(where: { $0.lowercased() == sel }) {
+            return idx
+        }
+        return 0
+    }
+
+    public var body: some View {
+        let count = levels.count
+        let idx = selectedIndex
+        let thumbRadius: CGFloat = 10
+
+        VStack(spacing: 6) {
+            GeometryReader { geo in
+                let usableWidth = max(1, geo.size.width - thumbRadius * 2)
+                let fraction: CGFloat = count > 1 ? CGFloat(idx) / CGFloat(count - 1) : 1.0
+                let thumbX = thumbRadius + usableWidth * fraction
+
+                ZStack(alignment: .leading) {
+                    // Base rail
+                    Capsule()
+                        .fill(SHColor.surfaceBubble)
+                        .frame(height: 6)
+                        .padding(.horizontal, thumbRadius)
+
+                    // Active fill
+                    Capsule()
+                        .fill(accentColor.opacity(0.88))
+                        .frame(width: max(6, usableWidth * fraction), height: 6)
+                        .padding(.leading, thumbRadius)
+                        .animation(.spring(response: 0.2, dampingFraction: 0.85), value: idx)
+
+                    // Discrete stop ticks
+                    if count > 1 {
+                        ForEach(0..<count, id: \.self) { stop in
+                            let stopFraction = CGFloat(stop) / CGFloat(count - 1)
+                            let stopX = thumbRadius + usableWidth * stopFraction
+                            Circle()
+                                .fill(stop <= idx ? Color.white.opacity(0.65) : SHColor.inkFaint.opacity(0.55))
+                                .frame(width: 4.5, height: 4.5)
+                                .position(x: stopX, y: geo.size.height / 2)
+                        }
+                    }
+
+                    // Tactile thumb
+                    Circle()
+                        .fill(SHColor.inkPrimary)
+                        .frame(width: thumbRadius * 2, height: thumbRadius * 2)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color.black.opacity(0.22), lineWidth: 0.75)
+                        )
+                        .shadow(color: Color.black.opacity(0.4), radius: 4, y: 1.5)
+                        .position(x: thumbX, y: geo.size.height / 2)
+                        .animation(.spring(response: 0.2, dampingFraction: 0.85), value: idx)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard count > 1 else { return }
+                            let next = Self.nearestStopIndex(
+                                x: value.location.x - thumbRadius,
+                                trackWidth: usableWidth,
+                                count: count
+                            )
+                            if next != lastHapticIndex && next != idx {
+                                lastHapticIndex = next
+                                #if canImport(UIKit)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
+                                onSelect(levels[next])
+                            } else if lastHapticIndex == nil && next != idx {
+                                lastHapticIndex = next
+                                #if canImport(UIKit)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
+                                onSelect(levels[next])
+                            }
+                        }
+                        .onEnded { _ in
+                            lastHapticIndex = nil
+                        }
+                )
+            }
+            .frame(height: 30)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Thinking effort")
+            .accessibilityValue(selectedLevel.map(Self.displayName(for:)) ?? "")
+            .accessibilityIdentifier("composer.thinking.slider")
+            .accessibilityAdjustableAction { direction in
+                guard count > 1 else { return }
+                switch direction {
+                case .increment:
+                    let next = min(count - 1, idx + 1)
+                    if next != idx { onSelect(levels[next]) }
+                case .decrement:
+                    let next = max(0, idx - 1)
+                    if next != idx { onSelect(levels[next]) }
+                @unknown default:
+                    break
+                }
+            }
+
+            // Tappable discrete stop labels aligned across the track
+            HStack(spacing: 0) {
+                ForEach(Array(levels.enumerated()), id: \.offset) { offset, level in
+                    let isSelected = offset == idx
+                    Button {
+                        if offset != idx {
+                            #if canImport(UIKit)
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            #endif
+                            onSelect(level)
+                        }
+                    } label: {
+                        Text(Self.compactStopLabel(for: level, totalStops: count))
+                            .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkFaint)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(
+                                maxWidth: .infinity,
+                                alignment: offset == 0 ? .leading : (offset == count - 1 ? .trailing : .center)
+                            )
+                            .padding(.vertical, 2)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("thinking.stop.\(level.lowercased())")
+                }
+            }
+        }
+    }
+}
+
+/// Coalesced model & thinking-effort selector shared by the live chat composer and the new-thread composer.
 ///
-/// It is `Equatable` on its data only and used with `.equatable()`. The screens around it
-/// re-render every time the host pushes an update, and rebuilding an open `Menu` makes iOS
-/// reload it and throw its scroll position back to the anchor, so a long model list could
-/// not be scrolled. With this, the menu is rebuilt only when its own contents change.
+/// Presents a compact floating Obsidian popover anchored directly above the composer pill, featuring
+/// a tactile Thinking Effort slider at the top (whenever the selected model supports thinking levels)
+/// and a clean scrollable model list underneath.
+///
+/// It is `Equatable` on its data only and used with `.equatable()` so background host refreshes
+/// never tear down or jump an open popover.
 struct SHModelEffortMenu: View, Equatable {
     struct ModelItem: Equatable, Identifiable {
         let id: String
@@ -1140,6 +1479,8 @@ struct SHModelEffortMenu: View, Equatable {
     let onSelectModel: (String) -> Void
     let onSelectEffort: (String) -> Void
 
+    @State private var isPopoverPresented: Bool = false
+
     nonisolated static func == (lhs: SHModelEffortMenu, rhs: SHModelEffortMenu) -> Bool {
         lhs.models == rhs.models
             && lhs.efforts == rhs.efforts
@@ -1150,36 +1491,25 @@ struct SHModelEffortMenu: View, Equatable {
             && lhs.identifier == rhs.identifier
     }
 
+    private var activeEffortLevel: String? {
+        efforts.first(where: { $0.isSelected })?.level ?? efforts.first?.level
+    }
+
+    private var accentColor: Color {
+        harness.harnessGroup.map(SHColor.harness) ?? SHColor.accentPrimary
+    }
+
+    private var isExtremeActive: Bool {
+        guard let lvl = activeEffortLevel?.lowercased() else { return false }
+        return lvl == "max" || lvl == "ultra"
+    }
+
     var body: some View {
-        Menu {
-            Section("Model") {
-                ForEach(models) { item in
-                    Button {
-                        onSelectModel(item.id)
-                    } label: {
-                        if item.isSelected {
-                            Label(item.label, systemImage: "checkmark")
-                        } else {
-                            Text(item.label)
-                        }
-                    }
-                }
-            }
-            if !efforts.isEmpty {
-                Section("Thinking Effort") {
-                    ForEach(efforts, id: \.level) { item in
-                        Button {
-                            onSelectEffort(item.level)
-                        } label: {
-                            if item.isSelected {
-                                Label(item.level.capitalized, systemImage: "checkmark")
-                            } else {
-                                Text(item.level.capitalized)
-                            }
-                        }
-                    }
-                }
-            }
+        Button {
+            #if canImport(UIKit)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            #endif
+            isPopoverPresented.toggle()
         } label: {
             HStack(spacing: 6) {
                 HarnessLogoView(harness: harness, size: 14.5)
@@ -1201,8 +1531,125 @@ struct SHModelEffortMenu: View, Equatable {
             .frame(height: ComposerView.controlSize)
             .background(SHColor.surfaceBubble, in: Capsule())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(accessibilityText)
         .accessibilityIdentifier(identifier)
+        .popover(
+            isPresented: $isPopoverPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            popoverContent
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground(SHColor.surfacePopover)
+        }
+    }
+
+    private var popoverContent: some View {
+        let rowHeight: CGFloat = 40
+        let listHeight = min(CGFloat(max(1, models.count)) * rowHeight + 10, 290)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if !efforts.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "brain")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(SHColor.inkMuted)
+                        Text("Thinking")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(SHColor.inkSecondary)
+                        Spacer()
+                        if let activeEffortLevel {
+                            Text(SHThinkingEffortSlider.displayName(for: activeEffortLevel))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(isExtremeActive ? SHColor.statusWarning : SHColor.inkPrimary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    (isExtremeActive ? SHColor.statusWarning.opacity(0.16) : SHColor.surfaceBubble),
+                                    in: Capsule()
+                                )
+                                .contentTransition(.numericText())
+                                .accessibilityIdentifier("composer.thinking.value")
+                        }
+                    }
+
+                    SHThinkingEffortSlider(
+                        levels: efforts.map(\.level),
+                        selectedLevel: activeEffortLevel,
+                        accentColor: accentColor,
+                        onSelect: onSelectEffort
+                    )
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
+
+                Rectangle()
+                    .fill(SHColor.lineHairline)
+                    .frame(height: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("MODEL")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(SHColor.inkFaint)
+                    .padding(.horizontal, 14)
+                    .padding(.top, efforts.isEmpty ? 12 : 10)
+                    .padding(.bottom, 2)
+
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(models) { item in
+                                Button {
+                                    #if canImport(UIKit)
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    #endif
+                                    onSelectModel(item.id)
+                                    isPopoverPresented = false
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text(item.label)
+                                            .font(.system(size: 14, weight: item.isSelected ? .semibold : .regular))
+                                            .foregroundStyle(item.isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 8)
+                                        if item.isSelected {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 12.5, weight: .semibold))
+                                                .foregroundStyle(accentColor)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .frame(height: rowHeight - 2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                                            .fill(item.isSelected ? SHColor.surfaceRaised : Color.clear)
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .id(item.id)
+                                .accessibilityIdentifier("model.option.\(item.id)")
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 8)
+                    }
+                    .frame(height: listHeight)
+                    .onAppear {
+                        if let active = models.first(where: { $0.isSelected }) {
+                            proxy.scrollTo(active.id, anchor: .center)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 292)
     }
 }
 

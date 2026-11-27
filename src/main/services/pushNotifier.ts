@@ -31,6 +31,8 @@ export interface PushSendPayload {
   threadId?: string;
   /** Unread session count to show on the iOS app icon for devices with `badgeEnabled: true`. */
   badge?: number;
+  /** Optional APNs collapse identifier (<= 64 ASCII chars) to prevent duplicate banners for the same event. */
+  collapseId?: string;
 }
 
 const DEFAULT_RELAY_URL = 'https://super-harness-push.lxe-sh.workers.dev';
@@ -207,7 +209,13 @@ export class PushNotifier {
     }
 
     const legacyKey = token ? deriveRelayCredentials(token).key : null;
-    const { badge: rawBadge, ...basePayload } = payload;
+    const { badge: rawBadge, collapseId: explicitCollapseId, ...restPayload } = payload;
+    const collapseId =
+      explicitCollapseId ||
+      (payload.kind !== 'test'
+        ? sha256Hex(`${payload.kind}\n${payload.sessionId ?? ''}\n${payload.body}`).slice(0, 32)
+        : undefined);
+    const basePayload = collapseId ? { ...restPayload, collapseId } : restPayload;
     const validBadge =
       typeof rawBadge === 'number' && Number.isFinite(rawBadge) && rawBadge >= 0
         ? Math.floor(rawBadge)

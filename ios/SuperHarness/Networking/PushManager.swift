@@ -20,6 +20,7 @@ public final class PushNotificationCoordinator: NSObject {
 
     private var hasRegisteredBGTask = false
     private var lastAppliedBadgeCount: Int?
+    private var pendingNotificationSessionId: String?
 
     public func configure(store: AppStore) {
         self.store = store
@@ -28,6 +29,21 @@ public final class PushNotificationCoordinator: NSObject {
         #endif
         registerBackgroundRefreshIfNeeded()
         setAppIconBadge(store.effectiveAppIconBadgeCount)
+        if let pending = pendingNotificationSessionId {
+            pendingNotificationSessionId = nil
+            store.openSessionFromNotification(pending)
+        }
+    }
+
+    public func handleNotificationTap(sessionId: String) {
+        let trimmed = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let store {
+            pendingNotificationSessionId = nil
+            store.openSessionFromNotification(trimmed)
+        } else {
+            pendingNotificationSessionId = trimmed
+        }
     }
 
     public func setAppIconBadge(_ count: Int) {
@@ -192,16 +208,30 @@ extension PushNotificationCoordinator: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        let userInfo = response.notification.request.content.userInfo
-        if let sessionId = userInfo["sessionId"] as? String, !sessionId.isEmpty {
+        let content = response.notification.request.content
+        let userInfo = content.userInfo
+        let explicitId = (userInfo["sessionId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let threadId = content.threadIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sessionId = (explicitId?.isEmpty == false ? explicitId : nil)
+            ?? (!threadId.isEmpty && threadId != "super-harness" ? threadId : nil)
+        if let sessionId {
             await MainActor.run {
-                PushNotificationCoordinator.shared.store?.selectSession(sessionId)
+                PushNotificationCoordinator.shared.handleNotificationTap(sessionId: sessionId)
             }
         }
     }
 }
 
 public final class SuperHarnessAppDelegate: NSObject, UIApplicationDelegate {
+    public func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Assign the notification center delegate before launch completes so iOS delivers
+        // cold-launch notification taps to `userNotificationCenter(_:didReceive:)`.
+        UNUserNotificationCenter.current().delegate = PushNotificationCoordinator.shared
+        return true
+    }
     public func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

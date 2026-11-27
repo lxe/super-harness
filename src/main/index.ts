@@ -372,6 +372,7 @@ const pairingService = new PairingService(store, {
 });
 const workingTracker = new WorkingCompletionTracker();
 const sessionNotifiedInputIds = new Set<string>();
+const lastNotifiedCompletionBySession = new Map<string, { messageId?: string; body: string }>();
 
 function getUnreadBadgeCount(ensureSessionId?: string): number {
   const sessions = registry.getCached().sessions;
@@ -393,33 +394,75 @@ function getUnreadBadgeCount(ensureSessionId?: string): number {
   return count;
 }
 
-function extractAssistantSnippet(transcript?: { messages?: Array<{ role: string; blocks: Array<{ type: string; text?: string }> }> }): string {
+type NotificationTranscriptLike = {
+  messages?: Array<{ id?: string; role: string; blocks: Array<{ type: string; text?: string }> }>;
+};
+
+function extractAssistantReply(transcript?: NotificationTranscriptLike): {
+  messageId?: string;
+  snippet: string;
+} {
   const lastAssistant = transcript?.messages
     ? [...transcript.messages].reverse().find((m) => m.role === 'assistant')
     : undefined;
-  const raw = lastAssistant?.blocks
-    .filter((b): b is { type: 'text'; text: string } => b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text.trim())
-    .join('\n\n') ?? '';
-  return notificationTextFromMarkdown(raw);
+  const raw =
+    lastAssistant?.blocks
+      .filter((b): b is { type: 'text'; text: string } => b.type === 'text' && typeof b.text === 'string')
+      .map((b) => b.text.trim())
+      .join('\n\n') ?? '';
+  return {
+    messageId: lastAssistant?.id,
+    snippet: notificationTextFromMarkdown(raw),
+  };
+}
+
+function isDuplicateCompletion(
+  prev: { messageId?: string; body: string } | undefined,
+  next: { messageId?: string; body: string }
+): boolean {
+  if (!prev) return false;
+  if (next.messageId && prev.messageId && next.messageId === prev.messageId && next.body === prev.body) {
+    return true;
+  }
+  return next.body !== 'Task completed' && prev.body === next.body;
 }
 
 async function notifyTaskCompleted(
   sessionId: string,
-  transcript?: { messages?: Array<{ role: string; blocks: Array<{ type: string; text?: string }> }> }
+  transcript?: NotificationTranscriptLike
 ): Promise<void> {
   if (!sessionId || sessionId.startsWith('master:')) return;
   const sess = registry.getSession(sessionId);
-  let snippet = extractAssistantSnippet(transcript);
-  if (!snippet) {
+  const prev = lastNotifiedCompletionBySession.get(sessionId);
+  let reply = extractAssistantReply(transcript);
+
+  // When triggered from discovery (or if the transcript hasn't flushed the newest reply yet),
+  // give the harness a brief moment to flush its final assistant message to disk before reading.
+  const needsFreshRead =
+    !reply.snippet ||
+    isDuplicateCompletion(prev, { messageId: reply.messageId, body: reply.snippet });
+  if (needsFreshRead) {
+    if (!transcript || prev) {
+      await new Promise((r) => setTimeout(r, 450));
+    }
     try {
       const fresh = await registry.getTranscript(sessionId, 8);
-      snippet = extractAssistantSnippet(fresh);
+      const freshReply = extractAssistantReply(fresh);
+      if (freshReply.snippet) {
+        reply = freshReply;
+      }
     } catch {
       // fall back to preview below
     }
   }
-  const body = snippet || notificationTextFromMarkdown(sess?.preview ?? '') || 'Task completed';
+
+  const body = reply.snippet || notificationTextFromMarkdown(sess?.preview ?? '') || 'Task completed';
+  const nextSig = { messageId: reply.messageId, body };
+  if (isDuplicateCompletion(prev, nextSig)) {
+    return;
+  }
+  lastNotifiedCompletionBySession.set(sessionId, nextSig);
+
   const res = await pushNotifier.notify({
     kind: 'task_completed',
     sessionId,

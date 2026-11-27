@@ -428,6 +428,11 @@ describe('ConfigStore pairing persistence across settings updates and restarts',
       expect(res.sent).toBe(2);
       expect(receivedByRid.get(devWithBadge.rid)?.badge).toBe(3);
       expect(receivedByRid.get(devNoBadge.rid)?.badge).toBeUndefined();
+      // Deterministic APNs collapseId prevents duplicate banners on the same physical phone
+      const cid1 = receivedByRid.get(devWithBadge.rid)?.collapseId;
+      const cid2 = receivedByRid.get(devNoBadge.rid)?.collapseId;
+      expect(typeof cid1).toBe('string');
+      expect(cid1).toBe(cid2);
     } finally {
       await new Promise<void>((r) => relay.close(() => r()));
       process.env.HOME = prevHome;

@@ -978,4 +978,30 @@ final class AppStoreTests: XCTestCase {
         store.setAppIconBadgeEnabled(false)
         XCTAssertEqual(store.effectiveAppIconBadgeCount, 0)
     }
+
+    func testOpenSessionFromNotificationHandlesColdLaunchAndWarmResume() {
+        let suite = "sh.tests.notif.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+
+        // Cold launch: sessions not loaded yet -> queues pendingInitialSessionId and dismisses sheets
+        store.isHostSettingsSheetPresented = true
+        store.openSessionFromNotification("antigravity:abc-123")
+        XCTAssertFalse(store.isHostSettingsSheetPresented)
+        XCTAssertEqual(store.pendingInitialSessionId, "antigravity:abc-123")
+
+        // Warm resume: session already loaded -> opens detailRoute immediately and clears unread
+        let now = Date().timeIntervalSince1970 * 1000
+        store.sessions = [
+            UnifiedSession(id: "antigravity:abc-123", harness: .antigravity, harnessGroup: .antigravity, title: "Thread", status: .idle, createdAt: now, updatedAt: now, unread: true),
+        ]
+        store.isUsageSheetPresented = true
+        store.openSessionFromNotification("antigravity:abc-123")
+        XCTAssertFalse(store.isUsageSheetPresented)
+        XCTAssertNil(store.pendingInitialSessionId)
+        XCTAssertEqual(store.selectedSessionId, "antigravity:abc-123")
+        XCTAssertEqual(store.detailRoute, .session("antigravity:abc-123"))
+        XCTAssertFalse(store.sessions[0].isUnread)
+    }
 }

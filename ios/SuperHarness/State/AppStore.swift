@@ -1914,6 +1914,29 @@ public final class AppStore {
         }
     }
 
+    /// Opens the target session when the user taps a push notification, whether the app was
+    /// cold-launched (sessions not loaded yet) or resumed from the background.
+    public func openSessionFromNotification(_ sessionId: String) {
+        let trimmed = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        isUsageSheetPresented = false
+        isHostSettingsSheetPresented = false
+        isAddMachineSheetPresented = false
+        lightboxPayload = nil
+        pendingInitialRoute = nil
+
+        if let matched = sessions.first(where: { $0.id == trimmed })
+            ?? sessions.first(where: { $0.nativeId == trimmed }) {
+            pendingInitialSessionId = nil
+            selectSession(matched.id)
+        } else {
+            pendingInitialSessionId = trimmed
+            if hasBootstrapped {
+                Task { await refresh() }
+            }
+        }
+    }
+
     public func clearDetailRoute() {
         selectedSessionId = nil
         detailRoute = nil

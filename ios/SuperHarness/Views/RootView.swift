@@ -31,7 +31,7 @@ public struct RootView: View {
                 Task { await store.handleScenePhaseChanged(.active) }
             }
         }
-        .onChange(of: store.sessions.count) { _, _ in
+        .onChange(of: store.sessions.map(\.id)) { _, _ in
             applyPendingInitialRouteIfNeeded()
         }
         .onChange(of: store.pendingInitialSessionId, initial: true) { _, _ in
@@ -40,7 +40,7 @@ public struct RootView: View {
         .onChange(of: store.pendingInitialRoute, initial: true) { _, _ in
             applyPendingInitialRouteIfNeeded()
         }
-        .onChange(of: store.detailRoute) { _, newRoute in
+        .onChange(of: store.detailRoute, initial: true) { _, newRoute in
             guard sizeClass != .regular else { return }
             if let newRoute {
                 if navigationPath.last != newRoute {
@@ -147,7 +147,7 @@ public struct RootView: View {
         }
 
         guard let targetId = store.pendingInitialSessionId,
-              let matched = store.sessions.first(where: { $0.id == targetId }) else {
+              let matched = store.sessions.first(where: { $0.id == targetId || $0.nativeId == targetId }) else {
             return
         }
         store.pendingInitialSessionId = nil

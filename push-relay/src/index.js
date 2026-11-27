@@ -89,16 +89,20 @@ async function apnsJwt(env) {
   return jwtCache.token;
 }
 
-async function apnsSend(env, apnsEnv, token, payload, topic, pushType, priority) {
+async function apnsSend(env, apnsEnv, token, payload, topic, pushType, priority, collapseId) {
   try {
+    const headers = {
+      authorization: `bearer ${await apnsJwt(env)}`,
+      "apns-topic": topic,
+      "apns-push-type": pushType,
+      "apns-priority": String(priority),
+    };
+    if (collapseId) {
+      headers["apns-collapse-id"] = collapseId;
+    }
     const r = await fetch(`${HOSTS[apnsEnv] || HOSTS.production}/3/device/${token}`, {
       method: "POST",
-      headers: {
-        authorization: `bearer ${await apnsJwt(env)}`,
-        "apns-topic": topic,
-        "apns-push-type": pushType,
-        "apns-priority": String(priority),
-      },
+      headers,
       body: JSON.stringify(payload),
     });
     const text = await r.text();
@@ -145,9 +149,13 @@ function buildApnsPayload(body) {
     aps.badge = Math.floor(body.badge);
   }
 
+  const rawCollapse = typeof body.collapseId === "string" ? body.collapseId.trim() : "";
+  const collapseId = /^[A-Za-z0-9._:-]{1,64}$/.test(rawCollapse) ? rawCollapse : "";
+
   return {
     pushType: "alert",
     priority: 10,
+    collapseId,
     payload: {
       aps,
       sh_kind: kind,
@@ -215,7 +223,7 @@ export default {
         return fail(400, "bad JSON");
       }
 
-      const { pushType, priority, payload } = buildApnsPayload(b);
+      const { pushType, priority, payload, collapseId } = buildApnsPayload(b);
       const tokens = rec.tokens || {};
       const tokenEntries = Object.entries(tokens);
       if (tokenEntries.length === 0) return fail(410, "NoToken");
@@ -225,10 +233,10 @@ export default {
       let lastReason = "";
       for (const [tok, meta] of tokenEntries) {
         const primaryEnv = meta.env === "sandbox" ? "sandbox" : "production";
-        let [status, reason] = await apnsSend(env, primaryEnv, tok, payload, env.BUNDLE_ID, pushType, priority);
+        let [status, reason] = await apnsSend(env, primaryEnv, tok, payload, env.BUNDLE_ID, pushType, priority, collapseId);
         if (status === 400 && reason === "BadDeviceToken") {
           const otherEnv = primaryEnv === "sandbox" ? "production" : "sandbox";
-          const [s2, r2] = await apnsSend(env, otherEnv, tok, payload, env.BUNDLE_ID, pushType, priority);
+          const [s2, r2] = await apnsSend(env, otherEnv, tok, payload, env.BUNDLE_ID, pushType, priority, collapseId);
           status = s2;
           reason = r2;
           if (status === 200) {

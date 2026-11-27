@@ -167,42 +167,75 @@ public struct RootView: View {
 
 // MARK: - Subtle Connection Status Pill
 
+/// The settings button in the top bar. Its glyph is the status: a gear when all is well,
+/// sync arrows while the app is fetching from the host, and a yellow warning mark when the
+/// host cannot be reached. The glyph morphs between these instead of carrying a status dot.
 public struct ConnectionStatusPill: View {
     public let health: ConnectionHealth
+    public var isSyncing: Bool = false
     public let action: () -> Void
 
-    public init(health: ConnectionHealth, action: @escaping () -> Void) {
+    public init(health: ConnectionHealth, isSyncing: Bool = false, action: @escaping () -> Void) {
         self.health = health
+        self.isSyncing = isSyncing
         self.action = action
     }
 
-    public var body: some View {
-        Button(action: action) {
-            // A gear for settings with the connection state as a dot on its corner. The logo
-            // itself lives in the middle of the bar.
-            Image(systemName: "gearshape")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(SHColor.inkSecondary)
-                .frame(width: 28, height: 28)
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(dotColor)
-                        .frame(width: 7, height: 7)
-                        .overlay(Circle().strokeBorder(SHColor.surfaceCanvas.opacity(0.9), lineWidth: 1))
-                        .offset(x: -2, y: 3)
-                }
-                .contentShape(Circle())
+    public enum Glyph: Equatable, Sendable {
+        case settings, syncing, problem
+
+        public var symbolName: String {
+            switch self {
+            case .settings: return "gearshape"
+            case .syncing: return "arrow.triangle.2.circlepath"
+            case .problem: return "exclamationmark.triangle.fill"
+            }
         }
-        .accessibilityLabel("Connection and settings · \(health.label)")
-        .accessibilityIdentifier("header.status")
     }
 
-    private var dotColor: Color {
-        switch health {
-        case .demo: return SHColor.inkMuted
-        case .connecting: return SHColor.statusWarning
-        case .connected: return SHColor.statusSuccess
-        case .offline: return SHColor.statusDanger
+    /// A problem outranks syncing: while the host is unreachable the app keeps retrying, and
+    /// the warning should stay put instead of alternating with the sync arrows.
+    nonisolated public static func glyph(health: ConnectionHealth, isSyncing: Bool) -> Glyph {
+        if case .offline = health { return .problem }
+        if isSyncing || health == .connecting { return .syncing }
+        return .settings
+    }
+
+    public var body: some View {
+        let glyph = Self.debugForcedGlyph ?? Self.glyph(health: health, isSyncing: isSyncing)
+        Button(action: action) {
+            Image(systemName: glyph.symbolName)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(glyph == .problem ? SHColor.statusWarning : SHColor.inkSecondary)
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: glyph == .syncing)
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
+                .animation(.easeInOut(duration: 0.25), value: glyph)
+        }
+        .accessibilityLabel("Settings · \(accessibilityStatus(glyph))")
+        .accessibilityIdentifier("header.status")
+        .accessibilityValue(String(describing: glyph))
+    }
+
+    /// UI checks set `SH_DEBUG_STATUS_GLYPH` to `syncing` or `problem` to show that state.
+    private static let debugForcedGlyph: Glyph? = {
+        #if DEBUG
+        switch ProcessInfo.processInfo.environment["SH_DEBUG_STATUS_GLYPH"] {
+        case "syncing": return .syncing
+        case "problem": return .problem
+        default: return nil
+        }
+        #else
+        return nil
+        #endif
+    }()
+
+    private func accessibilityStatus(_ glyph: Glyph) -> String {
+        switch glyph {
+        case .settings: return health.label
+        case .syncing: return "Syncing"
+        case .problem: return "Host unreachable"
         }
     }
 }

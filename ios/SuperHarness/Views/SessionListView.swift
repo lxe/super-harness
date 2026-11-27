@@ -253,7 +253,7 @@ public struct SessionListView: View {
         .toolbar {
             // Left group, one shared pill: connection status and settings, orchestrator, search.
             ToolbarItemGroup(placement: .topBarLeading) {
-                ConnectionStatusPill(health: store.connectionHealth) {
+                ConnectionStatusPill(health: store.connectionHealth, isSyncing: store.isSyncing) {
                     store.isHostSettingsSheetPresented = true
                 }
 

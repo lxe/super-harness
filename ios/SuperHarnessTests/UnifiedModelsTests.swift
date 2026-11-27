@@ -996,4 +996,14 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(ScrollingCommandText.firstLine(of: command), "cat > a.txt <<'EOF'")
         XCTAssertEqual(ScrollingCommandText.remainingLines(of: command), "  indented line\nlast\nEOF")
     }
+
+    func testSettingsButtonGlyphFollowsSyncAndConnectionState() {
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .connected, isSyncing: false), .settings)
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .demo, isSyncing: false), .settings)
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .connected, isSyncing: true), .syncing)
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .connecting, isSyncing: false), .syncing)
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .offline("timed out"), isSyncing: false), .problem)
+        // Retrying while offline keeps the warning instead of flipping to the sync arrows.
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .offline("timed out"), isSyncing: true), .problem)
+    }
 }

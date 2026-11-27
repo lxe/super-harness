@@ -268,6 +268,11 @@ public final class AppStore {
     private var hasBootstrapped: Bool = false
     public var hasCompletedBootstrap: Bool { hasBootstrapped }
     private var isResyncing: Bool = false
+    /// True while the app is fetching fresh state from the host: first load, a manual
+    /// refresh, a background resync, or while the connection is being established.
+    public var isSyncing: Bool {
+        isBootstrapping || isRefreshing || isResyncing || connectionHealth == .connecting
+    }
 
     // Session-list updates from the host are collected and applied together, so a burst of
     // them redraws the list once. See `enqueueListEvent`.

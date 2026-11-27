@@ -451,7 +451,10 @@ public struct ComposerView: View {
 
                 HStack(spacing: 8) {
                     attachMenuButton
+                    // The pill takes the width its text needs before the flexible gap gets any;
+                    // without the priority the gap and the pill split the row and the text truncates.
                     combinedModelEffortPill
+                        .layoutPriority(1)
                     Color.clear
                         .frame(minWidth: 4, maxWidth: .infinity, minHeight: Self.controlSize, maxHeight: Self.controlSize)
                         .contentShape(Rectangle())

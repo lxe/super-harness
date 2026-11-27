@@ -267,3 +267,30 @@ describe('HarnessUpdateService', () => {
     svc.cancel('pi');
   });
 });
+
+describe('HarnessUpdateService.start', () => {
+  it('checks soon after launch, waiting for the first detection', async () => {
+    const dets: HarnessDetection[] = [];
+    const { svc } = makeService({ dets });
+    svc.start({ firstCheckMs: 5, retryMs: 5 });
+    await new Promise((r) => setTimeout(r, 30));
+    dets.push(detection('pi', '1.4.0'));
+    await until(() => svc.infoFor(dets[0]!)?.latest === '1.6.1');
+    expect(svc.infoFor(dets[0]!)?.updateAvailable).toBe(true);
+    svc.stop();
+  });
+
+  it('skips the startup check for harnesses checked in the last 4 hours', async () => {
+    const dets = [detection('pi', '1.4.0')];
+    let fetches = 0;
+    const first = makeService({ dets, io: { fetchJson: async () => (fetches++, { latest: '1.6.1' }) } });
+    await first.svc.checkAll(true);
+    const cacheFile = path.join(first.home, 'cache.json');
+    const second = makeService({ dets, cacheFile, io: { fetchJson: async () => (fetches++, { latest: '1.6.1' }) } });
+    second.svc.start({ firstCheckMs: 5, retryMs: 5 });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(fetches).toBe(1);
+    expect(second.svc.infoFor(dets[0]!)?.latest).toBe('1.6.1');
+    second.svc.stop();
+  });
+});

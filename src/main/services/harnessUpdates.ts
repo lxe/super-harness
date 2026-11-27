@@ -461,8 +461,25 @@ export class HarnessUpdateService {
     }
   }
 
-  start(): void {
-    const kick = setTimeout(() => void this.checkAll(false), 30_000);
+  /**
+   * Starts background checks. The first runs shortly after launch (anything not checked in the
+   * last 4 hours, which is everything on a fresh install); if detection hasn't finished by then
+   * it retries until it has.
+   */
+  start(opts: { firstCheckMs?: number; retryMs?: number } = {}): void {
+    const firstCheckMs = opts.firstCheckMs ?? 8000;
+    const retryMs = opts.retryMs ?? 5000;
+    let tries = 0;
+    const kickoff = () => {
+      if (this.installed().length === 0 && tries++ < 24) {
+        const retry = setTimeout(kickoff, retryMs);
+        retry.unref?.();
+        this.timers.push(retry);
+        return;
+      }
+      void this.checkAll(false);
+    };
+    const kick = setTimeout(kickoff, firstCheckMs);
     kick.unref?.();
     const latest = setInterval(() => void this.checkAll(false), 15 * 60 * 1000);
     latest.unref?.();

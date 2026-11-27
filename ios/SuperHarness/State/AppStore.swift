@@ -202,6 +202,12 @@ public final class AppStore {
         connectionMode == .live && !isPaired
     }
 
+    /// True when this phone is paired with a real desktop, which is the only source of
+    /// notifications. False on the pairing screen and in the demo.
+    public var canReceivePushes: Bool {
+        connectionMode == .live && isPaired
+    }
+
     @ObservationIgnored private let pairingService: PairingServiceProtocol
     /// Debug: pairing was done against the stand-in desktop, so the app loads demo data after it.
     @ObservationIgnored private let usesMockPairing: Bool

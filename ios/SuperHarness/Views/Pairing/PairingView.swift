@@ -45,6 +45,22 @@ public struct PairingView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, SHSpacing.md)
 
+                // A way in without a desktop: sample chats, nothing sent anywhere. Settings →
+                // Developer turns it off again.
+                Button {
+                    Task { await store.setDemoMode(true) }
+                } label: {
+                    Text("See a demo")
+                        .font(SHTypography.label)
+                        .foregroundStyle(SHColor.inkSecondary)
+                        .padding(.horizontal, 18)
+                        .frame(height: 40)
+                        .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: 20, elevation: .tile)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the app with sample chats. No desktop needed.")
+                .accessibilityIdentifier("pairing.demo")
+
                 Button("Developer options") {
                     store.isHostSettingsSheetPresented = true
                 }

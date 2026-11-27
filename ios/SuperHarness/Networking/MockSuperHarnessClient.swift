@@ -885,7 +885,8 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
     }
 
     public func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment]) async throws -> SendMessageResult {
-        if let err = simulateSendError {
+        // UI checks set `SH_MOCK_SEND_ERROR` to make every send fail with that message.
+        if let err = simulateSendError ?? ProcessInfo.processInfo.environment["SH_MOCK_SEND_ERROR"] {
             return SendMessageResult(ok: false, error: err)
         }
         let now = Date().timeIntervalSince1970 * 1000.0

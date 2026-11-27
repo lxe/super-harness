@@ -59,6 +59,13 @@ interface CachedAgyLiveQuota {
   creditsBalance?: number;
 }
 
+export interface CachedHarnessLiveQuota {
+  fetchedAt: number;
+  planLabel?: string;
+  windows: UsageQuotaWindow[];
+  creditsBalance?: number;
+}
+
 export interface MuseQuotaSample {
   t: number;
   w?: number;
@@ -69,6 +76,9 @@ interface DiskUsageCache {
   version: number;
   files: Record<string, CachedFileSummary>;
   agyLiveQuota?: CachedAgyLiveQuota;
+  museLiveQuota?: CachedHarnessLiveQuota;
+  claudeLiveQuota?: CachedHarnessLiveQuota;
+  codexLiveQuota?: CachedHarnessLiveQuota;
   museQuotaSamples?: MuseQuotaSample[];
 }
 
@@ -295,18 +305,67 @@ async function scanJsonlLines(
 
 const CACHE_VERSION = 2;
 
-function loadDiskCache(): {
+interface LoadedDiskUsageCache {
   files: Record<string, CachedFileSummary>;
   agyLiveQuota?: CachedAgyLiveQuota;
+  museLiveQuota?: CachedHarnessLiveQuota;
+  claudeLiveQuota?: CachedHarnessLiveQuota;
+  codexLiveQuota?: CachedHarnessLiveQuota;
   museQuotaSamples: MuseQuotaSample[];
-} {
+}
+
+function isValidCachedQuota(q: unknown): q is CachedHarnessLiveQuota {
+  if (!q || typeof q !== 'object') return false;
+  const obj = q as Partial<CachedHarnessLiveQuota>;
+  return (
+    typeof obj.fetchedAt === 'number' &&
+    Number.isFinite(obj.fetchedAt) &&
+    obj.fetchedAt > 0 &&
+    Array.isArray(obj.windows) &&
+    obj.windows.length > 0
+  );
+}
+
+function shouldPersistQuota(
+  prev: CachedHarnessLiveQuota | undefined,
+  next: CachedHarnessLiveQuota
+): boolean {
+  if (!prev) return true;
+  if (prev.planLabel !== next.planLabel) return true;
+  if (prev.creditsBalance !== next.creditsBalance) return true;
+  if (Math.abs(next.fetchedAt - prev.fetchedAt) >= 60_000) return true;
+  if (prev.windows.length !== next.windows.length) return true;
+  for (let i = 0; i < next.windows.length; i++) {
+    const a = prev.windows[i];
+    const b = next.windows[i];
+    if (
+      a.id !== b.id ||
+      a.label !== b.label ||
+      a.usedPercent !== b.usedPercent ||
+      a.resetsAt !== b.resetsAt ||
+      a.windowMinutes !== b.windowMinutes
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function loadDiskCache(cachePath = USAGE_CACHE_PATH): LoadedDiskUsageCache {
   try {
-    if (!fs.existsSync(USAGE_CACHE_PATH)) return { files: {}, museQuotaSamples: [] };
-    const parsed = JSON.parse(fs.readFileSync(USAGE_CACHE_PATH, 'utf8')) as DiskUsageCache;
+    if (!fs.existsSync(cachePath)) return { files: {}, museQuotaSamples: [] };
+    const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8')) as DiskUsageCache;
     if (parsed?.version === CACHE_VERSION && parsed.files && typeof parsed.files === 'object') {
       return {
         files: parsed.files,
         agyLiveQuota: parsed.agyLiveQuota,
+        museLiveQuota: isValidCachedQuota(parsed.museLiveQuota) ? parsed.museLiveQuota : undefined,
+        claudeLiveQuota: isValidCachedQuota(parsed.claudeLiveQuota)
+          ? parsed.claudeLiveQuota
+          : undefined,
+        codexLiveQuota: isValidCachedQuota(parsed.codexLiveQuota)
+          ? parsed.codexLiveQuota
+          : undefined,
         museQuotaSamples: Array.isArray(parsed.museQuotaSamples)
           ? parsed.museQuotaSamples
           : [],
@@ -319,25 +378,39 @@ function loadDiskCache(): {
 }
 
 function saveDiskCache(
-  files: Record<string, CachedFileSummary>,
-  agyLiveQuota?: CachedAgyLiveQuota,
-  museQuotaSamples: MuseQuotaSample[] = []
+  data: {
+    files: Record<string, CachedFileSummary>;
+    agyLiveQuota?: CachedAgyLiveQuota;
+    museLiveQuota?: CachedHarnessLiveQuota;
+    claudeLiveQuota?: CachedHarnessLiveQuota;
+    codexLiveQuota?: CachedHarnessLiveQuota;
+    museQuotaSamples: MuseQuotaSample[];
+  },
+  cachePath = USAGE_CACHE_PATH
 ): void {
   try {
-    fs.mkdirSync(path.dirname(USAGE_CACHE_PATH), { recursive: true });
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     // Prune entries older than 21 days so cache stays tiny
     const minMtime = Date.now() - 21 * DAY_MS;
     const pruned: Record<string, CachedFileSummary> = {};
-    for (const [k, v] of Object.entries(files)) {
+    for (const [k, v] of Object.entries(data.files)) {
       if (v.mtimeMs >= minMtime) pruned[k] = v;
     }
-    const tmp = `${USAGE_CACHE_PATH}.tmp`;
+    const tmp = `${cachePath}.tmp`;
     fs.writeFileSync(
       tmp,
-      JSON.stringify({ version: CACHE_VERSION, files: pruned, agyLiveQuota, museQuotaSamples }),
+      JSON.stringify({
+        version: CACHE_VERSION,
+        files: pruned,
+        agyLiveQuota: data.agyLiveQuota,
+        museLiveQuota: data.museLiveQuota,
+        claudeLiveQuota: data.claudeLiveQuota,
+        codexLiveQuota: data.codexLiveQuota,
+        museQuotaSamples: data.museQuotaSamples,
+      }),
       'utf8'
     );
-    fs.renameSync(tmp, USAGE_CACHE_PATH);
+    fs.renameSync(tmp, cachePath);
   } catch {
     // ignore write failures
   }
@@ -648,19 +721,85 @@ export function inferWeeklyResetFromSamples(
   return nextReset;
 }
 
+export interface MuseLiveQuotaResult {
+  planLabel?: string;
+  windows: UsageQuotaWindow[];
+  asOfMs?: number;
+}
+
+export interface UsageServiceOptions {
+  cachePath?: string;
+  fetchMuseQuota?: (now: number) => Promise<MuseLiveQuotaResult | null>;
+}
+
+function decorateMuseWindows(
+  windows: UsageQuotaWindow[],
+  samples: MuseQuotaSample[],
+  referenceMs: number
+): UsageQuotaWindow[] {
+  return windows.map((w) => {
+    const copy: UsageQuotaWindow = { ...w };
+    if (copy.id === 'five_hour') {
+      copy.delta24h = computeMuseQuotaDelta24h(samples, 'w', copy.usedPercent, referenceMs);
+    } else if (copy.id === 'weekly') {
+      copy.delta24h = computeMuseQuotaDelta24h(samples, 'wk', copy.usedPercent, referenceMs);
+    }
+    return copy;
+  });
+}
+
+function synthesizeMuseQuotaFromSamples(
+  samples: MuseQuotaSample[]
+): CachedHarnessLiveQuota | undefined {
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    const windows: UsageQuotaWindow[] = [];
+    if (typeof s.w === 'number' && Number.isFinite(s.w)) {
+      windows.push({
+        id: 'five_hour',
+        label: 'Window',
+        usedPercent: s.w,
+        windowMinutes: 300,
+      });
+    }
+    if (typeof s.wk === 'number' && Number.isFinite(s.wk)) {
+      windows.push({
+        id: 'weekly',
+        label: 'Weekly (7d)',
+        usedPercent: s.wk,
+        windowMinutes: 7 * 24 * 60,
+      });
+    }
+    if (windows.length > 0 && Number.isFinite(s.t) && s.t > 0) {
+      return { fetchedAt: s.t, windows };
+    }
+  }
+  return undefined;
+}
+
 export class UsageService {
   private cache: UsageSnapshot | null = null;
   private lastComputedAt = 0;
   private inFlight: Promise<UsageSnapshot> | null = null;
+  private cachePath: string;
+  private fetchMuseQuotaOverride?: (now: number) => Promise<MuseLiveQuotaResult | null>;
   private fileCache: Record<string, CachedFileSummary>;
   private agyLiveQuota?: CachedAgyLiveQuota;
+  private museLiveQuota?: CachedHarnessLiveQuota;
+  private claudeLiveQuota?: CachedHarnessLiveQuota;
+  private codexLiveQuota?: CachedHarnessLiveQuota;
   private museQuotaSamples: MuseQuotaSample[];
   private agyQuotaInFlight: Promise<CachedAgyLiveQuota | undefined> | null = null;
 
-  constructor() {
-    const loaded = loadDiskCache();
+  constructor(options?: UsageServiceOptions) {
+    this.cachePath = options?.cachePath ?? USAGE_CACHE_PATH;
+    this.fetchMuseQuotaOverride = options?.fetchMuseQuota;
+    const loaded = loadDiskCache(this.cachePath);
     this.fileCache = loaded.files;
     this.agyLiveQuota = loaded.agyLiveQuota;
+    this.museLiveQuota = loaded.museLiveQuota;
+    this.claudeLiveQuota = loaded.claudeLiveQuota;
+    this.codexLiveQuota = loaded.codexLiveQuota;
     this.museQuotaSamples = loaded.museQuotaSamples;
   }
 
@@ -684,7 +823,17 @@ export class UsageService {
         this.collectPiUsage(now, markDirty),
       ]);
       if (dirty) {
-        saveDiskCache(this.fileCache, this.agyLiveQuota, this.museQuotaSamples);
+        saveDiskCache(
+          {
+            files: this.fileCache,
+            agyLiveQuota: this.agyLiveQuota,
+            museLiveQuota: this.museLiveQuota,
+            claudeLiveQuota: this.claudeLiveQuota,
+            codexLiveQuota: this.codexLiveQuota,
+            museQuotaSamples: this.museQuotaSamples,
+          },
+          this.cachePath
+        );
       }
       const snapshot: UsageSnapshot = {
         antigravity,
@@ -833,6 +982,55 @@ export class UsageService {
     };
   }
 
+  async getMuseUsage(now = Date.now()): Promise<HarnessUsageSummary> {
+    let dirty = false;
+    const summary = await this.collectMuseUsage(now, () => {
+      dirty = true;
+    });
+    if (dirty) {
+      saveDiskCache(
+        {
+          files: this.fileCache,
+          agyLiveQuota: this.agyLiveQuota,
+          museLiveQuota: this.museLiveQuota,
+          claudeLiveQuota: this.claudeLiveQuota,
+          codexLiveQuota: this.codexLiveQuota,
+          museQuotaSamples: this.museQuotaSamples,
+        },
+        this.cachePath
+      );
+    }
+    return summary;
+  }
+
+  private async fetchMuseLiveQuota(now: number): Promise<MuseLiveQuotaResult | null> {
+    if (this.fetchMuseQuotaOverride) {
+      return this.fetchMuseQuotaOverride(now);
+    }
+    const bin = await whichBinary('muse');
+    if (!bin) return null;
+    // Prefer structured JSON (absolute reset timestamps); fall back to the
+    // human text form for older CLIs without `--json`.
+    let quota: MuseLiveQuotaResult | null = null;
+    try {
+      const { stdout } = await execFileAsync(bin, ['usage', '--json'], {
+        timeout: 8000,
+        maxBuffer: 256 * 1024,
+      });
+      quota = parseMuseUsageJson(stdout);
+    } catch {
+      quota = null;
+    }
+    if (!quota) {
+      const { stdout } = await execFileAsync(bin, ['usage'], {
+        timeout: 8000,
+        maxBuffer: 256 * 1024,
+      });
+      quota = parseMuseUsageOutput(stdout, now);
+    }
+    return quota;
+  }
+
   private async collectMuseUsage(
     now: number,
     markDirty: () => void
@@ -933,35 +1131,39 @@ export class UsageService {
       spendIsEstimated: true,
       note: 'Quota from `muse usage`; API-equivalent spend from local transcripts',
     };
+
+    const buildCachedFallback = (): HarnessUsageSummary => {
+      const cached =
+        (this.museLiveQuota && this.museLiveQuota.windows.length > 0
+          ? this.museLiveQuota
+          : undefined) ?? synthesizeMuseQuotaFromSamples(this.museQuotaSamples);
+      if (!cached || cached.windows.length === 0) return base;
+      const windows = decorateMuseWindows(cached.windows, this.museQuotaSamples, cached.fetchedAt);
+      return {
+        ...base,
+        updatedAt: cached.fetchedAt,
+        planLabel: cached.planLabel || base.planLabel,
+        barPercent: Math.max(...windows.map((w) => w.usedPercent)),
+        windows,
+        note: 'Cached quota from last `muse usage` check; API-equivalent spend from local transcripts',
+      };
+    };
+
     try {
-      const bin = await whichBinary('muse');
-      if (!bin) return base;
-      // Prefer structured JSON (absolute reset timestamps); fall back to the
-      // human text form for older CLIs without `--json`.
-      let quota: { planLabel?: string; windows: UsageQuotaWindow[] } | null = null;
-      try {
-        const { stdout } = await execFileAsync(bin, ['usage', '--json'], {
-          timeout: 8000,
-          maxBuffer: 256 * 1024,
-        });
-        quota = parseMuseUsageJson(stdout);
-      } catch {
-        quota = null;
+      const quota = await this.fetchMuseLiveQuota(now);
+      if (!quota || quota.windows.length === 0) {
+        return buildCachedFallback();
       }
-      if (!quota) {
-        const { stdout } = await execFileAsync(bin, ['usage'], {
-          timeout: 8000,
-          maxBuffer: 256 * 1024,
-        });
-        quota = parseMuseUsageOutput(stdout, now);
-      }
-      const { planLabel, windows } = quota;
-      if (windows.length === 0) return base;
+      const { planLabel, windows: rawWindows } = quota;
+      const fetchedAt =
+        typeof quota.asOfMs === 'number' && Number.isFinite(quota.asOfMs) && quota.asOfMs > 0
+          ? quota.asOfMs
+          : now;
 
       // Record quota history so the hover card can show Claude-style
       // "+N% today" deltas, then decorate each window with its delta.
-      const fiveHour = windows.find((w) => w.id === 'five_hour');
-      const weekly = windows.find((w) => w.id === 'weekly');
+      const fiveHour = rawWindows.find((w) => w.id === 'five_hour');
+      const weekly = rawWindows.find((w) => w.id === 'weekly');
       const prevSamples = this.museQuotaSamples;
       this.museQuotaSamples = appendMuseQuotaSample(
         prevSamples,
@@ -969,31 +1171,27 @@ export class UsageService {
         now
       );
       if (this.museQuotaSamples !== prevSamples) markDirty();
-      if (fiveHour) {
-        fiveHour.delta24h = computeMuseQuotaDelta24h(
-          this.museQuotaSamples,
-          'w',
-          fiveHour.usedPercent,
-          now
-        );
-      }
-      if (weekly) {
-        weekly.delta24h = computeMuseQuotaDelta24h(
-          this.museQuotaSamples,
-          'wk',
-          weekly.usedPercent,
-          now
-        );
-      }
 
+      const nextCached: CachedHarnessLiveQuota = {
+        fetchedAt,
+        planLabel: planLabel || undefined,
+        windows: rawWindows.map((w) => ({ ...w })),
+      };
+      if (shouldPersistQuota(this.museLiveQuota, nextCached)) {
+        markDirty();
+      }
+      this.museLiveQuota = nextCached;
+
+      const windows = decorateMuseWindows(rawWindows, this.museQuotaSamples, now);
       return {
         ...base,
+        updatedAt: fetchedAt,
         planLabel: planLabel || base.planLabel,
         barPercent: Math.max(...windows.map((w) => w.usedPercent)),
         windows,
       };
     } catch {
-      return base;
+      return buildCachedFallback();
     }
   }
 
@@ -1185,8 +1383,24 @@ export class UsageService {
       foldBuckets(acc, buckets, now);
     }
 
-    const weekly = windows.find((w) => w.id === 'weekly');
-    const fiveHour = windows.find((w) => w.id === 'five_hour');
+    let resolvedWindows = windows;
+    if (resolvedWindows.length > 0) {
+      const nextCached: CachedHarnessLiveQuota = {
+        fetchedAt: updatedAt,
+        planLabel: 'Claude Plan',
+        windows: resolvedWindows.map((w) => ({ ...w })),
+      };
+      if (shouldPersistQuota(this.claudeLiveQuota, nextCached)) {
+        markDirty();
+      }
+      this.claudeLiveQuota = nextCached;
+    } else if (this.claudeLiveQuota && this.claudeLiveQuota.windows.length > 0) {
+      resolvedWindows = this.claudeLiveQuota.windows.map((w) => ({ ...w }));
+      updatedAt = this.claudeLiveQuota.fetchedAt;
+    }
+
+    const weekly = resolvedWindows.find((w) => w.id === 'weekly');
+    const fiveHour = resolvedWindows.find((w) => w.id === 'five_hour');
     const barPercent =
       weekly && fiveHour
         ? Math.max(weekly.usedPercent, fiveHour.usedPercent)
@@ -1198,7 +1412,7 @@ export class UsageService {
       planLabel: 'Claude Plan',
       barPercent,
       barIsEstimated: false,
-      windows,
+      windows: resolvedWindows,
       spend5hUsd: round2(acc.spend5h),
       spend24hUsd: round2(acc.spend24h),
       spend7dUsd: round2(acc.spend7d),
@@ -1392,16 +1606,36 @@ export class UsageService {
       }
     }
 
+    let resolvedWindows = windows;
+    let updatedAt = latestRlTs || now;
+    if (resolvedWindows.length > 0) {
+      const nextCached: CachedHarnessLiveQuota = {
+        fetchedAt: updatedAt,
+        planLabel: planLabel || 'Codex',
+        windows: resolvedWindows.map((w) => ({ ...w })),
+        creditsBalance,
+      };
+      if (shouldPersistQuota(this.codexLiveQuota, nextCached)) {
+        markDirty();
+      }
+      this.codexLiveQuota = nextCached;
+    } else if (this.codexLiveQuota && this.codexLiveQuota.windows.length > 0) {
+      resolvedWindows = this.codexLiveQuota.windows.map((w) => ({ ...w }));
+      updatedAt = this.codexLiveQuota.fetchedAt;
+      planLabel = planLabel || this.codexLiveQuota.planLabel;
+      if (creditsBalance === undefined) creditsBalance = this.codexLiveQuota.creditsBalance;
+    }
+
     const barPercent =
-      windows.length > 0 ? Math.max(...windows.map((w) => w.usedPercent)) : null;
+      resolvedWindows.length > 0 ? Math.max(...resolvedWindows.map((w) => w.usedPercent)) : null;
 
     return {
       harness: 'codex',
-      updatedAt: latestRlTs || now,
+      updatedAt,
       planLabel: planLabel || 'Codex',
       barPercent,
       barIsEstimated: false,
-      windows,
+      windows: resolvedWindows,
       creditsBalance,
       spend5hUsd: round2(acc.spend5h),
       spend24hUsd: round2(acc.spend24h),

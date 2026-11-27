@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildMuseResumeCommand,
@@ -20,6 +23,7 @@ import {
 import { createDefaultDrivers } from '../src/main/adapters/index';
 import { parseMuseModelsOutput } from '../src/main/services/catalogService';
 import {
+  UsageService,
   appendMuseQuotaSample,
   computeMuseQuotaDelta24h,
   parseMuseUsageJson,
@@ -694,5 +698,108 @@ describe('Muse usage parity (JSON, pace window, 24h delta)', () => {
     expect(computeMuseQuotaDelta24h(samples.slice(-1), 'wk', 41, now)).toBeUndefined();
     // Negative movement (reset crossed) → undefined, never a negative "+% today".
     expect(computeMuseQuotaDelta24h(samples, 'wk', 5, now)).toBeUndefined();
+  });
+
+  it('caches Muse quota to disk and falls back to last known quota with original updatedAt on failure', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-muse-usage-cache-'));
+    const cachePath = path.join(tmpDir, 'usage-cache.json');
+    try {
+      const t0 = 1_800_000_000_000;
+      const asOfMs = t0 - 15_000;
+      let mode: 'live' | 'null' | 'throw' | 'updated' = 'live';
+
+      const fetchMuseQuota = async () => {
+        if (mode === 'null') return null;
+        if (mode === 'throw') throw new Error('muse usage failed');
+        if (mode === 'updated') {
+          return {
+            planLabel: 'Muse Code Power Usage',
+            asOfMs: t0 + 300_000,
+            windows: [
+              { id: 'five_hour', label: 'Window', usedPercent: 28, resetsAt: t0 + 18_000_000, windowMinutes: 300 },
+              { id: 'weekly', label: 'Weekly (7d)', usedPercent: 45, resetsAt: t0 + 200_000_000, windowMinutes: 10080 },
+            ],
+          };
+        }
+        return {
+          planLabel: 'Muse Code Power Usage',
+          asOfMs,
+          windows: [
+            { id: 'five_hour', label: 'Window', usedPercent: 12, resetsAt: t0 + 14_400_000, windowMinutes: 300 },
+            { id: 'weekly', label: 'Weekly (7d)', usedPercent: 40, resetsAt: t0 + 200_000_000, windowMinutes: 10080 },
+          ],
+        };
+      };
+
+      const svc1 = new UsageService({ cachePath, fetchMuseQuota });
+      const live = await svc1.getMuseUsage(t0);
+      expect(live.planLabel).toBe('Muse Code Power Usage');
+      expect(live.barPercent).toBe(40);
+      expect(live.updatedAt).toBe(asOfMs);
+      expect(live.windows).toHaveLength(2);
+
+      // Subsequent empty response keeps previous windows and original updatedAt
+      mode = 'null';
+      const fallbackNull = await svc1.getMuseUsage(t0 + 60_000);
+      expect(fallbackNull.planLabel).toBe('Muse Code Power Usage');
+      expect(fallbackNull.barPercent).toBe(40);
+      expect(fallbackNull.updatedAt).toBe(asOfMs);
+      expect(fallbackNull.windows.map((w) => w.usedPercent)).toEqual([12, 40]);
+
+      // Subsequent error also keeps previous windows and original updatedAt
+      mode = 'throw';
+      const fallbackErr = await svc1.getMuseUsage(t0 + 120_000);
+      expect(fallbackErr.barPercent).toBe(40);
+      expect(fallbackErr.updatedAt).toBe(asOfMs);
+      expect(fallbackErr.windows).toHaveLength(2);
+
+      // Fresh UsageService instance (simulating restart) restores cached quota from disk
+      const svc2 = new UsageService({ cachePath, fetchMuseQuota });
+      const restarted = await svc2.getMuseUsage(t0 + 180_000);
+      expect(restarted.planLabel).toBe('Muse Code Power Usage');
+      expect(restarted.barPercent).toBe(40);
+      expect(restarted.updatedAt).toBe(asOfMs);
+      expect(restarted.windows.map((w) => w.usedPercent)).toEqual([12, 40]);
+
+      // When live fetch succeeds again, fresh values replace the cache
+      mode = 'updated';
+      const recovered = await svc2.getMuseUsage(t0 + 300_000);
+      expect(recovered.barPercent).toBe(45);
+      expect(recovered.updatedAt).toBe(t0 + 300_000);
+      expect(recovered.windows.map((w) => w.usedPercent)).toEqual([28, 45]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to legacy museQuotaSamples when museLiveQuota has not been cached yet', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-muse-usage-legacy-'));
+    const cachePath = path.join(tmpDir, 'usage-cache.json');
+    try {
+      const tSample = 1_800_000_000_000;
+      fs.writeFileSync(
+        cachePath,
+        JSON.stringify({
+          version: 2,
+          files: {},
+          museQuotaSamples: [{ t: tSample, w: 7, wk: 33 }],
+        }),
+        'utf8'
+      );
+
+      const svc = new UsageService({
+        cachePath,
+        fetchMuseQuota: async () => null,
+      });
+      const res = await svc.getMuseUsage(tSample + 120_000);
+      expect(res.barPercent).toBe(33);
+      expect(res.updatedAt).toBe(tSample);
+      expect(res.windows.map((w) => ({ id: w.id, usedPercent: w.usedPercent }))).toEqual([
+        { id: 'five_hour', usedPercent: 7 },
+        { id: 'weekly', usedPercent: 33 },
+      ]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

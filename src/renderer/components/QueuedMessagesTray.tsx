@@ -48,7 +48,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
           </span>
           {collapsed && (
             <Badge tone="neutral" mono>
-              {items.length}
+              <span className="translate-y-[1px] inline-block">{items.length}</span>
             </Badge>
           )}
           {subtitle && (

@@ -245,6 +245,33 @@ describe('pairing API', () => {
     expect(boot).toContain('"pairedDevices"');
   });
 
+  it('POST /api/unpair revokes the calling device; with the legacy token it is a no-op', async () => {
+    const { pair, pairing, authed, state, base } = await setup();
+    const { token } = await (await pair({ code: pairing.open().code, deviceName: 'p', deviceId: 'self' })).json();
+    const unpair = (t: string) =>
+      fetch(`${base}/api/unpair`, { method: 'POST', headers: { Authorization: `Bearer ${t}` } });
+
+    const legacy = await unpair(LEGACY);
+    expect(legacy.status).toBe(200);
+    expect(await legacy.json()).toEqual({ ok: true });
+    expect(state.settings.mobileApi?.pairedDevices).toHaveLength(1);
+
+    const res = await unpair(token);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(state.settings.mobileApi?.pairedDevices).toEqual([]);
+    expect((await authed(token)).status).toBe(401);
+    expect((await unpair(token)).status).toBe(401);
+    expect((await authed(LEGACY)).status).toBe(200);
+  });
+
+  it('uses the desktop name from settings when set', async () => {
+    const { base, store } = await setup();
+    store.updateSettings({ mobileApi: { hostName: 'Studio PC' } } as Partial<SuperHarnessSettings>);
+    expect((await (await fetch(`${base}/api/pair/info`)).json()).hostName).toBe('Studio PC');
+  });
+
   it('does not serve pairing routes on the loopback MCP listener', async () => {
     const { server } = await setup();
     const res = await fetch(`http://127.0.0.1:${server.port}/api/pair/info`);

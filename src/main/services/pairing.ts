@@ -1,6 +1,14 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
-import type { MobileApiSettings, PairedDevice, SuperHarnessSettings, SuperHarnessState } from '../../shared/types';
+import type {
+  MobileApiSettings,
+  PairedDevice,
+  PairingEvent,
+  SuperHarnessSettings,
+  SuperHarnessState,
+} from '../../shared/types';
+
+export type { PairingEvent };
 
 /**
  * Phone pairing: the desktop shows a one-time 6-digit code (and a QR code carrying it); a phone
@@ -23,10 +31,6 @@ export interface PairingCode {
   code: string;
   expiresAt: number;
 }
-
-export type PairingEvent =
-  | { type: 'paired'; device: { id: string; name: string } }
-  | { type: 'closed'; reason: 'expired' | 'too_many_attempts' | 'cancelled' | 'paired' };
 
 export type PairAttemptResult =
   | { status: 200; body: { ok: true; token: string; hostId: string; hostName: string } }
@@ -72,8 +76,9 @@ export class PairingService {
     this.now = opts.now ?? Date.now;
   }
 
+  /** The name phones show: settings.mobileApi.hostName, else the computer's name. */
   get hostName(): string {
-    return this.opts.hostName?.() ?? desktopName();
+    return this.mobile()?.hostName?.trim() || this.opts.hostName?.() || desktopName();
   }
 
   get version(): string {

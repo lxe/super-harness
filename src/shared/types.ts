@@ -385,7 +385,36 @@ export interface MobileApiSettings {
   hostId?: string;
   /** Phones paired with a one-time code; each has its own token, stored only as a hash. */
   pairedDevices?: PairedDevice[];
+  /** Name phones show for this desktop (pairing prompt, Bonjour). Empty: the computer's name. */
+  hostName?: string;
 }
+
+export interface MobileAddress {
+  address: string;
+  kind: 'tailscale-dns' | 'tailscale-ip' | 'lan';
+}
+
+export interface MobileAccessInfo {
+  hostId: string;
+  hostName: string;
+  defaultHostName: string;
+  /** Port the phone listener is bound to, 0 when it isn't listening. */
+  listeningPort: number;
+  addresses: MobileAddress[];
+  bonjour: boolean;
+}
+
+export interface PairingSession {
+  code: string;
+  expiresAt: number;
+  url: string;
+  qrDataUrl: string;
+  hosts: string[];
+}
+
+export type PairingEvent =
+  | { type: 'paired'; device: { id: string; name: string } }
+  | { type: 'closed'; reason: 'expired' | 'too_many_attempts' | 'cancelled' | 'paired' };
 
 export interface PairedDevice {
   id: string;
@@ -672,6 +701,12 @@ export interface SuperHarnessApi {
   getDictationStatus: (draft?: DictationSettings) => Promise<DictationStatus>;
   /** Sends recorded audio to the main process, which proxies it to the dictation server. */
   transcribeAudio: (audio: Uint8Array, mimeType: string) => Promise<DictationResult>;
+  getMobileAccessInfo: () => Promise<MobileAccessInfo>;
+  /** Starts pairing: a fresh one-time code plus the QR code that carries it. */
+  openPairing: () => Promise<PairingSession | { error: string }>;
+  closePairing: () => Promise<void>;
+  revokePairedDevice: (deviceId: string) => Promise<boolean>;
+  onPairingEvent: (cb: (ev: PairingEvent) => void) => () => void;
   onStreamEvent: (cb: (ev: StreamEvent) => void) => () => void;
   onTranscriptUpdated: (cb: (result: SessionTranscriptResult) => void) => () => void;
   onStateChanged: (cb: (state: SuperHarnessState) => void) => () => void;

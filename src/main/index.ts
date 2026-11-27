@@ -10,6 +10,9 @@ import type {
   DictationResult,
   DictationSettings,
   HarnessGroup,
+  MobileAccessInfo,
+  MobileAddress,
+  PairingSession,
   ImageAttachment,
   OrganizeAction,
   StartSessionRequest,
@@ -21,6 +24,9 @@ import { createProjectDirectory, HarnessCatalogService } from './services/catalo
 import { ControlServer } from './services/controlServer';
 import { checkDictationServer, transcribeAudio } from './services/dictation';
 import { PairingService } from './services/pairing';
+import { BonjourAdvertiser } from './services/bonjourAdvertiser';
+import { buildPairingUrl, defaultDesktopName, mobileAddresses } from './services/mobileAccess';
+import QRCode from 'qrcode';
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';
@@ -309,8 +315,39 @@ function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachm
 }
 
 const pushNotifier = new PushNotifier(() => store.getState().settings.mobileApi?.token ?? '');
+let defaultHostName = os.hostname().replace(/\.local$/, '') || 'Desktop';
+void defaultDesktopName().then((name) => {
+  defaultHostName = name;
+  void syncBonjour();
+});
+const bonjourAdvertiser = new BonjourAdvertiser();
+let mobileAddressCache: { at: number; list: MobileAddress[] } | null = null;
+async function getMobileAddressesCached(force = false): Promise<MobileAddress[]> {
+  if (!force && mobileAddressCache && Date.now() - mobileAddressCache.at < 15_000) return mobileAddressCache.list;
+  const list = await mobileAddresses();
+  mobileAddressCache = { at: Date.now(), list };
+  return list;
+}
+/** Advertise over Bonjour only while the phone listener is up. */
+async function syncBonjour(): Promise<void> {
+  const port = controlServer.mobilePort;
+  if (!port || !store.getState().settings.mobileApi?.enabled) {
+    bonjourAdvertiser.sync(null);
+    return;
+  }
+  const addresses = (await getMobileAddressesCached())
+    .filter((a) => a.kind !== 'tailscale-dns')
+    .map((a) => a.address);
+  bonjourAdvertiser.sync({
+    port,
+    hostId: pairingService.hostId(),
+    name: pairingService.hostName,
+    addresses,
+  });
+}
 const pairingService = new PairingService(store, {
   version: app.getVersion(),
+  hostName: () => defaultHostName,
   onEvent: (ev) => broadcastToRenderer('sh:pairing-event', ev),
   onRevoke: (deviceId) => {
     controlServer.dropDeviceConnections(deviceId);
@@ -648,7 +685,7 @@ store.subscribe((state) => {
   broadcastToRenderer('sh:state-changed', state);
   controlServer.broadcastEvent('state', state);
   schedulePolling(state.settings.pollIntervalMs);
-  void controlServer.syncMobileListener(state.settings.mobileApi);
+  void controlServer.syncMobileListener(state.settings.mobileApi).then(() => syncBonjour());
 });
 
 function schedulePolling(intervalMs: number): void {
@@ -952,7 +989,23 @@ function registerIpcHandlers(): void {
   );
 
   // Pairing codes go to the renderer only (shown in Settings → Mobile); never logged.
-  ipcMain.handle('sh:pairing-open', async () => pairingService.open());
+  ipcMain.handle('sh:mobile-info', async (): Promise<MobileAccessInfo> => ({
+    hostId: pairingService.hostId(),
+    hostName: pairingService.hostName,
+    defaultHostName,
+    listeningPort: controlServer.mobilePort,
+    addresses: await getMobileAddressesCached(true),
+    bonjour: bonjourAdvertiser.active,
+  }));
+  ipcMain.handle('sh:pairing-open', async (): Promise<PairingSession | { error: string }> => {
+    const port = controlServer.mobilePort;
+    if (!port) return { error: 'Turn on “Allow phones to connect” first.' };
+    const hosts = (await getMobileAddressesCached()).map((a) => a.address);
+    const { code, expiresAt } = pairingService.open();
+    const url = buildPairingUrl({ name: pairingService.hostName, hostId: pairingService.hostId(), port, code, hosts });
+    const qrDataUrl = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 360 });
+    return { code, expiresAt, url, qrDataUrl, hosts };
+  });
   ipcMain.handle('sh:pairing-close', async () => pairingService.close('cancelled'));
   ipcMain.handle('sh:revoke-device', async (_ev, deviceId: string) => pairingService.revoke(deviceId));
 
@@ -1141,6 +1194,7 @@ app.whenReady().then(async () => {
 
   await controlServer.start();
   await controlServer.syncMobileListener(store.getState().settings.mobileApi);
+  void syncBonjour();
   registerIpcHandlers();
   createWindow();
   liveSync.start();
@@ -1160,6 +1214,7 @@ app.on('window-all-closed', () => {
   if (usageTimer) clearInterval(usageTimer);
   liveSync.stop();
   dispatcher.shutdown();
+  bonjourAdvertiser.stop();
   controlServer.close();
   closeSqlitePool();
   if (process.platform !== 'darwin') {

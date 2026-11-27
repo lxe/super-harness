@@ -75,6 +75,15 @@ const api: SuperHarnessApi = {
     ipcRenderer.invoke('sh:dictation-status', draft),
   transcribeAudio: (audio: Uint8Array, mimeType: string) =>
     ipcRenderer.invoke('sh:dictate', audio, mimeType),
+  getMobileAccessInfo: () => ipcRenderer.invoke('sh:mobile-info'),
+  openPairing: () => ipcRenderer.invoke('sh:pairing-open'),
+  closePairing: () => ipcRenderer.invoke('sh:pairing-close'),
+  revokePairedDevice: (deviceId: string) => ipcRenderer.invoke('sh:revoke-device', deviceId),
+  onPairingEvent: (cb: (ev: import('../shared/types').PairingEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, ev: import('../shared/types').PairingEvent) => cb(ev);
+    ipcRenderer.on('sh:pairing-event', listener);
+    return () => ipcRenderer.removeListener('sh:pairing-event', listener);
+  },
 
   onStreamEvent: (cb: (ev: StreamEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: StreamEvent) => cb(payload);

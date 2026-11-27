@@ -9,6 +9,7 @@ import {
   FolderOpen,
   GripVertical,
   Mic,
+  Smartphone,
   Pencil,
   Plus,
   RefreshCw,
@@ -42,11 +43,12 @@ import {
 } from '../ui';
 import { DictationSettingsPane } from './DictationSettingsPane';
 import { ShortcutRecorder } from './ShortcutRecorder';
+import { MobileSettingsPane } from './MobileSettingsPane';
 import { DEFAULT_DICTATION_SHORTCUT } from '../utils/shortcut';
 import { HarnessLogo } from './HarnessLogo';
 import { SuperHarnessMark } from './SuperHarnessMark';
 
-export type SettingsTab = 'workspace' | 'apps' | 'dictation' | 'harnesses' | 'master';
+export type SettingsTab = 'workspace' | 'apps' | 'dictation' | 'mobile' | 'harnesses' | 'master';
 
 interface Props {
   harnesses: HarnessDetection[];
@@ -88,6 +90,13 @@ const NAV_ITEMS: NavItem[] = [
     section: 'General',
     keywords: 'dictation voice speech microphone mic transcription whisper yapyap server shortcut',
     Icon: Mic,
+  },
+  {
+    id: 'mobile',
+    label: 'Mobile',
+    section: 'General',
+    keywords: 'mobile phone iphone ios pair pairing qr code tailscale bonjour lan devices revoke port',
+    Icon: Smartphone,
   },
   {
     id: 'harnesses',
@@ -1143,6 +1152,11 @@ export const SettingsModal: React.FC<Props> = ({
               />
             )}
 
+            {/* MOBILE */}
+            {tab === 'mobile' && (
+              <MobileSettingsPane settings={settings} onUpdateSettings={onUpdateSettings} />
+            )}
+
             {/* MASTER AGENT */}
             {tab === 'master' && (
               <div className="space-y-7">
@@ -1238,74 +1252,6 @@ export const SettingsModal: React.FC<Props> = ({
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                         <span className="font-mono">super-harness-mcp</span>
                       </span>
-                    }
-                  />
-                </SettingsGroup>
-
-                <SettingsGroup title="Mobile companion API">
-                  <SettingsRow
-                    label="Enable LAN / Tailscale API"
-                    description="Serve HTTP + SSE endpoints for the native iOS companion app"
-                    control={
-                      <Switch
-                        checked={settings.mobileApi?.enabled ?? true}
-                        onChange={(enabled) =>
-                          onUpdateSettings({
-                            mobileApi: {
-                              enabled,
-                              bindHost: settings.mobileApi?.bindHost ?? '0.0.0.0',
-                              port: settings.mobileApi?.port ?? 47890,
-                              token: settings.mobileApi?.token ?? '',
-                            },
-                          })
-                        }
-                      />
-                    }
-                  />
-                  <SettingsRow
-                    label="Listen port"
-                    description={`Bound on ${settings.mobileApi?.bindHost ?? '0.0.0.0'}`}
-                    control={
-                      <Input
-                        inputSize="sm"
-                        mono
-                        className="w-28 text-right"
-                        value={String(settings.mobileApi?.port ?? 47890)}
-                        onChange={(e) => {
-                          const parsed = Number(e.target.value.replace(/[^0-9]/g, ''));
-                          if (parsed > 0 && parsed <= 65535) {
-                            onUpdateSettings({
-                              mobileApi: {
-                                enabled: settings.mobileApi?.enabled ?? true,
-                                bindHost: settings.mobileApi?.bindHost ?? '0.0.0.0',
-                                port: parsed,
-                                token: settings.mobileApi?.token ?? '',
-                              },
-                            });
-                          }
-                        }}
-                      />
-                    }
-                  />
-                  <SettingsRow
-                    label="Bearer token"
-                    description="Paste into Host Connection in the iOS app (stored in Keychain)"
-                    control={
-                      <div className="flex items-center gap-1.5">
-                        <code className="px-2 py-1 rounded-md bg-surface-code border border-line-hairline font-mono text-micro text-ink-secondary max-w-[180px] truncate">
-                          {settings.mobileApi?.token || 'Generating…'}
-                        </code>
-                        <IconButton
-                          label="Copy Bearer token"
-                          onClick={() => {
-                            if (settings.mobileApi?.token) {
-                              void navigator.clipboard.writeText(settings.mobileApi.token);
-                            }
-                          }}
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </IconButton>
-                      </div>
                     }
                   />
                 </SettingsGroup>

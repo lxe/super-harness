@@ -490,6 +490,20 @@ export class ControlServer {
         return;
       }
       if (authResult.kind === 'device') this.trackDeviceSocket(authResult.deviceId, req.socket);
+
+      // A paired phone unpairing itself: same as Revoke on the desktop. The legacy token has
+      // nothing to unpair, so it gets ok and no change.
+      if (opts.mobile && req.method === 'POST' && url.pathname === '/api/unpair') {
+        if (authResult.kind === 'device' && pairing) {
+          // Reply first: revoking closes this very connection.
+          const deviceId = authResult.deviceId;
+          res.once('finish', () => pairing.revoke(deviceId));
+          sendJson({ ok: true });
+        } else {
+          sendJson({ ok: true });
+        }
+        return;
+      }
       const readRawBody = async (maxBytes = 55 * 1024 * 1024): Promise<Buffer> => {
         const chunks: Buffer[] = [];
         let total = 0;

@@ -732,7 +732,7 @@ public struct SessionListView: View {
             SessionListRow(
                 session: session,
                 isBusy: isBusy,
-                isPinned: isPinned,
+                isPinned: isPinned || session.pinned || session.pinnedToTop,
                 // With one harness selected every row is that harness, so the logo adds nothing.
                 showsHarnessLogo: store.selectedHarnessFilter == nil
             )

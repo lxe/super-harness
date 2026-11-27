@@ -1870,6 +1870,7 @@ struct SHModelEffortMenu: View, Equatable {
 /// move redraws it directly.
 private struct SHModelEffortPopoverBody: View {
     @ObservedObject var draft: SHModelEffortDraft
+    @Namespace private var selectionNamespace
     let activeModels: [SHModelEffortMenu.ModelItem]
     let activeEfforts: [SHModelEffortMenu.EffortItem]
     let initialModelId: String?
@@ -1880,7 +1881,7 @@ private struct SHModelEffortPopoverBody: View {
     var body: some View {
         let activeEffort = draft.effort
         let rowHeight: CGFloat = 46
-        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight + 7, 330)
+        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight - 2 + 6, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
         let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12)
@@ -1918,7 +1919,9 @@ private struct SHModelEffortPopoverBody: View {
                                     #endif
                                     // The popover stays open so the slider can still be set for the new
                                     // model; both are committed when the popover closes.
-                                    draft.pickedModelId = item.id
+                                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                                        draft.pickedModelId = item.id
+                                    }
                                 } label: {
                                     let isChecked = (draft.pickedModelId ?? initialModelId) == item.id
                                     HStack(spacing: 10) {
@@ -1936,11 +1939,14 @@ private struct SHModelEffortPopoverBody: View {
                                     .padding(.horizontal, 12)
                                     .frame(height: rowHeight - 2)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        // Concentric with the popover: its radius minus the rows' 6pt inset.
-                                        RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.systemPopover, inset: 6), style: .continuous)
-                                            .fill(isChecked ? Color.white.opacity(0.07) : Color.clear)
-                                    )
+                                    .background {
+                                        // One highlight that slides from row to row, its corners concentric
+                                        // with the popover's wherever it sits.
+                                        if isChecked {
+                                            SHPopoverRowHighlight()
+                                                .matchedGeometryEffect(id: "model-selection", in: selectionNamespace)
+                                        }
+                                    }
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -1949,10 +1955,10 @@ private struct SHModelEffortPopoverBody: View {
                                 .accessibilityIdentifier("model.option.\(item.id)")
                             }
                         }
-                        // The last row sits the same 6pt from the bottom edge as from the sides
-                        // (5pt here plus the row's own 1pt), so its corners follow the popover's.
+                        // The last row sits the same 6pt from the bottom edge as from the sides,
+                        // so its corners follow the popover's.
                         .padding(.horizontal, 6)
-                        .padding(.bottom, 5)
+                        .padding(.bottom, 6)
                     }
                     .frame(height: listHeight)
                     .onAppear {
@@ -2071,3 +2077,17 @@ private struct SHSendMenuButton: UIViewRepresentable {
     }
 }
 #endif
+
+/// The selected row's highlight in the model popover. On iOS 26 its corners are concentric with
+/// the popover's glass container, so a row by an edge follows the popover's corner.
+private struct SHPopoverRowHighlight: View {
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            ConcentricRectangle(corners: .concentric(minimum: 10), isUniform: false)
+                .fill(Color.white.opacity(0.07))
+        } else {
+            RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.systemPopover, inset: 6), style: .continuous)
+                .fill(Color.white.opacity(0.07))
+        }
+    }
+}

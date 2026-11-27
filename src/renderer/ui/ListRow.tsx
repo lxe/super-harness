@@ -174,7 +174,7 @@ export const NavRow: React.FC<NavRowProps> = ({
           selected
             ? 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/40'
             : active
-              ? 'bg-surface-raised text-ink-primary font-medium'
+              ? 'bg-surface-raised text-ink-primary'
               : secondaryActive
                 ? 'bg-surface-subtle text-ink-primary'
                 : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-subtle',

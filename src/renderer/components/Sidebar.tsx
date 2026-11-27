@@ -94,23 +94,6 @@ interface ContextMenuState {
   sectionLabel?: string;
 }
 
-const REMOTE_HOST_ICON_COLORS = [
-  'text-sky-400',
-  'text-emerald-400',
-  'text-amber-400',
-  'text-rose-400',
-  'text-violet-400',
-  'text-teal-400',
-];
-
-function remoteHostColorClass(hostKey: string): string {
-  let h = 0;
-  for (let i = 0; i < hostKey.length; i += 1) {
-    h = (h * 31 + hostKey.charCodeAt(i)) | 0;
-  }
-  return REMOTE_HOST_ICON_COLORS[Math.abs(h) % REMOTE_HOST_ICON_COLORS.length];
-}
-
 function resolveGroupCwd(items: UnifiedSession[], isUngrouped = false): string | undefined {
   if (isUngrouped || items.length === 0) return undefined;
   const counts = new Map<string, number>();
@@ -1067,7 +1050,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
               {s.hostAddress ? (
                 <span
                   title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-                  className={remoteHostColorClass(s.hostAddress || s.hostLabel || 'remote')}
+                  className="text-ink-muted"
                 >
                   <Laptop className="w-3.5 h-3.5" />
                 </span>

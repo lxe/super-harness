@@ -1,6 +1,7 @@
 {
   "name": "super-harness",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "Unified desktop super-harness multiplexing Codex, Claude Desktop, Claude tmux/remote-control, and Antigravity sessions under one chrome with a tool-equipped Master Session.",
   "homepage": "https://github.com/lxe/superharness",
   "desktopName": "super-harness.desktop",

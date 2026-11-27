@@ -760,15 +760,13 @@ public struct SHRadialGauge<Center: View>: View {
     }
 }
 
-// MARK: - 3D Orbiting Lit-Sphere Activity Indicator (Replaces Spoke Spinners)
+// MARK: - Activity Indicator (the animated porcelain mark)
 
-/// Three glossy 3D-shaded lit spheres orbiting in tilted 3D perspective with specular highlights,
-/// underside shading, and back-to-front depth sorting.
+/// The app's working indicator. It draws `SHWorkingMark`; the name is kept because every
+/// call site uses it.
 public struct SHActivityPulse: View {
     public let tint: Color
     public var size: CGFloat = 14
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(tint: Color, size: CGFloat = 14) {
         self.tint = tint
@@ -779,16 +777,10 @@ public struct SHActivityPulse: View {
         max(size, 16)
     }
 
+    // The working indicator is the porcelain mark with a pulse travelling round its pieces,
+    // the same as the desktop's. Every call site keeps using SHActivityPulse.
     public var body: some View {
-        if reduceMotion {
-            spheresCanvas(phase: 0.35)
-        } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                let phase = (t / 1.5).truncatingRemainder(dividingBy: 1.0) * 2.0 * .pi
-                spheresCanvas(phase: phase)
-            }
-        }
+        SHWorkingMark(tint: tint, size: renderSize)
     }
 
     public static func hsbComponents(of color: Color) -> (hue: Double, sat: Double, bright: Double) {
@@ -806,97 +798,5 @@ public struct SHActivityPulse: View {
         }
         #endif
         return (0.62, 0.55, 0.90)
-    }
-
-    private func spheresCanvas(phase: Double) -> some View {
-        let box = renderSize
-        let hsb = Self.hsbComponents(of: tint)
-        return Canvas { ctx, sz in
-            let cx = sz.width * 0.5
-            let cy = sz.height * 0.5
-            let rx = sz.width * 0.30
-            let ry = sz.height * 0.21
-            let baseR = sz.width * 0.175
-
-            struct SphereSample {
-                let x: CGFloat
-                let y: CGFloat
-                let z: Double
-                let depth: Double
-                let radius: CGFloat
-            }
-
-            let samples: [SphereSample] = (0..<3).map { idx in
-                let angle = phase + Double(idx) * (2.0 * .pi / 3.0)
-                let z = sin(angle) // -1 (back) ... +1 (front)
-                let depth = (z + 1.0) * 0.5
-                let scale = 0.68 + 0.40 * depth
-                return SphereSample(
-                    x: cx + CGFloat(cos(angle)) * rx,
-                    y: cy + CGFloat(sin(angle)) * ry,
-                    z: z,
-                    depth: depth,
-                    radius: baseR * CGFloat(scale)
-                )
-            }.sorted { a, b in a.z < b.z }
-
-            for s in samples {
-                let r = s.radius
-                // Monochromatic HSB shading in the exact gauge hue & near-same saturation (no white pastel washout, no glow).
-                let depthBright = 0.78 + 0.22 * s.depth
-                let hiColor = Color(
-                    hue: hsb.hue,
-                    saturation: hsb.sat * 0.92,
-                    brightness: min(1.0, hsb.bright * 1.14 * depthBright)
-                )
-                let midColor = Color(
-                    hue: hsb.hue,
-                    saturation: hsb.sat,
-                    brightness: min(1.0, hsb.bright * depthBright)
-                )
-                let deepColor = Color(
-                    hue: hsb.hue,
-                    saturation: min(1.0, hsb.sat * 1.06),
-                    brightness: hsb.bright * 0.66 * depthBright
-                )
-                let glintColor = Color(
-                    hue: hsb.hue,
-                    saturation: hsb.sat * 0.65,
-                    brightness: min(1.0, hsb.bright * 1.24)
-                )
-
-                let sphereRect = CGRect(x: s.x - r, y: s.y - r, width: r * 2, height: r * 2)
-                let lightPoint = CGPoint(x: s.x - r * 0.28, y: s.y - r * 0.30)
-                ctx.fill(
-                    Path(ellipseIn: sphereRect),
-                    with: .radialGradient(
-                        Gradient(stops: [
-                            .init(color: hiColor, location: 0.0),
-                            .init(color: midColor, location: 0.40),
-                            .init(color: deepColor, location: 1.0),
-                        ]),
-                        center: lightPoint,
-                        startRadius: 0,
-                        endRadius: r * 1.48
-                    )
-                )
-
-                // Small, subtle same-hue specular glint
-                let glintR = max(0.6, r * 0.17)
-                let glintCenter = CGPoint(x: s.x - r * 0.28, y: s.y - r * 0.30)
-                let glintRect = CGRect(
-                    x: glintCenter.x - glintR,
-                    y: glintCenter.y - glintR,
-                    width: glintR * 2,
-                    height: glintR * 2
-                )
-                ctx.fill(
-                    Path(ellipseIn: glintRect),
-                    with: .color(glintColor.opacity(0.55 + 0.25 * s.depth))
-                )
-            }
-        }
-        .frame(width: box, height: box)
-        .accessibilityHidden(true)
     }
 }

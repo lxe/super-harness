@@ -1047,4 +1047,28 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertNil(impossible.contextUsedPercent)
         XCTAssertNil(SessionStats(contextUsedTokens: 5_000, contextWindowTokens: nil).contextUsedPercent)
     }
+
+    func testWorkingMarkPulseRestsPeaksAndTravelsRoundThePieces() {
+        XCTAssertEqual(SuperHarnessMarkGeometry.pieces.count, 4)
+        XCTAssertTrue(SuperHarnessMarkGeometry.pieces.allSatisfy { !$0.isEmpty })
+        // Every piece lies inside the mark's viewBox.
+        for piece in SuperHarnessMarkGeometry.pieces {
+            XCTAssertTrue(SuperHarnessMarkGeometry.viewBox.insetBy(dx: -0.01, dy: -0.01).contains(piece.boundingRect))
+        }
+        let rest = SHWorkingMark.state(atPhase: 0)
+        XCTAssertEqual(rest.lift, 0, accuracy: 0.001)
+        XCTAssertEqual(rest.opacity, 0.45, accuracy: 0.001)
+        let peak = SHWorkingMark.state(atPhase: 0.3)
+        XCTAssertEqual(peak.lift, 1, accuracy: 0.001)
+        XCTAssertEqual(peak.opacity, 1, accuracy: 0.001)
+        XCTAssertEqual(SHWorkingMark.state(atPhase: 0.65).lift, 0, accuracy: 0.001)
+        XCTAssertEqual(SHWorkingMark.state(atPhase: 0.65).opacity, 0.55, accuracy: 0.001)
+        // The cycle repeats, and the easing ends where it should.
+        XCTAssertEqual(SHWorkingMark.state(atPhase: 1.3), peak)
+        XCTAssertEqual(SHWorkingMark.ease(0), 0, accuracy: 0.001)
+        XCTAssertEqual(SHWorkingMark.ease(1), 1, accuracy: 0.001)
+        // At any instant the four pieces are a quarter cycle apart, so exactly one is near its peak.
+        let lifts = SHWorkingMark.phaseOffsets.map { SHWorkingMark.state(atPhase: 0.3 + $0).lift }
+        XCTAssertEqual(lifts.filter { $0 > 0.9 }.count, 1)
+    }
 }

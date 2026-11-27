@@ -31,6 +31,7 @@
 		A1CFAEC6475F8FC46A6EC6E0 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23BB07F65665EDC6439B41FE /* AppStore.swift */; };
 		ACA3E568707B33B147D52947 /* DictationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEB22201F11A8A2983A53F4F /* DictationController.swift */; };
 		ADD714F564383E54EF5B8B81 /* LiveE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1095336CFF8AE462BB2B21A /* LiveE2ETests.swift */; };
+		BF59EED4F0E8348DB67D3361 /* SuperHarnessMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21967B86378726819726498F /* SuperHarnessMark.swift */; };
 		C303B32C1FC3946E71CA10C0 /* SSEParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D0A6E42E4F447EA38EFC0CF /* SSEParserTests.swift */; };
 		C95A2EB7C312F305BED1B4E7 /* SuperHarnessClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F708471A80436ECDA9FC8BC /* SuperHarnessClient.swift */; };
 		CB6F8D052928AE728A3861A3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 891E7CB23D3E07D3693841D2 /* KeychainStore.swift */; };
@@ -64,6 +65,7 @@
 		17B805E904814D52DC35BD7C /* LiveStepsBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStepsBarView.swift; sourceTree = "<group>"; };
 		1C861CBA124F298AAF6F9BFE /* SuperHarness.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SuperHarness.entitlements; sourceTree = "<group>"; };
 		1D0A6E42E4F447EA38EFC0CF /* SSEParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParserTests.swift; sourceTree = "<group>"; };
+		21967B86378726819726498F /* SuperHarnessMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperHarnessMark.swift; sourceTree = "<group>"; };
 		23BB07F65665EDC6439B41FE /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
 		28A6445834AB007663A5F452 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		2C3BE61300B275C4E032407E /* NewSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionSheet.swift; sourceTree = "<group>"; };
@@ -140,6 +142,7 @@
 				4CF1A456E5B5974658EE650D /* DesignSystemCatalogView.swift */,
 				AEC979A2F98EABAB2973B321 /* MarkdownRenderer.swift */,
 				04415CCE24B3C30A70773AC9 /* SHPrimitives.swift */,
+				21967B86378726819726498F /* SuperHarnessMark.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -431,6 +434,7 @@
 				07D70BA4BDFB4EF136549043 /* SkeletonViews.swift in Sources */,
 				9245ACE801E49716AD3E292D /* SuperHarnessApp.swift in Sources */,
 				C95A2EB7C312F305BED1B4E7 /* SuperHarnessClient.swift in Sources */,
+				BF59EED4F0E8348DB67D3361 /* SuperHarnessMark.swift in Sources */,
 				3064B4B9FD999DF4903D6406 /* UnifiedModels.swift in Sources */,
 				0294F0FCDCA6909757BCC38D /* UsageSheetView.swift in Sources */,
 			);

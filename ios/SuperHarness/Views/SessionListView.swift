@@ -1434,9 +1434,12 @@ private struct HarnessHoldDragGesture: UIGestureRecognizerRepresentable {
 /// The Super Harness mark shown in the middle of the session list's top bar.
 struct SHToolbarLogo: View {
     var body: some View {
+        // The porcelain mark, a single-colour template tinted porcelain white.
         Image("SuperHarnessLogo")
+            .renderingMode(.template)
             .resizable()
             .scaledToFit()
+            .foregroundStyle(SHColor.porcelain)
             .frame(width: 26, height: 26)
             .accessibilityLabel("Super Harness")
             .accessibilityIdentifier("header.logo")

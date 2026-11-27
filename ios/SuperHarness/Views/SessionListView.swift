@@ -511,9 +511,9 @@ public struct SessionListView: View {
                                 }
                             } label: {
                                 HStack(spacing: 7) {
-                                    if let group = section.harnessGroup {
-                                        HarnessLogoView(group: group, size: 13)
-                                    } else if let hex = section.accentHex {
+                                    // Section titles never carry a harness logo; folders keep
+                                    // their colour dot and project groups their folder glyph.
+                                    if let hex = section.accentHex {
                                         Circle()
                                             .fill(Color(cssHex: hex))
                                             .frame(width: 7, height: 7)
@@ -532,17 +532,18 @@ public struct SessionListView: View {
                                             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                                             .foregroundStyle(SHColor.inkFaint)
                                     }
+                                    // The chevron sits right after the title.
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9.5, weight: .semibold))
+                                        .foregroundStyle(SHColor.inkFaint)
+                                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                                     if store.isAnyWorking(in: section) {
                                         SHActivityPulse(tint: section.harnessGroup.map(SHColor.harness) ?? SHColor.inkSecondary, size: 11)
                                     }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(SHColor.inkFaint)
-                                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                                    Spacer(minLength: 0)
                                 }
                                 // The padding is inside the button so the whole band is tappable.
-                                .padding(.top, 9)
+                                .padding(.top, 18)
                                 .padding(.bottom, 5)
                                 .contentShape(Rectangle())
                             }
@@ -630,7 +631,9 @@ public struct SessionListView: View {
             SessionListRow(
                 session: session,
                 isBusy: isBusy,
-                isPinned: isPinned
+                isPinned: isPinned,
+                // With one harness selected every row is that harness, so the logo adds nothing.
+                showsHarnessLogo: store.selectedHarnessFilter == nil
             )
             .padding(.horizontal, 8)
             .padding(.vertical, 9)
@@ -1003,6 +1006,7 @@ private struct SessionListRow: View {
     let session: UnifiedSession
     let isBusy: Bool
     var isPinned: Bool = false
+    var showsHarnessLogo: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1012,8 +1016,10 @@ private struct SessionListRow: View {
 
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .center, spacing: 7) {
-                HarnessLogoView(harness: session.harness, size: 15)
-                    .frame(width: 16, height: 16)
+                if showsHarnessLogo {
+                    HarnessLogoView(harness: session.harness, size: 15)
+                        .frame(width: 16, height: 16)
+                }
 
                 if isPinned {
                     Image(systemName: "pin.fill")

@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 import {
   canDropSessionIntoSection,
   groupSessionsForSidebar,
+  homeUsernameFromPath,
+  isHomeProjectLabel,
 } from '../src/renderer/utils/sidebarGrouping';
+import { isHomeDirectoryPath, projectNameFromCwd } from '../src/main/utils/system';
 import type { UnifiedSession } from '../src/shared/types';
 
 function makeSession(overrides: Partial<UnifiedSession>): UnifiedSession {
@@ -201,5 +204,86 @@ describe('Project view coalescing across harnesses', () => {
     expect(bb[0].label).toBe('bluebubbles-native');
     expect(bb[0].items?.map((s) => s.id)).toEqual(['antigravity:a', 'codex:b', 'claude:c']);
     expect(groups.find((g) => g.label === 'elsewhere')?.items?.map((s) => s.id)).toEqual(['codex:d']);
+  });
+
+  it('coalesces home directory username sections, tilde, and Home (~) into a single Home (~) group', () => {
+    expect(homeUsernameFromPath('/home/alice')).toBe('alice');
+    expect(homeUsernameFromPath('/Users/bob/')).toBe('bob');
+    expect(homeUsernameFromPath('C:\\Users\\carol')).toBe('carol');
+    expect(homeUsernameFromPath('/home/alice/repo')).toBeNull();
+    expect(isHomeDirectoryPath('~')).toBe(true);
+    expect(isHomeDirectoryPath('/home/alice')).toBe(true);
+    expect(isHomeDirectoryPath('/Users/bob')).toBe(true);
+    expect(isHomeDirectoryPath('/home/alice/repo')).toBe(false);
+    expect(projectNameFromCwd('~')).toBe('Home (~)');
+    expect(projectNameFromCwd('/Users/bob')).toBe('Home (~)');
+    expect(projectNameFromCwd('/home/alice/repo')).toBe('repo');
+    expect(isHomeProjectLabel('alice', '/home/alice')).toBe(true);
+    expect(isHomeProjectLabel('~ (Home)', '~')).toBe(true);
+    expect(isHomeProjectLabel('DSX', '/home/alice')).toBe(false);
+
+    const codexUsername = makeSession({
+      id: 'codex:home-user',
+      cwd: '/home/alice',
+      projectName: 'alice',
+      nativeSection: 'alice',
+      updatedAt: 5000,
+    });
+    const claudeHome = makeSession({
+      id: 'claude:home-tilde',
+      harness: 'claude-cli',
+      harnessGroup: 'claude',
+      cwd: '/home/alice',
+      projectName: 'Home (~)',
+      nativeSection: 'Ungrouped',
+      updatedAt: 4000,
+    });
+    const catalogTilde = makeSession({
+      id: 'pi:home-legacy',
+      harness: 'pi',
+      harnessGroup: 'pi',
+      cwd: '~',
+      projectName: '~ (Home)',
+      nativeSection: undefined,
+      updatedAt: 3000,
+    });
+    // Custom section on home cwd must remain separate (not swallowed into Home (~))
+    const customSection = makeSession({
+      id: 'claude:custom-dsx',
+      harness: 'claude-cli',
+      harnessGroup: 'claude',
+      cwd: '/home/alice',
+      projectName: 'Home (~)',
+      nativeSection: 'DSX',
+      updatedAt: 2000,
+    });
+    // Subdirectory of home must stay its own project
+    const subRepo = makeSession({
+      id: 'codex:subrepo',
+      cwd: '/home/alice/my-repo',
+      projectName: 'my-repo',
+      nativeSection: 'Ungrouped',
+      updatedAt: 1000,
+    });
+
+    const groups = groupSessionsForSidebar(
+      [codexUsername, claudeHome, catalogTilde, customSection, subRepo],
+      'project',
+      [],
+      'all'
+    );
+
+    const homeGroups = groups.filter(
+      (g) => g.label === 'Home (~)' || g.label.toLowerCase() === 'alice' || g.label.includes('~')
+    );
+    expect(homeGroups).toHaveLength(1);
+    expect(homeGroups[0].label).toBe('Home (~)');
+    expect(homeGroups[0].items?.map((s) => s.id)).toEqual([
+      'codex:home-user',
+      'claude:home-tilde',
+      'pi:home-legacy',
+    ]);
+    expect(groups.find((g) => g.label === 'DSX')?.items?.map((s) => s.id)).toEqual(['claude:custom-dsx']);
+    expect(groups.find((g) => g.label === 'my-repo')?.items?.map((s) => s.id)).toEqual(['codex:subrepo']);
   });
 });

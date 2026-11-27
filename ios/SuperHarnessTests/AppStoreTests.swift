@@ -1242,4 +1242,96 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(pickedOrch.modelId, "gemini-pro-orchestrator-neon")
         XCTAssertNil(pickedOrch.effort)
     }
+
+    func testHomeDirectoryAndUsernameProjectsCoalesce() {
+        XCTAssertEqual(AppStore.homeUsername(fromPath: "/home/alice"), "alice")
+        XCTAssertEqual(AppStore.homeUsername(fromPath: "/Users/bob/"), "bob")
+        XCTAssertEqual(AppStore.homeUsername(fromPath: "C:\\Users\\carol"), "carol")
+        XCTAssertNil(AppStore.homeUsername(fromPath: "/home/alice/my-repo"))
+        XCTAssertTrue(AppStore.isHomeProjectLabel("alice", cwd: "/home/alice"))
+        XCTAssertTrue(AppStore.isHomeProjectLabel("~ (Home)", cwd: "~"))
+        XCTAssertTrue(AppStore.isHomeProjectLabel("Home (~)", cwd: "/home/alice"))
+        XCTAssertFalse(AppStore.isHomeProjectLabel("DSX", cwd: "/home/alice"))
+
+        let suite = "sh.tests.homecoalesce.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        store.groupBy = .project
+        store.sessions = [
+            UnifiedSession(
+                id: "codex:user-home",
+                harness: .codex,
+                harnessGroup: .codex,
+                title: "Upgrade packages",
+                cwd: "/home/alice",
+                projectName: "alice",
+                status: .idle,
+                createdAt: now,
+                updatedAt: now,
+                nativeSection: "alice"
+            ),
+            UnifiedSession(
+                id: "claude:tilde-home",
+                harness: .claudeCli,
+                harnessGroup: .claude,
+                title: "Home task",
+                cwd: "/home/alice",
+                projectName: "Home (~)",
+                status: .idle,
+                createdAt: now - 1000,
+                updatedAt: now - 1000,
+                nativeSection: "Ungrouped"
+            ),
+            UnifiedSession(
+                id: "pi:legacy-home",
+                harness: .pi,
+                harnessGroup: .pi,
+                title: "Tilde task",
+                cwd: "~",
+                projectName: "~ (Home)",
+                status: .idle,
+                createdAt: now - 2000,
+                updatedAt: now - 2000
+            ),
+            UnifiedSession(
+                id: "claude:dsx",
+                harness: .claudeCli,
+                harnessGroup: .claude,
+                title: "DSX task",
+                cwd: "/home/alice",
+                projectName: "Home (~)",
+                status: .idle,
+                createdAt: now - 3000,
+                updatedAt: now - 3000,
+                nativeSection: "DSX"
+            ),
+            UnifiedSession(
+                id: "codex:subrepo",
+                harness: .codex,
+                harnessGroup: .codex,
+                title: "Repo work",
+                cwd: "/home/alice/my-repo",
+                projectName: "my-repo",
+                status: .idle,
+                createdAt: now - 4000,
+                updatedAt: now - 4000
+            ),
+        ]
+
+        let sections = store.groupedSections
+        let homeSections = sections.filter {
+            $0.title == "Home (~)" || $0.title.lowercased() == "alice" || $0.title.contains("~")
+        }
+        XCTAssertEqual(homeSections.count, 1)
+        XCTAssertEqual(homeSections.first?.title, "Home (~)")
+        XCTAssertEqual(
+            homeSections.first?.sessions.map(\.id),
+            ["codex:user-home", "claude:tilde-home", "pi:legacy-home"]
+        )
+        XCTAssertEqual(sections.first(where: { $0.title == "DSX" })?.sessions.map(\.id), ["claude:dsx"])
+        XCTAssertEqual(sections.first(where: { $0.title == "my-repo" })?.sessions.map(\.id), ["codex:subrepo"])
+    }
 }

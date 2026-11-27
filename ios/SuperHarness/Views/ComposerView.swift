@@ -1324,63 +1324,116 @@ public struct SHThinkingEffortSlider: View {
         return 0
     }
 
+    private var isOffSelection: Bool {
+        guard let lvl = selectedLevel?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return false
+        }
+        return lvl == "none" || lvl == "off"
+    }
+
+    private var isExtremeSelection: Bool {
+        guard let lvl = selectedLevel?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return false
+        }
+        return lvl == "max" || lvl == "ultra"
+    }
+
     public var body: some View {
         let count = levels.count
         let idx = selectedIndex
-        let thumbRadius: CGFloat = 10
+        let trackHeight: CGFloat = 32
+        let inset: CGFloat = 3
+        let knobDiameter: CGFloat = trackHeight - inset * 2
+        let knobRadius: CGFloat = knobDiameter / 2
+        let travelPadding: CGFloat = inset + knobRadius
+        let activeFillTint: Color = isExtremeSelection
+            ? SHColor.statusWarning.opacity(0.78)
+            : accentColor.opacity(0.76)
 
         VStack(spacing: 6) {
             GeometryReader { geo in
-                let usableWidth = max(1, geo.size.width - thumbRadius * 2)
+                let trackWidth = max(trackHeight, geo.size.width)
+                let usableWidth = max(1, trackWidth - travelPadding * 2)
                 let fraction: CGFloat = count > 1 ? CGFloat(idx) / CGFloat(count - 1) : 1.0
-                let thumbX = thumbRadius + usableWidth * fraction
+                let thumbX = travelPadding + usableWidth * fraction
+                let fillWidth: CGFloat = isOffSelection ? 0 : min(trackWidth, thumbX + knobRadius + inset)
 
                 ZStack(alignment: .leading) {
-                    // Base rail
+                    // Recessed Obsidian switch trough (clear right side)
                     Capsule()
-                        .fill(SHColor.surfaceBubble)
-                        .frame(height: 6)
-                        .padding(.horizontal, thumbRadius)
+                        .fill(
+                            SHColor.surfaceCode
+                                .shadow(.inner(color: .black.opacity(0.50), radius: 2.2, y: 1.2))
+                        )
+                        .frame(width: trackWidth, height: trackHeight)
 
-                    // Active fill
+                    // Switch-style filled area to the left of (and wrapping) the knob
                     Capsule()
-                        .fill(accentColor.opacity(0.88))
-                        .frame(width: max(6, usableWidth * fraction), height: 6)
-                        .padding(.leading, thumbRadius)
-                        .animation(.spring(response: 0.2, dampingFraction: 0.85), value: idx)
+                        .fill(
+                            activeFillTint
+                                .shadow(.inner(color: .black.opacity(0.22), radius: 1.5, y: 0.9))
+                        )
+                        .frame(width: max(trackHeight, fillWidth), height: trackHeight)
+                        .opacity(isOffSelection ? 0 : 1)
+                        .animation(.spring(response: 0.22, dampingFraction: 0.86), value: idx)
 
-                    // Discrete stop ticks
+                    // Discrete stop ticks recessed along the trough
                     if count > 1 {
                         ForEach(0..<count, id: \.self) { stop in
-                            let stopFraction = CGFloat(stop) / CGFloat(count - 1)
-                            let stopX = thumbRadius + usableWidth * stopFraction
-                            Circle()
-                                .fill(stop <= idx ? Color.white.opacity(0.65) : SHColor.inkFaint.opacity(0.55))
-                                .frame(width: 4.5, height: 4.5)
-                                .position(x: stopX, y: geo.size.height / 2)
+                            if stop != idx {
+                                let stopFraction = CGFloat(stop) / CGFloat(count - 1)
+                                let stopX = travelPadding + usableWidth * stopFraction
+                                Circle()
+                                    .fill(stop < idx && !isOffSelection
+                                        ? Color.white.opacity(0.36)
+                                        : SHColor.inkFaint.opacity(0.45))
+                                    .frame(width: 4.5, height: 4.5)
+                                    .position(x: stopX, y: trackHeight / 2)
+                            }
                         }
                     }
 
-                    // Tactile thumb
+                    // Subtle recessed inner rim (dark top bevel, faint bottom catch-light)
+                    Capsule()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.32),
+                                    Color.clear,
+                                    Color.white.opacity(0.06),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.75
+                        )
+                        .frame(width: trackWidth, height: trackHeight)
+                        .allowsHitTesting(false)
+
+                    // Elevated iOS-switch-style circular thumb
                     Circle()
-                        .fill(SHColor.inkPrimary)
-                        .frame(width: thumbRadius * 2, height: thumbRadius * 2)
+                        .fill(
+                            SHColor.porcelain
+                                .shadow(.inner(color: .white.opacity(0.65), radius: 0.5, y: 0.75))
+                        )
+                        .frame(width: knobDiameter, height: knobDiameter)
                         .overlay(
                             Circle()
-                                .strokeBorder(Color.black.opacity(0.22), lineWidth: 0.75)
+                                .strokeBorder(Color.black.opacity(0.16), lineWidth: 0.5)
                         )
-                        .shadow(color: Color.black.opacity(0.4), radius: 4, y: 1.5)
-                        .position(x: thumbX, y: geo.size.height / 2)
-                        .animation(.spring(response: 0.2, dampingFraction: 0.85), value: idx)
+                        .shadow(color: Color.black.opacity(0.42), radius: 3.5, y: 1.5)
+                        .position(x: thumbX, y: trackHeight / 2)
+                        .animation(.spring(response: 0.22, dampingFraction: 0.86), value: idx)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(Capsule())
+                .frame(width: trackWidth, height: trackHeight)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
                             guard count > 1 else { return }
                             let next = Self.nearestStopIndex(
-                                x: value.location.x - thumbRadius,
+                                x: value.location.x - travelPadding,
                                 trackWidth: usableWidth,
                                 count: count
                             )
@@ -1403,7 +1456,7 @@ public struct SHThinkingEffortSlider: View {
                         }
                 )
             }
-            .frame(height: 30)
+            .frame(height: trackHeight)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Thinking effort")
             .accessibilityValue(selectedLevel.map(Self.displayName(for:)) ?? "")
@@ -1422,7 +1475,7 @@ public struct SHThinkingEffortSlider: View {
                 }
             }
 
-            // Tappable discrete stop labels aligned across the track
+            // Tappable discrete stop labels aligned across the track (fixed weight & height to prevent layout shift)
             HStack(spacing: 0) {
                 ForEach(Array(levels.enumerated()), id: \.offset) { offset, level in
                     let isSelected = offset == idx
@@ -1435,7 +1488,7 @@ public struct SHThinkingEffortSlider: View {
                         }
                     } label: {
                         Text(Self.compactStopLabel(for: level, totalStops: count))
-                            .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(isSelected ? SHColor.inkPrimary : SHColor.inkFaint)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -1443,14 +1496,16 @@ public struct SHThinkingEffortSlider: View {
                                 maxWidth: .infinity,
                                 alignment: offset == 0 ? .leading : (offset == count - 1 ? .trailing : .center)
                             )
-                            .padding(.vertical, 2)
+                            .frame(height: 18)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("thinking.stop.\(level.lowercased())")
                 }
             }
+            .frame(height: 18)
         }
+        .frame(height: trackHeight + 6 + 18)
     }
 }
 
@@ -1541,7 +1596,7 @@ struct SHModelEffortMenu: View, Equatable {
         .accessibilityIdentifier(identifier)
         .popover(
             isPresented: $isPopoverPresented,
-            attachmentAnchor: .rect(.bounds),
+            attachmentAnchor: .rect(.rect(CGRect(x: 56, y: 0, width: 1, height: ComposerView.controlSize))),
             arrowEdge: .bottom
         ) {
             popoverContent
@@ -1551,8 +1606,13 @@ struct SHModelEffortMenu: View, Equatable {
     }
 
     private var popoverContent: some View {
-        let rowHeight: CGFloat = 40
-        let listHeight = min(CGFloat(max(1, models.count)) * rowHeight + 10, 290)
+        let rowHeight: CGFloat = 46
+        let listHeight = min(CGFloat(max(1, models.count)) * rowHeight + 10, 330)
+        // Deterministic height independent of the active effort label so moving the slider
+        // never alters preferredContentSize or triggers any popover resize/reflow.
+        let thinkingSectionHeight: CGFloat = efforts.isEmpty ? 0 : (14 + 24 + 10 + 56 + 12 + 1)
+        let modelHeaderHeight: CGFloat = (efforts.isEmpty ? 12 : 10) + 14 + 4
+        let totalHeight = thinkingSectionHeight + modelHeaderHeight + listHeight
 
         return VStack(alignment: .leading, spacing: 0) {
             if !efforts.isEmpty {
@@ -1569,16 +1629,23 @@ struct SHModelEffortMenu: View, Equatable {
                             Text(SHThinkingEffortSlider.displayName(for: activeEffortLevel))
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(isExtremeActive ? SHColor.statusWarning : SHColor.inkPrimary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
+                                .lineLimit(1)
+                                .frame(width: 66, height: 22)
                                 .background(
-                                    (isExtremeActive ? SHColor.statusWarning.opacity(0.16) : SHColor.surfaceBubble),
+                                    (isExtremeActive ? SHColor.statusWarning.opacity(0.16) : SHColor.surfaceCode),
                                     in: Capsule()
                                 )
-                                .contentTransition(.numericText())
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(
+                                            isExtremeActive ? SHColor.statusWarning.opacity(0.28) : SHColor.lineHairline,
+                                            lineWidth: 0.75
+                                        )
+                                )
                                 .accessibilityIdentifier("composer.thinking.value")
                         }
                     }
+                    .frame(height: 24)
 
                     SHThinkingEffortSlider(
                         levels: efforts.map(\.level),
@@ -1596,14 +1663,15 @@ struct SHModelEffortMenu: View, Equatable {
                     .frame(height: 1)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text("MODEL")
                     .font(.system(size: 10.5, weight: .semibold))
                     .tracking(0.6)
                     .foregroundStyle(SHColor.inkFaint)
+                    .frame(height: 14, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.top, efforts.isEmpty ? 12 : 10)
-                    .padding(.bottom, 2)
+                    .padding(.bottom, 4)
 
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -1618,17 +1686,17 @@ struct SHModelEffortMenu: View, Equatable {
                                 } label: {
                                     HStack(spacing: 10) {
                                         Text(item.label)
-                                            .font(.system(size: 14, weight: item.isSelected ? .semibold : .regular))
+                                            .font(.system(size: 14.5, weight: item.isSelected ? .semibold : .regular))
                                             .foregroundStyle(item.isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
                                             .lineLimit(1)
                                         Spacer(minLength: 8)
                                         if item.isSelected {
                                             Image(systemName: "checkmark")
-                                                .font(.system(size: 12.5, weight: .semibold))
+                                                .font(.system(size: 13, weight: .semibold))
                                                 .foregroundStyle(accentColor)
                                         }
                                     }
-                                    .padding(.horizontal, 10)
+                                    .padding(.horizontal, 12)
                                     .frame(height: rowHeight - 2)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(
@@ -1654,7 +1722,8 @@ struct SHModelEffortMenu: View, Equatable {
                 }
             }
         }
-        .frame(width: 292)
+        .frame(width: 296, height: totalHeight, alignment: .top)
+        .animation(nil, value: activeEffortLevel)
     }
 }
 

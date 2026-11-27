@@ -426,9 +426,16 @@ export function groupSessionsForSidebar(
   }
 
   // Unified cross-harness by Project: same-named sections from every harness coalesce into one group.
+  // Detect any home-directory usernames present across sessions so e.g. `/home/<user>` ("<user>")
+  // and `~` ("Home (~)") coalesce into one `Home (~)` group.
+  const knownHomeUsernames = new Set<string>();
+  for (const s of rest) {
+    const u = homeUsernameFromPath(s.cwd);
+    if (u) knownHomeUsernames.add(u.toLowerCase());
+  }
   const projMap = new Map<string, { label: string; fromSection: boolean; items: UnifiedSession[] }>();
   for (const s of rest) {
-    const { key, label, fromSection } = projectGroupFor(s);
+    const { key, label, fromSection } = projectGroupFor(s, knownHomeUsernames);
     let entry = projMap.get(key);
     if (!entry) {
       entry = { label, fromSection, items: [] };
@@ -445,10 +452,39 @@ export function groupSessionsForSidebar(
     .sort((a, b) => (b.items[0]?.updatedAt ?? 0) - (a.items[0]?.updatedAt ?? 0));
 }
 
+const HOME_DIR_PATH_RE = /^(?:~|\/(?:home|Users)\/([^/]+)|[A-Za-z]:[\\/]+Users[\\/]+([^\\/]+))$/;
+const HOME_LABEL_RE = /^(?:home\s*\(~\)|~\s*\(home\)|~|home)$/i;
+
+/** Extracts the username when `cwd` points directly at a user's home directory (Linux/macOS/Windows). */
+export function homeUsernameFromPath(cwd?: string | null): string | null {
+  if (!cwd) return null;
+  const normalized = cwd.trim().replace(/[\\/]+$/, '');
+  const m = normalized.match(HOME_DIR_PATH_RE);
+  if (!m) return null;
+  return (m[1] || m[2] || '').trim() || null;
+}
+
+/** True when `label` refers to the user's home directory (`Home (~)`, `~`, or the home dir's username). */
+export function isHomeProjectLabel(
+  label: string,
+  cwd?: string | null,
+  knownHomeUsernames?: ReadonlySet<string>
+): boolean {
+  const trimmed = label.trim();
+  if (!trimmed) return false;
+  if (HOME_LABEL_RE.test(trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  const cwdUser = homeUsernameFromPath(cwd);
+  if (cwdUser && lower === cwdUser.toLowerCase()) return true;
+  if (knownHomeUsernames && knownHomeUsernames.has(lower)) return true;
+  return false;
+}
+
 /** Folds case, spaces and underscores so "BlueBubbles Native" and "bluebubbles_native" match "bluebubbles-native". */
 export function normalizeProjectKey(name: string): string {
-  return name
-    .trim()
+  const trimmed = name.trim();
+  if (HOME_LABEL_RE.test(trimmed)) return 'home';
+  return trimmed
     .toLowerCase()
     .replace(/[\s_]+/g, '-')
     .replace(/-+/g, '-');
@@ -457,13 +493,24 @@ export function normalizeProjectKey(name: string): string {
 /**
  * The Project view group of a session: its section (assigned with sh_organize move_section, or the
  * harness's own section) when it has one, otherwise the project derived from its working folder.
+ * Home-directory aliases (`~`, `Home (~)`, `~ (Home)`, and a section named after the home directory's
+ * username like `/home/alice` → `alice`) coalesce into a single `Home (~)` group.
  */
-export function projectGroupFor(s: UnifiedSession): { key: string; label: string; fromSection: boolean } {
+export function projectGroupFor(
+  s: UnifiedSession,
+  knownHomeUsernames?: ReadonlySet<string>
+): { key: string; label: string; fromSection: boolean } {
   const section = s.nativeSection?.trim();
   if (section && section !== 'Ungrouped' && section !== 'Pinned') {
+    if (isHomeProjectLabel(section, s.cwd, knownHomeUsernames)) {
+      return { key: 'home', label: 'Home (~)', fromSection: false };
+    }
     return { key: normalizeProjectKey(section), label: section, fromSection: true };
   }
   const label = s.projectName?.trim() || 'General';
+  if (isHomeProjectLabel(label, s.cwd, knownHomeUsernames)) {
+    return { key: 'home', label: 'Home (~)', fromSection: false };
+  }
   return { key: normalizeProjectKey(label), label, fromSection: false };
 }
 

@@ -205,11 +205,20 @@ export async function listProcesses(): Promise<ProcessRow[]> {
   }
 }
 
+const HOME_DIR_RE = /^(?:~|\/(?:home|Users)\/[^/]+|[A-Za-z]:[\\/]+Users[\\/]+[^\\/]+)$/;
+
+export function isHomeDirectoryPath(cwd: string | undefined | null): boolean {
+  if (!cwd) return false;
+  const normalized = cwd.trim().replace(/[\\/]+$/, '');
+  if (!normalized) return false;
+  const home = os.homedir().replace(/[\\/]+$/, '');
+  return normalized === home || HOME_DIR_RE.test(normalized);
+}
+
 export function projectNameFromCwd(cwd: string | undefined | null): string {
   if (!cwd) return 'General';
-  const home = os.homedir();
-  const normalized = cwd.replace(/\/+$/, '');
-  if (!normalized || normalized === home) return 'Home (~)';
+  const normalized = cwd.trim().replace(/[\\/]+$/, '');
+  if (!normalized || isHomeDirectoryPath(normalized)) return 'Home (~)';
   return path.basename(normalized) || normalized;
 }
 

@@ -373,7 +373,7 @@ export function mergeHarnessProjects(
     if (normalized.startsWith('/tmp/')) continue;
     const existing = byPath.get(normalized);
     const derivedName =
-      item.name?.trim() || (normalized === HOME ? '~ (Home)' : projectNameFromCwd(normalized));
+      item.name?.trim() || (normalized === HOME ? 'Home (~)' : projectNameFromCwd(normalized));
 
     if (!existing) {
       byPath.set(normalized, {

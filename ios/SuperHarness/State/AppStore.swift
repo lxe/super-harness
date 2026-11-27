@@ -1719,15 +1719,79 @@ public final class AppStore {
         }
     }
 
-    private static func resolvedProjectSectionLabel(for session: UnifiedSession) -> String {
+    /// Extracts the username when a path points directly at a user's home directory
+    /// (`/home/<user>`, `/Users/<user>`, `C:\Users\<user>`), or nil for subdirectories / other paths.
+    static func homeUsername(fromPath rawPath: String?) -> String? {
+        guard let rawPath else { return nil }
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let parts = trimmed.split(separator: "/").map(String.init)
+        if parts.count == 2 && (parts[0] == "home" || parts[0] == "Users") {
+            return parts[1].isEmpty ? nil : parts[1]
+        }
+        if parts.count == 3 && parts[0].hasSuffix(":") && parts[1].lowercased() == "users" {
+            return parts[2].isEmpty ? nil : parts[2]
+        }
+        return nil
+    }
+
+    static func isHomeProjectLabel(
+        _ label: String,
+        cwd: String?,
+        knownHomeUsernames: Set<String> = []
+    ) -> Bool {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let lower = trimmed.lowercased()
+        if lower == "home (~)" || lower == "~ (home)" || lower == "~" || lower == "home" {
+            return true
+        }
+        if let cwdUser = homeUsername(fromPath: cwd)?.lowercased(), lower == cwdUser {
+            return true
+        }
+        if knownHomeUsernames.contains(lower) {
+            return true
+        }
+        return false
+    }
+
+    private func knownHomeUsernames(for sessions: [UnifiedSession]) -> Set<String> {
+        var names: Set<String> = []
+        if let u = Self.homeUsername(fromPath: settings.defaultNewSessionCwd)?.lowercased() {
+            names.insert(u)
+        }
+        for s in sessions {
+            if let u = Self.homeUsername(fromPath: s.cwd)?.lowercased() {
+                names.insert(u)
+            }
+        }
+        for p in catalog?.projects ?? [] {
+            if let u = Self.homeUsername(fromPath: p.path)?.lowercased() {
+                names.insert(u)
+            }
+        }
+        return names
+    }
+
+    private static func resolvedProjectSectionLabel(
+        for session: UnifiedSession,
+        knownHomeUsernames: Set<String> = []
+    ) -> String {
         if let sec = session.nativeSection?.trimmingCharacters(in: .whitespacesAndNewlines),
            !sec.isEmpty, sec != "Ungrouped" {
+            if isHomeProjectLabel(sec, cwd: session.cwd, knownHomeUsernames: knownHomeUsernames) {
+                return "Home (~)"
+            }
             return sec
         }
         let proj = session.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = proj.lowercased()
         let redundantHarnessNames: Set<String> = ["antigravity", "codex", "claude", "muse", "pi", "master", "super harness", ""]
         if !redundantHarnessNames.contains(lower) {
+            if isHomeProjectLabel(proj, cwd: session.cwd, knownHomeUsernames: knownHomeUsernames) {
+                return "Home (~)"
+            }
             return proj
         }
         return "Ungrouped"
@@ -1736,6 +1800,9 @@ public final class AppStore {
     /// Folds case, spaces and underscores so "BlueBubbles Native" and "bluebubbles_native" match "bluebubbles-native".
     static func normalizedProjectKey(_ name: String) -> String {
         let lowered = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered == "home (~)" || lowered == "~ (home)" || lowered == "~" || lowered == "home" {
+            return "home"
+        }
         let dashed = lowered.replacingOccurrences(of: "[\\s_]+", with: "-", options: .regularExpression)
         return dashed.replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
     }
@@ -1758,7 +1825,8 @@ public final class AppStore {
             )
         }
 
-        let dict = Dictionary(grouping: unpinned) { Self.resolvedProjectSectionLabel(for: $0) }
+        let homeUsers = knownHomeUsernames(for: unpinned)
+        let dict = Dictionary(grouping: unpinned) { Self.resolvedProjectSectionLabel(for: $0, knownHomeUsernames: homeUsers) }
         let orderedKeys = dict.keys.sorted { lhs, rhs in
             let lUngrouped = lhs == "Ungrouped"
             let rUngrouped = rhs == "Ungrouped"
@@ -1841,17 +1909,23 @@ public final class AppStore {
 
         case .project:
             // Same-named sections from every harness (and a matching folder project) coalesce into one group,
-            // keyed like the desktop's normalizeProjectKey.
+            // keyed like the desktop's normalizeProjectKey. Home-directory aliases (`Home (~)`, `~`, and the
+            // home directory's username) coalesce into a single `Home (~)` group.
+            let homeUsers = knownHomeUsernames(for: sorted)
             let dict = Dictionary(grouping: sorted) {
-                Self.normalizedProjectKey(Self.resolvedProjectSectionLabel(for: $0))
+                Self.normalizedProjectKey(Self.resolvedProjectSectionLabel(for: $0, knownHomeUsernames: homeUsers))
             }
             var labels: [String: String] = [:]
             for (key, items) in dict {
+                if key == "home" {
+                    labels[key] = "Home (~)"
+                    continue
+                }
                 let fromSection = items.first { s in
                     guard let sec = s.nativeSection?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
                     return !sec.isEmpty && sec != "Ungrouped"
                 }
-                labels[key] = Self.resolvedProjectSectionLabel(for: fromSection ?? items[0])
+                labels[key] = Self.resolvedProjectSectionLabel(for: fromSection ?? items[0], knownHomeUsernames: homeUsers)
             }
             let ungroupedKey = Self.normalizedProjectKey("Ungrouped")
             let orderedKeys = dict.keys.sorted { lhs, rhs in

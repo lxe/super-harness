@@ -913,7 +913,6 @@ private struct HarnessSwitcherStrip: View {
     }
 
     @State private var drag: DragState?
-    @State private var stripWidth: CGFloat = 0
     /// Lifting the finger at the end of a drag also ends a touch on the gauge's button; taps
     /// are ignored until this time so a reorder does not change the selected harness.
     @State private var ignoreTapsUntil: Date = .distantPast
@@ -922,10 +921,10 @@ private struct HarnessSwitcherStrip: View {
 
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
-    private static let scrollableCellWidth: CGFloat = 66
-    /// Six gauges still fit side by side on a phone; beyond that the dock scrolls. There is no
-    /// "All" gauge: with no harness selected nothing is highlighted and every harness is shown,
-    /// and tapping the selected gauge deselects it.
+    private static let cellDiameter: CGFloat = 52
+    /// Six circular gauges still fit side by side on a phone; beyond that the dock scrolls.
+    /// There is no "All" gauge: with no harness selected nothing is highlighted and every
+    /// harness is shown, and tapping the selected gauge deselects it.
     private static let maxFittedSlots = 6
     private static let stripSpace = "harnessStrip"
 
@@ -938,11 +937,7 @@ private struct HarnessSwitcherStrip: View {
     }
 
     private var cellWidth: CGFloat {
-        if needsHorizontalScroll {
-            return Self.scrollableCellWidth
-        }
-        let gaps = CGFloat(max(0, totalSlots - 1)) * Self.cellSpacing
-        return max(1, (stripWidth - Self.stripPadding * 2 - gaps) / CGFloat(totalSlots))
+        Self.cellDiameter
     }
 
     /// Centre of the cell at `slot` (the harness's index in the order), in strip coordinates.
@@ -990,6 +985,7 @@ private struct HarnessSwitcherStrip: View {
                         .padding(.vertical, 6)
                         .coordinateSpace(name: Self.stripSpace)
                 }
+                .frame(maxWidth: .infinity)
             } else {
                 chipsRow
                     .padding(.horizontal, Self.stripPadding)
@@ -997,11 +993,8 @@ private struct HarnessSwitcherStrip: View {
                     .coordinateSpace(name: Self.stripSpace)
             }
         }
-        .frame(maxWidth: .infinity)
-        // The same plain Liquid Glass capsule as the top bar's pills: no added sheen, rim or
-        // drop shadow.
+        // The same plain Liquid Glass capsule as the top bar's pills, hugging the circular gauges.
         .modifier(SHGlassSurfaceModifier(shape: Capsule()))
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stripWidth = $0 }
         .onChange(of: drag) { _, state in
             ignoreTapsUntil = Date().addingTimeInterval(0.5)
             guard let state else { return }
@@ -1076,16 +1069,11 @@ private struct HarnessSwitcherStrip: View {
 
     private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {
         content()
-            .frame(
-                minWidth: needsHorizontalScroll ? Self.scrollableCellWidth : nil,
-                maxWidth: needsHorizontalScroll ? Self.scrollableCellWidth : .infinity
-            )
-            .frame(height: 52)
-            // Selected: a flat neutral fill, like a pressed control in the top bar. No harness
-            // tint (a selected Muse gauge read as a purple pill) and no gradient or rim.
+            .frame(width: Self.cellDiameter, height: Self.cellDiameter)
+            // Selected: a flat neutral circular fill hugging the gauge, matching top-bar controls.
             .background(isSelected ? Color.white.opacity(0.14) : Color.clear)
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .clipShape(Circle())
+            .contentShape(Circle())
     }
 
     private func gaugeAccessibilityValue(percent: Double?, working: Bool) -> String {

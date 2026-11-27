@@ -11,6 +11,13 @@ import UIKit
 @MainActor
 public final class PushNotificationCoordinator: NSObject {
     public static let shared = PushNotificationCoordinator()
+    #if canImport(UIKit)
+    /// Non-isolated Objective-C delegate proxy assigned to `UNUserNotificationCenter.current().delegate`.
+    /// Using the completion-handler selectors (rather than Swift's `async` bridged shims) guarantees
+    /// Apple's `completionHandler` always executes on the main thread and avoids Swift 6's ObjC-async
+    /// background-executor crash when tapping a notification.
+    public nonisolated static let notificationDelegate = NotificationCenterDelegateProxy()
+    #endif
     public static let defaultRelayURL = "https://super-harness-push.lxe-sh.workers.dev"
     public static let bgRefreshTaskId = "com.lxe.superharness.refresh"
 
@@ -22,10 +29,25 @@ public final class PushNotificationCoordinator: NSObject {
     private var lastAppliedBadgeCount: Int?
     private var pendingNotificationSessionId: String?
 
+    public nonisolated static func extractSessionId(
+        userInfo: [AnyHashable: Any],
+        threadIdentifier: String
+    ) -> String? {
+        let explicitId = (userInfo["sessionId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let explicitId, !explicitId.isEmpty {
+            return explicitId
+        }
+        let threadId = threadIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !threadId.isEmpty && threadId != "super-harness" {
+            return threadId
+        }
+        return nil
+    }
+
     public func configure(store: AppStore) {
         self.store = store
         #if canImport(UIKit)
-        UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().delegate = Self.notificationDelegate
         #endif
         registerBackgroundRefreshIfNeeded()
         setAppIconBadge(store.effectiveAppIconBadgeCount)
@@ -196,27 +218,53 @@ public final class PushNotificationCoordinator: NSObject {
 }
 
 #if canImport(UIKit)
-extension PushNotificationCoordinator: UNUserNotificationCenterDelegate {
-    public nonisolated func userNotificationCenter(
+private struct UncheckedSendableClosure<T>: @unchecked Sendable {
+    let call: T
+}
+
+public final class NotificationCenterDelegateProxy: NSObject, UNUserNotificationCenterDelegate, Sendable {
+    public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        let options: UNNotificationPresentationOptions = [.banner, .sound, .badge]
+        if Thread.isMainThread {
+            completionHandler(options)
+        } else {
+            let box = UncheckedSendableClosure(call: completionHandler)
+            DispatchQueue.main.async {
+                box.call(options)
+            }
+        }
     }
 
-    public nonisolated func userNotificationCenter(
+    public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         let content = response.notification.request.content
-        let userInfo = content.userInfo
-        let explicitId = (userInfo["sessionId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let threadId = content.threadIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sessionId = (explicitId?.isEmpty == false ? explicitId : nil)
-            ?? (!threadId.isEmpty && threadId != "super-harness" ? threadId : nil)
-        if let sessionId {
-            await MainActor.run {
-                PushNotificationCoordinator.shared.handleNotificationTap(sessionId: sessionId)
+        let sessionId = PushNotificationCoordinator.extractSessionId(
+            userInfo: content.userInfo,
+            threadIdentifier: content.threadIdentifier
+        )
+        let box = UncheckedSendableClosure(call: completionHandler)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                if let sessionId {
+                    PushNotificationCoordinator.shared.handleNotificationTap(sessionId: sessionId)
+                }
+                box.call()
+            }
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if let sessionId {
+                        PushNotificationCoordinator.shared.handleNotificationTap(sessionId: sessionId)
+                    }
+                    box.call()
+                }
             }
         }
     }
@@ -228,8 +276,8 @@ public final class SuperHarnessAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         // Assign the notification center delegate before launch completes so iOS delivers
-        // cold-launch notification taps to `userNotificationCenter(_:didReceive:)`.
-        UNUserNotificationCenter.current().delegate = PushNotificationCoordinator.shared
+        // cold-launch notification taps to `userNotificationCenter(_:didReceive:withCompletionHandler:)`.
+        UNUserNotificationCenter.current().delegate = PushNotificationCoordinator.notificationDelegate
         return true
     }
     public func application(

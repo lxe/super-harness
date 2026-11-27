@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
 @testable import SuperHarness
 
 @MainActor
@@ -1004,4 +1007,87 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.detailRoute, .session("antigravity:abc-123"))
         XCTAssertFalse(store.sessions[0].isUnread)
     }
+
+    #if canImport(UIKit) && canImport(UserNotifications)
+    /// Regression test for the Swift 6 UNUserNotificationCenterDelegate crash:
+    /// implementing the bridged `async` delegate methods ran Apple's `completionHandler`
+    /// off the main thread (`onMain == false`), crashing iOS on every notification tap.
+    func testNotificationDelegateCallbacksCompleteOnMainThreadAndRouteTap() {
+        final class StubContent: NSObject {
+            @objc let userInfo: [AnyHashable: Any] = ["sessionId": "antigravity:tap-regression-1"]
+            @objc let threadIdentifier: String = "antigravity:tap-regression-1"
+        }
+        final class StubRequest: NSObject {
+            @objc let content = StubContent()
+        }
+        final class StubNotification: NSObject {
+            @objc let request = StubRequest()
+        }
+        final class StubResponse: NSObject {
+            @objc let notification = StubNotification()
+        }
+
+        let suite = "sh.tests.notif.delegate.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer {
+            store.stopEventStream()
+            PushNotificationCoordinator.shared.store = nil
+        }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        store.sessions = [
+            UnifiedSession(id: "antigravity:tap-regression-1", harness: .antigravity, harnessGroup: .antigravity, title: "Target", status: .idle, createdAt: now, updatedAt: now, unread: true),
+        ]
+        PushNotificationCoordinator.shared.configure(store: store)
+
+        let delegate = PushNotificationCoordinator.notificationDelegate
+        XCTAssertTrue(UNUserNotificationCenter.current().delegate === delegate)
+
+        // 1. didReceive invoked via ObjC selector on main thread completes synchronously on main thread and navigates.
+        let didReceiveSel = NSSelectorFromString("userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:")
+        XCTAssertTrue((delegate as AnyObject).responds(to: didReceiveSel))
+        typealias DidReceiveIMP = @convention(c) (AnyObject, Selector, UNUserNotificationCenter, AnyObject, @escaping @convention(block) () -> Void) -> Void
+        let didReceiveFn = unsafeBitCast(class_getMethodImplementation(type(of: delegate as AnyObject), didReceiveSel)!, to: DidReceiveIMP.self)
+
+        var didReceiveOnMain = false
+        var didReceiveCompleted = false
+        didReceiveFn(delegate as AnyObject, didReceiveSel, UNUserNotificationCenter.current(), StubResponse()) {
+            didReceiveOnMain = Thread.isMainThread
+            didReceiveCompleted = true
+        }
+        XCTAssertTrue(didReceiveCompleted)
+        XCTAssertTrue(didReceiveOnMain, "didReceive completionHandler must execute on the main thread")
+        XCTAssertEqual(store.detailRoute, .session("antigravity:tap-regression-1"))
+
+        // 2. didReceive invoked from a background queue still hops completionHandler onto the main thread.
+        final class BoolBox: @unchecked Sendable { var value = false }
+        let bgExp = expectation(description: "didReceive from background queue")
+        let bgOnMain = BoolBox()
+        let bgResponse = StubResponse()
+        DispatchQueue.global(qos: .userInitiated).async {
+            didReceiveFn(delegate as AnyObject, didReceiveSel, UNUserNotificationCenter.current(), bgResponse) {
+                bgOnMain.value = Thread.isMainThread
+                bgExp.fulfill()
+            }
+        }
+        wait(for: [bgExp], timeout: 3)
+        XCTAssertTrue(bgOnMain.value, "didReceive completionHandler must hop to main thread even if called off-main")
+
+        // 3. willPresent completes on main thread with banner + sound + badge.
+        let willPresentSel = NSSelectorFromString("userNotificationCenter:willPresentNotification:withCompletionHandler:")
+        XCTAssertTrue((delegate as AnyObject).responds(to: willPresentSel))
+        typealias WillPresentIMP = @convention(c) (AnyObject, Selector, UNUserNotificationCenter, AnyObject, @escaping @convention(block) (UNNotificationPresentationOptions) -> Void) -> Void
+        let willPresentFn = unsafeBitCast(class_getMethodImplementation(type(of: delegate as AnyObject), willPresentSel)!, to: WillPresentIMP.self)
+
+        var willPresentOnMain = false
+        var presentedOptions: UNNotificationPresentationOptions = []
+        willPresentFn(delegate as AnyObject, willPresentSel, UNUserNotificationCenter.current(), StubNotification()) { opts in
+            willPresentOnMain = Thread.isMainThread
+            presentedOptions = opts
+        }
+        XCTAssertTrue(willPresentOnMain)
+        XCTAssertEqual(presentedOptions, [.banner, .sound, .badge])
+    }
+    #endif
 }

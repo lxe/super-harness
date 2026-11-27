@@ -151,7 +151,9 @@ export class HarnessDispatcher {
 
     const driver = this.registry.getDriver(session.harnessGroup);
     if (!driver?.queueMessage) {
-      return { ok: false, error: `Native queueing not supported for ${session.harnessGroup}` };
+      // Harnesses without a separate native queue endpoint (e.g. Antigravity) handle
+      // non-forced sends cleanly via their normal dispatch path.
+      return this.sendToSession(sessionId, prompt, attachments, { force: false });
     }
 
     if (!session.tags?.includes('remote-host')) {
@@ -159,7 +161,7 @@ export class HarnessDispatcher {
     }
     const res = await driver.queueMessage(session, prompt, attachments, this.createContext());
     if (!res) {
-      return { ok: false, error: `Native queueing not supported for ${session.harnessGroup}` };
+      return this.sendToSession(sessionId, prompt, attachments, { force: false });
     }
     return res;
   }

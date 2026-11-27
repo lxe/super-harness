@@ -780,7 +780,9 @@ private struct MessageBubbleView: View, Equatable {
                                 .font(SHTypography.micro.weight(.medium))
                         }
                         .foregroundStyle(SHColor.statusDanger)
-                        .padding(.trailing, 4)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("message.retry")

@@ -303,7 +303,6 @@ private struct CompactTraceRowView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .shRaisedSurface(SHColor.surfacePopover, cornerRadius: SHRadius.md, elevation: .tile)
-                    .padding(.leading, 18)
                     .padding(.bottom, 6)
                 }
             }
@@ -366,7 +365,6 @@ private struct CompactTraceRowView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .shRecessedWell(cornerRadius: SHRadius.md)
-                    .padding(.leading, 18)
                 }
             }
 
@@ -709,7 +707,9 @@ public struct ImageLightboxView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 #if canImport(UIKit)
-                if let uiImage = DataURLImageDecoder.decode(payload.dataUrl) ?? remoteImage {
+                // Always prefer the full-resolution remote image once loaded; show any inline
+                // preview thumbnail only as an instant placeholder while full-res fetches.
+                if let uiImage = remoteImage ?? DataURLImageDecoder.decode(payload.dataUrl) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
@@ -755,8 +755,7 @@ public struct ImageLightboxView: View {
             }
             .task(id: payload.path) {
                 #if canImport(UIKit)
-                guard DataURLImageDecoder.decode(payload.dataUrl) == nil,
-                      remoteImage == nil,
+                guard remoteImage == nil,
                       let path = payload.path, !path.isEmpty,
                       let loader = onLoadMedia else {
                     return

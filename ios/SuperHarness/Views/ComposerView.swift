@@ -480,10 +480,7 @@ public struct ComposerView: View {
             .accessibilityIdentifier("composer.stop")
         } else {
             let canSend = (hasContent || dictation.state != .idle) && !isSending && !isFinalizingDictationForSend
-            Button {
-                triggerHaptic(.light)
-                handleSendTap(.steer)
-            } label: {
+            ZStack {
                 Group {
                     if isSending || isFinalizingDictationForSend {
                         SHActivityPulse(tint: SHColor.surfaceRail, size: 11)
@@ -496,25 +493,33 @@ public struct ComposerView: View {
                 .frame(width: Self.controlSize, height: Self.controlSize)
                 .background(SHColor.inkPrimary, in: Circle())
                 .opacity(canSend ? 1.0 : 0.28)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .contextMenu {
-                if canSend {
-                    Button {
+
+                #if canImport(UIKit)
+                SHSendMenuButton(
+                    isEnabled: canSend,
+                    onSteer: {
                         triggerHaptic(.light)
                         handleSendTap(.steer)
-                    } label: {
-                        Label("Steer Now", systemImage: "arrow.up.circle.fill")
-                    }
-                    Button {
+                    },
+                    onQueue: {
                         triggerHaptic(.light)
                         handleSendTap(.queue)
-                    } label: {
-                        Label("Queue for Later", systemImage: "text.badge.plus")
                     }
+                )
+                .frame(width: Self.controlSize, height: Self.controlSize)
+                #else
+                Button {
+                    triggerHaptic(.light)
+                    handleSendTap(.steer)
+                } label: {
+                    Color.clear.frame(width: Self.controlSize, height: Self.controlSize)
                 }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                #endif
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Send message")
             .accessibilityIdentifier("composer.send")
         }
@@ -1160,3 +1165,68 @@ struct SHModelEffortMenu: View, Equatable {
         .accessibilityIdentifier(identifier)
     }
 }
+
+#if canImport(UIKit)
+/// Native UIKit button overlay for Send: short tap steers immediately, long press opens
+/// the "Steer Now / Queue for Later" UIMenu WITHOUT resigning UITextView first responder,
+/// keeping the keyboard anchored in place so the menu never desyncs.
+private struct SHSendMenuButton: UIViewRepresentable {
+    let isEnabled: Bool
+    let onSteer: () -> Void
+    let onQueue: () -> Void
+
+    final class Coordinator: NSObject {
+        var onSteer: () -> Void
+        var onQueue: () -> Void
+
+        init(onSteer: @escaping () -> Void, onQueue: @escaping () -> Void) {
+            self.onSteer = onSteer
+            self.onQueue = onQueue
+        }
+
+        @objc func handlePrimaryTap() {
+            onSteer()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSteer: onSteer, onQueue: onQueue)
+    }
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.backgroundColor = .clear
+        button.showsMenuAsPrimaryAction = false
+        button.addTarget(context.coordinator, action: #selector(Coordinator.handlePrimaryTap), for: .touchUpInside)
+        applyState(to: button, coordinator: context.coordinator)
+        return button
+    }
+
+    func updateUIView(_ uiView: UIButton, context: Context) {
+        context.coordinator.onSteer = onSteer
+        context.coordinator.onQueue = onQueue
+        applyState(to: uiView, coordinator: context.coordinator)
+    }
+
+    private func applyState(to button: UIButton, coordinator: Coordinator) {
+        button.isEnabled = isEnabled
+        if isEnabled {
+            let steer = UIAction(
+                title: "Steer Now",
+                image: UIImage(systemName: "arrow.up.circle.fill")
+            ) { _ in
+                coordinator.onSteer()
+            }
+            let queue = UIAction(
+                title: "Queue for Later",
+                image: UIImage(systemName: "text.badge.plus")
+            ) { _ in
+                coordinator.onQueue()
+            }
+            button.menu = UIMenu(children: [steer, queue])
+        } else {
+            button.menu = nil
+        }
+    }
+}
+#endif

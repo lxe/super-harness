@@ -203,7 +203,7 @@ export const NavRow: React.FC<NavRowProps> = ({
           <span
             style={effectiveOpacity !== undefined ? { opacity: effectiveOpacity } : undefined}
             className={cn(
-              'text-[14px] leading-[1.35] truncate transition-opacity group-hover:!opacity-100',
+              'text-[14px] leading-[1.35] tracking-[-0.008em] truncate transition-opacity group-hover:!opacity-100',
               working && 'sh-nav-title-shimmer font-medium'
             )}
           >

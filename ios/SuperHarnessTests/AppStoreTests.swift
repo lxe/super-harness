@@ -1499,4 +1499,21 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions.first?.model, "gemini-4-neon-xhigh")
         XCTAssertEqual(store.sessions.first?.reasoningEffort, "xhigh")
     }
+
+    /// The checked row in the model menu is the model the pill names, in every case the pill
+    /// can name one: by stem, by alias, and by the harness default when the session reports none.
+    func testSelectedModelStemFollowsThePillLabel() {
+        let models = [
+            HarnessModelOption(id: "claude-opus-5-5", label: "Opus 5.5", isDefault: true, aliases: ["opus"]),
+            HarnessModelOption(id: "claude-fable-5-2", label: "Fable 5.2", aliases: ["fable"]),
+            HarnessModelOption(id: "gemini-4-neon-low", label: "Gemini 4 Neon (Low)"),
+        ]
+        XCTAssertEqual(ComposerView.selectedModelStem(model: "claude-fable-5-2", availableModels: models), "claude-fable-5-2")
+        XCTAssertEqual(ComposerView.selectedModelStem(model: "fable", availableModels: models), "claude-fable-5-2")
+        XCTAssertEqual(ComposerView.selectedModelStem(model: "Opus 5.5", availableModels: models), "claude-opus-5-5")
+        XCTAssertEqual(ComposerView.selectedModelStem(model: "gemini-4-neon-high", availableModels: models), "gemini-4-neon")
+        XCTAssertEqual(ComposerView.selectedModelStem(model: nil, availableModels: models), "claude-opus-5-5")
+        XCTAssertEqual(ComposerView.selectedModelStem(model: "", availableModels: models), "claude-opus-5-5")
+        XCTAssertNil(ComposerView.selectedModelStem(model: "unknown-model", availableModels: models))
+    }
 }

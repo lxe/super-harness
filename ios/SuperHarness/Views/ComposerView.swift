@@ -195,7 +195,7 @@ public struct ComposerView: View {
 
     private static let effortSuffixes = ["-low", "-medium", "-high", "-xhigh", "-max"]
 
-    private static func baseModelStem(_ id: String) -> String {
+    nonisolated static func baseModelStem(_ id: String) -> String {
         let lower = id.lowercased()
         for suf in effortSuffixes where lower.hasSuffix(suf) {
             return String(id.dropLast(suf.count))
@@ -307,6 +307,21 @@ public struct ComposerView: View {
             guard let rep = byStem[stem] else { return nil }
             return (stem, Self.cleanBaseDisplayLabel(rep.label), rep)
         }
+    }
+
+    /// The menu row that stands for the model in use. It follows the same rules as the label
+    /// on the pill, so the row with the checkmark is always the model the pill names: the
+    /// session's model by its stem, else by a catalog id, label or alias, and for a session
+    /// that reports no model, the harness's default.
+    nonisolated static func selectedModelStem(model: String?, availableModels: [HarnessModelOption]) -> String? {
+        let stems = Set(availableModels.map { baseModelStem($0.id) })
+        if let raw = model, !raw.isEmpty {
+            let stem = baseModelStem(raw)
+            if stems.contains(stem) { return stem }
+            return availableModels.first(where: { $0.matches(raw) || $0.matches(stem) }).map { baseModelStem($0.id) }
+        }
+        let fallback = availableModels.first(where: { $0.isDefault == true }) ?? availableModels.first
+        return fallback.map { baseModelStem($0.id) }
     }
 
     private var currentModelLabel: String {
@@ -516,14 +531,14 @@ public struct ComposerView: View {
     @ViewBuilder
     private var combinedModelEffortPill: some View {
         if !availableModels.isEmpty, let onSelectModel {
-            let currentStem = model.map(Self.baseModelStem)
+            let currentStem = Self.selectedModelStem(model: model, availableModels: availableModels)
             let options = menuModelOptions
             SHModelEffortMenu(
                 models: options.map { item in
                     SHModelEffortMenu.ModelItem(
                         id: item.stem,
                         label: item.displayLabel,
-                        isSelected: currentStem == item.stem || (model.map { item.representative.matches($0) } ?? false)
+                        isSelected: currentStem == item.stem
                     )
                 },
                 efforts: onSelectReasoningEffort == nil ? [] : reasoningLevels.map { level in

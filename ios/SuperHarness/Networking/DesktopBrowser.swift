@@ -8,10 +8,17 @@ public struct NearbyDesktop: Identifiable, Equatable, Sendable {
     public var id: String
     public var name: String
     public var hostId: String
-    /// Set for desktops found over Bonjour; nil for the debug sample.
-    var endpoint: NWEndpoint?
+    /// The Bonjour service (name, type, domain) for desktops found on the network; nil for the
+    /// debug sample.
+    var service: BonjourService?
     /// A known address (debug sample only).
     var fixedBaseURL: URL?
+}
+
+struct BonjourService: Equatable, Sendable {
+    var name: String
+    var type: String
+    var domain: String
 }
 
 /// Browses for desktops advertising `_superharness._tcp` and resolves a chosen one to an
@@ -37,7 +44,7 @@ public final class DesktopBrowser {
                 id: "mock-host",
                 name: "Demo Desktop",
                 hostId: "mock-host",
-                endpoint: nil,
+                service: nil,
                 fixedBaseURL: URL(string: "http://demo-desktop.local:47890")
             )]
             return
@@ -81,7 +88,7 @@ public final class DesktopBrowser {
     }
 
     nonisolated private static func desktop(from result: NWBrowser.Result) -> NearbyDesktop? {
-        guard case .service(let serviceName, _, _, _) = result.endpoint else { return nil }
+        guard case .service(let serviceName, let serviceType, let serviceDomain, _) = result.endpoint else { return nil }
         var txtName: String?
         var hostId = ""
         if case .bonjour(let record) = result.metadata {
@@ -89,70 +96,98 @@ public final class DesktopBrowser {
             hostId = record["id"] ?? ""
         }
         let name = (txtName?.isEmpty == false ? txtName! : serviceName)
-        return NearbyDesktop(id: hostId.isEmpty ? serviceName : hostId, name: name, hostId: hostId, endpoint: result.endpoint, fixedBaseURL: nil)
+        return NearbyDesktop(
+            id: hostId.isEmpty ? serviceName : hostId,
+            name: name,
+            hostId: hostId,
+            service: BonjourService(name: serviceName, type: serviceType, domain: serviceDomain),
+            fixedBaseURL: nil
+        )
     }
 
-    /// Resolves a Bonjour service to `http://<address>:<port>` by opening a connection to it
-    /// and reading the address the system chose. Returns nil when it cannot connect in time.
-    public func baseURL(for desktop: NearbyDesktop) async -> URL? {
-        if let fixed = desktop.fixedBaseURL { return fixed }
-        guard let endpoint = desktop.endpoint else { return nil }
-        return await Self.resolve(endpoint)
+    /// Every address the desktop advertises, as base URLs, best first (Tailscale, then other
+    /// IPv4, then IPv6). A desktop is often reachable on only some of them (a firewall may
+    /// block the LAN address while Tailscale works), so the caller tries them all.
+    public func baseURLs(for desktop: NearbyDesktop) async -> [URL] {
+        if let fixed = desktop.fixedBaseURL { return [fixed] }
+        guard let service = desktop.service else { return [] }
+        let resolved = await BonjourResolver().resolve(service)
+        return Self.rankedBaseURLs(addresses: resolved.addresses, port: resolved.port)
     }
 
-    nonisolated private static func resolve(_ endpoint: NWEndpoint, timeout: TimeInterval = 4) async -> URL? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<URL?, Never>) in
-            let connection = NWConnection(to: endpoint, using: .tcp)
-            let finished = ResolveOnce()
-            let finish: @Sendable (URL?) -> Void = { url in
-                guard finished.claim() else { return }
-                connection.cancel()
-                continuation.resume(returning: url)
-            }
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    finish(Self.url(from: connection.currentPath?.remoteEndpoint))
-                case .failed, .cancelled:
-                    finish(nil)
-                default:
-                    break
-                }
-            }
-            connection.start(queue: .global(qos: .userInitiated))
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { finish(nil) }
+    /// Orders addresses and drops ones a URL cannot use (IPv6 link-local needs a scope).
+    nonisolated static func rankedBaseURLs(addresses: [String], port: Int) -> [URL] {
+        func rank(_ address: String) -> Int {
+            if address.contains(":") { return 2 }
+            return isTailscale(address) ? 0 : 1
         }
+        var seen = Set<String>()
+        return addresses
+            .filter { !$0.lowercased().hasPrefix("fe80") && seen.insert($0).inserted }
+            .enumerated()
+            .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
+            .compactMap { PairingAddress.baseURL(from: $0.element, defaultPort: port) }
     }
 
-    nonisolated static func url(from endpoint: NWEndpoint?) -> URL? {
-        guard case .hostPort(let host, let port) = endpoint else { return nil }
-        let address: String
-        switch host {
-        case .ipv4(let v4):
-            address = "\(v4)"
-        case .ipv6(let v6):
-            // Drop a scope suffix such as "%en0": it is only meaningful on this device's stack
-            // and URL hosts cannot carry it reliably.
-            let text = "\(v6)"
-            address = "[\(text.split(separator: "%").first.map(String.init) ?? text)]"
-        case .name(let name, _):
-            address = name
-        @unknown default:
-            return nil
-        }
-        return URL(string: "http://\(address):\(port.rawValue)")
+    /// Tailscale hands out addresses from 100.64.0.0/10.
+    nonisolated static func isTailscale(_ ipv4: String) -> Bool {
+        let parts = ipv4.split(separator: ".").compactMap { Int($0) }
+        return parts.count == 4 && parts[0] == 100 && (64...127).contains(parts[1])
     }
 }
 
-/// Lets several callbacks race to finish one continuation exactly once.
-private final class ResolveOnce: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-    func claim() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if done { return false }
-        done = true
-        return true
+/// Resolves one Bonjour service to all of its addresses. `NetService` is deprecated, but it is
+/// the API that returns every address of a service; `NWConnection` only reports the one it
+/// happened to connect to.
+@MainActor
+private final class BonjourResolver: NSObject, @preconcurrency NetServiceDelegate {
+    private var continuation: CheckedContinuation<(addresses: [String], port: Int), Never>?
+    private var netService: NetService?
+
+    func resolve(_ service: BonjourService, timeout: TimeInterval = 4) async -> (addresses: [String], port: Int) {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            let netService = NetService(domain: service.domain, type: service.type, name: service.name)
+            netService.delegate = self
+            self.netService = netService
+            netService.schedule(in: .main, forMode: .common)
+            netService.resolve(withTimeout: timeout)
+        }
+    }
+
+    private func finish(addresses: [String], port: Int) {
+        guard let continuation else { return }
+        self.continuation = nil
+        netService?.stop()
+        netService?.delegate = nil
+        netService = nil
+        continuation.resume(returning: (addresses, port))
+    }
+
+    func netServiceDidResolveAddress(_ sender: NetService) {
+        let addresses = (sender.addresses ?? []).compactMap(Self.text(fromSockaddr:))
+        finish(addresses: addresses, port: sender.port)
+    }
+
+    func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
+        finish(addresses: [], port: 0)
+    }
+
+    nonisolated static func text(fromSockaddr data: Data) -> String? {
+        data.withUnsafeBytes { raw -> String? in
+            guard let base = raw.baseAddress, raw.count >= MemoryLayout<sockaddr>.size else { return nil }
+            let family = base.assumingMemoryBound(to: sockaddr.self).pointee.sa_family
+            var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+            if family == sa_family_t(AF_INET), raw.count >= MemoryLayout<sockaddr_in>.size {
+                var address = base.assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+                guard inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count)) != nil else { return nil }
+            } else if family == sa_family_t(AF_INET6), raw.count >= MemoryLayout<sockaddr_in6>.size {
+                var address = base.assumingMemoryBound(to: sockaddr_in6.self).pointee.sin6_addr
+                guard inet_ntop(AF_INET6, &address, &buffer, socklen_t(buffer.count)) != nil else { return nil }
+            } else {
+                return nil
+            }
+            return String(cString: buffer)
+        }
     }
 }

@@ -95,6 +95,21 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(PairingError.wrongCode(nil).errorDescription?.hasPrefix("That code didn’t work"), true)
     }
 
+    func testBonjourAddressesAreRankedTailscaleFirstAndLinkLocalIsDropped() {
+        let urls = DesktopBrowser.rankedBaseURLs(
+            addresses: ["192.168.0.134", "fe80::1c2:3d4:5e6:7f8", "100.76.24.95", "fd7a:115c:a1e0::5", "192.168.0.134"],
+            port: 47890
+        )
+        XCTAssertEqual(urls.map(\.absoluteString), [
+            "http://100.76.24.95:47890",
+            "http://192.168.0.134:47890",
+            "http://[fd7a:115c:a1e0::5]:47890",
+        ])
+        XCTAssertTrue(DesktopBrowser.isTailscale("100.64.0.1"))
+        XCTAssertFalse(DesktopBrowser.isTailscale("100.20.0.1"))
+        XCTAssertFalse(DesktopBrowser.isTailscale("192.168.0.3"))
+    }
+
     // MARK: Choosing an address
 
     func testPairingUsesTheBestRankedAddressThatAnswers() async throws {

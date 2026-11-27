@@ -271,12 +271,13 @@ public struct PairingView: View {
         workingLabel = "Finding \(desktop.name)…"
         errorMessage = nil
         Task {
-            guard let url = await browser.baseURL(for: desktop) else {
+            let urls = await browser.baseURLs(for: desktop)
+            guard !urls.isEmpty else {
                 isWorking = false
                 errorMessage = PairingError.unreachable.errorDescription
                 return
             }
-            await runPairing(candidates: [url], expectedHostId: desktop.hostId, code: code)
+            await runPairing(candidates: urls, expectedHostId: desktop.hostId, code: code)
         }
     }
 

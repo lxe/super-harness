@@ -1147,4 +1147,12 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(HoldThenMoveRecognizer.verdict(elapsed: 0.3, distance: 8), .drag)
         XCTAssertEqual(HoldThenMoveRecognizer.verdict(elapsed: 0.3, distance: 1), .wait)
     }
+
+    func testStatusGlyphWaitsBeforeShowingAProblem() {
+        // Just after the connection drops (as on return from the background) the glyph shows
+        // syncing; the warning appears only once the drop is confirmed.
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .offline("x"), isSyncing: false, offlineConfirmed: false), .syncing)
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .offline("x"), isSyncing: true, offlineConfirmed: true), .problem)
+        XCTAssertEqual(ConnectionStatusPill.glyph(health: .connected, isSyncing: false, offlineConfirmed: false), .settings)
+    }
 }

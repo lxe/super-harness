@@ -197,16 +197,30 @@ public struct ConnectionStatusPill: View {
         }
     }
 
-    /// A problem outranks syncing: while the host is unreachable the app keeps retrying, and
-    /// the warning should stay put instead of alternating with the sync arrows.
-    nonisolated public static func glyph(health: ConnectionHealth, isSyncing: Bool) -> Glyph {
-        if case .offline = health { return .problem }
+    /// How long the host must stay unreachable before the warning appears. Returning from the
+    /// background always starts with a dropped connection that is restored within a second or
+    /// two; the sync arrows cover that, so the warning does not flash.
+    public static let problemGrace: Duration = .seconds(4)
+
+    /// Set once the host has been unreachable for `problemGrace`.
+    @State private var offlineConfirmed = false
+
+    /// A confirmed problem outranks syncing: while the host is unreachable the app keeps
+    /// retrying, and the warning should stay put instead of alternating with the sync arrows.
+    /// Until the problem is confirmed, the app is reconnecting, which reads as syncing.
+    nonisolated public static func glyph(health: ConnectionHealth, isSyncing: Bool, offlineConfirmed: Bool = true) -> Glyph {
+        if case .offline = health { return offlineConfirmed ? .problem : .syncing }
         if isSyncing || health == .connecting { return .syncing }
         return .settings
     }
 
+    private var isOffline: Bool {
+        if case .offline = health { return true }
+        return false
+    }
+
     public var body: some View {
-        let glyph = Self.debugForcedGlyph ?? Self.glyph(health: health, isSyncing: isSyncing)
+        let glyph = Self.debugForcedGlyph ?? Self.glyph(health: health, isSyncing: isSyncing, offlineConfirmed: offlineConfirmed)
         Button(action: action) {
             ZStack {
                 if glyph == .settings {
@@ -228,6 +242,14 @@ public struct ConnectionStatusPill: View {
         .accessibilityLabel("Settings · \(accessibilityStatus(glyph))")
         .accessibilityIdentifier("header.status")
         .accessibilityValue(String(describing: glyph))
+        .task(id: isOffline) {
+            guard isOffline else {
+                offlineConfirmed = false
+                return
+            }
+            try? await Task.sleep(for: Self.problemGrace)
+            if !Task.isCancelled { offlineConfirmed = true }
+        }
     }
 
     /// UI checks set `SH_DEBUG_STATUS_GLYPH` to `syncing` or `problem` to show that state.

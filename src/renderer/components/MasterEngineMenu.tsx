@@ -134,7 +134,7 @@ export const MasterEngineMenu: React.FC<MasterEngineMenuProps> = ({ config, cata
           <MenuDivider />
 
           {controls.models.length > 6 && (
-            <div className="mb-1.5 flex items-center gap-2 px-3 h-8 rounded-[22px] bg-surface-rail shadow-[inset_0_1px_2px_rgba(0,0,0,0.30)] focus-within:ring-1 focus-within:ring-white/15 transition-all">
+            <div className="mx-0.5 mt-0.5 mb-2 flex items-center gap-2 px-3 h-8 rounded-[20px] bg-surface-code shadow-[inset_0_1px_2px_rgba(0,0,0,0.34)] focus-within:bg-surface-rail transition-colors">
               <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
               <input
                 type="text"

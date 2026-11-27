@@ -366,95 +366,108 @@ export function SegmentedControl<T extends string>({
                 )}
 
                 {/* 3. Working pulse (mirrors iOS SHRadialGauge):
-                    raised-cosine hue wave over empty track + additive soft halo + brightened usage arc */}
+                    single unified SVG so track swell, soft halo, and brightened arc ALWAYS mount together in 100% lockstep */}
                 {item.working && (() => {
                   const { trackPulse, brightPulse } = getGaugePulseGradients(palette.stroke);
                   const safeItemId = `${gaugeUid}-${String(item.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+                  const trackMaskId = `sh-track-mask-${safeItemId}`;
                   const arcMaskId = `sh-arc-mask-${safeItemId}`;
                   const haloMaskId = `sh-halo-mask-${safeItemId}`;
                   const haloBlurId = `sh-halo-blur-${safeItemId}`;
                   return (
-                    <>
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 36 36"
+                      overflow="visible"
+                      className="absolute inset-0 w-full h-full pointer-events-none"
+                    >
+                      <defs>
+                        <filter id={haloBlurId} x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur stdDeviation="1.5" />
+                        </filter>
+                        <mask id={trackMaskId} maskUnits="userSpaceOnUse" x="-6" y="-6" width="48" height="48">
+                          <circle
+                            cx="18"
+                            cy="18"
+                            r={GAUGE_RADIUS}
+                            fill="none"
+                            stroke="#fff"
+                            strokeWidth="3.0"
+                          />
+                        </mask>
+                        <mask id={arcMaskId} maskUnits="userSpaceOnUse" x="-6" y="-6" width="48" height="48">
+                          <circle
+                            cx="18"
+                            cy="18"
+                            r={GAUGE_RADIUS}
+                            fill="none"
+                            stroke="#fff"
+                            strokeWidth="3.0"
+                            strokeLinecap="round"
+                            strokeDasharray={GAUGE_CIRCUMFERENCE}
+                            strokeDashoffset={dashOffset}
+                            transform="rotate(-90 18 18)"
+                          />
+                        </mask>
+                        <mask id={haloMaskId} maskUnits="userSpaceOnUse" x="-8" y="-8" width="52" height="52">
+                          <circle
+                            cx="18"
+                            cy="18"
+                            r={GAUGE_RADIUS}
+                            fill="none"
+                            stroke="#fff"
+                            strokeWidth="6.6"
+                            strokeLinecap="round"
+                            strokeDasharray={GAUGE_CIRCUMFERENCE}
+                            strokeDashoffset={dashOffset}
+                            transform="rotate(-90 18 18)"
+                            filter={`url(#${haloBlurId})`}
+                          />
+                        </mask>
+                      </defs>
+
                       {/* Faint hue-matched swell travelling round the track */}
-                      <span
-                        aria-hidden="true"
-                        className="sh-gauge-aurora absolute inset-[1px] rounded-full pointer-events-none"
+                      <g mask={`url(#${trackMaskId})`}>
+                        <foreignObject x="0" y="0" width="36" height="36">
+                          <div
+                            className="sh-gauge-aurora w-full h-full rounded-full"
+                            style={{ background: trackPulse }}
+                          />
+                        </foreignObject>
+                      </g>
+
+                      {/* Soft additive halo in the brightened hue, confined to the usage arc */}
+                      <g
+                        mask={`url(#${haloMaskId})`}
                         style={{
-                          background: trackPulse,
-                          WebkitMaskImage:
-                            'radial-gradient(farthest-side, transparent calc(100% - 3.0px), #000 calc(100% - 2.6px))',
-                          maskImage:
-                            'radial-gradient(farthest-side, transparent calc(100% - 3.0px), #000 calc(100% - 2.6px))',
+                          mixBlendMode: 'plus-lighter',
+                          opacity: displayPct > 0 ? 1 : 0,
                         }}
-                      />
+                      >
+                        <foreignObject x="-4" y="-4" width="44" height="44">
+                          <div
+                            className="sh-gauge-aurora w-full h-full rounded-full"
+                            style={{
+                              background: brightPulse,
+                              filter: 'blur(1.8px)',
+                            }}
+                          />
+                        </foreignObject>
+                      </g>
 
-                      {displayPct > 0 && (
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 36 36"
-                          overflow="visible"
-                          className="absolute inset-0 w-full h-full pointer-events-none"
-                        >
-                          <defs>
-                            <filter id={haloBlurId} x="-50%" y="-50%" width="200%" height="200%">
-                              <feGaussianBlur stdDeviation="1.5" />
-                            </filter>
-                            <mask id={arcMaskId} maskUnits="userSpaceOnUse" x="-6" y="-6" width="48" height="48">
-                              <circle
-                                cx="18"
-                                cy="18"
-                                r={GAUGE_RADIUS}
-                                fill="none"
-                                stroke="#fff"
-                                strokeWidth="3.0"
-                                strokeLinecap="round"
-                                strokeDasharray={GAUGE_CIRCUMFERENCE}
-                                strokeDashoffset={dashOffset}
-                                transform="rotate(-90 18 18)"
-                              />
-                            </mask>
-                            <mask id={haloMaskId} maskUnits="userSpaceOnUse" x="-8" y="-8" width="52" height="52">
-                              <circle
-                                cx="18"
-                                cy="18"
-                                r={GAUGE_RADIUS}
-                                fill="none"
-                                stroke="#fff"
-                                strokeWidth="6.6"
-                                strokeLinecap="round"
-                                strokeDasharray={GAUGE_CIRCUMFERENCE}
-                                strokeDashoffset={dashOffset}
-                                transform="rotate(-90 18 18)"
-                                filter={`url(#${haloBlurId})`}
-                              />
-                            </mask>
-                          </defs>
-
-                          {/* Soft additive halo in the brightened hue, confined to the usage arc */}
-                          <g mask={`url(#${haloMaskId})`} style={{ mixBlendMode: 'plus-lighter' }}>
-                            <foreignObject x="-4" y="-4" width="44" height="44">
-                              <div
-                                className="sh-gauge-aurora w-full h-full rounded-full"
-                                style={{
-                                  background: brightPulse,
-                                  filter: 'blur(1.8px)',
-                                }}
-                              />
-                            </foreignObject>
-                          </g>
-
-                          {/* Brightened usage arc itself */}
-                          <g mask={`url(#${arcMaskId})`}>
-                            <foreignObject x="0" y="0" width="36" height="36">
-                              <div
-                                className="sh-gauge-aurora w-full h-full rounded-full"
-                                style={{ background: brightPulse }}
-                              />
-                            </foreignObject>
-                          </g>
-                        </svg>
-                      )}
-                    </>
+                      {/* Brightened usage arc itself */}
+                      <g
+                        mask={`url(#${arcMaskId})`}
+                        style={{ opacity: displayPct > 0 ? 1 : 0 }}
+                      >
+                        <foreignObject x="0" y="0" width="36" height="36">
+                          <div
+                            className="sh-gauge-aurora w-full h-full rounded-full"
+                            style={{ background: brightPulse }}
+                          />
+                        </foreignObject>
+                      </g>
+                    </svg>
                   );
                 })()}
 

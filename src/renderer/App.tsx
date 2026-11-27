@@ -86,10 +86,13 @@ function loadStoredDraftConversations(): DraftConversation[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (d): d is DraftConversation =>
-        Boolean(d && typeof d === 'object' && typeof d.id === 'string' && typeof d.prompt === 'string')
-    );
+    return parsed
+      .filter(
+        (d): d is DraftConversation =>
+          Boolean(d && typeof d === 'object' && typeof d.id === 'string' && typeof d.prompt === 'string')
+      )
+      // New Claude sessions always run in tmux; upgrade drafts saved with the old headless CLI mode.
+      .map((d) => (d.harness === 'claude-cli' ? { ...d, harness: 'claude-tmux' as const } : d));
   } catch {
     return [];
   }
@@ -1011,8 +1014,7 @@ export const App: React.FC = () => {
             // ignore
           }
         }}
-        title="Drag to resize sidebar (double-click to reset)"
-        className={`w-1.5 -ml-0.5 -mr-1 shrink-0 cursor-col-resize transition-colors z-20 ${
+        className={`w-1.5 -ml-0.5 -mr-1 shrink-0 cursor-col-resize transition-colors z-10 ${
           resizingSidebar ? 'bg-zinc-400/50' : 'bg-transparent hover:bg-white/[0.14]'
         }`}
       />

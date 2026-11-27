@@ -88,7 +88,7 @@ public struct RootView: View {
 
     private var splitLayout: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SessionListView(store: store) { sessionId in
+            SessionListView(store: store, keepsSelectionHighlight: true) { sessionId in
                 store.selectSession(sessionId)
             }
             .navigationSplitViewColumnWidth(min: 310, ideal: 350, max: 420)

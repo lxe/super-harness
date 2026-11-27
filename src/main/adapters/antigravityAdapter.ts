@@ -1417,8 +1417,13 @@ export function createAntigravityDriver(): HarnessDriver {
       if (!bin) return { ok: false, error: 'agy CLI not found' };
       if (action === 'start_remote' || action === 'stop_remote') {
         const sub = action === 'start_remote' ? 'start' : 'stop';
+        const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
         const { stdout, stderr } = await execFileAsync(bin, ['remote-control', sub], {
           timeout: 10000,
+          env: {
+            ...process.env,
+            XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`,
+          },
         });
         invalidateAgyRemoteStatusCache();
         ctx.triggerRefresh(1000);

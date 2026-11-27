@@ -6,10 +6,10 @@ import {
   HelpCircle,
   Hourglass,
   Laptop,
+  ListFilter,
   MoreHorizontal,
   Pin,
   Search,
-  SlidersHorizontal,
   SquarePen,
   X,
 } from 'lucide-react';
@@ -1139,7 +1139,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
               active={showFilterMenu || filter !== 'all'}
               onClick={() => setShowFilterMenu((v) => !v)}
             >
-              <SlidersHorizontal className="w-4 h-4" strokeWidth={1.75} />
+              <ListFilter className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
           </span>
           <IconButton

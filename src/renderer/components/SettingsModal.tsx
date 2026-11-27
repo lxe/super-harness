@@ -385,18 +385,12 @@ export const SettingsModal: React.FC<Props> = ({
           </nav>
 
           {/* Undulating porcelain sculptural mark in the lower sidebar */}
-          <div className="px-4 pb-6 pt-3 flex items-center justify-center select-none">
-            <div className="relative group/mark p-3 rounded-2xl transition-colors">
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-2 rounded-full bg-indigo-300/[0.06] blur-xl opacity-70 group-hover/mark:opacity-100 transition-opacity duration-500"
-              />
-              <SuperHarnessMark
-                size={68}
-                animated
-                className="relative text-ink-secondary/75 group-hover/mark:text-ink-primary transition-colors duration-300"
-              />
-            </div>
+          <div className="px-4 pb-8 pt-4 flex items-center justify-center select-none">
+            <SuperHarnessMark
+              size={108}
+              animated
+              className="text-ink-secondary/70 hover:text-ink-primary transition-colors duration-300"
+            />
           </div>
         </aside>
 

@@ -1740,8 +1740,13 @@ struct SHModelEffortMenu: View, Equatable {
         }
     }
     var body: some View {
-        let pillTitle = hasActiveDraftSession ? frozenTitle : title
-        let pillEffort = hasActiveDraftSession ? frozenEffortLabel : effortLabel
+        // While the popover is open the chip shows the pending pick and thinking level; they are
+        // committed when the popover closes.
+        let pickedLabel = pendingPickedModelId.flatMap { id in frozenModels.first(where: { $0.id == id })?.label }
+        let pillTitle = hasActiveDraftSession ? (pickedLabel ?? frozenTitle) : title
+        let pillEffort = hasActiveDraftSession
+            ? (draftEffort.map(SHThinkingEffortSlider.displayName(for:)) ?? frozenEffortLabel)
+            : effortLabel
 
         Button {
             #if canImport(UIKit)
@@ -1775,6 +1780,7 @@ struct SHModelEffortMenu: View, Equatable {
         }
         .buttonStyle(SHControlPressStyle(fill: SHColor.surfaceBubble, shape: Capsule(), isOn: isPopoverPresented))
         .accessibilityLabel(accessibilityText)
+        .accessibilityValue([pillTitle, pillEffort ?? ""].filter { !$0.isEmpty }.joined(separator: " "))
         .accessibilityIdentifier(identifier)
         .popover(
             isPresented: $isPopoverPresented,

@@ -323,4 +323,44 @@ final class LiveE2ETests: XCTestCase {
         expectation(for: left, evaluatedWith: hero)
         waitForExpectations(timeout: 6.0)
     }
+
+    /// Regression: picking another model and thinking level in the popover, then closing it,
+    /// must switch the chat to them (the model chip shows the new pair).
+    func testModelPopoverSwitchesModelAndEffort() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["SH_CONNECTION_MODE"] = "demo"
+        app.launchEnvironment["SH_INITIAL_SESSION_ID"] = "codex:cx-control-server"
+        app.launch()
+
+        let chip = app.buttons["composer.model"].firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 8))
+        let before = chip.value as? String ?? ""
+        chip.tap()
+
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "model.option."))
+        XCTAssertTrue(options.firstMatch.waitForExistence(timeout: 3))
+        // Pick a model the chip does not show yet.
+        var picked: XCUIElement?
+        for i in 0..<options.count {
+            let o = options.element(boundBy: i)
+            if !before.contains(o.label) { picked = o; break }
+        }
+        let target = try XCTUnwrap(picked, "a model other than the current one")
+        let targetLabel = target.label
+        target.tap()
+
+        // The popover stays open and the chip already shows the pick.
+        let low = app.buttons["thinking.stop.low"].firstMatch
+        XCTAssertTrue(low.waitForExistence(timeout: 2), "slider stays visible after picking a model")
+        low.tap()
+        XCTAssertTrue(chip.value as? String == "\(targetLabel) Low" || (chip.value as? String ?? "").hasPrefix(targetLabel),
+                      "chip follows the pick while the popover is open, got \(chip.value ?? "nil")")
+
+        // Close by tapping the model button again; the pick is committed.
+        chip.tap()
+        let committed = NSPredicate(format: "value BEGINSWITH %@ AND value CONTAINS %@", targetLabel, "Low")
+        expectation(for: committed, evaluatedWith: chip)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(low.exists, "popover closed")
+    }
 }

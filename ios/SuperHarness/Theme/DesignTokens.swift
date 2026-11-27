@@ -425,21 +425,23 @@ public extension View {
     /// Background for a small control while it is pressed or switched on: pressed into the
     /// panel, with a soft inner shadow along the top and no lift.
     func shPressedControl<S: InsettableShape>(_ fill: Color, in shape: S) -> some View {
+        // The raised control turned inside out: its drop shadow becomes a soft shadow inside the
+        // top edge, its top highlight becomes a faint light line along the bottom, and the fill
+        // dims a touch.
         self
             .background(
-                // A shade darker than the raised fill, with a clear shadow cast under the top edge,
-                // so the control reads as pushed into the panel rather than flat.
                 shape.fill(
-                    SHColor.surfaceCode
-                        .shadow(.inner(color: .black.opacity(0.55), radius: 2, y: 1.5))
+                    fill
+                        .shadow(.inner(color: .black.opacity(0.18), radius: 1.25, y: 0.75))
                 )
+                .overlay(shape.fill(Color.black.opacity(0.06)))
             )
             .overlay {
                 shape
                     .strokeBorder(
                         LinearGradient(
-                            colors: [.black.opacity(0.25), .white.opacity(0), .white.opacity(0.06)],
-                            startPoint: .top,
+                            colors: [.white.opacity(0), .white.opacity(0.055)],
+                            startPoint: .center,
                             endPoint: .bottom
                         ),
                         lineWidth: 0.5

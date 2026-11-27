@@ -3,13 +3,13 @@
 > [!WARNING]
 > **Alpha software for personal use.** Super Harness is an active personal project built for my own Linux + macOS + iOS multi-agent workflow. Expect breaking changes, rough edges, and no stability guarantees.
 
-One calm desktop app and native iOS companion to monitor, organize, and drive all your local and remote AI coding harnesses side by side.
+A desktop app and native iOS companion to drive all your local and remote AI coding harnesses side by side.
 
 <p align="center">
   <img src="./docs/screenshots/desktop-app.png" alt="Super Harness Desktop App (2-pane Split View)" width="100%" />
 </p>
 
-## Mobile Companion (iOS — Demo Mode)
+## iPhoneApp
 
 <p align="center">
   <img src="./docs/screenshots/ios-sessions-demo.png" alt="Super Harness iOS Session List (Demo Mode)" width="34%" />

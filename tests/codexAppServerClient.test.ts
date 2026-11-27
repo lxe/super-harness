@@ -150,3 +150,34 @@ describe('CodexAppServerClient.handleMessage routing', () => {
     ).toBe(false);
   });
 });
+
+describe('WsFrameDecoder chunked large frames', () => {
+  it('reassembles a 3 MB frame split into 64 KB chunks and a following small frame', async () => {
+    const { WsFrameDecoder } = await import('../src/main/services/codexAppServerClient');
+    const payload = Buffer.alloc(3 * 1024 * 1024, 0x61);
+    const header = Buffer.alloc(10);
+    header[0] = 0x81; // FIN + text
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(payload.length), 2);
+    const small = Buffer.from([0x81, 0x02, 0x68, 0x69]); // "hi"
+    const wire = Buffer.concat([header, payload, small]);
+    const dec = new WsFrameDecoder();
+    const frames = [];
+    for (let i = 0; i < wire.length; i += 65536) frames.push(...dec.push(wire.subarray(i, i + 65536)));
+    expect(frames).toHaveLength(2);
+    expect(frames[0].payload.length).toBe(payload.length);
+    expect(frames[0].payload.equals(payload)).toBe(true);
+    expect(frames[1].payload.toString()).toBe('hi');
+  });
+
+  it('handles a header split across chunks one byte at a time', async () => {
+    const { WsFrameDecoder } = await import('../src/main/services/codexAppServerClient');
+    const body = Buffer.alloc(300, 0x62);
+    const wire = Buffer.concat([Buffer.from([0x81, 126, 0x01, 0x2c]), body]);
+    const dec = new WsFrameDecoder();
+    const frames = [];
+    for (const byte of wire) frames.push(...dec.push(Buffer.from([byte])));
+    expect(frames).toHaveLength(1);
+    expect(frames[0].payload.equals(body)).toBe(true);
+  });
+});

@@ -58,12 +58,34 @@ export class WsFrameDecoder {
   private buf: Buffer = Buffer.alloc(0);
   private fragOpcode: number | null = null;
   private fragChunks: Buffer[] = [];
+  /**
+   * Chunks received since the last parse attempt, joined only once `need`
+   * bytes are available. Joining on every chunk copied the whole partial frame
+   * each time: a multi-MB Codex frame arriving in 64 KB chunks cost hundreds
+   * of MB of copying and stalled the main process for ~250 ms.
+   */
+  private pending: Buffer[] = [];
+  private pendingLen = 0;
+  private need = 0;
 
   push(chunk: Buffer): DecodedWsFrame[] {
-    this.buf = this.buf.length > 0 ? Buffer.concat([this.buf, chunk]) : chunk;
+    this.pending.push(chunk);
+    this.pendingLen += chunk.length;
+    if (this.buf.length + this.pendingLen < this.need) return [];
+    this.buf =
+      this.buf.length === 0 && this.pending.length === 1
+        ? this.pending[0]
+        : Buffer.concat([this.buf, ...this.pending], this.buf.length + this.pendingLen);
+    this.pending = [];
+    this.pendingLen = 0;
+    this.need = 0;
     const frames: DecodedWsFrame[] = [];
 
-    while (this.buf.length >= 2) {
+    while (true) {
+      if (this.buf.length < 2) {
+        this.need = 2;
+        break;
+      }
       const b0 = this.buf[0];
       const b1 = this.buf[1];
       const fin = (b0 & 0x80) !== 0;
@@ -73,11 +95,17 @@ export class WsFrameDecoder {
       let offset = 2;
 
       if (payloadLen === 126) {
-        if (this.buf.length < 4) break;
+        if (this.buf.length < 4) {
+          this.need = 4;
+          break;
+        }
         payloadLen = this.buf.readUInt16BE(2);
         offset = 4;
       } else if (payloadLen === 127) {
-        if (this.buf.length < 10) break;
+        if (this.buf.length < 10) {
+          this.need = 10;
+          break;
+        }
         const bigLen = this.buf.readBigUInt64BE(2);
         if (bigLen > BigInt(64 * 1024 * 1024)) {
           throw new Error(`WebSocket frame too large: ${bigLen.toString()}`);
@@ -88,7 +116,10 @@ export class WsFrameDecoder {
 
       const maskLen = masked ? 4 : 0;
       const totalLen = offset + maskLen + payloadLen;
-      if (this.buf.length < totalLen) break;
+      if (this.buf.length < totalLen) {
+        this.need = totalLen;
+        break;
+      }
 
       let payload = Buffer.from(this.buf.subarray(offset + maskLen, totalLen));
       if (masked) {

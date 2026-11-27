@@ -1834,16 +1834,18 @@ struct SHModelEffortMenu: View, Equatable {
                                     #if canImport(UIKit)
                                     UISelectionFeedbackGenerator().selectionChanged()
                                     #endif
+                                    // The popover stays open so the slider can still be set for the new
+                                    // model; both are committed when the popover closes.
                                     pendingPickedModelId = item.id
-                                    isPopoverPresented = false
                                 } label: {
+                                    let isChecked = (pendingPickedModelId ?? initialModelId) == item.id
                                     HStack(spacing: 10) {
                                         Text(item.label)
-                                            .font(.system(size: 14.5, weight: item.isSelected ? .semibold : .regular))
-                                            .foregroundStyle(item.isSelected ? SHColor.inkPrimary : SHColor.inkSecondary)
+                                            .font(.system(size: 14.5, weight: isChecked ? .semibold : .regular))
+                                            .foregroundStyle(isChecked ? SHColor.inkPrimary : SHColor.inkSecondary)
                                             .lineLimit(1)
                                         Spacer(minLength: 8)
-                                        if item.isSelected {
+                                        if isChecked {
                                             Image(systemName: "checkmark")
                                                 .font(.system(size: 13, weight: .semibold))
                                                 .foregroundStyle(accentColor)

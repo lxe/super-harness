@@ -7,6 +7,12 @@ public struct LiveStepsBarView: View {
     public let accentColor: Color
 
     @State private var isExpanded: Bool = false
+    /// The title on screen. It follows `titleText` only once a new value has held for a moment,
+    /// so a command that runs for a second does not flash "Running", its name, then "Running".
+    @State private var shownTitle: String?
+
+    /// How long a new title must hold before it replaces the one on screen.
+    static let titleSettleSeconds: Double = 1.2
 
     public init(activity: LiveActivityState, accentColor: Color) {
         self.activity = activity
@@ -39,12 +45,24 @@ public struct LiveStepsBarView: View {
     }
 
     public var body: some View {
+        content
+            .task(id: titleText) {
+                guard shownTitle != nil else {
+                    shownTitle = titleText
+                    return
+                }
+                try? await Task.sleep(nanoseconds: UInt64(Self.titleSettleSeconds * 1_000_000_000))
+                if !Task.isCancelled { shownTitle = titleText }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: SHLayout.itemGap) {
             SHInlineDisclosureRow(
                 // Matches the desktop's running line: a terminal glyph in the harness colour
                 // and a shimmering title while the thread works.
                 icon: "apple.terminal",
-                title: titleText,
+                title: shownTitle ?? titleText,
                 trailingBadge: progressBadge,
                 tint: isActivelyWorking ? accentColor : SHColor.inkMuted,
                 isShimmering: isActivelyWorking,

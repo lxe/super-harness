@@ -64,6 +64,7 @@ public struct ComposerView: View {
     @State private var pendingSendMode: SendMode?
     /// Bumped when dictated text lands, so the text view scrolls to its end.
     @State private var scrollToEndToken: Int = 0
+    @State private var focusInputToken: Int = 0
 
     /// Unified initializer shared by both live chat threads and the New Thread draft view.
     public init(
@@ -422,16 +423,26 @@ public struct ComposerView: View {
                     placeholder: placeholder,
                     isLocked: dictation.state == .transcribing,
                     scrollToEndToken: scrollToEndToken,
+                    focusToken: focusInputToken,
                     onPasteMedia: { handleClipboardPaste() }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 19)
                 .padding(.bottom, 17)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    focusInputToken += 1
+                }
 
                 HStack(spacing: 8) {
                     attachMenuButton
                     combinedModelEffortPill
-                    Spacer(minLength: 4)
+                    Color.clear
+                        .frame(minWidth: 4, maxWidth: .infinity, minHeight: Self.controlSize, maxHeight: Self.controlSize)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            focusInputToken += 1
+                        }
                     if onTranscribeAudio != nil {
                         micButton
                     }
@@ -1100,6 +1111,7 @@ private struct SHPasteableTextInput: View {
     /// While a transcription is in flight the text cannot be edited and a dot spinner shows.
     var isLocked: Bool = false
     var scrollToEndToken: Int = 0
+    var focusToken: Int = 0
     let onPasteMedia: () -> Void
     @State private var measuredHeight: CGFloat = 22
 
@@ -1120,6 +1132,7 @@ private struct SHPasteableTextInput: View {
                     measuredHeight: $measuredHeight,
                     isLocked: isLocked,
                     scrollToEndToken: scrollToEndToken,
+                    focusToken: focusToken,
                     onPasteMedia: onPasteMedia
                 )
                 .frame(height: measuredHeight)
@@ -1149,6 +1162,7 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
     @Binding var measuredHeight: CGFloat
     var isLocked: Bool = false
     var scrollToEndToken: Int = 0
+    var focusToken: Int = 0
     let onPasteMedia: () -> Void
 
     private static let minHeight: CGFloat = 22
@@ -1183,6 +1197,14 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
             uiView.text = text
         }
         recalcHeight(uiView)
+        if context.coordinator.lastFocusToken != focusToken {
+            context.coordinator.lastFocusToken = focusToken
+            if !isLocked && !uiView.isFirstResponder {
+                DispatchQueue.main.async {
+                    uiView.becomeFirstResponder()
+                }
+            }
+        }
         if context.coordinator.lastScrollToEndToken != scrollToEndToken {
             context.coordinator.lastScrollToEndToken = scrollToEndToken
             // After the layout pass that sizes the grown text, put the caret at the end and show it.
@@ -1225,10 +1247,12 @@ private struct SHPasteableTextViewRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: SHPasteableTextViewRepresentable
         var lastScrollToEndToken: Int
+        var lastFocusToken: Int
 
         init(_ parent: SHPasteableTextViewRepresentable) {
             self.parent = parent
             self.lastScrollToEndToken = parent.scrollToEndToken
+            self.lastFocusToken = parent.focusToken
         }
 
         /// Typing is refused while a transcription is in flight; the keyboard stays up.

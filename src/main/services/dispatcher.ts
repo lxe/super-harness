@@ -29,6 +29,18 @@ function harnessGroupForStartRequest(harness: StartSessionRequest['harness']): H
  */
 export class HarnessDispatcher {
   private activeRuns = new Map<string, ChildProcess>();
+  /** Messages waiting for their session's running turn to end (a steer never stops a turn). */
+  private held: Array<{
+    sessionId: string;
+    prompt: string;
+    attachments?: ImageAttachment[];
+    heldAt: number;
+    idleChecks: number;
+  }> = [];
+  private holdTimer: ReturnType<typeof setInterval> | null = null;
+  /** How often held messages are checked, and how long one may wait. */
+  static holdPollMs = 2000;
+  static holdMaxMs = 45 * 60_000;
 
   constructor(
     private readonly registry: HarnessRegistry,
@@ -120,6 +132,11 @@ export class HarnessDispatcher {
       ({ prompt, attachments } = moveFileAttachmentsIntoPrompt(prompt, attachments));
     }
     const res = await driver.sendMessage(session, prompt, attachments, this.createContext(), opts);
+    if (!res.ok && res.holdUntilIdle) {
+      this.hold(sessionId, prompt, attachments);
+      console.log(`[dispatcher] held session=${sessionId} until its turn ends (${res.error || 'mid-turn'})`);
+      return { ok: true, dispatchedVia: 'held until the current turn ends' };
+    }
     if (!res.ok) {
       console.error(
         `[dispatcher] sendMessage failed session=${sessionId} harness=${session.harnessGroup} force=${Boolean(opts?.force)}: ${res.error || 'unknown error'}`
@@ -130,6 +147,51 @@ export class HarnessDispatcher {
       );
     }
     return res;
+  }
+
+  /** Holds a message until its session is idle, then sends it as a normal message. */
+  private hold(sessionId: string, prompt: string, attachments?: ImageAttachment[]): void {
+    this.held.push({ sessionId, prompt, attachments, heldAt: Date.now(), idleChecks: 0 });
+    if (!this.holdTimer) {
+      this.holdTimer = setInterval(() => void this.flushHeld(), HarnessDispatcher.holdPollMs);
+      this.holdTimer.unref?.();
+    }
+  }
+
+  /** Sends held messages whose session has been idle for two checks in a row, oldest first. */
+  async flushHeld(): Promise<void> {
+    const pending = this.held;
+    this.held = [];
+    const sentThisRound = new Set<string>();
+    for (const item of pending) {
+      if (Date.now() - item.heldAt > HarnessDispatcher.holdMaxMs) {
+        console.error(`[dispatcher] dropped a held message for ${item.sessionId}: its turn never ended`);
+        continue;
+      }
+      const session = this.registry.getSession(item.sessionId);
+      const busy = !session || session.status === 'running' || sentThisRound.has(item.sessionId);
+      item.idleChecks = busy ? 0 : item.idleChecks + 1;
+      if (item.idleChecks < 2) {
+        this.held.push(item);
+        continue;
+      }
+      const driver = this.registry.getDriver(session!.harnessGroup as HarnessGroup);
+      if (!driver) continue;
+      const res = await driver.sendMessage(session!, item.prompt, item.attachments, this.createContext(), {
+        force: false,
+      });
+      if (!res.ok && res.holdUntilIdle) {
+        item.idleChecks = 0;
+        this.held.push(item);
+        continue;
+      }
+      sentThisRound.add(item.sessionId);
+      console.log(`[dispatcher] sent held message session=${item.sessionId} ok=${res.ok}${res.error ? ` error=${res.error}` : ''}`);
+    }
+    if (this.held.length === 0 && this.holdTimer) {
+      clearInterval(this.holdTimer);
+      this.holdTimer = null;
+    }
   }
 
   async queueToSession(

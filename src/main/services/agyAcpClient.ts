@@ -89,6 +89,10 @@ interface ActivePromptRun {
  * conversations (`~/.gemini/antigravity-cli`), including native multimodal image blocks
  * and live `session/cancel`.
  */
+
+/** The conversation is mid-turn; the message should be held until the turn ends. */
+export class AgentTurnActiveError extends Error {}
+
 class AcpConnection {
   private proc: ChildProcess | null = null;
   private initialized = false;
@@ -338,20 +342,19 @@ class AcpConnection {
     model?: string,
     force = false
   ): Promise<void> {
+    // A running turn is never cancelled to make room for a message (a steer never stops a
+    // turn): the caller holds the message and sends it when the turn ends.
+    void force;
     if (this.activeRuns.has(nativeSessionId)) {
-      if (force) {
-        await this.cancel(nativeSessionId);
-      } else {
-        throw new Error(
-          'This Antigravity conversation is already running a turn in Superharness. Wait for it to finish or queue your message.'
-        );
-      }
+      throw new AgentTurnActiveError(
+        'This Antigravity conversation is mid-turn in Superharness; the message is held until it ends.'
+      );
     }
 
     const transcriptPath = this.getTranscriptPath(nativeSessionId);
-    if (!force && isExternalAntigravityTurnActive(transcriptPath)) {
-      throw new Error(
-        'Antigravity Desktop is currently running a turn on this conversation. Wait for it to finish before sending from Superharness so the conversation does not fork.'
+    if (isExternalAntigravityTurnActive(transcriptPath)) {
+      throw new AgentTurnActiveError(
+        'Antigravity Desktop is mid-turn on this conversation; the message is held until it ends so the conversation does not fork.'
       );
     }
 

@@ -2772,8 +2772,12 @@ export function createClaudeDriver(): HarnessDriver {
       if (decision.action === 'tmux') {
         return sendViaTmux(decision.tmuxTarget);
       }
-      if (decision.action === 'block' && !opts?.force) {
-        return { ok: false, error: decision.reason };
+      if (decision.action === 'block') {
+        // Another Claude (the Desktop app or a terminal) is running this chat. A plain send is
+        // refused; a steer is held until that turn ends, never forced into a second process.
+        return opts?.force
+          ? { ok: false, holdUntilIdle: true, error: decision.reason }
+          : { ok: false, error: decision.reason };
       }
       // Nothing owns this chat right now, but it last ran in tmux (e.g. before a reboot):
       // bring it back in tmux rather than answering through a headless worker.
@@ -2787,9 +2791,8 @@ export function createClaudeDriver(): HarnessDriver {
           return reviveInTmux(rec);
         }
       }
-      if (opts?.force && streamPool.hasActiveTurn(session.id)) {
-        streamPool.abort(session.id, ctx.emitStream);
-      }
+      // A steer never stops the running turn. The background CLI cannot take a message
+      // mid-turn, so sendTurn holds it in the worker's queue and sends it when the turn ends.
 
       const cwd = fs.existsSync(session.cwd) ? session.cwd : os.homedir();
       const runId = crypto.randomBytes(6).toString('hex');

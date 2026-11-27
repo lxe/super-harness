@@ -20,7 +20,7 @@ import type {
   UnifiedMessage,
   UnifiedSession,
 } from '../../shared/types';
-import { AgyAcpPool } from '../services/agyAcpClient';
+import { AgentTurnActiveError, AgyAcpPool } from '../services/agyAcpClient';
 import { AntigravityLsClient } from '../services/antigravityLsClient';
 import { RemoteAntigravityMirror } from './remoteAntigravity';
 import { querySqliteReadOnly } from '../utils/sqlite';
@@ -1441,6 +1441,9 @@ export function createAntigravityDriver(): HarnessDriver {
               : 'Antigravity CLI (ACP cold resume)',
         };
       } catch (err) {
+        if (err instanceof AgentTurnActiveError) {
+          return { ok: false, holdUntilIdle: true, error: err.message };
+        }
         return {
           ok: false,
           error: err instanceof Error ? err.message : String(err),

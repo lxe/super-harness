@@ -621,6 +621,11 @@ export interface SendMessageResult {
   error?: string;
   dispatchedVia?: string;
   runId?: string;
+  /**
+   * The session is mid-turn and the harness cannot take a message without stopping it. The
+   * dispatcher then holds the message and sends it when the turn ends; a steer never stops a turn.
+   */
+  holdUntilIdle?: boolean;
 }
 
 export interface StreamEvent {

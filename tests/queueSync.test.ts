@@ -191,10 +191,10 @@ describe('Persistent Superharness queue storage', () => {
       'void dispatchMessageNow(item.text, item.attachments ?? [], { force: true });'
     );
     expect(paneSrc).toContain('if (!opts?.force && isBusyDispatchError(errText))');
-    expect(acpSrc).toContain('if (!force && isExternalAntigravityTurnActive(transcriptPath))');
+    expect(acpSrc).toContain('if (isExternalAntigravityTurnActive(transcriptPath))');
     expect(codexClientSrc).toContain("'turn/steer'");
     expect(codexAdapterSrc).toContain('appServer.steerTurn(session.nativeId, prompt, attachments)');
-    expect(claudeAdapterSrc).toContain("if (decision.action === 'block' && !opts?.force)");
+    expect(claudeAdapterSrc).toContain("if (decision.action === 'block') {");
   });
 
   it('clears canceled Antigravity background tasks and avoids stale transcript-cache queue deadlocks', () => {

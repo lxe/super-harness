@@ -1450,8 +1450,9 @@ export function createMuseDriver(): HarnessDriver {
             ctx.triggerRefresh(300);
             return { ok: true, runId, dispatchedVia: 'Muse MSP turn/steer' };
           }
+          // A steer never stops the running turn: hold the message until it ends.
           if (client.hasActiveTurn(session.nativeId)) {
-            await client.interruptSession(session.nativeId);
+            return { ok: false, holdUntilIdle: true, error: 'Muse is mid-turn; holding the message until it ends.' };
           }
         }
         if (session.model?.trim()) {

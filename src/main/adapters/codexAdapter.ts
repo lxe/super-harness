@@ -1363,7 +1363,17 @@ export function createCodexDriver(): HarnessDriver {
           ctx.triggerRefresh(300);
           return { ok: true, runId, dispatchedVia: 'Codex live steer' };
         }
-        await appServer.interruptTurn(session.nativeId);
+        // A steer never stops the running turn: when Codex can't take it live, it goes into
+        // Codex's own queue and runs after the turn.
+        if (appServer.hasActiveTurn?.(session.nativeId)) {
+          try {
+            await appServer.queueAdd(session.nativeId, prompt, attachments);
+            ctx.triggerRefresh(150);
+            return { ok: true, runId, dispatchedVia: 'Codex queue (turn still running)' };
+          } catch {
+            return { ok: false, holdUntilIdle: true, error: 'Codex is mid-turn; holding the message until it ends.' };
+          }
+        }
       }
 
       try {

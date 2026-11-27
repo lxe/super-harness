@@ -994,7 +994,6 @@ private struct HarnessSwitcherStrip: View {
         var x: CGFloat
     }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drag: DragState?
     /// Lifting the finger at the end of a drag also ends a touch on the gauge's button; taps
     /// are ignored until this time so a reorder does not change the selected harness.
@@ -1003,12 +1002,6 @@ private struct HarnessSwitcherStrip: View {
     @State private var shortcutsHarness: HarnessGroup?
     /// How far the dock follows a sideways swipe that switches machines.
     @State private var machineSwipeOffset: CGFloat = 0
-    /// True while the selection is travelling to another gauge: it is drawn as a clear glass
-    /// lens, larger than a cell, and settles into the dark resting capsule when it arrives.
-    @State private var selectionIsTravelling = false
-    @State private var selectionSettleTask: Task<Void, Never>?
-    /// The slot the selection last sat in, so it fades out in place when nothing is selected.
-    @State private var lastSelectedSlot = 0
 
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
@@ -1040,63 +1033,12 @@ private struct HarnessSwitcherStrip: View {
         Self.stripPadding + cellWidth / 2 + CGFloat(slot) * (cellWidth + Self.cellSpacing)
     }
 
-    private var selectedSlot: Int? {
-        store.selectedHarnessFilter.flatMap { store.harnessOrder.firstIndex(of: $0) }
-    }
-
-    /// Left edge of the cell at `slot`, in the row's own coordinates.
-    private func cellLeading(slot: Int) -> CGFloat {
-        CGFloat(slot) * (cellWidth + Self.cellSpacing)
-    }
-
-    /// The selection at rest: a dark capsule behind the selected gauge, like the selected
-    /// item of a Liquid Glass tab bar.
-    private var selectionCapsule: some View {
-        Circle()
-            .fill(Color.black.opacity(0.46))
-            .frame(width: Self.cellDiameter, height: Self.cellDiameter)
-            .opacity(selectedSlot == nil || selectionIsTravelling ? 0 : 1)
-            .offset(x: cellLeading(slot: selectedSlot ?? lastSelectedSlot))
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-
-    /// The selection on the move: a clear lens, larger than a cell, that slides to the new gauge.
-    private var selectionLens: some View {
-        Capsule()
-            .fill(Color.clear)
-            .frame(width: Self.cellDiameter, height: Self.cellDiameter)
-            .modifier(SHSelectionLensGlass())
-            .scaleEffect(x: selectionIsTravelling ? 1.5 : 1, y: selectionIsTravelling ? 1.3 : 1)
-            .opacity(selectionIsTravelling ? 1 : 0)
-            .offset(x: cellLeading(slot: selectedSlot ?? lastSelectedSlot))
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-
-    /// Starts the lens and schedules it to settle once it has reached the new gauge.
-    private func selectionChanged(to slot: Int?) {
-        selectionSettleTask?.cancel()
-        guard slot != nil, !reduceMotion else {
-            selectionIsTravelling = false
-            return
-        }
-        withAnimation(.easeOut(duration: 0.12)) { selectionIsTravelling = true }
-        selectionSettleTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.22)) { selectionIsTravelling = false }
-        }
-    }
-
     private var chipsRow: some View {
         HStack(spacing: Self.cellSpacing) {
             ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
                 let isDragged = drag?.harness == group
-                // The gauge under the travelling lens is magnified a little, as through glass.
-                let isUnderLens = selectionIsTravelling && selectedSlot == index
                 harnessChip(group)
-                    .scaleEffect(isDragged ? 1.14 : (isUnderLens ? 1.1 : 1))
+                    .scaleEffect(isDragged ? 1.14 : 1)
                     .shadow(color: .black.opacity(isDragged ? 0.45 : 0), radius: 8, y: 3)
                     .offset(x: isDragged ? (drag?.x ?? 0) - cellCenter(slot: index) : 0)
                     .zIndex(isDragged ? 1 : 0)
@@ -1113,17 +1055,8 @@ private struct HarnessSwitcherStrip: View {
                     )
             }
         }
-        // Both sit behind the gauges, so a logo stays readable while the lens passes under it.
-        .background(alignment: .leading) { selectionLens }
-        .background(alignment: .leading) { selectionCapsule }
         .animation(.easeInOut(duration: 0.18), value: store.harnessOrder)
         .animation(.easeOut(duration: 0.15), value: drag?.harness)
-        .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.74), value: selectedSlot)
-        .onChange(of: selectedSlot) { _, slot in
-            if let slot { lastSelectedSlot = slot }
-            selectionChanged(to: slot)
-        }
-        .onAppear { if let selectedSlot { lastSelectedSlot = selectedSlot } }
     }
 
     var body: some View {
@@ -1227,7 +1160,7 @@ private struct HarnessSwitcherStrip: View {
                     size: 38
                 ) {
                     HarnessLogoView(group: group, size: 17)
-                        .opacity(isSelected || store.selectedHarnessFilter == nil ? 1 : 0.72)
+                        .opacity(isSelected ? 1 : 0.82)
                 }
             }
         }
@@ -1244,7 +1177,6 @@ private struct HarnessSwitcherStrip: View {
         }
         .onTapGesture {
             guard Date() >= ignoreTapsUntil else { return }
-            triggerSelectionHaptic()
             withAnimation(.easeInOut(duration: 0.16)) {
                 store.selectedHarnessFilter = isSelected ? nil : group
             }
@@ -1259,8 +1191,9 @@ private struct HarnessSwitcherStrip: View {
     private func chipCell<Content: View>(isSelected: Bool, @ViewBuilder content: () -> Content) -> some View {
         content()
             .frame(width: Self.cellDiameter, height: Self.cellDiameter)
-            // The selection itself is drawn once for the whole row (`selectionCapsule`), so it
-            // can slide from one gauge to the next.
+            // Selected: a flat neutral circular fill hugging the gauge, matching top-bar controls.
+            .background(isSelected ? Color.white.opacity(0.14) : Color.clear)
+            .clipShape(Circle())
             .contentShape(Circle())
     }
 
@@ -1269,20 +1202,6 @@ private struct HarnessSwitcherStrip: View {
         if let percent { parts.append("\(Int(percent.rounded())) percent of quota used") }
         if working { parts.append("working") }
         return parts.joined(separator: ", ")
-    }
-}
-
-/// The moving selection's surface: clear Liquid Glass that bends what is under it. Before
-/// iOS 26 it is a light translucent capsule.
-private struct SHSelectionLensGlass: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.clear.interactive(), in: Capsule())
-        } else {
-            content
-                .background(Color.white.opacity(0.16), in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.75))
-        }
     }
 }
 

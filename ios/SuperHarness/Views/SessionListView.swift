@@ -251,12 +251,17 @@ public struct SessionListView: View {
                 .presentationDragIndicator(.visible)
         }
         .toolbar {
-            // Left group, one shared pill: connection status and settings, orchestrator, search.
-            ToolbarItemGroup(placement: .topBarLeading) {
+            // Left: the Super Harness mark in its own glass bubble. It opens Settings and is the
+            // app's status light: it turns into sync arrows while fetching from the host and a
+            // warning mark when the host cannot be reached.
+            ToolbarItem(placement: .topBarLeading) {
                 ConnectionStatusPill(health: store.connectionHealth, isSyncing: store.isSyncing) {
                     store.isHostSettingsSheetPresented = true
                 }
+            }
 
+            // Right: every other control in one pill.
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 if let master = store.masterSession {
                     let isMasterBusy = store.isSessionBusy(master.id)
                     Button {
@@ -291,17 +296,7 @@ public struct SessionListView: View {
                 }
                 .accessibilityLabel("Search sessions")
                 .accessibilityIdentifier("header.search")
-            }
 
-            // The logo sits between the two pills, on the bar itself with no glass behind it.
-            if #available(iOS 26.0, *) {
-                ToolbarItem(placement: .principal) { SHToolbarLogo() }
-                    .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .principal) { SHToolbarLogo() }
-            }
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     store.openUsageSheet(for: store.selectedHarnessFilter)
                 } label: {

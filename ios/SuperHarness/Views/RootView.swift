@@ -167,9 +167,9 @@ public struct RootView: View {
 
 // MARK: - Subtle Connection Status Pill
 
-/// The settings button in the top bar. Its glyph is the status: a gear when all is well,
-/// sync arrows while the app is fetching from the host, and a yellow warning mark when the
-/// host cannot be reached. The glyph morphs between these instead of carrying a status dot.
+/// The Super Harness mark in the top bar. It opens Settings, and its glyph is the status: the
+/// mark when all is well, sync arrows while the app is fetching from the host, and a yellow
+/// warning mark when the host cannot be reached. It morphs between these.
 public struct ConnectionStatusPill: View {
     public let health: ConnectionHealth
     public var isSyncing: Bool = false
@@ -204,14 +204,22 @@ public struct ConnectionStatusPill: View {
     public var body: some View {
         let glyph = Self.debugForcedGlyph ?? Self.glyph(health: health, isSyncing: isSyncing)
         Button(action: action) {
-            Image(systemName: glyph.symbolName)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(glyph == .problem ? SHColor.statusWarning : SHColor.inkSecondary)
-                .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: glyph == .syncing)
-                .frame(width: 28, height: 28)
-                .contentShape(Circle())
-                .animation(.easeInOut(duration: 0.25), value: glyph)
+            ZStack {
+                if glyph == .settings {
+                    SHToolbarLogo()
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                } else {
+                    Image(systemName: glyph.symbolName)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(glyph == .problem ? SHColor.statusWarning : SHColor.porcelain)
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: glyph == .syncing)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+            }
+            .frame(width: 30, height: 30)
+            .contentShape(Circle())
+            .animation(.spring(response: 0.32, dampingFraction: 0.8), value: glyph)
         }
         .accessibilityLabel("Settings · \(accessibilityStatus(glyph))")
         .accessibilityIdentifier("header.status")

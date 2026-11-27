@@ -1384,11 +1384,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 );
               }
 
-              const prevGrp = grpIdx > 0 ? topGroups[grpIdx - 1] : null;
-              const collapseTopBorder = Boolean(
-                prevGrp && (prevGrp.headless || Boolean(collapsed[prevGrp.id]))
-              );
-
               const isFilteredHarnessGroup = isSingleHarnessFilter(filter) && Boolean(grp.harnessLogo);
               const isTopClosed = isFilteredHarnessGroup ? false : Boolean(collapsed[grp.id]);
               const groupHasWorking =
@@ -1429,8 +1424,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   key={grp.id}
                   data-drop-section-id={isTopDroppable ? grp.id : undefined}
                   className={`relative transition-opacity ${
-                    collapseTopBorder ? '-mt-px' : ''
-                  } ${
                     isOtherHarnessWhileDragging ? 'opacity-40' : ''
                   } ${
                     isTopDragOver

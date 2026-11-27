@@ -54,7 +54,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel
           ? cn(
-              'h-8 pl-2.5 pr-3 rounded-none bg-[#13151a] hover:bg-[#171920] border-y border-[#1c1f28] shadow-[0_2px_4px_rgba(0,0,0,0.18)] text-[13px] font-normal tracking-[-0.005em] text-ink-primary',
+              'h-8 pl-2.5 pr-3 rounded-none bg-[#13151a] hover:bg-[#171920] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),inset_0_-1px_0_rgba(0,0,0,0.38),0_2px_4px_rgba(0,0,0,0.20)] text-[13px] font-normal tracking-[-0.005em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
           : 'h-7 px-2 rounded-lg bg-surface-rail hover:bg-white/[0.04] text-[12.5px] font-normal text-ink-secondary/80 hover:text-ink-primary',

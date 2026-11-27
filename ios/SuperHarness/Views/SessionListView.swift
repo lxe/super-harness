@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 // MARK: - Session Row Subtitle Formatting
@@ -144,6 +145,10 @@ public enum SessionRowFormatting {
 
 public struct SessionListView: View {
     @AppStorage("sh.collapsedSections") private var collapsedSectionsRaw: String = ""
+    /// A chat being dragged toward the pinned area: which one, and where the finger is.
+    @State private var pinDrag: PinDragState?
+    /// Where each pinned row is on screen, for working out the drop position.
+    @State private var pinnedRowFrames: [String: CGRect] = [:]
     @State private var renamingSession: UnifiedSession? = nil
     @State private var renameDraft: String = ""
     @State private var isNewFolderAlertPresented: Bool = false
@@ -403,6 +408,73 @@ public struct SessionListView: View {
         .padding(.bottom, SHSpacing.sm)
     }
 
+    // MARK: Drag a chat into the pinned chats
+
+    /// The pinned rows on screen, top to bottom.
+    private var orderedPinnedFrames: [CGRect] {
+        store.pinnedToTopSessions.compactMap { pinnedRowFrames[$0.id] }
+    }
+
+    /// Where the dragged chat would land, or nil when the finger is not over the pinned area.
+    private var pinDropIndex: Int? {
+        guard let pinDrag else { return nil }
+        return PinDragState.dropIndex(y: pinDrag.location.y, pinnedFrames: orderedPinnedFrames)
+    }
+
+    private func finishPinDrag(commit: Bool) {
+        let drag = pinDrag
+        let index = pinDropIndex
+        withAnimation(.easeOut(duration: 0.15)) { pinDrag = nil }
+        guard commit, let drag, let index else { return }
+        #if canImport(UIKit)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
+        Task { await store.pinSession(drag.sessionId, atVisibleIndex: index) }
+    }
+
+    /// The floating label that follows the finger, and the line that marks the drop position.
+    @ViewBuilder
+    private var pinDragOverlay: some View {
+        if let pinDrag {
+            let frames = orderedPinnedFrames
+            let index = pinDropIndex
+            // Positions are in screen coordinates; `origin` converts them to this overlay's.
+            GeometryReader { geometry in
+                let origin = geometry.frame(in: .global).origin
+                ZStack(alignment: .topLeading) {
+                    if let index, let lineY = PinDragState.lineY(index: index, pinnedFrames: frames) {
+                        Capsule()
+                            .fill(SHColor.inkPrimary)
+                            .frame(height: 3)
+                            .padding(.horizontal, 20)
+                            .offset(y: lineY - origin.y - 1.5)
+                            .accessibilityIdentifier("pindrag.line")
+                    }
+                    HStack(spacing: 7) {
+                        Image(systemName: index == nil ? "hand.draw" : "pin.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(pinDrag.title)
+                            .font(SHTypography.label.weight(.medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 40)
+                    .frame(maxWidth: 260)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+                    .offset(
+                        x: max(12, pinDrag.location.x - origin.x - 60),
+                        y: pinDrag.location.y - origin.y - 58
+                    )
+                    .accessibilityIdentifier("pindrag.ghost")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
     private var sessionListContent: some View {
         List {
             // Subtle error banner if live host had an issue
@@ -470,12 +542,6 @@ public struct SessionListView: View {
                     // Hold a pinned chat and drag it to reorder the pins.
                     .onMove { offsets, destination in
                         store.movePinned(fromOffsets: offsets, toOffset: destination)
-                    }
-                    // Drop any other chat here to pin it at that position.
-                    .onInsert(of: [SessionDragItem.type]) { index, providers in
-                        SessionDragItem.loadSessionId(from: providers) { sessionId in
-                            Task { await store.pinSession(sessionId, atVisibleIndex: index) }
-                        }
                     }
                 }
             }
@@ -603,6 +669,7 @@ public struct SessionListView: View {
             }
         }
         .listStyle(.plain)
+        .overlay(alignment: .topLeading) { pinDragOverlay }
         // Rows size to their content. The default 44 pt minimum made every section header a
         // tall, mostly empty row, which is where the loose spacing between sections came from.
         .environment(\.defaultMinListRowHeight, 0)
@@ -645,8 +712,25 @@ public struct SessionListView: View {
             .padding(.vertical, 9)
             .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+            // Hold an unpinned chat briefly, then drag it up into the pinned chats to pin it.
+            // The recognizer sits inside the button's content: attached around the button it
+            // never sees the touch.
+            .modifier(PinDragSource(
+                session: isPinned ? nil : session,
+                onChange: { location in
+                    pinDrag = PinDragState(sessionId: session.id, title: session.displayTitle, location: location)
+                },
+                onEnd: { finishPinDrag(commit: $0) }
+            ))
         }
         .buttonStyle(SHRowTapButtonStyle(isSelected: isSelected))
+        // Pinned rows report where they are, so a drag knows where it would land. This sits
+        // before the list-row modifiers: applied after them it cancels the row's clear
+        // background and hidden separator.
+        .modifier(PinnedRowFrameReporter(sessionId: isPinned ? session.id : nil) { frame in
+            pinnedRowFrames[session.id] = frame
+        })
+        .opacity(pinDrag?.sessionId == session.id ? 0.35 : 1)
         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
@@ -1389,6 +1473,158 @@ struct SHShimmerText: View {
             .font(font)
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+}
+
+/// A chat being dragged toward the pinned area.
+struct PinDragState: Equatable {
+    var sessionId: String
+    var title: String
+    var location: CGPoint
+
+    /// The position among the pinned rows for a finger at `y`, or nil when the finger is not
+    /// over the pinned area. With no pinned rows yet, the top band of the list is the target.
+    nonisolated static func dropIndex(y: CGFloat, pinnedFrames: [CGRect], slack: CGFloat = 28, emptyTop: CGFloat = 100, emptyBand: CGFloat = 150) -> Int? {
+        guard let first = pinnedFrames.first, let last = pinnedFrames.last else {
+            return y < emptyTop + emptyBand ? 0 : nil
+        }
+        guard y >= first.minY - slack, y <= last.maxY + slack else { return nil }
+        return pinnedFrames.filter { $0.midY < y }.count
+    }
+
+    /// Where to draw the insertion line for `index`.
+    nonisolated static func lineY(index: Int, pinnedFrames: [CGRect]) -> CGFloat? {
+        guard !pinnedFrames.isEmpty else { return 118 }
+        if index <= 0 { return pinnedFrames[0].minY - 2 }
+        if index >= pinnedFrames.count { return pinnedFrames[pinnedFrames.count - 1].maxY + 2 }
+        return (pinnedFrames[index - 1].maxY + pinnedFrames[index].minY) / 2
+    }
+}
+
+/// Reports a pinned row's frame in screen coordinates.
+private struct PinnedRowFrameReporter: ViewModifier {
+    let sessionId: String?
+    let onFrame: (CGRect) -> Void
+
+    func body(content: Content) -> some View {
+        if sessionId != nil {
+            content.onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { onFrame($0) }
+        } else {
+            content
+        }
+    }
+}
+
+/// Attaches the hold-then-move recognizer to an unpinned row.
+private struct PinDragSource: ViewModifier {
+    let session: UnifiedSession?
+    let onChange: (CGPoint) -> Void
+    let onEnd: (_ commit: Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if session != nil {
+            content.gesture(HoldThenMoveGesture(onChange: onChange, onEnd: onEnd))
+        } else {
+            content
+        }
+    }
+}
+
+/// Recognizes "hold briefly, then move". It leaves the other gestures on a row alone: a quick
+/// swipe fails it at once so the list scrolls, and holding still fails it just before the
+/// context menu would open, so the menu still appears.
+final class HoldThenMoveRecognizer: UIGestureRecognizer {
+    static let holdBeforeMove: TimeInterval = 0.2
+    static let giveUpStill: TimeInterval = 0.42
+    static let quickSwipeDistance: CGFloat = 9
+    static let dragDistance: CGFloat = 4
+
+    private var startTime: TimeInterval = 0
+    private var startPoint: CGPoint = .zero
+    private var stillTimer: Timer?
+
+    /// What a touch that has moved `distance` after `elapsed` seconds means.
+    enum Verdict { case wait, scroll, drag }
+    nonisolated static func verdict(elapsed: TimeInterval, distance: CGFloat) -> Verdict {
+        if elapsed < holdBeforeMove { return distance > quickSwipeDistance ? .scroll : .wait }
+        return distance > dragDistance ? .drag : .wait
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard touches.count == 1, let touch = touches.first, state == .possible else {
+            state = .failed
+            return
+        }
+        startTime = touch.timestamp
+        startPoint = touch.location(in: view?.window)
+        stillTimer?.invalidate()
+        stillTimer = Timer.scheduledTimer(withTimeInterval: Self.giveUpStill, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.state == .possible else { return }
+                self.state = .failed
+            }
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = touches.first else { return }
+        if state == .began || state == .changed {
+            state = .changed
+            return
+        }
+        guard state == .possible else { return }
+        let point = touch.location(in: view?.window)
+        let distance = hypot(point.x - startPoint.x, point.y - startPoint.y)
+        switch Self.verdict(elapsed: touch.timestamp - startTime, distance: distance) {
+        case .wait: break
+        case .scroll: finish(.failed)
+        case .drag:
+            stillTimer?.invalidate()
+            state = .began
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        finish(state == .began || state == .changed ? .ended : .failed)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        finish(state == .began || state == .changed ? .cancelled : .failed)
+    }
+
+    private func finish(_ next: UIGestureRecognizer.State) {
+        stillTimer?.invalidate()
+        stillTimer = nil
+        state = next
+    }
+
+    override func reset() {
+        stillTimer?.invalidate()
+        stillTimer = nil
+    }
+}
+
+private struct HoldThenMoveGesture: UIGestureRecognizerRepresentable {
+    let onChange: (CGPoint) -> Void
+    let onEnd: (_ commit: Bool) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> HoldThenMoveRecognizer {
+        HoldThenMoveRecognizer()
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: HoldThenMoveRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed:
+            // Screen coordinates: a named coordinate space set on the List is not visible
+            // from inside its rows.
+            onChange(context.converter.location(in: .global))
+        case .ended:
+            onEnd(true)
+        case .cancelled, .failed:
+            onEnd(false)
+        default:
+            break
+        }
     }
 }
 

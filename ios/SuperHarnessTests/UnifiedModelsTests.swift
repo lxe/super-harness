@@ -1129,4 +1129,22 @@ final class UnifiedModelsTests: XCTestCase {
         let sent = try await client.fetchBootstrap().state?.settings.enabledHarnesses
         XCTAssertEqual(sent, ["antigravity": true, "codex": true, "claude": true, "muse": false, "pi": true])
     }
+
+    func testPinDragDropPositionAndGestureVerdicts() {
+        let frames = [CGRect(x: 0, y: 100, width: 300, height: 60), CGRect(x: 0, y: 168, width: 300, height: 60)]
+        XCTAssertEqual(PinDragState.dropIndex(y: 105, pinnedFrames: frames), 0)
+        XCTAssertEqual(PinDragState.dropIndex(y: 160, pinnedFrames: frames), 1)
+        XCTAssertEqual(PinDragState.dropIndex(y: 240, pinnedFrames: frames), 2)
+        XCTAssertNil(PinDragState.dropIndex(y: 400, pinnedFrames: frames), "below the pinned area is not a drop")
+        // With nothing pinned yet, the top band of the list takes the drop.
+        XCTAssertEqual(PinDragState.dropIndex(y: 180, pinnedFrames: []), 0)
+        XCTAssertNil(PinDragState.dropIndex(y: 500, pinnedFrames: []))
+        XCTAssertEqual(PinDragState.lineY(index: 1, pinnedFrames: frames), 164)
+
+        // A quick swipe scrolls; moving after a short hold drags; staying put keeps waiting.
+        XCTAssertEqual(HoldThenMoveRecognizer.verdict(elapsed: 0.05, distance: 20), .scroll)
+        XCTAssertEqual(HoldThenMoveRecognizer.verdict(elapsed: 0.05, distance: 3), .wait)
+        XCTAssertEqual(HoldThenMoveRecognizer.verdict(elapsed: 0.3, distance: 8), .drag)
+        XCTAssertEqual(HoldThenMoveRecognizer.verdict(elapsed: 0.3, distance: 1), .wait)
+    }
 }

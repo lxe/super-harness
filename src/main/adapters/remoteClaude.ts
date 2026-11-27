@@ -49,6 +49,86 @@ interface RemoteClaudeEntry {
 const CONFIG_PATH = path.join(os.homedir(), '.config', 'super-harness', 'remote-hosts.json');
 const POLL_MS = 3000;
 const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+const REMOTE_TRANSCRIPT_MAX_WIRE_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Streams a large remote Claude JSONL transcript on the remote host, keeping only the
+ * last `max_lines` conversation records (skipping telemetry blobs like `api-request-blob`).
+ * If the selected tail exceeds `max_wire_bytes` due to embedded base64 screenshots, strips
+ * base64 payloads from the oldest records first so recent screenshots stay intact and
+ * "Load earlier" can page all the way to the start of 100+ MB transcripts.
+ */
+const REMOTE_TRANSCRIPT_SLICE_SCRIPT = String.raw`
+import json, sys
+from collections import deque
+
+path = sys.argv[1]
+max_lines = int(sys.argv[2])
+max_wire_bytes = int(sys.argv[3])
+keep_types = {"user", "assistant", "queue-operation", "system", "summary", "custom-title"}
+skip_tokens = (
+    '"type":"api-request',
+    '"type":"data-flow-records"',
+    '"type":"file-history-',
+    '"type":"attachment"',
+)
+
+buf = deque(maxlen=max_lines)
+total_kept = 0
+with open(path, "r", encoding="utf-8", errors="replace") as f:
+    for raw in f:
+        if '"type"' not in raw:
+            continue
+        if any(tok in raw for tok in skip_tokens):
+            continue
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        if obj.get("type") in keep_types:
+            total_kept += 1
+            buf.append(raw.rstrip("\n"))
+
+lines = list(buf)
+truncated = total_kept > len(lines)
+
+def strip_base64(node):
+    if isinstance(node, dict):
+        if node.get("type") == "base64" and isinstance(node.get("data"), str) and len(node["data"]) > 16384:
+            node["data"] = ""
+            return True
+        changed = False
+        for v in node.values():
+            if strip_base64(v):
+                changed = True
+        return changed
+    if isinstance(node, list):
+        changed = False
+        for item in node:
+            if strip_base64(item):
+                changed = True
+        return changed
+    return False
+
+total_bytes = sum(len(l) + 1 for l in lines)
+if total_bytes > max_wire_bytes:
+    for i in range(len(lines)):
+        if total_bytes <= max_wire_bytes:
+            break
+        if len(lines[i]) > 32768 and "base64" in lines[i]:
+            try:
+                obj = json.loads(lines[i])
+                if strip_base64(obj):
+                    compact = json.dumps(obj, separators=(",", ":"))
+                    total_bytes -= len(lines[i]) - len(compact)
+                    lines[i] = compact
+            except Exception:
+                pass
+
+sys.stdout.write(json.dumps({"totalKept": total_kept, "returnedKept": len(lines), "truncated": truncated}) + "\n")
+for l in lines:
+    sys.stdout.write(l + "\n")
+`;
 
 const SSH_BASE = [
   '-o', 'BatchMode=yes',
@@ -307,20 +387,66 @@ export class RemoteClaudeMirror {
   async loadTranscript(sessionId: string, limit: number): Promise<SessionTranscriptResult | null> {
     const e = this.entries.get(sessionId);
     if (!e?.transcriptPath) return null;
-    const out = await ssh(e.host, `tail -c ${TRANSCRIPT_TAIL_BYTES} ${shQuote(e.transcriptPath)}`, {
-      timeout: 15000,
-      maxBuffer: TRANSCRIPT_TAIL_BYTES * 2,
-    });
-    const truncated = (e.size ?? 0) > TRANSCRIPT_TAIL_BYTES;
-    const lines = out.split('\n');
-    if (truncated) lines.shift(); // first line is cut mid-record
     const running = e.status === 'busy' || e.status === 'running';
-    return parseClaudeJsonlLines(lines, sessionId, e.mtimeMs ?? Date.now(), limit, {
-      truncated,
-      fileSize: e.size,
-      bytesRead: Math.min(e.size ?? 0, TRANSCRIPT_TAIL_BYTES),
-      tailActivity: { working: running, mtimeMs: e.mtimeMs ?? Date.now() },
-    });
+    const fileSize = e.size ?? 0;
+
+    // Small transcripts: fast direct `tail -c` read
+    if (fileSize > 0 && fileSize <= TRANSCRIPT_TAIL_BYTES) {
+      const out = await ssh(e.host, `tail -c ${TRANSCRIPT_TAIL_BYTES} ${shQuote(e.transcriptPath)}`, {
+        timeout: 15000,
+        maxBuffer: TRANSCRIPT_TAIL_BYTES * 2,
+      });
+      const lines = out.split('\n');
+      return parseClaudeJsonlLines(lines, sessionId, e.mtimeMs ?? Date.now(), limit, {
+        truncated: false,
+        fileSize,
+        bytesRead: fileSize,
+        tailActivity: { working: running, mtimeMs: e.mtimeMs ?? Date.now() },
+      });
+    }
+
+    // Large transcripts (e.g. 50-150+ MB with base64 screenshots or telemetry blobs):
+    // slice the exact last N conversation lines on the remote host so "Load earlier" scales cleanly.
+    const maxLines = Math.max(480, limit * 8);
+    try {
+      const out = await ssh(
+        e.host,
+        `python3 - ${shQuote(e.transcriptPath)} ${maxLines} ${REMOTE_TRANSCRIPT_MAX_WIRE_BYTES}`,
+        {
+          input: REMOTE_TRANSCRIPT_SLICE_SCRIPT,
+          timeout: 30000,
+          maxBuffer: REMOTE_TRANSCRIPT_MAX_WIRE_BYTES + 4 * 1024 * 1024,
+        }
+      );
+      const nl = out.indexOf('\n');
+      const header = nl !== -1 ? (JSON.parse(out.slice(0, nl)) as { totalKept?: number; returnedKept?: number; truncated?: boolean }) : null;
+      const lines = nl !== -1 ? out.slice(nl + 1).split('\n') : out.split('\n');
+      const truncated = Boolean(header?.truncated);
+      const totalKept = header?.totalKept ?? lines.length;
+      const returnedKept = header?.returnedKept ?? lines.length;
+      return parseClaudeJsonlLines(lines, sessionId, e.mtimeMs ?? Date.now(), limit, {
+        truncated,
+        fileSize: totalKept,
+        bytesRead: returnedKept,
+        tailActivity: { working: running, mtimeMs: e.mtimeMs ?? Date.now() },
+      });
+    } catch {
+      // Fallback if python3 is unavailable on the remote host: scale tail bytes with limit
+      const tailBytes = Math.min(REMOTE_TRANSCRIPT_MAX_WIRE_BYTES, Math.max(TRANSCRIPT_TAIL_BYTES, Math.round((limit / 60) * TRANSCRIPT_TAIL_BYTES)));
+      const out = await ssh(e.host, `tail -c ${tailBytes} ${shQuote(e.transcriptPath)}`, {
+        timeout: 20000,
+        maxBuffer: tailBytes * 2,
+      });
+      const truncated = fileSize > tailBytes;
+      const lines = out.split('\n');
+      if (truncated) lines.shift();
+      return parseClaudeJsonlLines(lines, sessionId, e.mtimeMs ?? Date.now(), limit, {
+        truncated,
+        fileSize,
+        bytesRead: Math.min(fileSize, tailBytes),
+        tailActivity: { working: running, mtimeMs: e.mtimeMs ?? Date.now() },
+      });
+    }
   }
 
   async sendMessage(

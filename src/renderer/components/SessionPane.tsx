@@ -172,6 +172,8 @@ export const SessionPane: React.FC<Props> = ({
   const [liveActivity, setLiveActivity] = useState<LiveActivityState | undefined>(undefined);
   const [limit, setLimit] = useState(DEFAULT_TRANSCRIPT_LIMIT);
   const [loading, setLoading] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const pendingPrependScrollRef = useRef<{ prevHeight: number; prevTop: number } | null>(null);
 
   const [sending, setSending] = useState(false);
   const [dispatchNote, setDispatchNote] = useState<string | null>(null);
@@ -401,7 +403,22 @@ export const SessionPane: React.FC<Props> = ({
           setLiveActivity(res.liveActivity);
         }
       } finally {
-        if (currentSessionRef.current === reqId) setLoading(false);
+        if (currentSessionRef.current === reqId) {
+          setLoading(false);
+          setLoadingEarlier(false);
+          const pendingScroll = pendingPrependScrollRef.current;
+          if (pendingScroll) {
+            pendingPrependScrollRef.current = null;
+            requestAnimationFrame(() => {
+              const el = scrollRef.current;
+              if (!el) return;
+              const delta = el.scrollHeight - pendingScroll.prevHeight;
+              if (delta > 0) {
+                el.scrollTop = pendingScroll.prevTop + delta;
+              }
+            });
+          }
+        }
       }
     },
     [sessionId, isMaster, masterMessages, limit]
@@ -979,8 +996,24 @@ export const SessionPane: React.FC<Props> = ({
         <div className="max-w-[740px] mx-auto space-y-6 pb-12">
           {totalCount > messages.length && (
             <div className="flex justify-center">
-              <Button size="xs" variant="ghost" onClick={() => setLimit((prev) => prev + 60)}>
-                Load earlier ({totalCount - messages.length})
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={loadingEarlier}
+                onClick={() => {
+                  const el = scrollRef.current;
+                  if (el) {
+                    stickyBottomRef.current = false;
+                    pendingPrependScrollRef.current = {
+                      prevHeight: el.scrollHeight,
+                      prevTop: el.scrollTop,
+                    };
+                  }
+                  setLoadingEarlier(true);
+                  setLimit((prev) => prev + 60);
+                }}
+              >
+                {loadingEarlier ? 'Loading earlier…' : `Load earlier (${totalCount - messages.length})`}
               </Button>
             </div>
           )}

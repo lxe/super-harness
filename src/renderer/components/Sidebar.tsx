@@ -549,8 +549,15 @@ export const Sidebar: React.FC<Props> = React.memo(({
       if (id) nextTops.set(id, el.getBoundingClientRect().top);
     }
 
+    // Only FLIP-animate pure reorders of the exact same visible row set (never on archive/add/remove)
+    const prevTops = prevRowTopsRef.current;
+    const sameRowSet =
+      prevTops.size === nextTops.size &&
+      Array.from(nextTops.keys()).every((id) => prevTops.has(id));
+
     const shouldAnimate =
       !activeDrag &&
+      sameRowSet &&
       prevLayoutContextRef.current === contextKey &&
       prevOrderSigRef.current !== '' &&
       prevOrderSigRef.current !== orderSignature;
@@ -560,7 +567,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       for (const el of rows) {
         const id = el.dataset.sessionId;
         if (!id) continue;
-        const prevTop = prevRowTopsRef.current.get(id);
+        const prevTop = prevTops.get(id);
         const nextTop = nextTops.get(id);
         if (prevTop === undefined || nextTop === undefined) continue;
         const dy = prevTop - nextTop;
@@ -568,7 +575,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
           moved.push({ el, dy });
         }
       }
-      if (moved.length > 0) {
+      // Skip FLIP if too many rows shifted at once (e.g. pin/unpin or section height change)
+      if (moved.length > 0 && moved.length <= 6) {
         for (const { el, dy } of moved) {
           el.style.transition = 'none';
           el.style.transform = `translateY(${dy}px)`;
@@ -1232,19 +1240,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
         </div>
       </div>
 
-      {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar) */}
-      {globalPinnedSessions.length > 0 && (
-        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline">
-          {globalPinnedSessions.map((s) =>
-            renderSessionRow(s, { showLogo: true, showPin: false })
-          )}
-        </div>
-      )}
-
-      {/* Inline Search */}
+      {/* Inline Search — right below the top bar */}
       {(showSearch || query) && (
         <div className="px-2.5 pb-2">
-          <div className="h-9 flex items-center gap-2 px-3 rounded-lg bg-surface-subtle border border-line-subtle focus-within:border-line-strong transition-colors">
+          <div className="h-9 flex items-center gap-2 px-3 rounded-xl bg-surface-code shadow-[inset_0_1px_2px_rgba(0,0,0,0.34)] focus-within:bg-surface-canvas/70 transition-colors">
+            <Search className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
             <input
               ref={searchInputRef}
               type="text"
@@ -1260,7 +1260,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 }
               }}
               placeholder="Filter conversations…"
-              className="flex-1 min-w-0 bg-transparent p-0 text-[14px] leading-normal text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
+              className="flex-1 min-w-0 bg-transparent p-0 text-[13.5px] leading-normal text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none"
             />
             <button
               type="button"
@@ -1283,6 +1283,15 @@ export const Sidebar: React.FC<Props> = React.memo(({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar / Search) */}
+      {globalPinnedSessions.length > 0 && (
+        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline">
+          {globalPinnedSessions.map((s) =>
+            renderSessionRow(s, { showLogo: true, showPin: false })
+          )}
         </div>
       )}
 

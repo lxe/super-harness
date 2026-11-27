@@ -511,16 +511,84 @@ body,
   will-change: opacity;
 }
 
+/* Sculptural Super Harness porcelain mark — 4-piece staggered isometric undulation */
+@keyframes sh-mark-float-0 {
+  0%, 100% { transform: translate(0px, 0px); opacity: 0.92; }
+  50% { transform: translate(0px, -0.38px); opacity: 1; }
+}
+@keyframes sh-mark-float-1 {
+  0%, 100% { transform: translate(0px, 0px); opacity: 0.86; }
+  50% { transform: translate(-0.32px, 0.2px); opacity: 1; }
+}
+@keyframes sh-mark-float-2 {
+  0%, 100% { transform: translate(0px, 0px); opacity: 0.86; }
+  50% { transform: translate(0.32px, 0.2px); opacity: 1; }
+}
+@keyframes sh-mark-float-3 {
+  0%, 100% { transform: translate(0px, 0px); opacity: 0.84; }
+  50% { transform: translate(0px, 0.42px); opacity: 1; }
+}
+
+.sh-mark-piece {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+.sh-mark-piece-0 { animation: sh-mark-float-0 4.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite; }
+.sh-mark-piece-1 { animation: sh-mark-float-1 4.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) -1.15s infinite; }
+.sh-mark-piece-2 { animation: sh-mark-float-2 4.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) -2.3s infinite; }
+.sh-mark-piece-3 { animation: sh-mark-float-3 4.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) -3.45s infinite; }
+
+.sh-mark-animated:hover .sh-mark-piece {
+  animation-duration: 2.2s;
+}
+
+/* Kinetic WorkingOrb spinner mode — snappy choreographed 4-piece sculptural pulse */
+@keyframes sh-mark-spin-0 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); opacity: 0.45; }
+  30% { transform: translate(0px, -0.75px) scale(1.06); opacity: 1; }
+  65% { transform: translate(0px, 0px) scale(1); opacity: 0.55; }
+}
+@keyframes sh-mark-spin-1 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); opacity: 0.45; }
+  30% { transform: translate(-0.65px, 0.38px) scale(1.05); opacity: 1; }
+  65% { transform: translate(0px, 0px) scale(1); opacity: 0.55; }
+}
+@keyframes sh-mark-spin-2 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); opacity: 0.45; }
+  30% { transform: translate(0.65px, 0.38px) scale(1.05); opacity: 1; }
+  65% { transform: translate(0px, 0px) scale(1); opacity: 0.55; }
+}
+@keyframes sh-mark-spin-3 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); opacity: 0.45; }
+  30% { transform: translate(0px, 0.8px) scale(1.08); opacity: 1; }
+  65% { transform: translate(0px, 0px) scale(1); opacity: 0.55; }
+}
+
+.sh-mark-spin-piece {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+.sh-mark-spin-piece-0 { animation: sh-mark-spin-0 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.sh-mark-spin-piece-1 { animation: sh-mark-spin-1 1.6s cubic-bezier(0.4, 0, 0.2, 1) -1.2s infinite; }
+.sh-mark-spin-piece-2 { animation: sh-mark-spin-2 1.6s cubic-bezier(0.4, 0, 0.2, 1) -0.8s infinite; }
+.sh-mark-spin-piece-3 { animation: sh-mark-spin-3 1.6s cubic-bezier(0.4, 0, 0.2, 1) -0.4s infinite; }
+
 /* Pause infinite CSS animations when the Electron window is hidden or a row is offscreen */
 .sh-window-hidden .sh-orb-sphere,
 .sh-window-hidden .sh-orb-shade,
 .sh-window-hidden .sh-gauge-aurora,
 .sh-window-hidden .sh-gauge-arc-shimmer,
+.sh-window-hidden .sh-mark-piece,
+.sh-window-hidden .sh-mark-spin-piece,
 .sh-window-hidden .sh-working-shimmer::after,
 [data-sh-offscreen='true'] .sh-orb-sphere,
 [data-sh-offscreen='true'] .sh-orb-shade,
 [data-sh-offscreen='true'] .sh-gauge-aurora,
 [data-sh-offscreen='true'] .sh-gauge-arc-shimmer,
+[data-sh-offscreen='true'] .sh-mark-piece,
+[data-sh-offscreen='true'] .sh-mark-spin-piece,
 [data-sh-offscreen='true'] .sh-working-shimmer::after,
 [data-sh-offscreen='true'].sh-working-shimmer::after {
   animation-play-state: paused !important;
@@ -531,6 +599,8 @@ body,
   .sh-orb-shade,
   .sh-gauge-aurora,
   .sh-gauge-arc-shimmer,
+  .sh-mark-piece,
+  .sh-mark-spin-piece,
   .sh-working-shimmer::after {
     animation-play-state: paused !important;
   }

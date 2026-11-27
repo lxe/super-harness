@@ -1175,7 +1175,7 @@ export const SessionPane: React.FC<Props> = ({
 
       {/* Bottom Composer Dock */}
       <div className="relative z-10 px-6 pb-5 pt-2 shrink-0 bg-surface-canvas">
-        <div className="pointer-events-none absolute -top-8 inset-x-0 h-8 sh-scroll-fade-bottom" />
+        <div className="pointer-events-none absolute -top-8 left-0 right-2 h-8 sh-scroll-fade-bottom" />
         {showScrollToBottom && viewMode !== 'tmux' && (
           <button
             type="button"

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { HarnessGroup, UsageSnapshot } from '../../shared/types';
 import { cn } from './cn';
 import { useAnimationVisibilityRef } from './animationVisibility';
+import { SuperHarnessMark } from '../components/SuperHarnessMark';
 
 export type WorkingOrbTone = HarnessGroup | 'master' | 'neutral' | 'warning' | 'danger';
 
@@ -115,8 +116,8 @@ const SIZE_PX: Record<NonNullable<WorkingOrbProps['size']>, number> = {
 };
 
 /**
- * Glow-free 3D orbiting lit-sphere activity indicator tinted to the exact gauge colorway:
- * three fully opaque monochromatic HSB-shaded spheres revolving in depth-scaled perspective.
+ * Kinetic 4-piece sculptural Super Harness mark activity indicator,
+ * tinted to the exact harness/status colorway.
  */
 export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   tone = 'master',
@@ -124,53 +125,17 @@ export const WorkingOrb: React.FC<WorkingOrbProps> = ({
   className,
 }) => {
   const hostRef = useAnimationVisibilityRef<HTMLSpanElement>();
-  const px = SIZE_PX[size];
-  const dotPx = Math.max(4.6, Math.round(px * 0.34 * 10) / 10);
-  const orbitR = Math.round(px * 0.31 * 10) / 10;
+  const px = SIZE_PX[size] + 2;
   const palette = ORB_PALETTES[tone] ?? ORB_PALETTES.master;
-  const sphereBg = [
-    `radial-gradient(circle at 30% 27%, ${palette.glint} 0%, ${palette.glint} 8%, transparent 18%)`,
-    `radial-gradient(circle at 32% 28%, ${palette.highlight} 0%, ${palette.mid} 42%, ${palette.deep} 100%)`,
-  ].join(', ');
 
   return (
     <span
       ref={hostRef}
       aria-hidden="true"
-      style={
-        {
-          width: px,
-          height: px,
-          '--sh-orbit-rx': `${orbitR}px`,
-          '--sh-orbit-ry': `${Math.round(orbitR * 0.64 * 10) / 10}px`,
-        } as React.CSSProperties
-      }
+      style={{ color: palette.mid, width: px, height: px }}
       className={cn('relative inline-flex items-center justify-center shrink-0', className)}
     >
-      {[0, 1, 2].map((idx) => {
-        const delay = `${(-idx * 1.5) / 3}s`;
-        return (
-          <span
-            key={idx}
-            className="sh-orb-sphere absolute rounded-full overflow-hidden pointer-events-none"
-            style={{
-              width: dotPx,
-              height: dotPx,
-              background: sphereBg,
-              animationDelay: delay,
-            }}
-          >
-            {/* Compositor-only depth shading overlay (opacity-only, keeps sphere 100% opaque) */}
-            <span
-              className="sh-orb-shade absolute inset-0 rounded-full pointer-events-none"
-              style={{
-                background: palette.deep,
-                animationDelay: delay,
-              }}
-            />
-          </span>
-        );
-      })}
+      <SuperHarnessMark size={px} animated mode="spinner" />
     </span>
   );
 };

@@ -430,7 +430,11 @@ export const SIDEBAR_SORT_OPTIONS: Array<[SidebarSortBy, string]> = [
 export function sortSidebarGroups(groups: TopGroup[], sortBy: SidebarSortBy): TopGroup[] {
   if (sortBy === 'native') return groups;
   const key = (s: UnifiedSession) => (sortBy === 'active' ? s.updatedAt : s.createdAt) || 0;
-  const sortItems = (items: UnifiedSession[]) => [...items].sort((a, b) => key(b) - key(a));
+  const sortItems = (items: UnifiedSession[]) =>
+    [...items].sort((a, b) => {
+      if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+      return key(b) - key(a);
+    });
   const newest = (items: UnifiedSession[]) => items.reduce((m, s) => Math.max(m, key(s)), 0);
 
   const sorted = groups.map((g) => {

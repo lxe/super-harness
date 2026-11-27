@@ -70,6 +70,8 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 .hero .lede { max-width: 38em; }
 .hero .lede + .lede { margin-top: 10px; }
 .hero .cta { justify-content: center; }
+.hero-lede { margin-top: 44px; }
+.hero-lede .lede:first-child { margin-top: 0; }
 .hero .note { margin: 28px auto 0; }
 .eyebrow { color: var(--ink-3); font-size: 0.86rem; letter-spacing: 0.02em; margin-bottom: 18px; }
 .lede { margin-top: 22px; font-size: 1.14rem; color: var(--ink-2); max-width: 34em; }

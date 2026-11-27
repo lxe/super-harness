@@ -64,7 +64,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
           : 'h-7 pl-2.5 pr-1 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[12.5px] font-medium tracking-[0.01em] text-ink-faint hover:text-ink-secondary',
-        !isTopLevel && sticky && (level === 2 ? 'sticky top-[34px] z-10' : 'sticky top-0 z-10'),
+        !isTopLevel && sticky && level === 2 && 'sticky top-[34px] z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
@@ -122,6 +122,14 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   if (isTopLevel && sticky) {
     return (
       <div className="sticky top-0 z-20 -mx-2.5 bg-surface-rail">
+        {pillContent}
+      </div>
+    );
+  }
+
+  if (!isTopLevel && sticky && level === 1) {
+    return (
+      <div className="sticky top-0 z-10 pt-2 bg-surface-rail">
         {pillContent}
       </div>
     );

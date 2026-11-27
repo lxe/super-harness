@@ -69,6 +69,7 @@ const api: SuperHarnessApi = {
     opts?: { line?: number; tmuxSession?: string }
   ) => ipcRenderer.invoke('sh:open-path', targetPath, mode, opts),
   openExternalUrl: (url: string) => ipcRenderer.invoke('sh:open-external', url),
+  openInHarness: (sessionId: string) => ipcRenderer.invoke('sh:open-in-harness', sessionId),
   getUsage: (force?: boolean) => ipcRenderer.invoke('sh:get-usage', force),
   restartApp: (opts?: { build?: boolean }) => ipcRenderer.invoke('sh:restart-app', opts),
   getDictationStatus: (draft?: import('../shared/types').DictationSettings) =>

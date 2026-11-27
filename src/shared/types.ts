@@ -700,6 +700,7 @@ export interface SuperHarnessApi {
     opts?: { line?: number; tmuxSession?: string }
   ) => Promise<{ ok: boolean; action?: 'internal' | 'launched'; error?: string }>;
   openExternalUrl: (url: string) => Promise<{ ok: boolean }>;
+  openInHarness: (sessionId: string) => Promise<{ ok: boolean; via?: string; error?: string }>;
   getUsage: (force?: boolean) => Promise<UsageSnapshot>;
   restartApp: (opts?: { build?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   /** Checks the saved dictation server, or `draft` settings when given (Settings → Test). */

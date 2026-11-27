@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Columns2,
+  ExternalLink,
   Folder,
   FolderInput,
   Inbox,
@@ -23,21 +24,53 @@ function harnessLabelForPin(session: UnifiedSession): string {
 }
 
 const SUBMENU_GAP_PX = 4;
-const SUBMENU_CLOSE_DELAY_MS = 180;
+const SUBMENU_CLOSE_DELAY_MS = 160;
+const SUBMENU_AIM_DWELL_MS = 280;
+
+type SubmenuId = 'section' | 'folder';
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface SafeTriangleZone {
+  owner: SubmenuId;
+  a: Point;
+  b: Point;
+  c: Point;
+  opensLeft: boolean;
+  lastX: number;
+  pendingNext: SubmenuId | null;
+  cleanup: () => void;
+}
+
+function pointInTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
+  const sign = (p1: Point, p2: Point, p3: Point) =>
+    (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+  const d1 = sign(p, a, b);
+  const d2 = sign(p, b, c);
+  const d3 = sign(p, c, a);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
 
 /**
  * A context-menu row that opens its children in a second-level menu beside
  * the parent, flipping left or upward when it would leave the window.
- * Opens on hover or click; closes shortly after the pointer leaves, unless
- * focus is inside it (e.g. while typing a new section name).
+ * Uses a geometric safe hover triangle (aim-cone) so moving diagonally toward
+ * the secondary menu across neighboring rows or the gap keeps it open.
  */
 const MenuSubmenu: React.FC<{
+  id: SubmenuId;
   icon: React.ReactNode;
   label: string;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  safeZoneRef: React.MutableRefObject<SafeTriangleZone | null>;
+  onSelectSubmenu: (next: SubmenuId | null) => void;
   children: React.ReactNode;
-}> = ({ icon, label, open, onOpenChange, children }) => {
+}> = ({ id, icon, label, open, safeZoneRef, onSelectSubmenu, children }) => {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const flyRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -49,7 +82,23 @@ const MenuSubmenu: React.FC<{
       closeTimer.current = null;
     }
   };
-  useEffect(() => cancelClose, []);
+
+  const clearOwnSafeZone = () => {
+    if (safeZoneRef.current?.owner === id) {
+      safeZoneRef.current.cleanup();
+      safeZoneRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      cancelClose();
+      if (safeZoneRef.current?.owner === id) {
+        safeZoneRef.current.cleanup();
+        safeZoneRef.current = null;
+      }
+    };
+  }, [id, safeZoneRef]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -62,19 +111,115 @@ const MenuSubmenu: React.FC<{
     });
   }, [open]);
 
+  const startAimGrace = (exitX: number, exitY: number) => {
+    const fly = flyRef.current?.getBoundingClientRect();
+    if (!fly) return false;
+    const opensLeft = placement.left;
+    // Only engage the aim triangle when exiting from the parent-menu side toward the flyout
+    const onParentSide = opensLeft ? exitX >= fly.right - 2 : exitX <= fly.left + 2;
+    if (!onParentSide) return false;
+
+    clearOwnSafeZone();
+
+    const nearX = opensLeft ? fly.right - 4 : fly.left + 4;
+    const a: Point = { x: opensLeft ? exitX + 4 : exitX - 4, y: exitY };
+    const b: Point = { x: nearX, y: fly.top - 12 };
+    const c: Point = { x: nearX, y: fly.bottom + 12 };
+
+    let dwellTimer: number | null = null;
+    const finishGrace = () => {
+      const z = safeZoneRef.current;
+      if (!z || z.owner !== id) return;
+      const next = z.pendingNext;
+      z.cleanup();
+      safeZoneRef.current = null;
+      if (wrapRef.current?.contains(document.activeElement)) return;
+      onSelectSubmenu(next);
+    };
+
+    const resetDwell = () => {
+      if (dwellTimer !== null) window.clearTimeout(dwellTimer);
+      dwellTimer = window.setTimeout(finishGrace, SUBMENU_AIM_DWELL_MS);
+    };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const z = safeZoneRef.current;
+      if (!z || z.owner !== id) return;
+      const target = ev.target as Node | null;
+      if (target && wrapRef.current?.contains(target)) {
+        z.cleanup();
+        safeZoneRef.current = null;
+        return;
+      }
+      const pt: Point = { x: ev.clientX, y: ev.clientY };
+      if (!pointInTriangle(pt, z.a, z.b, z.c)) {
+        finishGrace();
+        return;
+      }
+      const movingTowardFlyout = z.opensLeft ? ev.clientX < z.lastX : ev.clientX > z.lastX;
+      z.lastX = ev.clientX;
+      if (movingTowardFlyout) {
+        resetDwell();
+      }
+    };
+
+    const cleanup = () => {
+      if (dwellTimer !== null) {
+        window.clearTimeout(dwellTimer);
+        dwellTimer = null;
+      }
+      window.removeEventListener('mousemove', onMouseMove, true);
+    };
+
+    safeZoneRef.current = {
+      owner: id,
+      a,
+      b,
+      c,
+      opensLeft,
+      lastX: exitX,
+      pendingNext: null,
+      cleanup,
+    };
+
+    window.addEventListener('mousemove', onMouseMove, true);
+    resetDwell();
+    return true;
+  };
+
   return (
     <div
       ref={wrapRef}
       className="relative"
-      onMouseEnter={() => {
+      onMouseEnter={(e) => {
         cancelClose();
-        onOpenChange(true);
+        const activeZone = safeZoneRef.current;
+        if (
+          activeZone &&
+          activeZone.owner !== id &&
+          pointInTriangle({ x: e.clientX, y: e.clientY }, activeZone.a, activeZone.b, activeZone.c)
+        ) {
+          // Pointer is cutting diagonally across this row toward the open sibling submenu
+          activeZone.pendingNext = id;
+          return;
+        }
+        if (activeZone) {
+          activeZone.cleanup();
+          safeZoneRef.current = null;
+        }
+        onSelectSubmenu(id);
       }}
-      onMouseLeave={() => {
+      onMouseLeave={(e) => {
         cancelClose();
+        if (safeZoneRef.current && safeZoneRef.current.pendingNext === id) {
+          safeZoneRef.current.pendingNext = null;
+        }
+        if (!open) return;
+        if (wrapRef.current?.contains(document.activeElement)) return;
+        if (startAimGrace(e.clientX, e.clientY)) return;
         closeTimer.current = window.setTimeout(() => {
           if (wrapRef.current?.contains(document.activeElement)) return;
-          onOpenChange(false);
+          onSelectSubmenu(null);
         }, SUBMENU_CLOSE_DELAY_MS);
       }}
     >
@@ -82,26 +227,48 @@ const MenuSubmenu: React.FC<{
         icon={icon}
         active={open}
         rightSlot={<ChevronRight className="w-3.5 h-3.5 text-ink-faint" />}
-        onClick={() => onOpenChange(!open)}
+        onClick={() => {
+          if (safeZoneRef.current) {
+            safeZoneRef.current.cleanup();
+            safeZoneRef.current = null;
+          }
+          onSelectSubmenu(open ? null : id);
+        }}
       >
         {label}
       </MenuItem>
 
       {open && (
-        <div
-          ref={flyRef}
-          className="absolute z-10"
-          style={{
-            ...(placement.left
-              ? { right: '100%', marginRight: SUBMENU_GAP_PX }
-              : { left: '100%', marginLeft: SUBMENU_GAP_PX }),
-            ...(placement.up ? { bottom: -6 } : { top: -6 }),
-          }}
-        >
-          <PopoverSurface width="md" className="space-y-0.5 max-h-[70vh] overflow-y-auto">
-            {children}
-          </PopoverSurface>
-        </div>
+        <>
+          {/* Invisible hover bridge across the gap between parent menu and secondary menu */}
+          <div
+            aria-hidden="true"
+            className="absolute top-0 bottom-0 z-10"
+            style={
+              placement.left
+                ? { right: '100%', width: SUBMENU_GAP_PX + 2 }
+                : { left: '100%', width: SUBMENU_GAP_PX + 2 }
+            }
+          />
+          <div
+            ref={flyRef}
+            className="absolute z-10"
+            onMouseEnter={() => {
+              cancelClose();
+              clearOwnSafeZone();
+            }}
+            style={{
+              ...(placement.left
+                ? { right: '100%', marginRight: SUBMENU_GAP_PX }
+                : { left: '100%', marginLeft: SUBMENU_GAP_PX }),
+              ...(placement.up ? { bottom: -6 } : { top: -6 }),
+            }}
+          >
+            <PopoverSurface width="md" className="space-y-0.5 max-h-[70vh] overflow-y-auto">
+              {children}
+            </PopoverSurface>
+          </div>
+        </>
       )}
     </div>
   );
@@ -143,7 +310,8 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   onOrganize,
   onArchiveMany,
 }) => {
-  const [openSubmenu, setOpenSubmenu] = useState<'section' | 'folder' | null>(null);
+  const [openSubmenu, setOpenSubmenu] = useState<SubmenuId | null>(null);
+  const safeZoneRef = useRef<SafeTriangleZone | null>(null);
   const [creatingSection, setCreatingSection] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -319,6 +487,30 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
         </MenuItem>
       )}
 
+      {!isMulti && single.harness !== 'master' && (
+        <MenuItem
+          icon={<ExternalLink className="w-3.5 h-3.5" />}
+          onClick={() => {
+            onClose();
+            void window.superHarness.openInHarness(single.id);
+          }}
+        >
+          {single.tmuxSessionName
+            ? 'Open in tmux'
+            : single.harness === 'antigravity'
+              ? 'Open in Antigravity'
+              : single.harness === 'codex'
+                ? 'Open in Codex'
+                : single.harness === 'claude-desktop' || single.harness === 'claude-cli'
+                  ? 'Open in Claude'
+                  : single.harness === 'muse'
+                    ? 'Open in Muse'
+                    : single.harness === 'pi'
+                      ? 'Open in Pi'
+                      : 'Open in Harness'}
+        </MenuItem>
+      )}
+
       <MenuItem
         icon={
           <Pin
@@ -379,6 +571,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
 
       {canMoveSection && (
         <MenuSubmenu
+          id="section"
           icon={<FolderInput className="w-3.5 h-3.5" />}
           label={
             isMulti
@@ -386,7 +579,8 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
               : `Move to ${harnessLabelForPin(single)} section`
           }
           open={showMoveSections}
-          onOpenChange={(o) => setOpenSubmenu(o ? 'section' : null)}
+          safeZoneRef={safeZoneRef}
+          onSelectSubmenu={setOpenSubmenu}
         >
           {availableSections!.map((sec) => {
             const isCurrent = currentSingleSection === sec.label;
@@ -447,10 +641,12 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
       )}
 
       <MenuSubmenu
+        id="folder"
         icon={<FolderInput className="w-3.5 h-3.5" />}
         label={isMulti ? `Move ${targets.length} to folder` : 'Move to folder'}
         open={showMoveFolders}
-        onOpenChange={(o) => setOpenSubmenu(o ? 'folder' : null)}
+        safeZoneRef={safeZoneRef}
+        onSelectSubmenu={setOpenSubmenu}
       >
         {sortedFolders.map((f) => (
           <MenuItem

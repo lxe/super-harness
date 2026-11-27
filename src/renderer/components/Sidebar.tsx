@@ -44,7 +44,6 @@ import {
   getGlobalPinnedSessions,
   groupSessionsForSidebar,
   isSingleHarnessFilter,
-  reorderIds,
   SIDEBAR_SORT_OPTIONS,
   sortSidebarGroups,
   moveHarness,
@@ -100,6 +99,47 @@ interface ContextMenuState {
 /** Small upright pin marking a chat pinned inside its harness (same glyph as the "Pin" menu items). */
 const HarnessPinIcon: React.FC<{ className?: string }> = ({ className = 'w-3 h-3' }) => (
   <Pin aria-hidden="true" strokeWidth={2.25} className={`shrink-0 ${className}`} />
+);
+
+type ReorderPlacement = 'before' | 'after';
+
+interface ReorderDragState {
+  draggedId: string;
+  overId: string | null;
+  placement: ReorderPlacement;
+}
+
+function moveIdToPlacement(
+  ids: string[],
+  draggedId: string,
+  targetId: string,
+  placement: ReorderPlacement
+): string[] {
+  if (draggedId === targetId) return ids;
+  const fromIdx = ids.indexOf(draggedId);
+  const toIdx = ids.indexOf(targetId);
+  if (fromIdx === -1 || toIdx === -1) return ids;
+  const next = ids.filter((id) => id !== draggedId);
+  const targetIdx = next.indexOf(targetId);
+  const insertAt = placement === 'before' ? targetIdx : targetIdx + 1;
+  next.splice(insertAt, 0, draggedId);
+  return next;
+}
+
+/** Crisp horizontal insertion bar rendered between sibling rows/sections while dragging to reorder. */
+const DropInsertionLine: React.FC<{ placement: ReorderPlacement; className?: string }> = ({
+  placement,
+  className = '',
+}) => (
+  <div
+    aria-hidden="true"
+    className={`pointer-events-none absolute left-1.5 right-1.5 z-30 flex items-center ${
+      placement === 'before' ? '-top-[3px]' : '-bottom-[3px]'
+    } ${className}`}
+  >
+    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 shadow-[0_0_6px_rgba(129,140,248,0.85)]" />
+    <span className="h-[2px] flex-1 rounded-full bg-indigo-400 shadow-[0_0_6px_rgba(129,140,248,0.65)]" />
+  </div>
 );
 
 const PINNED_ORDER_STORAGE_KEY = 'sh:pinnedOrder:v1';
@@ -276,14 +316,14 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const [pinnedOrder, setPinnedOrder] = useState<string[]>(() =>
     loadStringArray(PINNED_ORDER_STORAGE_KEY)
   );
-  const [pinDrag, setPinDrag] = useState<{ draggedId: string; overId: string | null } | null>(null);
+  const [pinDrag, setPinDrag] = useState<ReorderDragState | null>(null);
   const suppressPinClickRef = useRef(false);
 
   // Manual ordering for draggable sidebar sections/folders
   const [sectionOrderMap, setSectionOrderMap] = useState<Record<string, string[]>>(() =>
     loadSectionOrderMap()
   );
-  const [sectionDrag, setSectionDrag] = useState<{ draggedId: string; overId: string | null } | null>(null);
+  const [sectionDrag, setSectionDrag] = useState<ReorderDragState | null>(null);
   const suppressSectionToggleRef = useRef(false);
 
   useEffect(() => {
@@ -602,33 +642,68 @@ export const Sidebar: React.FC<Props> = React.memo(({
     return applyManualGroupOrder(sorted, sectionOrderMap[sectionOrderContextKey]);
   }, [filtered, groupBy, folders, filter, harnessOrder, sortBy, sectionOrderMap, sectionOrderContextKey]);
 
+  const findInsertionSlot = (
+    selector: string,
+    attr: string,
+    y: number,
+    orderedIds: string[],
+    draggedId: string
+  ): { overId: string | null; placement: ReorderPlacement } => {
+    const nodes = asideRef.current?.querySelectorAll<HTMLElement>(selector);
+    if (!nodes || nodes.length === 0) return { overId: null, placement: 'before' };
+    const items: Array<{ id: string; rect: DOMRect }> = [];
+    for (const el of nodes) {
+      const id = el.getAttribute(attr);
+      if (id) items.push({ id, rect: el.getBoundingClientRect() });
+    }
+    if (items.length === 0) return { overId: null, placement: 'before' };
+
+    let targetId = items[items.length - 1].id;
+    let placement: ReorderPlacement = 'after';
+    for (const item of items) {
+      const mid = (item.rect.top + item.rect.bottom) / 2;
+      if (y < mid) {
+        targetId = item.id;
+        placement = 'before';
+        break;
+      }
+    }
+
+    // Suppress the bar if dropping here wouldn't change the item's position
+    const nextOrder = moveIdToPlacement(orderedIds, draggedId, targetId, placement);
+    if (nextOrder.join(',') === orderedIds.join(',')) {
+      return { overId: null, placement };
+    }
+    return { overId: targetId, placement };
+  };
+
   const startPinnedRowDrag = (e: React.PointerEvent<HTMLElement>, sessionId: string) => {
     if (e.button !== 0 || query.trim()) return;
     if ((e.target as HTMLElement | null)?.closest('button, input, textarea')) return;
     const startY = e.clientY;
     const startX = e.clientX;
+    const baseOrder = allGlobalPinned.map((s) => s.id);
     let active = false;
     let currentOver: string | null = null;
-
-    const findTarget = (y: number): string | null => {
-      const nodes = asideRef.current?.querySelectorAll<HTMLElement>('[data-global-pin-id]');
-      if (!nodes) return null;
-      for (const el of nodes) {
-        const r = el.getBoundingClientRect();
-        if (y >= r.top && y <= r.bottom) return el.dataset.globalPinId || null;
-      }
-      return null;
-    };
+    let currentPlacement: ReorderPlacement = 'before';
 
     const onMove = (ev: PointerEvent) => {
+      if (ev.buttons === 0) {
+        finish(false);
+        return;
+      }
       if (!active) {
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return;
         active = true;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+        setPinDrag({ draggedId: sessionId, overId: null, placement: 'before' });
       }
-      const hit = findTarget(ev.clientY);
-      if (hit !== currentOver) {
-        currentOver = hit;
-        setPinDrag({ draggedId: sessionId, overId: hit });
+      const slot = findInsertionSlot('[data-global-pin-id]', 'data-global-pin-id', ev.clientY, baseOrder, sessionId);
+      if (slot.overId !== currentOver || slot.placement !== currentPlacement) {
+        currentOver = slot.overId;
+        currentPlacement = slot.placement;
+        setPinDrag({ draggedId: sessionId, overId: slot.overId, placement: slot.placement });
       }
     };
 
@@ -636,14 +711,17 @@ export const Sidebar: React.FC<Props> = React.memo(({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      window.removeEventListener('keydown', onKeyDown);
       if (active) {
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
         suppressPinClickRef.current = true;
         window.setTimeout(() => {
           suppressPinClickRef.current = false;
         }, 0);
-        if (commit && currentOver && currentOver !== sessionId) {
-          const baseOrder = allGlobalPinned.map((s) => s.id);
-          setPinnedOrder(reorderIds(baseOrder, sessionId, currentOver));
+        if (commit && currentOver) {
+          setPinnedOrder(moveIdToPlacement(baseOrder, sessionId, currentOver, currentPlacement));
         }
       }
       setPinDrag(null);
@@ -651,9 +729,14 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
     const onUp = () => finish(true);
     const onCancel = () => finish(false);
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') finish(false);
+    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
+    window.addEventListener('keydown', onKeyDown);
   };
 
   const startSectionHeaderDrag = (
@@ -665,28 +748,36 @@ export const Sidebar: React.FC<Props> = React.memo(({
     if ((e.target as HTMLElement | null)?.closest('button[aria-label^="New "]')) return;
     const startY = e.clientY;
     const startX = e.clientX;
+    const baseOrder = isCustomFolder
+      ? folders.map((f) => f.id)
+      : topGroups.filter((g) => !g.headless).map((g) => g.id);
     let active = false;
     let currentOver: string | null = null;
-
-    const findTarget = (y: number): string | null => {
-      const nodes = asideRef.current?.querySelectorAll<HTMLElement>('[data-reorder-section-id]');
-      if (!nodes) return null;
-      for (const el of nodes) {
-        const r = el.getBoundingClientRect();
-        if (y >= r.top - 4 && y <= r.bottom + 4) return el.dataset.reorderSectionId || null;
-      }
-      return null;
-    };
+    let currentPlacement: ReorderPlacement = 'before';
 
     const onMove = (ev: PointerEvent) => {
+      if (ev.buttons === 0) {
+        finish(false);
+        return;
+      }
       if (!active) {
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return;
         active = true;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+        setSectionDrag({ draggedId: sectionId, overId: null, placement: 'before' });
       }
-      const hit = findTarget(ev.clientY);
-      if (hit !== currentOver) {
-        currentOver = hit;
-        setSectionDrag({ draggedId: sectionId, overId: hit });
+      const slot = findInsertionSlot(
+        '[data-reorder-group-id]',
+        'data-reorder-group-id',
+        ev.clientY,
+        baseOrder,
+        sectionId
+      );
+      if (slot.overId !== currentOver || slot.placement !== currentPlacement) {
+        currentOver = slot.overId;
+        currentPlacement = slot.placement;
+        setSectionDrag({ draggedId: sectionId, overId: slot.overId, placement: slot.placement });
       }
     };
 
@@ -694,22 +785,23 @@ export const Sidebar: React.FC<Props> = React.memo(({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      window.removeEventListener('keydown', onKeyDown);
       if (active) {
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
         suppressSectionToggleRef.current = true;
         window.setTimeout(() => {
           suppressSectionToggleRef.current = false;
         }, 0);
-        if (commit && currentOver && currentOver !== sectionId) {
-          if (isCustomFolder) {
-            const folderIds = folders.map((f) => f.id);
-            const nextFolderIds = reorderIds(folderIds, sectionId, currentOver);
-            if (nextFolderIds.join(',') !== folderIds.join(',')) {
-              onOrganizeRef.current([{ type: 'reorder_folders', folderIds: nextFolderIds }]);
+        if (commit && currentOver) {
+          const nextIds = moveIdToPlacement(baseOrder, sectionId, currentOver, currentPlacement);
+          if (nextIds.join(',') !== baseOrder.join(',')) {
+            if (isCustomFolder) {
+              onOrganizeRef.current([{ type: 'reorder_folders', folderIds: nextIds }]);
+            } else {
+              setSectionOrderMap((prev) => ({ ...prev, [sectionOrderContextKey]: nextIds }));
             }
-          } else {
-            const visibleIds = topGroups.filter((g) => !g.headless).map((g) => g.id);
-            const nextIds = reorderIds(visibleIds, sectionId, currentOver);
-            setSectionOrderMap((prev) => ({ ...prev, [sectionOrderContextKey]: nextIds }));
           }
         }
       }
@@ -718,9 +810,14 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
     const onUp = () => finish(true);
     const onCancel = () => finish(false);
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') finish(false);
+    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
+    window.addEventListener('keydown', onKeyDown);
   };
 
   // Smooth FLIP animation whenever sessions legitimately swap positions in the sidebar
@@ -1507,10 +1604,17 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
       {/* Global Top-Pinned Chats (manual order — drag up/down to reorder) */}
       {globalPinnedSessions.length > 0 && (
-        <div className="px-2.5 py-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline">
+        <div
+          className={`px-2.5 py-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline ${
+            pinDrag ? '[&_*]:pointer-events-none' : ''
+          }`}
+        >
           {globalPinnedSessions.map((s) => {
             const isDraggingThis = pinDrag?.draggedId === s.id;
-            const isDropOverThis = Boolean(pinDrag && pinDrag.overId === s.id && pinDrag.draggedId !== s.id);
+            const dropPlacement =
+              pinDrag && pinDrag.overId === s.id && pinDrag.draggedId !== s.id
+                ? pinDrag.placement
+                : null;
             return (
               <div
                 key={s.id}
@@ -1522,10 +1626,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                     e.stopPropagation();
                   }
                 }}
-                className={`rounded-lg transition-opacity ${isDraggingThis ? 'opacity-40' : ''} ${
-                  isDropOverThis ? 'ring-1 ring-inset ring-indigo-400/55 bg-indigo-500/10' : ''
-                }`}
+                className={`relative rounded-lg transition-opacity ${isDraggingThis ? 'opacity-40' : ''}`}
               >
+                {dropPlacement && <DropInsertionLine placement={dropPlacement} />}
                 {renderSessionRow(s, { showLogo: true, showPin: false })}
               </div>
             );
@@ -1637,7 +1740,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
             No conversations found
           </div>
         ) : (
-          <div>
+          <div className={sectionDrag ? '[&_*]:pointer-events-none' : undefined}>
             {topGroups.map((grp, grpIdx) => {
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
@@ -1701,29 +1804,32 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 !isFilteredHarnessGroup &&
                 (groupBy !== 'folders' || (grp.folderId !== undefined && grp.folderId !== null));
               const isDraggingSection = sectionDrag?.draggedId === grp.id;
-              const isOverSection = Boolean(
+              const sectionDropPlacement =
                 sectionDrag && sectionDrag.overId === grp.id && sectionDrag.draggedId !== grp.id
-              );
+                  ? sectionDrag.placement
+                  : null;
 
               return (
                 <div
                   key={grp.id}
                   data-drop-section-id={isTopDroppable ? grp.id : undefined}
+                  data-reorder-group-id={isSectionReorderable ? grp.id : undefined}
                   className={`relative transition-opacity ${
                     isOtherHarnessWhileDragging || isDraggingSection ? 'opacity-40' : ''
                   } ${
-                    isTopDragOver || isOverSection
+                    isTopDragOver
                       ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-400/45 rounded-lg'
                       : ''
                   }`}
                 >
+                  {sectionDropPlacement && <DropInsertionLine placement={sectionDropPlacement} />}
                   {!isFilteredHarnessGroup && (
                     <SectionHeader
                       level={1}
                       variant={isHarnessDivider ? 'separator' : 'tree'}
                       accent={grp.harnessLogo || grp.harnessGroup}
                       collapsed={isTopClosed}
-                      dropTarget={isTopDragOver || isOverSection}
+                      dropTarget={isTopDragOver}
                       reorderSectionId={isSectionReorderable ? grp.id : undefined}
                       onPointerDown={
                         isSectionReorderable

@@ -34,6 +34,7 @@ import { PushNotifier } from './services/pushNotifier';
 import {
   detectSystemApps,
   openPathWithApp,
+  openSessionInHarness,
   readFilePreview,
 } from './services/systemLauncher';
 import { SessionSummarizer } from './services/sessionSummarizer';
@@ -1050,6 +1051,12 @@ function registerIpcHandlers(): void {
       return { ok: true };
     }
     return { ok: false };
+  });
+
+  ipcMain.handle('sh:open-in-harness', async (_ev, sessionId: string) => {
+    const session = registry.getCached().sessions.find((s) => s.id === sessionId);
+    if (!session) return { ok: false, error: 'Session not found' };
+    return openSessionInHarness(session, store.getState().settings.apps);
   });
 
   ipcMain.handle('sh:get-usage', async (_ev, force?: boolean) => {

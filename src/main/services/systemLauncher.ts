@@ -7,6 +7,7 @@ import type {
   DetectedSystemApps,
   ExternalAppsSettings,
   FilePreviewData,
+  UnifiedSession,
 } from '../../shared/types';
 import { whichBinary } from '../utils/system';
 
@@ -323,6 +324,133 @@ export async function openPathWithApp(
     }
 
     return { ok: false, error: `Unknown open mode: ${effectiveMode}` };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function launchTerminalWithCommand(
+  cmdArgv: string[],
+  cwd: string,
+  apps: ExternalAppsSettings
+): Promise<void> {
+  const detected = await detectSystemApps();
+  const safeCwd = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  const tpl =
+    apps.terminalCommand?.trim() ||
+    detected.terminals[0]?.command ||
+    'kitty --directory {cwd}';
+  const argv = splitCommandArgs(tpl, { cwd: safeCwd, path: safeCwd });
+  const firstBin = path.basename(argv[0] || '');
+  if (firstBin === 'wezterm') {
+    argv.push('--', ...cmdArgv);
+  } else {
+    argv.push('-e', ...cmdArgv);
+  }
+  spawnDetached(argv, safeCwd);
+}
+
+/**
+ * Opens a session directly in its native external harness (desktop app deep link
+ * when available, or configured terminal attached to tmux / CLI resume).
+ */
+export async function openSessionInHarness(
+  session: UnifiedSession,
+  apps: ExternalAppsSettings
+): Promise<{ ok: boolean; via?: string; error?: string }> {
+  const cwd = session.cwd && fs.existsSync(session.cwd) ? session.cwd : os.homedir();
+  const openUrl = async (url: string): Promise<boolean> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { shell } = require('electron') as typeof import('electron');
+      await shell.openExternal(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  try {
+    // 1. Live tmux session (Claude tmux or Muse tmux, local or remote SSH)
+    if (session.tmuxSessionName) {
+      if (session.hostAddress) {
+        await launchTerminalWithCommand(
+          ['ssh', '-t', session.hostAddress, 'tmux', 'attach-session', '-t', session.tmuxSessionName],
+          os.homedir(),
+          apps
+        );
+        return { ok: true, via: `ssh tmux (${session.hostAddress})` };
+      }
+      await launchTerminalWithCommand(
+        ['tmux', 'attach-session', '-t', session.tmuxSessionName],
+        cwd,
+        apps
+      );
+      return { ok: true, via: `tmux:${session.tmuxSessionName}` };
+    }
+
+    // 2. OpenAI Codex: deep-link Codex Desktop straight to the thread, fallback to CLI resume
+    if (session.harness === 'codex') {
+      const hasCodexDesktop =
+        fs.existsSync('/usr/bin/codex-desktop') ||
+        fs.existsSync('/usr/share/applications/codex-desktop.desktop') ||
+        process.platform === 'darwin';
+      if (hasCodexDesktop && (await openUrl(`codex://threads/${encodeURIComponent(session.nativeId)}`))) {
+        return { ok: true, via: 'Codex Desktop' };
+      }
+      const codexBin = (await whichBinary('codex')) || 'codex';
+      await launchTerminalWithCommand([codexBin, 'resume', session.nativeId], cwd, apps);
+      return { ok: true, via: 'Codex CLI' };
+    }
+
+    // 3. Google Antigravity: deep-link Antigravity Desktop to conversation, fallback to agy CLI
+    if (session.harness === 'antigravity') {
+      const hasAgyDesktop =
+        fs.existsSync(path.join(os.homedir(), '.local/share/applications/antigravity.desktop')) ||
+        fs.existsSync('/usr/share/applications/antigravity.desktop') ||
+        process.platform === 'darwin';
+      if (hasAgyDesktop && (await openUrl(`antigravity://conversation/${encodeURIComponent(session.nativeId)}`))) {
+        return { ok: true, via: 'Antigravity Desktop' };
+      }
+      const agyBin = (await whichBinary('agy')) || 'agy';
+      await launchTerminalWithCommand([agyBin, '--resume', session.nativeId], cwd, apps);
+      return { ok: true, via: 'Antigravity CLI' };
+    }
+
+    // 4. Claude Desktop
+    if (session.harness === 'claude-desktop') {
+      if (await openUrl('claude://')) {
+        return { ok: true, via: 'Claude Desktop' };
+      }
+      return { ok: false, error: 'Could not open Claude Desktop' };
+    }
+
+    // 5. Claude CLI
+    if (session.harness === 'claude-cli' || session.harness === 'claude-tmux') {
+      const claudeBin = (await whichBinary('claude')) || 'claude';
+      await launchTerminalWithCommand([claudeBin, '--resume', session.nativeId], cwd, apps);
+      return { ok: true, via: 'Claude CLI' };
+    }
+
+    // 6. Muse
+    if (session.harness === 'muse') {
+      const museBin = (await whichBinary('muse')) || 'muse';
+      await launchTerminalWithCommand([museBin, 'resume', session.nativeId], cwd, apps);
+      return { ok: true, via: 'Muse CLI' };
+    }
+
+    // 7. Pi
+    if (session.harness === 'pi') {
+      const piBin = (await whichBinary('pi')) || 'pi';
+      const args = session.nativeId ? [piBin, '--session', session.nativeId] : [piBin];
+      await launchTerminalWithCommand(args, cwd, apps);
+      return { ok: true, via: 'Pi CLI' };
+    }
+
+    return { ok: false, error: `Opening external harness is not supported for ${session.harness}` };
   } catch (err) {
     return {
       ok: false,

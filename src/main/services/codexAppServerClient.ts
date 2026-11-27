@@ -579,6 +579,7 @@ export class CodexAppServerClient {
           runId: run.runId,
           kind: 'delta',
           text: delta,
+          ...(typeof params.itemId === 'string' && params.itemId ? { itemId: params.itemId } : {}),
         });
       }
       return;

@@ -597,6 +597,12 @@ export interface StreamEvent {
   runId: string;
   kind: 'start' | 'delta' | 'block' | 'done' | 'error';
   text?: string;
+  /**
+   * For `delta`: the harness's id for the message item the text belongs to, when it has one.
+   * A change of itemId starts a new paragraph (two text items can follow each other with no
+   * block between them).
+   */
+  itemId?: string;
   block?: UnifiedBlock;
   error?: string;
 }

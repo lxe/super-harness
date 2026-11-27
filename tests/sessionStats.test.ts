@@ -6,6 +6,25 @@ import {
 } from '../src/main/utils/sessionStats';
 
 describe('sessionStats', () => {
+  it('raises the Claude window to the smallest known size that holds the peak usage', () => {
+    const turn = (id: string, cacheRead: number) =>
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id,
+          model: 'claude-opus-5-5',
+          usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead, output_tokens: 50 },
+        },
+      });
+    // 684k in context on a model name with no "1m": the window must be 1M, not 200k,
+    // and stay 1M after a compaction brings usage back down.
+    const stats = computeClaudeSessionStats([turn('a', 150_000), turn('b', 684_000), turn('c', 40_000)]);
+    expect(stats?.contextUsedTokens).toBe(40_010);
+    expect(stats?.contextWindowTokens).toBe(1_000_000);
+    const small = computeClaudeSessionStats([turn('a', 150_000)]);
+    expect(small?.contextWindowTokens).toBe(200_000);
+  });
+
   it('computes Antigravity token totals, latest context usage, and estimated cost', () => {
     const lines = [
       JSON.stringify({

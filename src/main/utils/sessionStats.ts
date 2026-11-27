@@ -19,6 +19,20 @@ export function inferContextWindowTokens(model?: string, harnessGroup?: string):
   return 200_000;
 }
 
+const KNOWN_CONTEXT_WINDOWS = [200_000, 400_000, 1_000_000, 2_000_000];
+
+/**
+ * The inferred window, raised to the smallest known window that holds the most context the
+ * session has actually used. Model names don't say whether a long-context variant is in use
+ * (Claude logs "claude-opus-5-5" for Opus 1M), so usage above the inferred window proves a
+ * larger one. The peak, not the latest value, keeps the window from dropping back after a
+ * compaction.
+ */
+export function contextWindowFittingPeak(inferred: number, peakUsed: number): number {
+  if (peakUsed <= inferred) return inferred;
+  return KNOWN_CONTEXT_WINDOWS.find((w) => w >= peakUsed) ?? peakUsed;
+}
+
 /**
  * Extracts per-session token totals, latest context window fill, and estimated API cost
  * from Antigravity `transcript.jsonl` lines (`PLANNER_RESPONSE` entries).
@@ -86,6 +100,7 @@ export function computeClaudeSessionStats(lines: string[]): SessionStats | undef
   >();
   let fallbackIdx = 0;
   let lastContextUsed = 0;
+  let peakContextUsed = 0;
   let lastModel: string | undefined;
 
   for (let i = 0; i < lines.length; i++) {
@@ -113,6 +128,7 @@ export function computeClaudeSessionStats(lines: string[]): SessionStats | undef
       typeof msg?.id === 'string' && msg.id ? msg.id : `anon-${fallbackIdx++}`;
     seenMsgIds.set(msgId, { model, input, cacheWrite, cacheRead, output });
     lastContextUsed = input + cacheWrite + cacheRead;
+    peakContextUsed = Math.max(peakContextUsed, lastContextUsed);
     lastModel = model;
   }
 
@@ -144,7 +160,10 @@ export function computeClaudeSessionStats(lines: string[]): SessionStats | undef
     cacheWriteTokens,
     totalTokens: inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens,
     contextUsedTokens: lastContextUsed,
-    contextWindowTokens: inferContextWindowTokens(lastModel, 'claude'),
+    contextWindowTokens: contextWindowFittingPeak(
+      inferContextWindowTokens(lastModel, 'claude'),
+      peakContextUsed
+    ),
     estimatedCostUsd: Number(estimatedCostUsd.toFixed(4)),
     turnCount: seenMsgIds.size,
   };

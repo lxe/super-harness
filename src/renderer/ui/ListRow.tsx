@@ -54,10 +54,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel
           ? cn(
-              'h-[34px] pl-2.5 pr-3 rounded-none bg-surface-canvas hover:bg-surface-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[14px] font-normal tracking-[-0.005em] text-ink-primary',
+              'h-[34px] px-4 rounded-none bg-surface-canvas hover:bg-surface-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[14px] font-normal tracking-[-0.005em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
-          : 'h-[30px] px-2 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[13px] font-normal text-ink-secondary/80 hover:text-ink-primary',
+          : 'h-[30px] px-2.5 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[13px] font-normal text-ink-muted hover:text-ink-primary',
         !isTopLevel && sticky && 'sticky top-[34px] z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
@@ -69,24 +69,24 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         aria-expanded={!collapsed}
         className={cn(
           'flex-1 min-w-0 h-full flex items-center cursor-pointer focus:outline-none focus-visible:shadow-none',
-          isTopLevel ? 'gap-2.5' : 'gap-2'
+          isTopLevel ? 'gap-2' : 'gap-1.5'
         )}
       >
-        {collapsed ? (
-          <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
-        ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
-        )}
         {icon && <span className="shrink-0 inline-flex items-center justify-center">{icon}</span>}
         <span
           className={cn(
             'leading-none truncate',
-            isTopLevel && 'translate-y-[1px]',
+            isTopLevel && 'translate-y-[0.5px]',
             working && 'sh-nav-title-shimmer'
           )}
         >
           {label}
         </span>
+        {collapsed ? (
+          <ChevronRight className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-ink-faint group-hover:text-ink-muted shrink-0 transition-colors" />
+        )}
         {count !== undefined && (
           <span className="ml-auto flex items-center gap-1.5 text-[11px] leading-none tabular-nums font-normal text-ink-faint shrink-0">
             <span>{count}</span>

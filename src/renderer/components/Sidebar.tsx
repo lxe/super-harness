@@ -2,7 +2,6 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import {
   Archive,
   Columns2,
-  Folder,
   FolderGit2,
   FolderPlus,
   HelpCircle,
@@ -1488,11 +1487,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                           const isSecClosed = Boolean(collapsed[sec.id]);
                           const secHasWorking = sec.items.some((i) => i.status === 'running');
                           const isSecUngrouped = sec.label === 'Ungrouped';
-                          const secIcon = isSecUngrouped ? (
-                            <Inbox className="w-3.5 h-3.5 text-ink-muted" />
-                          ) : (
-                            <Folder className="w-3.5 h-3.5 text-ink-secondary" />
-                          );
                           const isSecDragOver = Boolean(
                             activeDrag?.overValid && activeDrag.overTargetId === sec.id
                           );
@@ -1526,12 +1520,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                   })
                                 }
                                 addLabel={`New ${grp.label} conversation in ${sec.label}`}
-                                icon={secIcon}
                                 label={sec.label}
                                 working={secHasWorking}
                               />
                               {!isSecClosed && (
-                                <div className="mt-0.5 ml-2.5 pl-2 border-l border-white/[0.06] space-y-0.5">
+                                <div className="mt-0.5 space-y-0.5">
                                   {sec.items.map((s) =>
                                     renderSessionRow(s, { showLogo: false, showPin: Boolean(s.pinned) })
                                   )}

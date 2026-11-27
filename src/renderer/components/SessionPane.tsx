@@ -41,6 +41,7 @@ import { SessionHeader } from './SessionHeader';
 import { reconcileById } from '../utils/reconcile';
 import { filesToAttachments, isImageAttachment } from '../utils/attachments';
 import { useStableCallback } from '../utils/useStableCallback';
+import { setComposerDraft, useComposerDraft } from '../utils/composerDraftStore';
 
 interface FailedUserEntry {
   msg: UnifiedMessage;
@@ -101,10 +102,7 @@ function saveFailedMessagesCache(map: Map<string, FailedUserEntry[]>): void {
  */
 const failedUserMessagesBySession = loadFailedMessagesCache();
 
-export interface ComposerDraft {
-  text: string;
-  attachments: ImageAttachment[];
-}
+export type { ComposerDraft } from '../utils/composerDraftStore';
 
 interface Props {
   session: UnifiedSession | undefined;
@@ -112,11 +110,6 @@ interface Props {
   folders: SessionFolder[];
   catalog?: HarnessCatalog | null;
   isStreamingGlobal?: boolean;
-  draft: ComposerDraft;
-  onDraftChange: (
-    sessionId: string,
-    updater: ComposerDraft | ((prev: ComposerDraft) => ComposerDraft)
-  ) => void;
   queuedMessages: QueuedMessageItem[];
   onQueueChange: (
     sessionId: string,
@@ -158,8 +151,6 @@ export const SessionPane: React.FC<Props> = ({
   folders,
   catalog,
   isStreamingGlobal = false,
-  draft,
-  onDraftChange,
   queuedMessages,
   onQueueChange,
   isSplitPane,
@@ -296,6 +287,9 @@ export const SessionPane: React.FC<Props> = ({
   const sessionId = session?.id ?? '';
   const paneId = isSplitPane ? 'split' : 'primary';
 
+  // The draft lives in an external store: typing re-renders this pane only, never App or the sidebar.
+  const draft = useComposerDraft(sessionId);
+  const onDraftChange = setComposerDraft;
   const input = draft.text;
   const attachments = draft.attachments;
 

@@ -15,7 +15,8 @@ import type {
 } from '../shared/types';
 import { DraftSessionPane, type DraftConversation } from './components/DraftSessionPane';
 import { FilePreviewDrawer, type PreviewTarget } from './components/FilePreviewDrawer';
-import { SessionPane, type ComposerDraft } from './components/SessionPane';
+import { SessionPane } from './components/SessionPane';
+import { EMPTY_DRAFT, getComposerDraft, setComposerDraft } from './utils/composerDraftStore';
 import { SettingsModal, type SettingsTab } from './components/SettingsModal';
 import { DictationProvider } from './components/DictationButton';
 import { Sidebar, type SidebarFilterTab } from './components/Sidebar';
@@ -32,54 +33,10 @@ import {
 } from './utils/transcriptCache';
 import { reconcileById, reuseIfEqual } from './utils/reconcile';
 
-const EMPTY_DRAFT: ComposerDraft = { text: '', attachments: [] };
 const EMPTY_QUEUE: QueuedMessageItem[] = [];
 const ACTIVE_SESSION_STORAGE_KEY = 'sh:activeSessionId';
 const SPLIT_SESSION_STORAGE_KEY = 'sh:splitSessionId';
-const COMPOSER_DRAFTS_STORAGE_KEY = 'sh:composerDrafts:v1';
 const DRAFT_CONVERSATIONS_STORAGE_KEY = 'sh:draftConversations:v1';
-
-function loadStoredDrafts(): Record<string, ComposerDraft> {
-  try {
-    const raw = localStorage.getItem(COMPOSER_DRAFTS_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, ComposerDraft>;
-    if (!parsed || typeof parsed !== 'object') return {};
-    const out: Record<string, ComposerDraft> = {};
-    for (const [sid, d] of Object.entries(parsed)) {
-      if (!d || typeof d !== 'object') continue;
-      const text = typeof d.text === 'string' ? d.text : '';
-      const attachments = Array.isArray(d.attachments) ? d.attachments : [];
-      if (text || attachments.length > 0) {
-        out[sid] = { text, attachments };
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function saveStoredDrafts(drafts: Record<string, ComposerDraft>): void {
-  try {
-    const compact: Record<string, ComposerDraft> = {};
-    for (const [sid, d] of Object.entries(drafts)) {
-      if (!d) continue;
-      const text = d.text || '';
-      const attachments = (d.attachments || []).map(({ previewDataUrl: _drop, ...rest }) => rest);
-      if (text || attachments.length > 0) {
-        compact[sid] = { text, attachments };
-      }
-    }
-    if (Object.keys(compact).length === 0) {
-      localStorage.removeItem(COMPOSER_DRAFTS_STORAGE_KEY);
-    } else {
-      localStorage.setItem(COMPOSER_DRAFTS_STORAGE_KEY, JSON.stringify(compact));
-    }
-  } catch {
-    // ignore storage quota errors
-  }
-}
 
 function loadStoredDraftConversations(): DraftConversation[] {
   try {
@@ -164,7 +121,6 @@ export const App: React.FC = () => {
       // ignore
     }
   }, [splitSessionId]);
-  const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>(() => loadStoredDrafts());
   const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessageItem[]>>(
     () => loadStoredQueues()
   );
@@ -176,11 +132,6 @@ export const App: React.FC = () => {
   const [draftConversations, setDraftConversations] = useState<DraftConversation[]>(() =>
     loadStoredDraftConversations()
   );
-
-  // Crash-proof synchronous persistence for every session's composer text & pasted attachments
-  useEffect(() => {
-    saveStoredDrafts(drafts);
-  }, [drafts]);
 
   useEffect(() => {
     saveStoredDraftConversations(draftConversations);
@@ -399,6 +350,7 @@ export const App: React.FC = () => {
 
   const handleDiscardDraftConversation = useCallback(
     (draftId: string) => {
+      setComposerDraft(draftId, EMPTY_DRAFT);
       setDraftConversations((prev) => prev.filter((d) => d.id !== draftId));
       if (activeSessionId === draftId) {
         const next = sessions.find((s) => s.harness !== 'master' && !s.isSubagent);
@@ -506,16 +458,10 @@ export const App: React.FC = () => {
                 return;
               }
               // Non-busy failure: restore text to session draft so nothing is ever lost & notify user
-              setDrafts((prev) => {
-                const cur = prev[sid] ?? EMPTY_DRAFT;
-                return {
-                  ...prev,
-                  [sid]: {
-                    text: cur.text ? `${nextItem.text}\n${cur.text}` : nextItem.text,
-                    attachments: [...(nextItem.attachments ?? []), ...cur.attachments],
-                  },
-                };
-              });
+              setComposerDraft(sid, (cur) => ({
+                text: cur.text ? `${nextItem.text}\n${cur.text}` : nextItem.text,
+                attachments: [...(nextItem.attachments ?? []), ...cur.attachments],
+              }));
               const failMsg = `Queued message not sent: ${res.error || 'Dispatch failed'}`;
               setToast(failMsg);
               window.setTimeout(() => {
@@ -709,20 +655,6 @@ export const App: React.FC = () => {
     const next = await window.superHarness.clearMasterHistory();
     setState(next);
   }, []);
-
-  const handleDraftChange = useCallback(
-    (
-      sessionId: string,
-      updater: ComposerDraft | ((prev: ComposerDraft) => ComposerDraft)
-    ) => {
-      setDrafts((prev) => {
-        const current = prev[sessionId] ?? EMPTY_DRAFT;
-        const next = typeof updater === 'function' ? updater(current) : updater;
-        return { ...prev, [sessionId]: next };
-      });
-    },
-    []
-  );
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -1044,7 +976,9 @@ export const App: React.FC = () => {
             onUpdateDraft={(patch) => handleUpdateDraftConversation(activeDraft.id, patch)}
             onDiscard={() => handleDiscardDraftConversation(activeDraft.id)}
             onLaunched={(newSid) => {
-              const launchedDraft = activeDraft;
+              // The prompt text lives in the composer draft store; read it before clearing it.
+              const launchedDraft = { ...activeDraft, prompt: getComposerDraft(activeDraft.id).text };
+              setComposerDraft(activeDraft.id, EMPTY_DRAFT);
               setDraftConversations((prev) => prev.filter((d) => d.id !== launchedDraft.id));
               if (newSid && launchedDraft.harness) {
                 const now = Date.now();
@@ -1144,8 +1078,6 @@ export const App: React.FC = () => {
             folders={folders}
             catalog={catalog}
             isStreamingGlobal={streamingIds.has(activeSessionId)}
-            draft={drafts[activeSessionId] ?? EMPTY_DRAFT}
-            onDraftChange={handleDraftChange}
             queuedMessages={queuedBySession[activeSessionId] ?? EMPTY_QUEUE}
             onQueueChange={handleQueueChange}
             hasSplitOpen={Boolean(splitSessionId)}
@@ -1169,8 +1101,6 @@ export const App: React.FC = () => {
             folders={folders}
             catalog={catalog}
             isStreamingGlobal={streamingIds.has(splitSessionId)}
-            draft={drafts[splitSessionId] ?? EMPTY_DRAFT}
-            onDraftChange={handleDraftChange}
             queuedMessages={queuedBySession[splitSessionId] ?? EMPTY_QUEUE}
             onQueueChange={handleQueueChange}
             isSplitPane

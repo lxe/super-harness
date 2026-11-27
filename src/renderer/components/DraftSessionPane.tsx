@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   Brain,
@@ -33,6 +33,7 @@ import { HarnessLogo } from './HarnessLogo';
 import { AttachmentFileTile } from './AttachmentFileTile';
 import { filesToAttachments, isImageAttachment } from '../utils/attachments';
 import { ImageLightbox, type PreviewImageItem } from './ImageLightbox';
+import { getComposerDraft, setComposerDraft, useComposerDraft } from '../utils/composerDraftStore';
 
 export interface DraftConversation {
   id: string;
@@ -117,12 +118,30 @@ export const DraftSessionPane: React.FC<Props> = ({
   const modelTriggerRef = useRef<HTMLButtonElement | null>(null);
   const thinkingTriggerRef = useRef<HTMLButtonElement | null>(null);
 
+  // The prompt text lives in the composer draft store (persisted on every keystroke), so typing
+  // re-renders this pane and the sidebar's draft title only, not App. Drafts saved before this
+  // carried their text on the draft object; copy it in once.
+  const prompt = useComposerDraft(draft.id).text;
+  useEffect(() => {
+    if (draft.prompt) {
+      if (!getComposerDraft(draft.id).text) {
+        setComposerDraft(draft.id, (prev) => ({ ...prev, text: draft.prompt }));
+      }
+      onUpdateDraft({ prompt: '' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.id]);
+  const setPrompt = useCallback(
+    (text: string) => setComposerDraft(draft.id, (prev) => ({ ...prev, text })),
+    [draft.id]
+  );
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 56), 240)}px`;
-  }, [draft.prompt, draft.id]);
+  }, [prompt, draft.id]);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -332,7 +351,7 @@ export const DraftSessionPane: React.FC<Props> = ({
         cwd: draft.cwd,
         model: draft.model.trim() || undefined,
         reasoningEffort: draft.reasoningEffort?.trim() || undefined,
-        prompt: draft.prompt.trim() || undefined,
+        prompt: getComposerDraft(draft.id).text.trim() || undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         remoteControl: draft.remoteControl,
       });
@@ -582,8 +601,8 @@ export const DraftSessionPane: React.FC<Props> = ({
             <textarea
               ref={textareaRef}
               rows={2}
-              value={draft.prompt}
-              onChange={(e) => onUpdateDraft({ prompt: e.target.value })}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
               onPaste={(e) => void handlePaste(e)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -982,8 +1001,8 @@ export const DraftSessionPane: React.FC<Props> = ({
               <div className="flex items-center gap-1.5 shrink-0">
                 <DictationButton
                   textareaRef={textareaRef}
-                  value={draft.prompt}
-                  onChange={(prompt) => onUpdateDraft({ prompt })}
+                  value={prompt}
+                  onChange={setPrompt}
                 />
                 <button
                   type="button"

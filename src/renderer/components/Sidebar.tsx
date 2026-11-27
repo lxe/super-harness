@@ -53,6 +53,7 @@ import {
   type SidebarFilterTab,
 } from '../utils/sidebarGrouping';
 import { prefetchSessionTranscript } from '../utils/transcriptCache';
+import { useComposerDraft } from '../utils/composerDraftStore';
 import type { DraftConversation } from './DraftSessionPane';
 import { HarnessLogo } from './HarnessLogo';
 import { SuperHarnessMark } from './SuperHarnessMark';
@@ -166,6 +167,15 @@ interface SessionRowProps {
 }
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** An unsent-draft row whose title follows the draft's text; typing re-renders only this row. */
+function DraftNavRow({
+  draftId,
+  ...rest
+}: { draftId: string } & Omit<React.ComponentProps<typeof NavRow>, 'title'>) {
+  const text = useComposerDraft(draftId).text;
+  return <NavRow {...rest} title={text.trim().slice(0, 60) || 'New Conversation'} />;
+}
 
 /**
  * One sidebar conversation row. Memoized on plain props (the session object
@@ -1864,10 +1874,10 @@ export const Sidebar: React.FC<Props> = React.memo(({
         {draftConversations.length > 0 && (
           <div className="-mx-2.5 px-2.5 py-2 space-y-0.5 border-b border-line-hairline">
             {draftConversations.map((d) => {
-              const title = d.prompt.trim().slice(0, 60) || 'New Conversation';
               return (
-                <NavRow
+                <DraftNavRow
                   key={d.id}
+                  draftId={d.id}
                   icon={
                     d.harness ? (
                       <HarnessLogo harness={d.harness} size={15} />
@@ -1875,7 +1885,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
                       <HelpCircle className="w-4 h-4 text-ink-muted" />
                     )
                   }
-                  title={title}
                   active={activeSessionId === d.id}
                   meta={<span className="text-micro text-ink-faint">draft</span>}
                   hoverActions={

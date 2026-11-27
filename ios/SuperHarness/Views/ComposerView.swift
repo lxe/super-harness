@@ -1881,7 +1881,7 @@ private struct SHModelEffortPopoverBody: View {
     var body: some View {
         let activeEffort = draft.effort
         let rowHeight: CGFloat = 46
-        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight - 2 + 8, 330)
+        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight - 2 + SHPopoverRowMetrics.bottomInset, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
         let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12)
@@ -1901,7 +1901,7 @@ private struct SHModelEffortPopoverBody: View {
                         }
                     )
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 12)
             }
@@ -1944,7 +1944,7 @@ private struct SHModelEffortPopoverBody: View {
                                         // One highlight that slides from row to row, its corners concentric
                                         // with the popover's wherever it sits.
                                         if isChecked {
-                                            SHPopoverRowHighlight()
+                                            SHPopoverRowHighlight(isLast: item.id == activeModels.last?.id)
                                                 .matchedGeometryEffect(id: "model-selection", in: selectionNamespace)
                                         }
                                     }
@@ -1958,8 +1958,8 @@ private struct SHModelEffortPopoverBody: View {
                         }
                         // The last row sits the same 6pt from the bottom edge as from the sides,
                         // so its corners follow the popover's.
-                        .padding(.horizontal, 6)
-                        .padding(.bottom, 8)
+                        .padding(.horizontal, SHPopoverRowMetrics.sideInset)
+                        .padding(.bottom, SHPopoverRowMetrics.bottomInset)
                     }
                     .frame(height: listHeight)
                     .onAppear {
@@ -1971,8 +1971,6 @@ private struct SHModelEffortPopoverBody: View {
             }
         }
         .frame(width: 296, height: totalHeight, alignment: .top)
-        // The popover's own corner: rows inside it take their corners from this one.
-        .containerShape(RoundedRectangle(cornerRadius: SHRadius.systemPopover, style: .continuous))
         .animation(nil, value: activeEffort)
         .background(SHWillDisappearHook(action: onWillClose))
     }
@@ -2083,15 +2081,33 @@ private struct SHSendMenuButton: UIViewRepresentable {
 
 /// The selected row's highlight in the model popover. On iOS 26 its corners are concentric with
 /// the popover's glass container, so a row by an edge follows the popover's corner.
+/// Insets of the model rows inside the popover. The gap is narrowest under the last row and
+/// widens to the sides, so it grows steadily up the popover's bottom corners and never pinches.
+enum SHPopoverRowMetrics {
+    static let sideInset: CGFloat = 8
+    static let bottomInset: CGFloat = 6
+    /// Corners away from the popover's edge.
+    static let innerRadius: CGFloat = 12
+    /// The last row's bottom corners. A circle centred between the gaps (the mean inset
+    /// subtracted from the popover's radius) makes the gap run from 6pt at the bottom to 8pt
+    /// at the side without dipping in between.
+    static var outerRadius: CGFloat { SHRadius.systemPopover - (sideInset + bottomInset) / 2 }
+}
+
+/// The selected row's highlight. The last row's bottom corners follow the popover's curve; a
+/// 44pt row can't be uniformly that round, so its top corners stay small.
 private struct SHPopoverRowHighlight: View {
+    var isLast: Bool
+
     var body: some View {
-        if #available(iOS 26.0, *) {
-            // Takes its corner radius from the popover's container shape minus its distance to it.
-            ConcentricRectangle(corners: .concentric(minimum: 0), isUniform: true)
-                .fill(Color.white.opacity(0.07))
-        } else {
-            RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.systemPopover, inset: 6), style: .continuous)
-                .fill(Color.white.opacity(0.07))
-        }
+        let bottom = isLast ? SHPopoverRowMetrics.outerRadius : SHPopoverRowMetrics.innerRadius
+        UnevenRoundedRectangle(
+            topLeadingRadius: SHPopoverRowMetrics.innerRadius,
+            bottomLeadingRadius: bottom,
+            bottomTrailingRadius: bottom,
+            topTrailingRadius: SHPopoverRowMetrics.innerRadius,
+            style: .continuous
+        )
+        .fill(Color.white.opacity(0.07))
     }
 }

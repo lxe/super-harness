@@ -173,6 +173,9 @@ public struct ComposerView: View {
         return (session.reasoningEffort ?? reasoningLevels.last)?.capitalized
     }
 
+    /// Height of every control in the composer's bottom row (and the width of the round ones).
+    static let controlSize: CGFloat = 38
+
     public var body: some View {
         SHComposerSurface {
             VStack(spacing: 0) {
@@ -234,9 +237,9 @@ public struct ComposerView: View {
                     scrollToEndToken: scrollToEndToken,
                     onPasteMedia: { handleClipboardPaste() }
                 )
-                .padding(.horizontal, 15)
-                .padding(.top, 15)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 16)
+                .padding(.top, 19)
+                .padding(.bottom, 17)
 
                 HStack(spacing: 8) {
                     attachMenuButton
@@ -247,8 +250,8 @@ public struct ComposerView: View {
                     }
                     actionButton
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 11)
+                .padding(.bottom, 11)
             }
         }
         .photosPicker(
@@ -297,9 +300,9 @@ public struct ComposerView: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 16.5, weight: .semibold))
                 .foregroundStyle(SHColor.inkSecondary)
-                .frame(width: 32, height: 32)
+                .frame(width: Self.controlSize, height: Self.controlSize)
                 .background(SHColor.surfaceBubble, in: Circle())
         }
         .accessibilityLabel("Attach media or file")
@@ -340,12 +343,12 @@ public struct ComposerView: View {
             HStack(spacing: 5) {
                 HarnessLogoView(harness: session.harness, size: 12.5)
                 Text(currentModelLabel)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
+            .padding(.horizontal, 12)
+            .frame(height: ComposerView.controlSize)
             .background(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
         }
     }
@@ -359,9 +362,9 @@ public struct ComposerView: View {
                 Task { await handleDictationTap() }
             } label: {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 15.5, weight: .medium))
                     .foregroundStyle(SHColor.inkMuted)
-                    .frame(width: 32, height: 32)
+                    .frame(width: Self.controlSize, height: Self.controlSize)
                     .background(SHColor.surfaceBubble, in: Circle())
             }
             .buttonStyle(.plain)
@@ -374,16 +377,14 @@ public struct ComposerView: View {
                 Task { await handleDictationTap() }
             } label: {
                 HStack(spacing: 6) {
+                    // Level bars and a stop mark; the elapsed time is not shown.
                     SHAudioLevelBars(levels: dictation.levelHistory, tint: SHColor.statusDanger)
-                    Text(dictation.formattedDuration)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(SHColor.statusDanger)
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 10.5, weight: .bold))
                         .foregroundStyle(SHColor.statusDanger)
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 32)
+                .padding(.horizontal, 13)
+                .frame(height: ComposerView.controlSize)
                 .background(SHColor.statusDanger.opacity(0.16), in: Capsule())
             }
             .buttonStyle(.plain)
@@ -392,7 +393,7 @@ public struct ComposerView: View {
 
         case .transcribing:
             SHActivityPulse(tint: SHColor.brandAntigravity, size: 12)
-                .frame(width: 32, height: 32)
+                .frame(width: Self.controlSize, height: Self.controlSize)
                 .background(SHColor.surfaceBubble, in: Circle())
                 .accessibilityLabel("Transcribing voice dictation")
                 .accessibilityIdentifier("composer.mic")
@@ -441,9 +442,9 @@ public struct ComposerView: View {
                 onAbort()
             } label: {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(SHColor.surfaceRail)
-                    .frame(width: 32, height: 32)
+                    .frame(width: Self.controlSize, height: Self.controlSize)
                     .background(SHColor.inkPrimary, in: Circle())
             }
             .buttonStyle(.plain)
@@ -460,11 +461,11 @@ public struct ComposerView: View {
                         SHActivityPulse(tint: SHColor.surfaceRail, size: 11)
                     } else {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 13.5, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(SHColor.surfaceRail)
                     }
                 }
-                .frame(width: 32, height: 32)
+                .frame(width: Self.controlSize, height: Self.controlSize)
                 .background(SHColor.inkPrimary, in: Circle())
                 .opacity(canSend ? 1.0 : 0.28)
             }
@@ -1107,24 +1108,24 @@ struct SHModelEffortMenu: View, Equatable {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                HarnessLogoView(harness: harness, size: 12.5)
+            HStack(spacing: 6) {
+                HarnessLogoView(harness: harness, size: 14.5)
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(SHColor.inkPrimary)
                     .lineLimit(1)
                 if let effortLabel, !effortLabel.isEmpty {
                     Text(effortLabel)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.system(size: 13.5, weight: .regular))
                         .foregroundStyle(SHColor.inkMuted)
                         .lineLimit(1)
                 }
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8.5, weight: .semibold))
+                    .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(SHColor.inkFaint)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 32)
+            .padding(.horizontal, 13)
+            .frame(height: ComposerView.controlSize)
             .background(SHColor.surfaceBubble, in: Capsule())
         }
         .accessibilityLabel(accessibilityText)

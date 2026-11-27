@@ -632,6 +632,22 @@ public struct SessionListView: View {
                     }
                 )
                 .padding(.top, 4)
+                .padding(.bottom, 14)
+                // Rows scrolling underneath fade out behind the chips; without this their text
+                // shows through and between the translucent chips and both become hard to read.
+                .background(alignment: .top) {
+                    LinearGradient(
+                        stops: [
+                            .init(color: SHColor.surfaceCanvas, location: 0),
+                            .init(color: SHColor.surfaceCanvas, location: 0.9),
+                            .init(color: SHColor.surfaceCanvas.opacity(0), location: 1),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .padding(.top, -120)
+                    .allowsHitTesting(false)
+                }
                 .transition(
                     .move(edge: .top)
                     .combined(with: .opacity)

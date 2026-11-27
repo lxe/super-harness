@@ -709,10 +709,23 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
             throw URLError(.cannotConnectToHost)
         }
         #if DEBUG
-        // UI checks for the pinned pill grid: pin enough sessions to fill more than two rows.
-        if ProcessInfo.processInfo.environment["SH_MOCK_MANY_PINS"] != nil {
+        // UI checks for pinned chats: pin nine sessions and add enough unpinned ones that the
+        // list scrolls.
+        if ProcessInfo.processInfo.environment["SH_MOCK_MANY_PINS"] != nil,
+           !sessions.contains(where: { $0.id.hasPrefix("codex:extra-") }),
+           let template = sessions.first(where: { $0.id == "codex:cx-test-harness" }) {
+            for n in 1...16 {
+                var extra = template
+                extra.id = "codex:extra-\(n)"
+                extra.nativeId = "extra-\(n)"
+                extra.title = n <= 2 ? "Pinned extra chat \(n)" : "Filler chat \(n)"
+                extra.pinnedToTop = false
+                extra.updatedAt = template.updatedAt - Double(n) * 3_600_000
+                sessions.append(extra)
+            }
             var pinned = 0
-            for idx in sessions.indices where !sessions[idx].isMaster && pinned < 9 {
+            for idx in sessions.indices where !sessions[idx].isMaster && pinned < 9
+                && !sessions[idx].title.hasPrefix("Filler") {
                 sessions[idx].pinnedToTop = true
                 pinned += 1
             }

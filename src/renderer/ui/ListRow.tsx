@@ -57,7 +57,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
               'h-[34px] px-4 rounded-none bg-surface-canvas hover:bg-surface-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[14px] font-normal tracking-[-0.005em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
-          : 'h-[30px] px-2.5 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[13px] font-normal text-ink-muted hover:text-ink-primary',
+          : 'h-7 px-2.5 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[12.5px] font-medium tracking-[0.01em] text-ink-faint hover:text-ink-secondary',
         !isTopLevel && sticky && 'sticky top-[34px] z-10',
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className

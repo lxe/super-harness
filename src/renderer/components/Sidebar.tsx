@@ -1524,7 +1524,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                                 working={secHasWorking}
                               />
                               {!isSecClosed && (
-                                <div className="mt-0.5 space-y-0.5">
+                                <div className="mt-0.5 pb-3 space-y-0.5">
                                   {sec.items.map((s) =>
                                     renderSessionRow(s, { showLogo: false, showPin: Boolean(s.pinned) })
                                   )}

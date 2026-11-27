@@ -608,6 +608,38 @@ final class AppStoreTests: XCTestCase {
         XCTAssertFalse(store.isSessionBusy("muse:muse-orb-review"))
     }
 
+    /// Regression: right after a send, the host's working list lags the open chat's transcript.
+    /// A lagging list must not wipe the open chat's working state (the Running row flashed).
+    func testLaggingActivityListDoesNotClearOpenChatWorkingState() async {
+        let defaults = UserDefaults(suiteName: "AppStoreLag.\(UUID().uuidString)")!
+        let mock = MockSuperHarnessClient()
+        let store = AppStore(client: mock, keychain: InMemoryKeychainStore(), defaults: defaults)
+        defer { store.stopEventStream() }
+        await store.bootstrap()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        let sid = "codex:cx-control-server"
+        store.selectedSessionId = sid
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid,
+            messages: [UnifiedMessage(id: "m1", role: .user, timestamp: 1000, blocks: [.text(text: "hi")])],
+            hasMore: false,
+            sourceMtimeMs: 1000,
+            liveActivity: LiveActivityState(isWorking: true)
+        ))
+
+        // The host's list has not caught up with the new turn yet.
+        await mock.emitServerEventForTesting(.activity([]))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(store.transcriptsBySessionId[sid]?.liveActivity?.isWorking, true)
+
+        // Once the chat is no longer open, the host's list is trusted again.
+        store.selectedSessionId = nil
+        await mock.emitServerEventForTesting(.activity(["muse:muse-orb-review"]))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(store.transcriptsBySessionId[sid]?.liveActivity?.isWorking, false)
+    }
+
     func testProtocolV2SessionsDeltaUpsertsRemovesReordersAndSkipsNoOp() async {
         final class FlagBox: @unchecked Sendable {
             private let lock = NSLock()

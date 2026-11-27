@@ -1423,6 +1423,7 @@ public final class AppStore {
         reconcilePendingOutgoing(for: tr.sessionId, transcript: tr)
         if let isWorking = tr.liveActivity?.isWorking {
             if isWorking {
+                lastWorkingTranscriptAt[tr.sessionId] = Date()
                 if !hostWorkingSessionIds.contains(tr.sessionId) {
                     hostWorkingSessionIds.insert(tr.sessionId)
                 }
@@ -2454,14 +2455,28 @@ public final class AppStore {
         return false
     }
 
+    /// When each session's transcript last arrived saying it is working.
+    private var lastWorkingTranscriptAt: [String: Date] = [:]
+    /// How long a working transcript for the open chat outranks the host's working list.
+    static let workingTranscriptGraceSeconds: TimeInterval = 10
+
     /// Clears stale `liveActivity.isWorking` on cached transcripts when the host explicitly
     /// reports the session is no longer working (prevents frozen spinners on unwatched rows
     /// and when re-opening a previously running thread).
     private func clearStaleTranscriptActivity() {
         let workingByStatus = Set(sessions.filter { !$0.isMaster && $0.isWorking }.map(\.id))
         let activeIds = hostWorkingSessionIds.union(workingByStatus)
+        let now = Date()
         for (sid, tr) in transcriptsBySessionId {
             guard tr.liveActivity?.isWorking == true else { continue }
+            // The open chat's transcript push is fresher than the host's working list, which
+            // lags a new turn by a few seconds. Clearing here made the Running row vanish and
+            // come back right after a send.
+            if sid == selectedSessionId,
+               let pushedAt = lastWorkingTranscriptAt[sid],
+               now.timeIntervalSince(pushedAt) < Self.workingTranscriptGraceSeconds {
+                continue
+            }
             guard !activeIds.contains(sid),
                   streamingMessagesBySessionId[sid] == nil,
                   pendingOutgoingBySessionId[sid]?.contains(where: { $0.state == .sending }) != true else {

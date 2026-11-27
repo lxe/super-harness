@@ -1012,7 +1012,7 @@ export const App: React.FC = () => {
           }
         }}
         title="Drag to resize sidebar (double-click to reset)"
-        className={`w-1.5 -ml-0.5 shrink-0 cursor-col-resize transition-colors z-20 ${
+        className={`w-1.5 -ml-0.5 -mr-1 shrink-0 cursor-col-resize transition-colors z-20 ${
           resizingSidebar ? 'bg-zinc-400/50' : 'bg-transparent hover:bg-white/[0.14]'
         }`}
       />

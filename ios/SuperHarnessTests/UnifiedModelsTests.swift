@@ -1006,4 +1006,35 @@ final class UnifiedModelsTests: XCTestCase {
         // Retrying while offline keeps the warning instead of flipping to the sync arrows.
         XCTAssertEqual(ConnectionStatusPill.glyph(health: .offline("timed out"), isSyncing: true), .problem)
     }
+
+    func testClipboardFileDetectionSeparatesFilesFromTextAndMedia() {
+        // A zip shared from another app is a file.
+        XCTAssertEqual(ClipboardAttachables.fileTypeIdentifier(in: ["public.zip-archive"]), "public.zip-archive")
+        // Copied prose (with rich-text companions) stays text.
+        XCTAssertNil(ClipboardAttachables.fileTypeIdentifier(in: ["public.rtf", "com.apple.flat-rtfd", "public.utf8-plain-text"]))
+        XCTAssertNil(ClipboardAttachables.fileTypeIdentifier(in: ["public.url", "public.utf8-plain-text"]))
+        // Images, PDFs and file URLs have their own handling.
+        XCTAssertNil(ClipboardAttachables.fileTypeIdentifier(in: ["public.png"]))
+        XCTAssertNil(ClipboardAttachables.fileTypeIdentifier(in: ["com.adobe.pdf"]))
+        XCTAssertNil(ClipboardAttachables.fileTypeIdentifier(in: ["public.file-url"]))
+
+        XCTAssertEqual(ClipboardAttachables.fileName(suggested: "super_harness_porcelain_package", typeIdentifier: "public.zip-archive", fallbackURL: nil, index: 0), "super_harness_porcelain_package.zip")
+        XCTAssertEqual(ClipboardAttachables.fileName(suggested: "notes.txt", typeIdentifier: "public.zip-archive", fallbackURL: nil, index: 0), "notes.txt")
+        XCTAssertEqual(ClipboardAttachables.fileName(suggested: nil, typeIdentifier: "public.zip-archive", fallbackURL: nil, index: 1), "pasted-file-2.zip")
+    }
+
+    @MainActor func testOversizeAttachmentIsRefusedWithAClearMessage() async {
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "Oversize.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        let big = Data(count: AppStore.maxAttachmentBytes + 1)
+        await store.addFileAttachment(for: "codex:cx-test-harness", data: big, mimeType: "application/zip", filename: "huge.zip")
+        XCTAssertTrue((store.draftAttachments["codex:cx-test-harness"] ?? []).isEmpty)
+        XCTAssertEqual(store.attachmentNotice?.contains("huge.zip"), true)
+        XCTAssertEqual(store.attachmentNotice?.contains("up to"), true)
+
+        store.attachmentNotice = nil
+        await store.addFileAttachment(for: "codex:cx-test-harness", data: Data("hello".utf8), mimeType: "text/plain", filename: "note.txt")
+        XCTAssertEqual(store.draftAttachments["codex:cx-test-harness"]?.map(\.name), ["note.txt"])
+        XCTAssertNil(store.attachmentNotice)
+    }
 }

@@ -554,7 +554,10 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         req.httpMethod = "POST"
         req.timeoutInterval = 120
         req.httpBody = data
-        req.setValue(mimeType.isEmpty ? "application/octet-stream" : mimeType, forHTTPHeaderField: "Content-Type")
+        // The host treats an application/json body as its base64 upload form, so a .json file
+        // travels as a generic binary; its name keeps the extension.
+        let wireType = (mimeType.isEmpty || mimeType.lowercased() == "application/json") ? "application/octet-stream" : mimeType
+        req.setValue(wireType, forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if let filename, !filename.isEmpty {
             let encoded = filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename

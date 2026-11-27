@@ -288,7 +288,7 @@ public struct ComposerView: View {
             Button {
                 isFileImporterPresented = true
             } label: {
-                Label("Choose File", systemImage: "doc")
+                Label("Files", systemImage: "folder")
             }
             Button {
                 handleClipboardPaste(allowTextFallback: true)
@@ -523,6 +523,7 @@ public struct ComposerView: View {
                 || prov.hasItemConformingToTypeIdentifier(UTType.image.identifier)
                 || prov.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
                 || prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+                || ClipboardAttachables.fileTypeIdentifier(in: prov.registeredTypeIdentifiers) != nil
         }
         if !mediaProviders.isEmpty {
             for (idx, prov) in mediaProviders.prefix(4).enumerated() {
@@ -570,6 +571,23 @@ public struct ComposerView: View {
                         guard let data, !data.isEmpty else { return }
                         Task { @MainActor in
                             onPickFileData?(data, "application/pdf", pdfName, nil)
+                        }
+                    }
+                } else if !prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+                          let typeId = ClipboardAttachables.fileTypeIdentifier(in: prov.registeredTypeIdentifiers) {
+                    // Any other file placed on the clipboard as data (a zip shared from
+                    // another app, for example).
+                    let suggested = prov.suggestedName
+                    prov.loadFileRepresentation(forTypeIdentifier: typeId) { url, _ in
+                        guard let url else { return }
+                        let name = ClipboardAttachables.fileName(suggested: suggested, typeIdentifier: typeId, fallbackURL: url, index: idx)
+                        let tmp = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("sh-paste-\(UUID().uuidString)", isDirectory: true)
+                        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+                        let dest = tmp.appendingPathComponent(name)
+                        guard (try? FileManager.default.copyItem(at: url, to: dest)) != nil else { return }
+                        Task { @MainActor in
+                            handleImportedFiles(.success([dest]))
                         }
                     }
                 } else if prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -720,6 +738,46 @@ public struct ComposerView: View {
 }
 
 
+// MARK: - Clipboard Items That Attach as Files
+
+/// Decides whether a clipboard item is a file to attach, as opposed to text to insert.
+enum ClipboardAttachables {
+    /// The type to load when a clipboard item should be attached as a file, or nil when the
+    /// item is text, a link, or something the composer already handles (images, video, PDF,
+    /// file URLs). An item that offers any text or URL form is treated as text, so copying a
+    /// paragraph from a web page never turns into an attachment.
+    nonisolated static func fileTypeIdentifier(in registeredTypeIdentifiers: [String]) -> String? {
+        let types = registeredTypeIdentifiers.map { ($0, UTType($0)) }
+        let isTextLike = types.contains { _, type in
+            guard let type else { return false }
+            return type.conforms(to: .text) || type.conforms(to: .url)
+        }
+        guard !isTextLike else { return nil }
+        return types.first { id, type in
+            guard let type else { return !id.hasPrefix("com.apple.") }
+            if type.conforms(to: .image) || type.conforms(to: .movie) || type.conforms(to: .video)
+                || type.conforms(to: .pdf) || type.conforms(to: .fileURL) {
+                return false
+            }
+            return type.conforms(to: .data) || type.conforms(to: .item) || id.hasPrefix("dyn.")
+        }?.0
+    }
+
+    /// A file name for a pasted item: the name the source app suggested, with the extension
+    /// its type implies when the name has none.
+    nonisolated static func fileName(suggested: String?, typeIdentifier: String, fallbackURL: URL?, index: Int) -> String {
+        let trimmed = suggested?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var base = trimmed.isEmpty ? (fallbackURL?.deletingPathExtension().lastPathComponent ?? "") : trimmed
+        if base.isEmpty { base = "pasted-file-\(index + 1)" }
+        base = base.replacingOccurrences(of: "/", with: "-")
+        if !(base as NSString).pathExtension.isEmpty { return base }
+        let ext = UTType(typeIdentifier)?.preferredFilenameExtension
+            ?? fallbackURL?.pathExtension
+            ?? ""
+        return ext.isEmpty ? base : "\(base).\(ext)"
+    }
+}
+
 // MARK: - Paste-Aware Auto-Sizing Composer Input (Supports Pasting Images, Videos, Files & Text)
 
 #if canImport(UIKit)
@@ -735,6 +793,7 @@ private final class SHPasteInterceptingTextView: UITextView {
                 || prov.hasItemConformingToTypeIdentifier(UTType.video.identifier)
                 || prov.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
                 || prov.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+                || ClipboardAttachables.fileTypeIdentifier(in: prov.registeredTypeIdentifiers) != nil
         }
     }
 

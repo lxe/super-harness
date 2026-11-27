@@ -178,6 +178,10 @@ public final class AppStore {
     public private(set) var harnessOrder: [HarnessGroup] = HarnessGroup.allCases
 
     /// Off by default: "max" and "ultra" thinking effort are offered only after the person enables them.
+    /// Set when a file could not be attached (too large, or the upload failed); the chat
+    /// screen shows it as an alert.
+    public var attachmentNotice: String?
+
     /// Chat text size and spacing, chosen in Settings and kept on this device.
     public var chatTextSize: ChatTextSize = .standard {
         didSet { defaults.set(chatTextSize.rawValue, forKey: StorageKey.chatTextSize) }
@@ -2274,6 +2278,15 @@ public final class AppStore {
         )
     }
 
+    /// The host reads at most 55 MB per upload; the app stops a little short of that.
+    nonisolated public static let maxAttachmentBytes = 50 * 1024 * 1024
+
+    nonisolated public static func oversizeAttachmentMessage(name: String, bytes: Int) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        let limit = ByteCountFormatter.string(fromByteCount: Int64(maxAttachmentBytes), countStyle: .file)
+        return "“\(name)” is \(size). The host accepts attachments up to \(limit)."
+    }
+
     /// Immediately attaches any image, video, or file to the composer with an instant local preview
     /// while uploading raw binary bytes to `/api/attachments` in the background.
     public func addFileAttachment(
@@ -2283,6 +2296,10 @@ public final class AppStore {
         filename: String,
         previewImageData: Data? = nil
     ) async {
+        guard data.count <= Self.maxAttachmentBytes else {
+            attachmentNotice = Self.oversizeAttachmentMessage(name: filename, bytes: data.count)
+            return
+        }
         let localId = UUID().uuidString
         let thumbDataUrl: String? = await Task.detached(priority: .userInitiated) {
             guard let imgBytes = previewImageData else { return nil }
@@ -2338,9 +2355,18 @@ public final class AppStore {
                 return merged
             } catch {
                 await MainActor.run {
-                    self?.reportError(error)
+                    guard let self else { return }
+                    // A file that never reached the host has no path to send, so drop its chip
+                    // and say why instead of leaving a chip that would be silently ignored.
+                    if var list = self.draftAttachments[sessionId] {
+                        list.removeAll { $0.id == localId }
+                        self.draftAttachments[sessionId] = list
+                    }
+                    if !(error is CancellationError) {
+                        self.attachmentNotice = "“\(filename)” could not be uploaded. \(error.localizedDescription)"
+                    }
                 }
-                return optimistic
+                return nil
             }
         }
         attachmentUploadTasks[localId] = uploadTask

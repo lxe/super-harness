@@ -483,6 +483,17 @@ public struct SessionDetailView: View {
                 .accessibilityLabel("Session actions")
             }
         }
+        .alert(
+            "Can’t Attach File",
+            isPresented: Binding(
+                get: { store.attachmentNotice != nil },
+                set: { if !$0 { store.attachmentNotice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { store.attachmentNotice = nil }
+        } message: {
+            Text(store.attachmentNotice ?? "")
+        }
         .alert("Rename Thread", isPresented: $isRenameAlertPresented) {
             TextField("Thread title", text: $renameDraft)
             Button("Save") {

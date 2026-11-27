@@ -167,38 +167,40 @@ cat > "$OUT_DIR/index.html" << HTML
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Install Super Harness</title>
+  <meta name="theme-color" content="#16171b">
+  <link rel="icon" type="image/png" href="icon-512.png">
+  <link rel="apple-touch-icon" href="icon-512.png">
   <style>
     :root { color-scheme: dark; }
     body {
       margin: 0; min-height: 100dvh; display: grid; place-items: center;
-      background: #101114; color: #f1f3f7;
+      background: #16171b; color: #f1f2f5;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
       padding: 24px;
     }
     .card {
-      width: 100%; max-width: 360px; background: #1a1c22;
-      border: 1px solid rgba(255,255,255,0.09); border-radius: 24px;
-      padding: 28px 24px; text-align: center;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+      width: 100%; max-width: 360px; background: #1c1e24;
+      border-radius: 28px; padding: 32px 24px 26px; text-align: center;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.28), 0 2px 5px rgba(0,0,0,0.16),
+        inset 0 1px 0 rgba(255,255,255,0.045);
     }
     .icon {
-      width: 84px; height: 84px; border-radius: 20px; margin: 0 auto 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: block;
+      width: 88px; height: 88px; border-radius: 22.4%; margin: 0 auto 18px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.32), 0 3px 8px rgba(0,0,0,0.22); display: block;
     }
     h1 { margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
-    .meta { color: #9ca3af; font-size: 13px; margin: 0 0 22px; line-height: 1.5; }
+    .meta { color: #9a9ea8; font-size: 13px; margin: 0 0 22px; line-height: 1.5; }
     .pill {
       display: inline-block; padding: 3px 9px; border-radius: 999px;
-      background: rgba(96,165,250,0.14); color: #93c5fd;
+      background: rgba(255,255,255,0.08); color: #c9ccd4;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
     }
     .btn {
       display: block; width: 100%; box-sizing: border-box;
-      padding: 15px 18px; border-radius: 14px; text-decoration: none;
-      background: linear-gradient(135deg, #60a5fa, #818cf8);
-      color: #0b0d12; font-weight: 700; font-size: 16px;
+      padding: 15px 18px; border-radius: 16px; text-decoration: none;
+      background: #e4e6ec; color: #16171b; font-weight: 650; font-size: 16px;
     }
-    .note { margin: 16px 0 0; color: #6b7280; font-size: 12px; line-height: 1.45; }
+    .note { margin: 16px 0 0; color: #7c808b; font-size: 12px; line-height: 1.45; }
   </style>
 </head>
 <body>

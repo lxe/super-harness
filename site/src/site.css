@@ -70,8 +70,10 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 .hero .lede { max-width: 38em; }
 .hero .lede + .lede { margin-top: 10px; }
 .hero .cta { justify-content: center; }
-.hero-lede { margin-top: 44px; }
-.hero-lede .lede:first-child { margin-top: 0; }
+/* The two taglines sit in two columns under the screenshots: desktop on the left, phone on the right. */
+.hero-lede { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 56px; width: 100%; max-width: 1000px; text-align: left; }
+.hero .hero-lede .lede { margin: 0; max-width: none; }
+@media (max-width: 720px) { .hero-lede { grid-template-columns: 1fr; gap: 18px; text-align: center; } }
 .hero .note { margin: 28px auto 0; }
 .eyebrow { color: var(--ink-3); font-size: 0.86rem; letter-spacing: 0.02em; margin-bottom: 18px; }
 .lede { margin-top: 22px; font-size: 1.14rem; color: var(--ink-2); max-width: 34em; }

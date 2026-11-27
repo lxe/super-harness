@@ -381,9 +381,13 @@ export function foldMspItems(items: MspItem[], fallbackTs: number = Date.now()):
         ensureAssistant(item).blocks.push(mapToolCallItem(item));
         break;
       }
+      case 'reminderChild': {
+        // Muse spawns internal post-turn reminder/memory child sessions after turns;
+        // suppress them so transcripts aren't cluttered with generic "Reminder child session" cards.
+        break;
+      }
       case 'subagent':
       case 'workflow':
-      case 'reminderChild':
       case 'sideChat':
       case 'subagentInput':
       case 'subagentResult': {

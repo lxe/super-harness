@@ -7,6 +7,8 @@ import {
   buildPiUndeliverableError,
   createPiDriver,
   encodePiCwd,
+  extractPiLinkedImages,
+  MAX_PI_LINKED_IMAGES_PER_TURN,
   isPiProcessRow,
   parsePiJsonlLines,
   piActiveBranch,
@@ -273,5 +275,68 @@ describe('Pi driver', () => {
     expect(res.find((r) => r.field === 'model')).toMatchObject({ status: 'next_message', value: 'ds41/deepseek' });
     expect(res.find((r) => r.field === 'reasoningEffort')).toMatchObject({ status: 'next_message', value: 'off' });
     driver.shutdown?.();
+  });
+});
+
+describe('Pi linked images', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-linked-'));
+  const png = (name: string) => {
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, 'x');
+    return p;
+  };
+  const smiley = png('smiley.png');
+  const fresh = () => ({ seen: new Set<string>(), budget: { left: MAX_PI_LINKED_IMAGES_PER_TURN } });
+
+  it('turns linked-image, image and link markdown into one image block and drops dead links', () => {
+    const s = fresh();
+    const r = extractPiLinkedImages(
+      `Here it is:\n\n[![Smiley face](${smiley})](${smiley})\n\nAttached: [smiley.png](file://${smiley})`,
+      s.seen,
+      s.budget
+    );
+    expect(r.images).toEqual([{ type: 'image', path: smiley, name: 'Smiley face' }]);
+    expect(r.text).toBe('Here it is:\n\nAttached: smiley.png');
+  });
+
+  it('shows bare paths and keeps them in the text', () => {
+    const s = fresh();
+    const r = extractPiLinkedImages(`Saved to ${smiley}.`, s.seen, s.budget);
+    expect(r.images.map((i) => i.path)).toEqual([smiley]);
+    expect(r.text).toBe(`Saved to ${smiley}.`);
+  });
+
+  it('leaves missing files, relative paths, web URLs and non-images alone', () => {
+    const s = fresh();
+    const text = `![a](${dir}/missing.png) [b](img/rel.png) ![c](https://x.com/c.png) [d](${dir}/notes.txt)`;
+    const r = extractPiLinkedImages(text, s.seen, s.budget);
+    expect(r.images).toEqual([]);
+    expect(r.text).toBe(text);
+  });
+
+  it('caps images per turn', () => {
+    const s = fresh();
+    const paths = Array.from({ length: 6 }, (_, i) => png(`p${i}.png`));
+    const r = extractPiLinkedImages(paths.map((p) => `![x](${p})`).join(' '), s.seen, s.budget);
+    expect(r.images).toHaveLength(MAX_PI_LINKED_IMAGES_PER_TURN);
+  });
+
+  it('adds image blocks to the assistant turn in a parsed transcript', () => {
+    const lines = [
+      msg('u1', null, { role: 'user', content: 'draw a smiley' }),
+      msg('a1', 'u1', {
+        role: 'assistant',
+        content: [{ type: 'text', text: `Done: ![Smiley](${smiley})` }],
+        provider: 'p',
+        model: 'm',
+        stopReason: 'stop',
+      }),
+    ];
+    const r = parsePiJsonlLines(lines, 'pi:x', Date.now());
+    const blocks = r.messages[1].blocks;
+    expect(blocks).toEqual([
+      { type: 'text', text: 'Done: ' },
+      { type: 'image', path: smiley, name: 'Smiley' },
+    ]);
   });
 });

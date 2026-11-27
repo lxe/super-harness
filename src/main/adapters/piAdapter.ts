@@ -405,6 +405,72 @@ async function listTmuxPanes(): Promise<Map<number, string>> {
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;
 
+/** At most this many images are pulled out of one assistant turn's text. */
+export const MAX_PI_LINKED_IMAGES_PER_TURN = 4;
+const PI_LINKED_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+
+/** Resolves a link target to an existing local image file, or null. */
+function resolveLocalImagePath(target: string): string | null {
+  let p = target.trim().replace(/^<|>$/g, '');
+  if (p.startsWith('file://')) {
+    try {
+      p = decodeURIComponent(new URL(p).pathname);
+    } catch {
+      return null;
+    }
+  } else if (p.startsWith('~/')) {
+    p = path.join(os.homedir(), p.slice(2));
+  }
+  if (!path.isAbsolute(p)) return null;
+  if (!PI_LINKED_IMAGE_EXTS.has(path.extname(p).toLowerCase())) return null;
+  try {
+    return fs.statSync(p).isFile() ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pi has no "send a file" tool, so models hand over images as markdown links to local
+ * paths, which are dead links on the phone. This finds links to image files that exist
+ * on this machine (`![a](p)`, `[a](p)`, `[![a](p)](p)`, `file://` URLs and bare absolute
+ * paths), drops the link syntax from the text, and returns image blocks so the phone shows
+ * a thumbnail via /api/media. Missing files and non-image links are left untouched.
+ * `seen`/`budget` carry dedupe and the per-turn cap across a turn's text blocks.
+ */
+export function extractPiLinkedImages(
+  text: string,
+  seen: Set<string>,
+  budget: { left: number }
+): { text: string; images: Array<Extract<UnifiedBlock, { type: 'image' }>> } {
+  const images: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
+  const take = (target: string, alt: string): boolean => {
+    const p = resolveLocalImagePath(target);
+    if (!p) return false;
+    if (!seen.has(p) && budget.left > 0) {
+      seen.add(p);
+      budget.left -= 1;
+      images.push({ type: 'image', path: p, name: alt.trim() || path.basename(p) });
+    }
+    return true;
+  };
+  // Linked image `[![alt](p)](p)` → one image, no leftover text.
+  let out = text.replace(/\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)\s]+)\)/g, (m, alt: string, src: string) =>
+    take(src, alt) ? '' : m
+  );
+  // Image `![alt](p)` → removed from text.
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt: string, src: string) => (take(src, alt) ? '' : m));
+  // Link `[label](p)` → label stays as plain text.
+  out = out.replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label: string, href: string) =>
+    take(href, label) ? label : m
+  );
+  // Bare absolute, `~/` or file:// paths stay in the text; the image is shown as well.
+  for (const m of out.matchAll(/(?:file:\/\/|~\/|(?<![\w.~:/-])\/)[^\s`'"<>()[\]]+\.(?:png|jpe?g|webp|gif)\b/gi)) {
+    take(m[0], '');
+  }
+  return { text: out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n'), images };
+}
+
 type PendingBlock = Extract<UnifiedBlock, { type: 'command' | 'tool_call' | 'file_change' }>;
 
 function textOfResult(content: unknown): string {
@@ -540,6 +606,18 @@ export function parsePiJsonlLines(
   const pending = new Map<string, PendingBlock>();
   let current: UnifiedMessage | null = null;
   let lastFocus: string | undefined;
+  // Dedupe and cap linked images per coalesced assistant turn.
+  const linkedImageState = new WeakMap<UnifiedMessage, { seen: Set<string>; budget: { left: number } }>();
+  const linkedState = (m: UnifiedMessage) => {
+    let s = linkedImageState.get(m);
+    if (!s) {
+      s = { seen: new Set(), budget: { left: MAX_PI_LINKED_IMAGES_PER_TURN } };
+      linkedImageState.set(m, s);
+    }
+    return s;
+  };
+  const turnImages = (m: UnifiedMessage) => linkedState(m).seen;
+  const turnImageBudget = (m: UnifiedMessage) => linkedState(m).budget;
 
   const ensureAssistant = (id: string, ts: number, model?: string): UnifiedMessage => {
     if (!current) {
@@ -606,7 +684,9 @@ export function parsePiJsonlLines(
         if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
           a.blocks.push({ type: 'thinking', text: b.thinking.trim() });
         } else if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
-          a.blocks.push({ type: 'text', text: b.text });
+          const linked = extractPiLinkedImages(b.text, turnImages(a), turnImageBudget(a));
+          if (linked.text.trim()) a.blocks.push({ type: 'text', text: linked.text });
+          a.blocks.push(...linked.images);
         } else if (b.type === 'toolCall') {
           const name = typeof b.name === 'string' ? b.name : 'tool';
           const block = blockForToolCall(name, asRecord(b.arguments));

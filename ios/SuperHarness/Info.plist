@@ -31,10 +31,16 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_superharness._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Super Harness uses the camera to scan the pairing QR code shown on your desktop.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Super Harness connects to your desktop host over LAN or Tailscale.</string>
+	<string>Super Harness finds and connects to your desktop over your local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Super Harness records voice dictation for transcription via your configured YapYap server.</string>
+	<string>Super Harness records voice dictation and sends it to your desktop for transcription.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Super Harness attaches photos and videos you select to your coding agent conversations.</string>
 	<key>UIBackgroundModes</key>

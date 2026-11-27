@@ -444,21 +444,38 @@ public struct DraftChatView: View {
     private var draftMicButton: some View {
         switch dictation.state {
         case .idle:
-            Button {
-                #if canImport(UIKit)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                #endif
-                Task { await handleDraftDictationTap() }
-            } label: {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(SHColor.inkMuted)
-                    .frame(width: 32, height: 32)
-                    .background(SHColor.surfaceBubble, in: Circle())
+            if let reason = store.dictationUnavailableReason {
+                // Dictation is not set up on the desktop: a tap explains why.
+                Button {
+                    dictation.errorMessage = reason
+                } label: {
+                    Image(systemName: "mic.slash.fill")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(SHColor.inkFaint)
+                        .frame(width: 32, height: 32)
+                        .background(SHColor.surfaceBubble.opacity(0.5), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Voice dictation unavailable")
+                .accessibilityHint(reason)
+                .accessibilityIdentifier("composer.mic.unavailable")
+            } else {
+                Button {
+                    #if canImport(UIKit)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    #endif
+                    Task { await handleDraftDictationTap() }
+                } label: {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .frame(width: 32, height: 32)
+                        .background(SHColor.surfaceBubble, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start voice dictation")
+                .accessibilityIdentifier("composer.mic")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Start voice dictation")
-            .accessibilityIdentifier("composer.mic")
 
         case .recording:
             Button {

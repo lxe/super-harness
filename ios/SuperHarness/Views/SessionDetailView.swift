@@ -284,6 +284,7 @@ public struct SessionDetailView: View {
                         )
                     }
                 },
+                dictationUnavailableReason: store.dictationUnavailableReason,
                 onRemoveAttachment: { attId in
                     store.removeAttachment(for: session.id, attachmentId: attId)
                 },

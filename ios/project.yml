@@ -31,9 +31,12 @@ targets:
           UIColorName: LaunchBackground
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: "Super Harness connects to your desktop host over LAN or Tailscale."
+        NSLocalNetworkUsageDescription: "Super Harness finds and connects to your desktop over your local network or Tailscale."
+        NSBonjourServices:
+          - _superharness._tcp
+        NSCameraUsageDescription: "Super Harness uses the camera to scan the pairing QR code shown on your desktop."
         ITSAppUsesNonExemptEncryption: false
-        NSMicrophoneUsageDescription: "Super Harness records voice dictation for transcription via your configured YapYap server."
+        NSMicrophoneUsageDescription: "Super Harness records voice dictation and sends it to your desktop for transcription."
         NSPhotoLibraryUsageDescription: "Super Harness attaches photos and videos you select to your coding agent conversations."
         UIBackgroundModes:
           - fetch

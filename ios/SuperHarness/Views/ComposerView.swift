@@ -33,6 +33,8 @@ public struct ComposerView: View {
     public let isAgentBusy: Bool
     public let onPickPhotoData: (Data, String) -> Void
     public let onPickFileData: ((Data, String, String, Data?) -> Void)?
+    /// Why the mic cannot be used (dictation not set up on the desktop), or nil when it can.
+    public let dictationUnavailableReason: String?
     public let onRemoveAttachment: (String) -> Void
     public let onTapAttachment: (ImageAttachment) -> Void
     public let onSelectModel: ((HarnessModelOption) -> Void)?
@@ -44,6 +46,7 @@ public struct ComposerView: View {
     public let onAbort: () -> Void
 
     @State private var selectedMediaItems: [PhotosPickerItem] = []
+    @State private var isDictationReasonPresented = false
     @State private var isPhotoPickerPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
     @State private var dictation = DictationController()
@@ -65,6 +68,7 @@ public struct ComposerView: View {
         isAgentBusy: Bool,
         onPickPhotoData: @escaping (Data, String) -> Void,
         onPickFileData: ((Data, String, String, Data?) -> Void)? = nil,
+        dictationUnavailableReason: String? = nil,
         onRemoveAttachment: @escaping (String) -> Void,
         onTapAttachment: @escaping (ImageAttachment) -> Void,
         onSelectModel: ((HarnessModelOption) -> Void)? = nil,
@@ -85,6 +89,7 @@ public struct ComposerView: View {
         self.isAgentBusy = isAgentBusy
         self.onPickPhotoData = onPickPhotoData
         self.onPickFileData = onPickFileData
+        self.dictationUnavailableReason = dictationUnavailableReason
         self.onRemoveAttachment = onRemoveAttachment
         self.onTapAttachment = onTapAttachment
         self.onSelectModel = onSelectModel
@@ -357,19 +362,42 @@ public struct ComposerView: View {
     private var micButton: some View {
         switch dictation.state {
         case .idle:
-            Button {
-                triggerHaptic(.light)
-                Task { await handleDictationTap() }
-            } label: {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 15.5, weight: .medium))
-                    .foregroundStyle(SHColor.inkMuted)
-                    .frame(width: Self.controlSize, height: Self.controlSize)
-                    .background(SHColor.surfaceBubble, in: Circle())
+            if let reason = dictationUnavailableReason {
+                // Dictation is not set up on the desktop: the mic is shown dimmed and a tap
+                // explains why instead of starting a recording.
+                Button {
+                    isDictationReasonPresented = true
+                } label: {
+                    Image(systemName: "mic.slash.fill")
+                        .font(.system(size: 15.5, weight: .medium))
+                        .foregroundStyle(SHColor.inkFaint)
+                        .frame(width: Self.controlSize, height: Self.controlSize)
+                        .background(SHColor.surfaceBubble.opacity(0.5), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Voice dictation unavailable")
+                .accessibilityHint(reason)
+                .accessibilityIdentifier("composer.mic.unavailable")
+                .alert("Dictation Isn’t Set Up", isPresented: $isDictationReasonPresented) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("\(reason).")
+                }
+            } else {
+                Button {
+                    triggerHaptic(.light)
+                    Task { await handleDictationTap() }
+                } label: {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 15.5, weight: .medium))
+                        .foregroundStyle(SHColor.inkMuted)
+                        .frame(width: Self.controlSize, height: Self.controlSize)
+                        .background(SHColor.surfaceBubble, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start voice dictation")
+                .accessibilityIdentifier("composer.mic")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Start voice dictation")
-            .accessibilityIdentifier("composer.mic")
 
         case .recording:
             Button {

@@ -13,7 +13,11 @@ public struct RootView: View {
 
     public var body: some View {
         Group {
-            if sizeClass == .regular {
+            if store.needsPairing {
+                // A fresh install, or a phone the desktop unpaired: nothing else is reachable
+                // until it is paired.
+                PairingView(store: store)
+            } else if sizeClass == .regular {
                 splitLayout
             } else {
                 compactLayout

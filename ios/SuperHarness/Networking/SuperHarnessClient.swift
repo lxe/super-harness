@@ -58,8 +58,9 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func fetchMedia(path: String, maxWidth: Int?) async throws -> Data
     /// `ignoreLocalCache` skips the HTTP cache, for a retry after a response that was missing or unusable.
     func fetchMedia(path: String, maxWidth: Int?, ignoreLocalCache: Bool) async throws -> Data
-    func fetchDictationStatus(overrideURL: String?, overrideToken: String?) async -> DictationStatusResponse?
-    func transcribeAudio(wavData: Data, overrideURL: String?, overrideToken: String?) async throws -> String
+    /// Dictation always goes through the host, which proxies to the server set on the desktop.
+    func fetchDictationStatus() async -> DictationStatusResponse?
+    func transcribeAudio(wavData: Data) async throws -> String
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment]) async throws -> SendMessageResult
     func sendMessage(sessionId: String, message: String, attachments: [ImageAttachment], mode: SendMode) async throws -> SendMessageResult
     func abortRun(sessionId: String) async throws -> Bool
@@ -342,7 +343,7 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         }
     }
 
-    public func fetchDictationStatus(overrideURL: String? = nil, overrideToken: String? = nil) async -> DictationStatusResponse? {
+    public func fetchDictationStatus() async -> DictationStatusResponse? {
         guard let url = makeURL(path: "/api/dictate/status") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
@@ -350,12 +351,6 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let overrideURL, !overrideURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            req.setValue(overrideURL.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "X-Dictation-URL")
-        }
-        if let overrideToken, !overrideToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            req.setValue(overrideToken.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "X-Dictation-Token")
         }
         guard let (data, response) = try? await session.data(for: req),
               let http = response as? HTTPURLResponse,
@@ -365,7 +360,7 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         return try? decoder.decode(DictationStatusResponse.self, from: data)
     }
 
-    public func transcribeAudio(wavData: Data, overrideURL: String? = nil, overrideToken: String? = nil) async throws -> String {
+    public func transcribeAudio(wavData: Data) async throws -> String {
         guard let url = makeURL(path: "/api/dictate") else {
             throw SuperHarnessAPIError.invalidURL("/api/dictate")
         }
@@ -378,12 +373,6 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        if let overrideURL, !overrideURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            req.setValue(overrideURL.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "X-Dictation-URL")
-        }
-        if let overrideToken, !overrideToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            req.setValue(overrideToken.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "X-Dictation-Token")
         }
 
         let requestStartedAt = CFAbsoluteTimeGetCurrent()

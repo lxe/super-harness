@@ -4,55 +4,32 @@ public struct HostConnectionSheet: View {
     @Bindable var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var isDemoMode: Bool
-    @State private var hostURL: String
-    @State private var token: String
-    @State private var revealToken: Bool = false
-    @State private var dictationURL: String
-    @State private var dictationToken: String
-    @State private var revealDictationToken: Bool = false
     @State private var isTesting: Bool = false
-    @State private var isSaving: Bool = false
+    @State private var isApplyingDemoMode: Bool = false
+    @State private var isUnpairConfirmationPresented: Bool = false
     @State private var testResult: ConnectionTestResult?
     @State private var isSendingTestPush: Bool = false
     @State private var testPushFeedback: String?
     @State private var showDesignCatalog: Bool = false
-    @State private var showDictationAdvanced: Bool
     @State private var showHarnessDetails: Bool = false
 
     public init(store: AppStore) {
         self.store = store
-        _isDemoMode = State(initialValue: store.connectionMode == .demo)
-        _hostURL = State(initialValue: store.hostURLString)
-        _token = State(initialValue: store.bearerToken)
-        _dictationURL = State(initialValue: store.dictationURLOverride)
-        _dictationToken = State(initialValue: store.dictationTokenOverride)
-        // Custom dictation settings stay visible when they are in use.
-        _showDictationAdvanced = State(
-            initialValue: !store.dictationURLOverride.isEmpty || !store.dictationTokenOverride.isEmpty
-        )
     }
 
     public var body: some View {
         NavigationStack {
             Form {
-                hostSection
-                appearanceSection
-                dictationSection
-                harnessSection
-                reasoningSection
-                notificationSection
-
-                Section {
-                    Button {
-                        showDesignCatalog = true
-                    } label: {
-                        actionLabel("Design System Catalog", icon: "square.grid.2x2")
-                    }
-                } header: {
-                    sectionHeader("Developer", icon: "hammer")
+                // Before pairing only the developer options are relevant.
+                if !store.needsPairing {
+                    desktopSection
+                    appearanceSection
+                    dictationSection
+                    harnessSection
+                    reasoningSection
+                    notificationSection
                 }
-                .listRowBackground(SHColor.surfaceSubtle)
+                developerSection
             }
             .scrollContentBackground(.hidden)
             .background(SHColor.surfaceCanvas)
@@ -63,77 +40,142 @@ public struct HostConnectionSheet: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await saveAndClose() }
-                    } label: {
-                        if isSaving {
-                            SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
-                        } else {
-                            Text("Save")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .disabled(isSaving)
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                        .accessibilityIdentifier("settings.done")
                 }
             }
+            .confirmationDialog(
+                "Unpair from \(desktopDisplayName)?",
+                isPresented: $isUnpairConfirmationPresented,
+                titleVisibility: .visible
+            ) {
+                Button("Unpair", role: .destructive) {
+                    store.unpair()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This phone forgets the desktop. To use it again, pair from the desktop’s Settings → Mobile.")
+            }
             .task {
-                if store.dictationStatus == nil {
+                if store.dictationStatus == nil, !store.needsPairing {
                     await store.refreshDictationStatus()
                 }
             }
         }
     }
 
-    // MARK: - Host
+    // MARK: - Desktop
 
-    private var hostSection: some View {
+    private var desktopDisplayName: String {
+        store.pairedHostName.isEmpty ? "this desktop" : store.pairedHostName
+    }
+
+    /// The address without the scheme, e.g. "100.64.0.3:47890".
+    private var desktopAddress: String {
+        let raw = store.hostURLString
+        guard let url = URL(string: raw), let host = url.host else { return raw }
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    private var desktopSection: some View {
         Section {
-            Toggle(isOn: $isDemoMode) {
-                rowLabel("Demo Mode", detail: "Offline sample sessions")
-            }
-            .tint(SHColor.toggleOn)
-
-            Group {
-                labeledField("URL") {
-                    TextField("http://100.64.0.10:47890", text: $hostURL)
-                        .keyboardType(.URL)
+            HStack(spacing: 12) {
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
+                rowLabel(
+                    store.pairedHostName.isEmpty ? "Desktop" : store.pairedHostName,
+                    detail: store.connectionMode == .demo ? "Demo mode is on" : desktopAddress
+                )
+                Spacer(minLength: 8)
+                if store.connectionMode == .live {
+                    Text(store.connectionHealth.label)
+                        .font(SHTypography.micro.weight(.medium))
+                        .foregroundStyle(store.connectionHealth == .connected ? SHColor.statusSuccess : SHColor.inkMuted)
                 }
-
-                secretField("Token", placeholder: "Host control token", text: $token, isRevealed: $revealToken)
             }
-            .opacity(isDemoMode ? 0.5 : 1.0)
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("settings.desktop")
 
-            Button {
-                Task { await runConnectionTest() }
-            } label: {
-                HStack(spacing: 10) {
-                    actionLabel(isTesting ? "Testing…" : "Test Connection", icon: "bolt.horizontal")
-                    Spacer()
-                    if isTesting {
-                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
+            if store.isPaired {
+                Button {
+                    Task { await runConnectionTest() }
+                } label: {
+                    HStack(spacing: 10) {
+                        actionLabel(isTesting ? "Testing…" : "Test Connection", icon: "bolt.horizontal")
+                        Spacer()
+                        if isTesting {
+                            SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
+                        }
                     }
                 }
-            }
-            .disabled(isTesting || hostURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isTesting)
 
-            if let result = testResult {
-                HStack(spacing: 8) {
-                    Image(systemName: result.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(result.ok ? SHColor.statusSuccess : SHColor.statusDanger)
-                    Text(result.message)
-                        .font(SHTypography.micro)
-                        .foregroundStyle(result.ok ? SHColor.statusSuccess : SHColor.statusDanger)
+                if let result = testResult {
+                    HStack(spacing: 8) {
+                        Image(systemName: result.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(result.ok ? SHColor.statusSuccess : SHColor.statusDanger)
+                        Text(result.message)
+                            .font(SHTypography.micro)
+                            .foregroundStyle(result.ok ? SHColor.statusSuccess : SHColor.statusDanger)
+                    }
                 }
+
+                Button(role: .destructive) {
+                    isUnpairConfirmationPresented = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 22)
+                        Text("Unpair")
+                            .font(SHTypography.label)
+                    }
+                    .foregroundStyle(SHColor.statusDanger)
+                }
+                .accessibilityIdentifier("settings.unpair")
             }
         } header: {
-            sectionHeader("Connection", icon: "network")
+            sectionHeader("Desktop", icon: "desktopcomputer")
         } footer: {
-            Text("Tailscale or LAN address. The token is stored in Keychain.")
+            Text("Pair or revoke phones in Super Harness on the desktop, under Settings → Mobile.")
                 .foregroundStyle(SHColor.inkFaint)
+        }
+        .listRowBackground(SHColor.surfaceSubtle)
+    }
+
+    // MARK: - Developer
+
+    private var developerSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { store.connectionMode == .demo },
+                set: { enabled in
+                    isApplyingDemoMode = true
+                    Task {
+                        await store.setDemoMode(enabled)
+                        isApplyingDemoMode = false
+                    }
+                }
+            )) {
+                rowLabel("Demo Mode", detail: "Sample sessions, no desktop needed")
+            }
+            .tint(SHColor.toggleOn)
+            .disabled(isApplyingDemoMode)
+            .accessibilityIdentifier("settings.demoMode")
+
+            Button {
+                showDesignCatalog = true
+            } label: {
+                actionLabel("Design System Catalog", icon: "square.grid.2x2")
+            }
+        } header: {
+            sectionHeader("Developer", icon: "hammer")
         }
         .listRowBackground(SHColor.surfaceSubtle)
     }
@@ -199,12 +241,7 @@ public struct HostConnectionSheet: View {
                 rowLabel(dictationStatusHeadline, detail: dictationStatusDetail)
                 Spacer()
                 Button {
-                    Task {
-                        await store.refreshDictationStatus(
-                            overrideURL: dictationURL,
-                            overrideToken: dictationToken
-                        )
-                    }
+                    Task { await store.refreshDictationStatus() }
                 } label: {
                     if store.isCheckingDictation {
                         SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
@@ -215,46 +252,15 @@ public struct HostConnectionSheet: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Check dictation server")
+                .accessibilityLabel("Check dictation")
             }
             .padding(.vertical, 2)
-
-            SHInlineDisclosureRow(
-                icon: "slider.horizontal.3",
-                title: "Advanced",
-                isExpanded: showDictationAdvanced
-            ) {
-                withAnimation { showDictationAdvanced.toggle() }
-            }
-
-            if showDictationAdvanced {
-                if let st = store.dictationStatus, st.healthy {
-                    if let model = st.model, !model.isEmpty {
-                        detailRow("Model", value: model)
-                    }
-                    if let url = st.url, !url.isEmpty {
-                        detailRow("Server", value: url)
-                    }
-                }
-
-                labeledField("Custom Server URL") {
-                    TextField("Host YapYap config", text: $dictationURL)
-                        .keyboardType(.URL)
-                }
-
-                secretField(
-                    "Custom Token",
-                    placeholder: "Optional",
-                    text: $dictationToken,
-                    isRevealed: $revealDictationToken
-                )
-
-                Text("Leave both blank to use the host's ~/.config/yapyap/config.toml.")
-                    .font(SHTypography.micro)
-                    .foregroundStyle(SHColor.inkFaint)
-            }
+            .accessibilityIdentifier("settings.dictation")
         } header: {
             sectionHeader("Dictation", icon: "mic")
+        } footer: {
+            Text("Dictation runs through your desktop. Choose the dictation server in Super Harness on the desktop, under Settings → Dictation.")
+                .foregroundStyle(SHColor.inkFaint)
         }
         .listRowBackground(SHColor.surfaceSubtle)
     }
@@ -267,8 +273,8 @@ public struct HostConnectionSheet: View {
 
     private var dictationStatusHeadline: String {
         guard let st = store.dictationStatus else { return "Checking…" }
-        if st.healthy { return "Connected" }
-        return st.configured ? "Unreachable" : "Not configured on host"
+        if st.healthy { return "Ready" }
+        return st.configured ? "Dictation server unreachable" : "Not set up"
     }
 
     /// One quiet line under the status: the error when there is one, otherwise the model's
@@ -276,11 +282,12 @@ public struct HostConnectionSheet: View {
     /// The full model id and server URL live under Advanced.
     private var dictationStatusDetail: String? {
         guard let st = store.dictationStatus else { return nil }
+        if !st.configured { return AppStore.dictationSetupMessage }
         if let err = st.error, !err.isEmpty { return err }
         if st.healthy, let model = st.model, !model.isEmpty {
             return model.split(separator: "/").last.map(String.init) ?? model
         }
-        return st.url
+        return nil
     }
 
     // MARK: - Harnesses
@@ -477,64 +484,9 @@ public struct HostConnectionSheet: View {
         .padding(.vertical, 2)
     }
 
-    private func labeledField<Field: View>(
-        _ title: String,
-        @ViewBuilder trailing: () -> some View = { EmptyView() },
-        @ViewBuilder field: () -> Field
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(SHTypography.micro)
-                    .foregroundStyle(SHColor.inkMuted)
-                Spacer()
-                trailing()
-            }
-            field()
-                .font(SHTypography.mono)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        }
-        .padding(.vertical, 2)
-    }
-
-    private func secretField(
-        _ title: String,
-        placeholder: String,
-        text: Binding<String>,
-        isRevealed: Binding<Bool>
-    ) -> some View {
-        labeledField(title) {
-            Button(isRevealed.wrappedValue ? "Hide" : "Show") {
-                isRevealed.wrappedValue.toggle()
-            }
-            .buttonStyle(.borderless)
-            .font(SHTypography.micro.weight(.medium))
-            .foregroundStyle(SHColor.inkSecondary)
-        } field: {
-            if isRevealed.wrappedValue {
-                TextField(placeholder, text: text)
-            } else {
-                SecureField(placeholder, text: text)
-            }
-        }
-    }
-
     private func runConnectionTest() async {
         isTesting = true
         defer { isTesting = false }
-        testResult = await store.testHostConnection(urlString: hostURL, token: token)
-    }
-
-    private func saveAndClose() async {
-        isSaving = true
-        defer { isSaving = false }
-        await store.saveDictationOverrides(url: dictationURL, token: dictationToken)
-        await store.applyConnectionSettings(
-            mode: isDemoMode ? .demo : .live,
-            urlString: hostURL,
-            token: token
-        )
-        dismiss()
+        testResult = await store.testHostConnection(urlString: store.hostURLString, token: store.bearerToken)
     }
 }

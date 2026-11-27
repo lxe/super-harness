@@ -111,6 +111,11 @@ private enum MobileSnapshotDiskStore {
         return try? JSONDecoder().decode(CachedMobileSnapshot.self, from: data)
     }
 
+    static func remove(at url: URL?) {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     static func save(_ snapshot: CachedMobileSnapshot, to url: URL?, synchronous: Bool = false) {
         guard let url else { return }
         let writeBlock: @Sendable () -> Void = {
@@ -140,6 +145,10 @@ public final class AppStore {
         static let tokenAccount = "desktop-control-server"
         static let dictationURL = "sh.dictationURL"
         static let dictationTokenAccount = "yapyap-dictation-token"
+        static let pairedHostName = "sh.pairedHostName"
+        static let pairedHostId = "sh.pairedHostId"
+        static let deviceId = "sh.deviceId"
+        static let didLaunch = "sh.didLaunch"
         static let pushEnabled = "sh.pushEnabled"
         static let allowExtremeReasoning = "sh.allowExtremeReasoning"
         static let chatTextSize = "sh.chatTextSize"
@@ -168,9 +177,41 @@ public final class AppStore {
     public var lastBootstrapSeq: Int?
 
     // MARK: - Dictation (YapYap) State
-    public var dictationURLOverride: String = ""
-    public var dictationTokenOverride: String = ""
     public var dictationStatus: DictationStatusResponse?
+
+    // MARK: Pairing
+
+    /// Name and id of the desktop this phone paired with. Empty for a connection set up before
+    /// pairing existed (a stored address and the desktop's shared token), which still works.
+    public var pairedHostName: String = ""
+    public var pairedHostId: String = ""
+    /// One line shown on the pairing screen, for example after the desktop revoked this phone.
+    public var pairingNotice: String?
+
+    /// A desktop address and a token are both stored. A store built around an injected client
+    /// (tests, previews) counts as paired until it is unpaired.
+    public var isPaired: Bool {
+        hasInjectedClient
+            || (!hostURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !bearerToken.isEmpty)
+    }
+    private var hasInjectedClient = false
+
+    /// True when the app should show the pairing screen instead of the session list.
+    public var needsPairing: Bool {
+        connectionMode == .live && !isPaired
+    }
+
+    @ObservationIgnored private let pairingService: PairingServiceProtocol
+    /// Debug: pairing was done against the stand-in desktop, so the app loads demo data after it.
+    @ObservationIgnored private let usesMockPairing: Bool
+
+    /// Why dictation cannot be used right now, or nil when it can. The host proxies dictation
+    /// to the server configured on the desktop; the phone has no dictation settings of its own.
+    public var dictationUnavailableReason: String? {
+        guard let status = dictationStatus else { return nil }
+        return status.configured ? nil : Self.dictationSetupMessage
+    }
+    nonisolated public static let dictationSetupMessage = "Set up dictation in Super Harness on your desktop"
     public var isCheckingDictation: Bool = false
     public var pushNotificationsEnabled: Bool = true
     /// Order of the harness gauges, the harness sections in the All view and the usage pills.
@@ -307,20 +348,49 @@ public final class AppStore {
         defaults: UserDefaults = .standard,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         reconnectIntervalNs: UInt64 = 2_000_000_000,
-        snapshotFileURL: URL? = nil
+        snapshotFileURL: URL? = nil,
+        pairingService: PairingServiceProtocol? = nil
     ) {
         self.keychain = keychain
         self.defaults = defaults
         self.reconnectIntervalNs = reconnectIntervalNs
+        let mockPairing = environment["SH_MOCK_PAIRING"] != nil
+        self.usesMockPairing = mockPairing
+        self.pairingService = pairingService ?? (mockPairing ? MockPairingService() : HTTPPairingService())
 
-        var savedHost = defaults.string(forKey: StorageKey.hostURL) ?? "http://100.64.0.10:47890"
+        // The Keychain outlives the app: after delete-and-reinstall the old token is still
+        // there while every other setting is gone. On a first launch with no stored address,
+        // drop that leftover so a fresh install really starts at the pairing screen.
+        if defaults.object(forKey: StorageKey.didLaunch) == nil {
+            if defaults.string(forKey: StorageKey.hostURL) == nil {
+                keychain.deleteToken(for: StorageKey.tokenAccount)
+            }
+            defaults.set(true, forKey: StorageKey.didLaunch)
+        }
+        // The phone no longer has dictation settings of its own.
+        keychain.deleteToken(for: StorageKey.dictationTokenAccount)
+        defaults.removeObject(forKey: StorageKey.dictationURL)
+
+        #if DEBUG
+        // UI checks start from a clean, unpaired state with SH_DEBUG_RESET_PAIRING set.
+        if environment["SH_DEBUG_RESET_PAIRING"] != nil {
+            keychain.deleteToken(for: StorageKey.tokenAccount)
+            defaults.removeObject(forKey: StorageKey.hostURL)
+            defaults.removeObject(forKey: StorageKey.pairedHostName)
+            defaults.removeObject(forKey: StorageKey.pairedHostId)
+        }
+        #endif
+
+        var savedHost = defaults.string(forKey: StorageKey.hostURL) ?? ""
         var savedToken = keychain.loadToken(for: StorageKey.tokenAccount) ?? ""
         let savedModeRaw = defaults.string(forKey: StorageKey.connectionMode)
         var resolvedMode: ConnectionMode
         if let raw = savedModeRaw, let mode = ConnectionMode(rawValue: raw) {
             resolvedMode = mode
         } else {
-            resolvedMode = .demo
+            // Demo mode is opt-in (Settings → Developer). A store built around an injected
+            // client (tests, previews) keeps the old demo default.
+            resolvedMode = client == nil ? .live : .demo
         }
 
         var resolvedInitialRoute: DetailRoute? = nil
@@ -366,7 +436,8 @@ public final class AppStore {
         self.hostURLString = savedHost
         self.bearerToken = savedToken
         self.connectionMode = resolvedMode
-        self.dictationURLOverride = defaults.string(forKey: StorageKey.dictationURL) ?? ""
+        self.pairedHostName = defaults.string(forKey: StorageKey.pairedHostName) ?? ""
+        self.pairedHostId = defaults.string(forKey: StorageKey.pairedHostId) ?? ""
         if defaults.object(forKey: StorageKey.pushEnabled) != nil {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
@@ -385,7 +456,6 @@ public final class AppStore {
         } else {
             self.pushRelayURL = savedRelay ?? PushNotificationCoordinator.defaultRelayURL
         }
-        self.dictationTokenOverride = keychain.loadToken(for: StorageKey.dictationTokenAccount) ?? ""
 
         if let rawGroup = defaults.string(forKey: StorageKey.groupBy),
            let group = SidebarGroupBy(rawValue: rawGroup) {
@@ -393,11 +463,18 @@ public final class AppStore {
         }
 
         if let injected = client {
+            self.hasInjectedClient = true
             self.client = injected
             self.connectionHealth = resolvedMode == .demo ? .demo : .connected
-        } else if resolvedMode == .live, let url = try? LiveSuperHarnessClient.normalizeBaseURL(savedHost) {
+        } else if resolvedMode == .live, !savedHost.isEmpty, !savedToken.isEmpty,
+                  let url = try? LiveSuperHarnessClient.normalizeBaseURL(savedHost) {
             self.client = LiveSuperHarnessClient(baseURL: url, token: savedToken)
             self.connectionHealth = .connecting
+        } else if resolvedMode == .live {
+            // Not paired yet: the pairing screen shows and nothing is fetched. The stand-in
+            // client is never asked for anything.
+            self.client = MockSuperHarnessClient()
+            self.connectionHealth = .offline("Not paired")
         } else {
             self.connectionMode = .demo
             self.client = MockSuperHarnessClient()
@@ -543,6 +620,7 @@ public final class AppStore {
     // MARK: - Lifecycle
 
     public func bootstrap(quiet: Bool = false) async {
+        guard !needsPairing else { return }
         #if DEBUG
         if !quiet { debugStartListPublishLog() }
         #endif
@@ -593,6 +671,10 @@ public final class AppStore {
                 await self?.refreshDictationStatus()
             }
         } catch {
+            if handleAuthFailure(error) {
+                isBootstrapping = false
+                return
+            }
             reportError(error)
             if connectionMode == .live {
                 connectionHealth = .offline(error.localizedDescription)
@@ -606,6 +688,7 @@ public final class AppStore {
     }
 
     public func refresh() async {
+        guard !needsPairing else { return }
         isRefreshing = true
         lastError = nil
         do {
@@ -625,6 +708,10 @@ public final class AppStore {
                 }
             }
         } catch {
+            if handleAuthFailure(error) {
+                isRefreshing = false
+                return
+            }
             reportError(error)
             if connectionMode == .live {
                 connectionHealth = .offline(error.localizedDescription)
@@ -636,7 +723,7 @@ public final class AppStore {
 
     /// Lightweight bidirectional resync triggered by SSE `resync_required`, reconnect, or returning to foreground.
     public func resync() async {
-        guard !isResyncing, !isBootstrapping else { return }
+        guard !needsPairing, !isResyncing, !isBootstrapping else { return }
         isResyncing = true
         defer { isResyncing = false }
 
@@ -655,6 +742,7 @@ public final class AppStore {
             }
             lastError = nil
         } catch {
+            if handleAuthFailure(error) { return }
             if isSceneActive { thawList() }
             if connectionMode == .live {
                 connectionHealth = .offline(error.localizedDescription)
@@ -2508,53 +2596,23 @@ public final class AppStore {
 
     // MARK: - YapYap Voice Dictation
 
-    public func refreshDictationStatus(overrideURL: String? = nil, overrideToken: String? = nil) async {
+    public func refreshDictationStatus() async {
         isCheckingDictation = true
         defer { isCheckingDictation = false }
-        let url = overrideURL ?? dictationURLOverride
-        let tok = overrideToken ?? dictationTokenOverride
-        dictationStatus = await client.fetchDictationStatus(
-            overrideURL: url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : url,
-            overrideToken: tok.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : tok
-        )
-    }
-
-    public func saveDictationOverrides(url: String, token: String) async {
-        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        dictationURLOverride = trimmedURL
-        dictationTokenOverride = trimmedToken
-        defaults.set(trimmedURL, forKey: StorageKey.dictationURL)
-        if trimmedToken.isEmpty {
-            keychain.deleteToken(for: StorageKey.dictationTokenAccount)
-        } else {
-            try? keychain.saveToken(trimmedToken, for: StorageKey.dictationTokenAccount)
-        }
-        await refreshDictationStatus()
+        dictationStatus = await client.fetchDictationStatus()
     }
 
     /// Called when the mic is tapped. One cheap status request opens the phone → host connection
-    /// (and the host → YapYap one) during recording, so the audio upload after "stop" does not
-    /// also pay for connection setup.
+    /// (and the host → dictation server one) during recording, so the audio upload after "stop"
+    /// does not also pay for connection setup.
     public func prewarmDictation() async {
-        let url = dictationURLOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tok = dictationTokenOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let status = await client.fetchDictationStatus(
-            overrideURL: url.isEmpty ? nil : url,
-            overrideToken: tok.isEmpty ? nil : tok
-        ) {
+        if let status = await client.fetchDictationStatus() {
             dictationStatus = status
         }
     }
 
     public func transcribeDictation(wavData: Data) async throws -> String {
-        let url = dictationURLOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tok = dictationTokenOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try await client.transcribeAudio(
-            wavData: wavData,
-            overrideURL: url.isEmpty ? nil : url,
-            overrideToken: tok.isEmpty ? nil : tok
-        )
+        try await client.transcribeAudio(wavData: wavData)
     }
 
     public func startSession(_ request: StartSessionRequest) async -> String? {
@@ -2622,6 +2680,134 @@ public final class AppStore {
         } catch {
             reportError(error)
         }
+    }
+
+    // MARK: - Pairing
+
+    /// A name the desktop can show in its paired-devices list.
+    public var deviceName: String {
+        #if canImport(UIKit)
+        return UIDevice.current.name
+        #else
+        return "iPhone"
+        #endif
+    }
+
+    /// Stable per install, so pairing the same phone twice replaces its entry on the desktop.
+    public var deviceId: String {
+        if let saved = defaults.string(forKey: StorageKey.deviceId), !saved.isEmpty { return saved }
+        let fresh = UUID().uuidString
+        defaults.set(fresh, forKey: StorageKey.deviceId)
+        return fresh
+    }
+
+    /// Checks which address reaches the desktop, exchanges the 6-digit code for this phone's
+    /// own token, stores it, and loads the sessions. Throws a `PairingError` to show.
+    public func pair(candidates: [URL], expectedHostId: String, code: String) async throws {
+        let grant = try await PairingFlow.pair(
+            candidates: candidates,
+            expectedHostId: expectedHostId,
+            code: code,
+            deviceName: deviceName,
+            deviceId: deviceId,
+            service: pairingService
+        )
+        await completePairing(grant)
+    }
+
+    /// The desktop's name at an address, for confirming a manually typed address.
+    public func pairingInfo(at url: URL) async -> PairInfo? {
+        try? await pairingService.info(baseURL: url)
+    }
+
+    private func completePairing(_ grant: PairGrant) async {
+        pairedHostName = grant.hostName
+        pairedHostId = grant.hostId
+        defaults.set(grant.hostName, forKey: StorageKey.pairedHostName)
+        defaults.set(grant.hostId, forKey: StorageKey.pairedHostId)
+        pairingNotice = nil
+        lastError = nil
+        await applyConnectionSettings(
+            mode: usesMockPairing ? .demo : .live,
+            urlString: grant.baseURL.absoluteString,
+            token: grant.token
+        )
+        Task { [weak self] in await self?.refreshDictationStatus() }
+        // The push relay key is derived from the token this phone uses, which just changed.
+        PushNotificationCoordinator.shared.syncCurrentTokenIfAvailable()
+    }
+
+    /// Forgets the desktop and returns to the pairing screen. `reason` is shown there.
+    public func unpair(reason: String? = nil) {
+        stopEventStream()
+        keychain.deleteToken(for: StorageKey.tokenAccount)
+        defaults.removeObject(forKey: StorageKey.hostURL)
+        defaults.removeObject(forKey: StorageKey.pairedHostName)
+        defaults.removeObject(forKey: StorageKey.pairedHostId)
+        defaults.set(ConnectionMode.live.rawValue, forKey: StorageKey.connectionMode)
+        hostURLString = ""
+        bearerToken = ""
+        hasInjectedClient = false
+        pairedHostName = ""
+        pairedHostId = ""
+        connectionMode = .live
+        connectionHealth = .offline("Not paired")
+        client = MockSuperHarnessClient()
+
+        sessions = []
+        harnesses = []
+        usage = nil
+        catalog = nil
+        dictationStatus = nil
+        transcriptsBySessionId.removeAll()
+        transcriptLimitsBySessionId.removeAll()
+        streamingMessagesBySessionId.removeAll()
+        pendingOutgoingBySessionId.removeAll()
+        hostWorkingSessionIds.removeAll()
+        transcriptRevisionBySessionId.removeAll()
+        mediaCache.removeAll()
+        selectedSessionId = nil
+        detailRoute = nil
+        hasBootstrapped = false
+        lastError = nil
+        isHostSettingsSheetPresented = false
+        isUsageSheetPresented = false
+        MobileSnapshotDiskStore.remove(at: snapshotFileURL)
+        pairingNotice = reason
+    }
+
+    /// Demo mode shows sample sessions without a desktop. Turning it off returns to the paired
+    /// desktop, or to the pairing screen when there is none.
+    public func setDemoMode(_ enabled: Bool) async {
+        if enabled {
+            await applyConnectionSettings(mode: .demo, urlString: hostURLString, token: bearerToken)
+        } else if isPaired {
+            await applyConnectionSettings(mode: .live, urlString: hostURLString, token: bearerToken)
+        } else {
+            stopEventStream()
+            connectionMode = .live
+            defaults.set(ConnectionMode.live.rawValue, forKey: StorageKey.connectionMode)
+            connectionHealth = .offline("Not paired")
+            sessions = []
+            harnesses = []
+            usage = nil
+            catalog = nil
+            selectedSessionId = nil
+            detailRoute = nil
+            hasBootstrapped = false
+            isHostSettingsSheetPresented = false
+        }
+    }
+
+    nonisolated public static let revokedNotice = "This phone is no longer paired with the desktop. Pair it again to continue."
+
+    /// A 401 while paired means the desktop revoked this phone (or its token changed): go back
+    /// to the pairing screen with a one-line reason. Returns true when it handled the error.
+    @discardableResult
+    private func handleAuthFailure(_ error: Error) -> Bool {
+        guard case SuperHarnessAPIError.unauthorized = error, connectionMode == .live, isPaired else { return false }
+        unpair(reason: Self.revokedNotice)
+        return true
     }
 
     // MARK: - Host Connection Settings

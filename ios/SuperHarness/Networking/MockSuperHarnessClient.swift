@@ -18,6 +18,9 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
     public private(set) var watchedSessions: [String?] = []
     public private(set) var bootstrapCallCount: Int = 0
     public private(set) var simulateOffline: Bool = false
+    /// Tests: the host rejects this phone's token, as it does after the desktop revokes it.
+    public private(set) var simulateUnauthorized: Bool = false
+    public func setSimulateUnauthorized(_ value: Bool) { simulateUnauthorized = value }
     public private(set) var simulateSendError: String? = nil
 
     public func setSimulateOffline(_ offline: Bool) {
@@ -714,6 +717,9 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         if simulateOffline {
             throw URLError(.cannotConnectToHost)
         }
+        if simulateUnauthorized {
+            throw SuperHarnessAPIError.unauthorized
+        }
         #if DEBUG
         // UI checks for pinned chats: pin nine sessions and add enough unpinned ones that the
         // list scrolls.
@@ -849,17 +855,20 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         throw SuperHarnessAPIError.notFound("/api/media")
     }
 
-    public func fetchDictationStatus(overrideURL: String?, overrideToken: String?) async -> DictationStatusResponse? {
-        DictationStatusResponse(
+    public func fetchDictationStatus() async -> DictationStatusResponse? {
+        // SH_MOCK_DICTATION_UNCONFIGURED shows the state where the desktop has no dictation server.
+        if ProcessInfo.processInfo.environment["SH_MOCK_DICTATION_UNCONFIGURED"] != nil {
+            return DictationStatusResponse(ok: true, configured: false, healthy: false)
+        }
+        return DictationStatusResponse(
             ok: true,
             configured: true,
-            url: overrideURL?.isEmpty == false ? overrideURL : "http://100.64.0.10:8765",
             healthy: true,
             model: "whisper-large-v3-turbo"
         )
     }
 
-    public func transcribeAudio(wavData: Data, overrideURL: String?, overrideToken: String?) async throws -> String {
+    public func transcribeAudio(wavData: Data) async throws -> String {
         // SH_MOCK_TRANSCRIBE_DELAY_MS lengthens the demo transcription so UI tests can observe the in-flight state.
         let delayMs = ProcessInfo.processInfo.environment["SH_MOCK_TRANSCRIBE_DELAY_MS"].flatMap(UInt64.init) ?? 250
         try? await Task.sleep(nanoseconds: delayMs * 1_000_000)

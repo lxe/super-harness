@@ -451,8 +451,13 @@ export function sortSidebarGroups(groups: TopGroup[], sortBy: SidebarSortBy): To
       ...(g.sections ?? []).map((sec) => newest(sec.items))
     );
   const headless = sorted.filter((g) => g.headless);
-  const rest = sorted.filter((g) => !g.headless).sort((a, b) => groupNewest(b) - groupNewest(a));
-  return [...headless, ...rest];
+  const rest = sorted.filter((g) => !g.headless);
+  // Top-level harness sections always match the user's saved harness gauge order.
+  const isHarnessTopLevel = rest.length > 0 && rest.every((g) => Boolean(g.harnessLogo));
+  const orderedRest = isHarnessTopLevel
+    ? rest
+    : [...rest].sort((a, b) => groupNewest(b) - groupNewest(a));
+  return [...headless, ...orderedRest];
 }
 
 /**

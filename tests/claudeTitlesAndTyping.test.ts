@@ -82,4 +82,13 @@ describe('sidebar sort', () => {
     expect(out[0].sections![1].items.map((x) => x.id)).toEqual(['2', '1']);
     expect(sortSidebarGroups(groups, 'native')).toBe(groups);
   });
+
+  it('preserves top-level harness order when sorting threads by activity', () => {
+    const groups = [
+      { id: 'harness:antigravity', label: 'Antigravity', harnessLogo: 'antigravity' as const, items: [s('1', 10)] },
+      { id: 'harness:pi', label: 'Pi', harnessLogo: 'pi' as const, items: [s('2', 999)] },
+    ];
+    const out = sortSidebarGroups(groups, 'active');
+    expect(out.map((g) => g.id)).toEqual(['harness:antigravity', 'harness:pi']);
+  });
 });

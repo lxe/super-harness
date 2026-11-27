@@ -1,3 +1,4 @@
+import { describePiModelError, piErrorFromMessage, type PiModelError } from '../adapters/piErrors';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -53,6 +54,15 @@ interface PiWorker {
   hooks: PiRpcTurnHooks | null;
   idleTimer: NodeJS.Timeout | null;
   closed: boolean;
+  /** Newest failed model call of the current run (cleared when a call succeeds). */
+  lastError?: PiModelError;
+  /** Set between Pi's auto_retry_start and auto_retry_end. */
+  retry?: PiRetryState;
+}
+
+export interface PiRetryState extends PiModelError {
+  attempt: number;
+  maxAttempts: number;
 }
 
 /** `provider/modelId` split at the first slash (model ids may contain more slashes). */
@@ -179,6 +189,12 @@ export class PiRpcPool {
   has(key: string): boolean {
     const w = this.workers.get(key);
     return Boolean(w && !w.closed);
+  }
+
+  /** Pi is waiting to call the model again after a failure. */
+  retryState(key: string): PiRetryState | undefined {
+    const w = this.workers.get(key);
+    return w?.streaming ? w.retry : undefined;
   }
 
   isStreaming(key: string): boolean {
@@ -330,13 +346,34 @@ export class PiRpcPool {
       }
       case 'message_end': {
         const msg = (obj.message ?? {}) as Record<string, unknown>;
-        if (msg.role === 'assistant' && msg.stopReason === 'error' && typeof msg.errorMessage === 'string') {
-          emit({ kind: 'error', error: msg.errorMessage.slice(0, 1500) });
-        }
+        // Reported once the run settles: Pi may still retry and succeed.
+        if (msg.role === 'assistant') w.lastError = piErrorFromMessage(msg) ?? undefined;
+        hooks?.onPersisted();
+        break;
+      }
+      case 'auto_retry_start': {
+        const base = w.lastError ?? { errorMessage: typeof obj.errorMessage === 'string' ? obj.errorMessage : 'The model call failed.' };
+        w.retry = {
+          ...base,
+          errorMessage: typeof obj.errorMessage === 'string' && obj.errorMessage ? obj.errorMessage : base.errorMessage,
+          attempt: typeof obj.attempt === 'number' ? obj.attempt : 1,
+          maxAttempts: typeof obj.maxAttempts === 'number' ? obj.maxAttempts : 0,
+        };
+        hooks?.onPersisted();
+        break;
+      }
+      case 'auto_retry_end': {
+        const finalError = typeof obj.finalError === 'string' && obj.finalError ? obj.finalError : undefined;
+        if (obj.success === true) w.lastError = undefined;
+        else if (finalError) w.lastError = { ...(w.lastError ?? w.retry ?? {}), errorMessage: finalError };
+        w.retry = undefined;
         hooks?.onPersisted();
         break;
       }
       case 'agent_settled': {
+        if (w.lastError) emit({ kind: 'error', error: describePiModelError(w.lastError) });
+        w.lastError = undefined;
+        w.retry = undefined;
         w.streaming = false;
         w.fileStamp = fileStamp(w.sessionFile);
         if (w.fileStamp) this.rememberWrite(w.key, w.fileStamp);

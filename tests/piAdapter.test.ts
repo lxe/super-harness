@@ -12,11 +12,13 @@ import {
   isPiProcessRow,
   parsePiJsonlLines,
   piActiveBranch,
+  piRetryFocus,
   piSessionIdFromFilename,
   piTailState,
   scanPiSessionMeta,
 } from '../src/main/adapters/piAdapter';
 import { createDefaultDrivers } from '../src/main/adapters/index';
+import { describePiModelError, summarizePiError } from '../src/main/adapters/piErrors';
 import { buildPiRpcArgs, splitPiModelRef } from '../src/main/services/piRpcClient';
 import { parsePiModels } from '../src/main/services/catalogService';
 import { readLastUserText } from '../src/main/utils/lastUserText';
@@ -121,7 +123,7 @@ describe('parsePiJsonlLines', () => {
     expect(texts).toContain('Returned from another branch');
   });
 
-  it('shows compaction as a notice and keeps errors on the assistant message', () => {
+  it('shows compaction and model errors as notices', () => {
     const lines = [
       ...sampleSession().slice(0, 5),
       line({ type: 'compaction', id: 'k1', parentId: 'u1', timestamp: '2026-11-26T10:02:00.000Z', summary: 'did stuff', firstKeptEntryId: 'u1', tokensBefore: 181611 }),
@@ -130,7 +132,7 @@ describe('parsePiJsonlLines', () => {
     const res = parsePiJsonlLines(lines, 'pi:sess-1', Date.now());
     const notice = res.messages.find((m) => m.harnessMeta?.sourceKind === 'compaction');
     expect(notice?.blocks[0]).toMatchObject({ type: 'notice', title: 'Context compacted (182k tokens)' });
-    expect(res.messages[res.messages.length - 1].error).toBe('Request timed out.');
+    expect(res.messages[res.messages.length - 1].blocks[0]).toMatchObject({ type: 'notice', title: 'Model: request timed out', detail: 'Request timed out.' });
   });
 
   it('renders user images from base64 and ! shell runs as commands', () => {
@@ -338,5 +340,81 @@ describe('Pi linked images', () => {
       { type: 'text', text: 'Done: ' },
       { type: 'image', path: smiley, name: 'Smiley' },
     ]);
+  });
+});
+
+describe('Pi model errors', () => {
+  const user = (id: string, parentId: string | null, text: string) =>
+    JSON.stringify({ type: 'message', id, parentId, timestamp: '2026-11-26T10:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const failed = (id: string, parentId: string, errorMessage = 'Connection error.: connect ECONNREFUSED 127.0.0.1:9') =>
+    JSON.stringify({
+      type: 'message',
+      id,
+      parentId,
+      timestamp: '2026-11-26T10:00:01.000Z',
+      message: { role: 'assistant', content: [], provider: 'deadprov', model: 'm1', stopReason: 'error', errorMessage },
+    });
+  const removedBy = (id: string, parentId: string, target: string) =>
+    JSON.stringify({ type: 'context_edit', id, parentId, timestamp: '2026-11-26T10:00:01.500Z', targetId: target, replacement: null });
+  const ok = (id: string, parentId: string, text: string) =>
+    JSON.stringify({
+      type: 'message',
+      id,
+      parentId,
+      timestamp: '2026-11-26T10:00:05.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text }], provider: 'deadprov', model: 'm1', stopReason: 'stop' },
+    });
+
+  it('describes provider failures in plain words', () => {
+    expect(describePiModelError({ provider: 'p', model: 'm', errorMessage: 'Connection error.: connect ECONNREFUSED 10.0.0.1:8080' })).toBe(
+      'p / m: connection refused at 10.0.0.1:8080'
+    );
+    expect(summarizePiError('getaddrinfo ENOTFOUND api.example.com')).toBe('host not found at api.example.com');
+    expect(summarizePiError('Connection error.', '10.0.0.2:80')).toBe('could not connect to 10.0.0.2:80');
+    expect(summarizePiError('529 overloaded')).toBe('529 overloaded');
+    expect(summarizePiError('Connection error.: bad port', '127.0.0.1:9')).toBe('could not connect to 127.0.0.1:9 (bad port)');
+  });
+
+  it('keeps retried failures in the thread as one notice with a count', () => {
+    const lines = [
+      user('u1', null, 'hi'),
+      failed('a1', 'u1'),
+      removedBy('e1', 'a1', 'a1'),
+      failed('a2', 'e1'),
+      removedBy('e2', 'a2', 'a2'),
+      failed('a3', 'e2'),
+      removedBy('e3', 'a3', 'a3'),
+      failed('a4', 'e3'),
+    ];
+    const r = parsePiJsonlLines(lines, 'pi:x', Date.now());
+    expect(r.messages.map((m) => m.role)).toEqual(['user', 'system']);
+    expect(r.messages[1].blocks[0]).toMatchObject({
+      type: 'notice',
+      title: 'deadprov / m1: connection refused at 127.0.0.1:9 (failed 4 times)',
+    });
+    // The last failure was not removed: Pi gave up, so the turn is over.
+    expect(r.tail.midTurn).toBe(false);
+    expect(r.tail.modelError).toMatchObject({ retrying: false, attempts: 4 });
+  });
+
+  it('reports a retry in progress while the newest failure was removed from context', () => {
+    const lines = [user('u1', null, 'hi'), failed('a1', 'u1'), removedBy('e1', 'a1', 'a1'), failed('a2', 'e1'), removedBy('e2', 'a2', 'a2')];
+    const r = parsePiJsonlLines(lines, 'pi:x', Date.now());
+    expect(r.tail.midTurn).toBe(true);
+    expect(r.liveActivity?.isWorking).toBe(true);
+    expect(r.liveActivity?.focus).toBe('Retrying: connection refused at 127.0.0.1:9 (2 failed)');
+    expect(piRetryFocus({ errorMessage: 'connect ECONNREFUSED 1.2.3.4:5' }, 1, 3)).toBe('Retrying: connection refused at 1.2.3.4:5 (attempt 2 of 4)');
+  });
+
+  it('keeps the notice when a retry then succeeds', () => {
+    const lines = [user('u1', null, 'hi'), failed('a1', 'u1'), removedBy('e1', 'a1', 'a1'), ok('a2', 'e1', 'hello')];
+    const r = parsePiJsonlLines(lines, 'pi:x', Date.now());
+    expect(r.messages.map((m) => [m.role, m.blocks[0]?.type])).toEqual([
+      ['user', 'text'],
+      ['system', 'notice'],
+      ['assistant', 'text'],
+    ]);
+    expect(r.tail.midTurn).toBe(false);
+    expect(r.tail.modelError).toBeUndefined();
   });
 });

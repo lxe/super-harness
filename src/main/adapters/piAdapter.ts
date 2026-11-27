@@ -22,6 +22,7 @@ import { readJsonlTailLines, readProgressiveJsonlTail } from '../utils/tailReade
 import { cleanTextPreview, getBinaryVersionCached, projectNameFromCwd, whichBinary, type ProcessRow } from '../utils/system';
 import { findTmuxPaneForPids, parseTmuxPaneList } from './museAdapter';
 import { invalid, normalizeEffort, resultsFor } from './sessionConfig';
+import { describePiModelError, piErrorFromMessage, piModelErrorKey, summarizePiError, piProviderHost, type PiModelError } from './piErrors';
 import {
   computeFileFingerprint,
   createUniqueIdGenerator,
@@ -230,6 +231,17 @@ export interface PiTailState {
   lastEventAt: number;
   /** Name of the tool whose result has not landed yet, when the tail ends on a tool call. */
   activeTool?: string;
+  /**
+   * The newest model call failed. With `retrying`, Pi removed it from context (context_edit)
+   * and will call again; otherwise the turn ended on this error.
+   */
+  modelError?: PiModelError & { retrying: boolean; attempts: number };
+}
+
+/** Live-activity focus for a session whose model calls are failing. */
+export function piRetryFocus(err: PiModelError, attempt?: number, maxAttempts?: number): string {
+  const n = attempt && maxAttempts ? ` (attempt ${attempt + 1} of ${maxAttempts + 1})` : attempt ? ` (${attempt} failed)` : '';
+  return `Retrying: ${summarizePiError(err.errorMessage, piProviderHost(err.provider))}${n}`;
 }
 
 /**
@@ -238,18 +250,37 @@ export interface PiTailState {
  * tool use means a run is still going (if a process is alive to run it).
  */
 export function piTailState(lines: string[], fallbackTs: number): PiTailState {
+  // Context edits come after the entry they remove, so a backward walk sees them first.
+  const removed = new Set<string>();
+  let failure: (PiModelError & { retrying: boolean; attempts: number; ts: number }) | null = null;
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
-    if (!line.includes('"type":"message"') && !line.includes('"type":"compaction"')) continue;
+    const isEdit = line.includes('"type":"context_edit"');
+    if (!isEdit && !line.includes('"type":"message"') && !line.includes('"type":"compaction"')) continue;
     let o: Record<string, unknown>;
     try {
       o = JSON.parse(line) as Record<string, unknown>;
     } catch {
       continue;
     }
+    if (o.type === 'context_edit') {
+      if (typeof o.targetId === 'string' && o.replacement == null) removed.add(o.targetId);
+      continue;
+    }
     const ts = isoToMs(o.timestamp, fallbackTs);
-    if (o.type === 'compaction') return { midTurn: true, lastEventAt: ts };
     const msg = asRecord(o.message);
+    const err = o.type === 'message' ? piErrorFromMessage(msg) : null;
+    if (err && (!failure || piModelErrorKey(failure) === piModelErrorKey(err))) {
+      // Count the run of identical failures at the tail; the newest decides retrying.
+      if (failure) failure.attempts++;
+      else failure = { ...err, retrying: typeof o.id === 'string' && removed.has(o.id), attempts: 1, ts };
+      continue;
+    }
+    if (failure) {
+      const { ts: failedAt, ...modelError } = failure;
+      return { midTurn: failure.retrying, lastEventAt: failedAt, modelError };
+    }
+    if (o.type === 'compaction') return { midTurn: true, lastEventAt: ts };
     const role = msg.role;
     if (role === 'system' || role === 'custom') continue;
     if (role === 'assistant') {
@@ -262,6 +293,10 @@ export function piTailState(lines: string[], fallbackTs: number): PiTailState {
     }
     if (role === 'user' || role === 'toolResult') return { midTurn: true, lastEventAt: ts };
     return { midTurn: false, lastEventAt: ts };
+  }
+  if (failure) {
+    const { ts: failedAt, ...modelError } = failure;
+    return { midTurn: failure.retrying, lastEventAt: failedAt, modelError };
   }
   return { midTurn: false, lastEventAt: fallbackTs };
 }
@@ -644,9 +679,27 @@ export function parsePiJsonlLines(
     });
   };
 
+  // A failed model call is shown where it happened, even after Pi's retry removes it from
+  // the model's context (context_edit); identical back-to-back failures share one notice.
+  let lastModelError: { key: string; count: number; msg: UnifiedMessage } | null = null;
+  const pushModelError = (id: string, ts: number, err: PiModelError) => {
+    const key = piModelErrorKey(err);
+    const title = describePiModelError(err);
+    const prev = lastModelError;
+    if (prev && prev.key === key && messages[messages.length - 1] === prev.msg) {
+      prev.count++;
+      prev.msg.timestamp = ts;
+      prev.msg.blocks = [{ type: 'notice', title: `${title} (failed ${prev.count} times)`, detail: err.errorMessage.slice(0, 1500) }];
+      return;
+    }
+    pushNotice(id, ts, title, err.errorMessage.slice(0, 1500), 'system_meta');
+    lastModelError = { key, count: 1, msg: messages[messages.length - 1] };
+  };
+
   for (const e of branch) {
     const id = String(e.id);
     const ts = isoToMs(e.timestamp, sourceMtimeMs);
+    if (e.type === 'context_edit') continue;
     if (e.type === 'compaction') {
       const tokens = typeof e.tokensBefore === 'number' ? ` (${Math.round(e.tokensBefore / 1000)}k tokens)` : '';
       pushNotice(id, ts, `Context compacted${tokens}`, typeof e.summary === 'string' ? e.summary.slice(0, 4000) : undefined, 'compaction');
@@ -678,8 +731,15 @@ export function parsePiJsonlLines(
     }
     if (role === 'assistant') {
       const model = typeof msg.provider === 'string' && typeof msg.model === 'string' ? `${msg.provider}/${msg.model}` : undefined;
+      const modelError = piErrorFromMessage(msg);
+      const content = Array.isArray(msg.content) ? msg.content : [];
+      if (modelError && content.length === 0) {
+        pushModelError(id, mts, modelError);
+        continue;
+      }
+      lastModelError = null;
       const a = ensureAssistant(id, mts, model);
-      for (const raw of Array.isArray(msg.content) ? msg.content : []) {
+      for (const raw of content) {
         const b = asRecord(raw);
         if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
           a.blocks.push({ type: 'thinking', text: b.thinking.trim() });
@@ -695,7 +755,7 @@ export function parsePiJsonlLines(
           lastFocus = name === 'bash' ? 'Running command' : `Running ${name}`;
         }
       }
-      if (msg.stopReason === 'error' && typeof msg.errorMessage === 'string') a.error = msg.errorMessage.slice(0, 1500);
+      if (modelError) pushModelError(id, mts, modelError);
       else if (msg.stopReason === 'aborted') a.blocks.push({ type: 'notice', title: 'Stopped' });
       continue;
     }
@@ -737,7 +797,13 @@ export function parsePiJsonlLines(
   const sliced = totalCount > limit ? messages.slice(totalCount - limit) : messages;
   const liveActivity: LiveActivityState = {
     isWorking: tail.midTurn,
-    focus: tail.midTurn ? (tail.activeTool ? `Running ${tail.activeTool}` : lastFocus) : undefined,
+    focus: tail.midTurn
+      ? tail.modelError?.retrying
+        ? piRetryFocus(tail.modelError, tail.modelError.attempts)
+        : tail.activeTool
+          ? `Running ${tail.activeTool}`
+          : lastFocus
+      : undefined,
     lastEventAt: tail.lastEventAt,
   };
   return {
@@ -1108,7 +1174,9 @@ export function createPiDriver(): HarnessDriver {
       // Working needs a live runner: our worker, or a terminal that holds the session.
       const runner = pool.has(session.id) ? pool.isStreaming(session.id) : Boolean(lastHolders.get(session.nativeId)) || Date.now() - out.sourceMtimeMs < 60_000;
       const isWorking = pool.has(session.id) ? pool.isStreaming(session.id) : tail.midTurn && runner;
-      out.liveActivity = { ...(out.liveActivity ?? { isWorking }), isWorking, focus: isWorking ? out.liveActivity?.focus : undefined };
+      const retry = pool.retryState(session.id);
+      const focus = !isWorking ? undefined : retry ? piRetryFocus(retry, retry.attempt, retry.maxAttempts) : out.liveActivity?.focus;
+      out.liveActivity = { ...(out.liveActivity ?? { isWorking }), isWorking, focus };
       return out;
     },
 

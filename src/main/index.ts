@@ -46,7 +46,7 @@ import { notificationTextFromMarkdown } from './utils/notificationText';
 import { ensureRichPath, whichBinary } from './utils/system';
 import { claudeTmuxRecords } from './adapters/claudeTmuxRevival';
 import { ensureLoginAutostart } from './services/loginAutostart';
-import { staleWorkingIds } from './utils/workingSet';
+import { staleWorkingIds, WorkingCompletionTracker } from './utils/workingSet';
 
 // Ensure macOS/Linux GUI-launched packaged builds inherit Homebrew & user CLI bins
 ensureRichPath();
@@ -370,8 +370,71 @@ const pairingService = new PairingService(store, {
     pushNotifier.removePairedDevice(deviceId);
   },
 });
-const sessionWorkingSinceMs = new Map<string, number>();
+const workingTracker = new WorkingCompletionTracker();
 const sessionNotifiedInputIds = new Set<string>();
+
+function getUnreadBadgeCount(ensureSessionId?: string): number {
+  const sessions = registry.getCached().sessions;
+  let count = 0;
+  let ensuredCounted = false;
+  for (const s of sessions) {
+    if (s.id.startsWith('master:') || s.status === 'archived' || s.hidden) continue;
+    if (s.unread) {
+      count += 1;
+      if (s.id === ensureSessionId) ensuredCounted = true;
+    }
+  }
+  if (ensureSessionId && !ensureSessionId.startsWith('master:') && !ensuredCounted) {
+    const target = sessions.find((s) => s.id === ensureSessionId);
+    if (!target || (target.status !== 'archived' && !target.hidden)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function extractAssistantSnippet(transcript?: { messages?: Array<{ role: string; blocks: Array<{ type: string; text?: string }> }> }): string {
+  const lastAssistant = transcript?.messages
+    ? [...transcript.messages].reverse().find((m) => m.role === 'assistant')
+    : undefined;
+  const raw = lastAssistant?.blocks
+    .filter((b): b is { type: 'text'; text: string } => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text.trim())
+    .join('\n\n') ?? '';
+  return notificationTextFromMarkdown(raw);
+}
+
+async function notifyTaskCompleted(
+  sessionId: string,
+  transcript?: { messages?: Array<{ role: string; blocks: Array<{ type: string; text?: string }> }> }
+): Promise<void> {
+  if (!sessionId || sessionId.startsWith('master:')) return;
+  const sess = registry.getSession(sessionId);
+  let snippet = extractAssistantSnippet(transcript);
+  if (!snippet) {
+    try {
+      const fresh = await registry.getTranscript(sessionId, 8);
+      snippet = extractAssistantSnippet(fresh);
+    } catch {
+      // fall back to preview below
+    }
+  }
+  const body = snippet || notificationTextFromMarkdown(sess?.preview ?? '') || 'Task completed';
+  const res = await pushNotifier.notify({
+    kind: 'task_completed',
+    sessionId,
+    harness: sess?.harness,
+    title: sess?.title || 'Task completed',
+    body,
+    badge: getUnreadBadgeCount(sessionId),
+  });
+  if (res.results.length > 0) {
+    console.log(
+      `[push] task_completed session=${sessionId} sent=${res.sent}/${res.results.length}`,
+      res.results.map((r) => `${r.rid}:${r.status}${r.reason ? `(${r.reason})` : ''}`).join(',')
+    );
+  }
+}
 
 let controlServerRef: ControlServer | null = null;
 let masterEngineRef: MasterEngine | null = null;
@@ -404,6 +467,7 @@ function broadcastActivityIfChanged(): void {
 const emitStream = (ev: StreamEvent) => {
   if (ev.kind === 'start' || ev.kind === 'delta' || ev.kind === 'block') {
     activeStreamingSessionIds.add(ev.sessionId);
+    workingTracker.markWorking(ev.sessionId, Date.now());
   } else if (ev.kind === 'done' || ev.kind === 'error') {
     activeStreamingSessionIds.delete(ev.sessionId);
   }
@@ -466,17 +530,17 @@ async function refreshAndBroadcast() {
     .discover()
     .then((result) => {
       // Drop sessions stuck as working because nothing watched them when they went idle.
+      const now = Date.now();
       const byId = new Map(result.sessions.map((s) => [s.id, s]));
       for (const id of staleWorkingIds({
         working: liveWorkingSessionIds,
         addedAt: liveWorkingAddedAt,
         watched: liveSyncRef?.getWatchedSessionIds() ?? new Set(),
         discoveredRunning: (id) => (byId.has(id) ? byId.get(id)!.status === 'running' : undefined),
-        now: Date.now(),
+        now,
       })) {
         liveWorkingSessionIds.delete(id);
         liveWorkingAddedAt.delete(id);
-        sessionWorkingSinceMs.delete(id);
       }
       const activeSet = new Set<string>([...activeStreamingSessionIds, ...liveWorkingSessionIds]);
       const sessions = result.sessions.map((s) =>
@@ -490,6 +554,14 @@ async function refreshAndBroadcast() {
             .map((s) => s.id),
         ])
       ).sort();
+      const completedFromDiscovery = workingTracker.reconcileDiscovery({
+        runningIds: activeWorkingSessionIds,
+        knownIds: new Set(byId.keys()),
+        now,
+      });
+      for (const completedId of completedFromDiscovery) {
+        void notifyTaskCompleted(completedId);
+      }
       const decorated = { ...result, sessions };
       sessionSummarizer.noteSessions(sessions);
       void claudeTmuxRecords.noteSessions(sessions).catch(() => {});
@@ -568,8 +640,11 @@ const controlServer = new ControlServer(
     },
     onMessageSent: (sessionId) => {
       if (!sessionId.startsWith('master:')) {
+        const now = Date.now();
         liveWorkingSessionIds.add(sessionId);
-        liveWorkingAddedAt.set(sessionId, Date.now());
+        liveWorkingAddedAt.set(sessionId, now);
+        workingTracker.markWorking(sessionId, now);
+        sessionNotifiedInputIds.delete(sessionId);
         broadcastActivityIfChanged();
       }
       if (liveSyncRef) {
@@ -603,6 +678,7 @@ const controlServer = new ControlServer(
           kind: 'test',
           title: opts?.title || 'Superharness',
           body: opts?.body || 'Push notifications are connected and working.',
+          badge: Math.max(1, getUnreadBadgeCount()),
         },
         { bypassCooldown: true }
       ),
@@ -629,34 +705,19 @@ const liveSync = new LiveSyncService(
   (transcript) => {
     if (typeof transcript.liveActivity?.isWorking === 'boolean') {
       const wasWorking = liveWorkingSessionIds.has(transcript.sessionId);
+      const now = Date.now();
       if (transcript.liveActivity.isWorking) {
         liveWorkingSessionIds.add(transcript.sessionId);
-        if (!wasWorking) liveWorkingAddedAt.set(transcript.sessionId, Date.now());
-        if (!wasWorking) {
-          sessionWorkingSinceMs.set(transcript.sessionId, Date.now());
+        if (!wasWorking) liveWorkingAddedAt.set(transcript.sessionId, now);
+        if (!workingTracker.has(transcript.sessionId)) {
+          workingTracker.markWorking(transcript.sessionId, now);
           sessionNotifiedInputIds.delete(transcript.sessionId);
         }
       } else {
         liveWorkingSessionIds.delete(transcript.sessionId);
-        const startedAt = sessionWorkingSinceMs.get(transcript.sessionId);
-        sessionWorkingSinceMs.delete(transcript.sessionId);
-        if (wasWorking && startedAt && Date.now() - startedAt >= 2000 && !transcript.sessionId.startsWith('master:')) {
-          const sess = registry.getSession(transcript.sessionId);
-          const lastAssistant = [...transcript.messages].reverse().find((m) => m.role === 'assistant');
-          const snippet =
-            notificationTextFromMarkdown(
-              lastAssistant?.blocks
-                .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-                .map((b) => b.text.trim())
-                .join('\n\n') ?? ''
-            ) || 'Task completed';
-          void pushNotifier.notify({
-            kind: 'task_completed',
-            sessionId: transcript.sessionId,
-            harness: sess?.harness,
-            title: sess?.title || 'Task completed',
-            body: snippet,
-          });
+        liveWorkingAddedAt.delete(transcript.sessionId);
+        if (workingTracker.markIdleAndCheckCompleted(transcript.sessionId, now)) {
+          void notifyTaskCompleted(transcript.sessionId, transcript);
         }
       }
       broadcastActivityIfChanged();
@@ -679,6 +740,7 @@ const liveSync = new LiveSyncService(
         harness: sess?.harness,
         title: `${sess?.title || 'Agent'} needs input`,
         body: qText,
+        badge: getUnreadBadgeCount(transcript.sessionId),
       });
     }
     broadcastToRenderer('sh:transcript-updated', transcript);

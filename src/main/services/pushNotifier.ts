@@ -7,6 +7,8 @@ export interface RegisteredPushDevice {
   rid: string;
   relayUrl: string;
   enabled: boolean;
+  /** Whether the phone opted into showing an app-icon unread count badge via APNs. */
+  badgeEnabled?: boolean;
   updatedAt: number;
   /**
    * Relay signing key (hex) derived from the token the phone registered with. Paired phones
@@ -27,6 +29,8 @@ export interface PushSendPayload {
   body: string;
   harness?: string;
   threadId?: string;
+  /** Unread session count to show on the iOS app icon for devices with `badgeEnabled: true`. */
+  badge?: number;
 }
 
 const DEFAULT_RELAY_URL = 'https://super-harness-push.lxe-sh.workers.dev';
@@ -90,6 +94,7 @@ export class PushNotifier {
               rid: d.rid,
               relayUrl: (d.relayUrl || DEFAULT_RELAY_URL).replace(/\/+$/, ''),
               enabled: d.enabled !== false,
+              ...(typeof d.badgeEnabled === 'boolean' ? { badgeEnabled: d.badgeEnabled } : {}),
               updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : Date.now(),
               ...(typeof d.keyHex === 'string' && /^[0-9a-f]{64}$/.test(d.keyHex) ? { keyHex: d.keyHex } : {}),
               ...(typeof d.pairedDeviceId === 'string' ? { pairedDeviceId: d.pairedDeviceId } : {}),
@@ -134,6 +139,7 @@ export class PushNotifier {
     rid?: string;
     relayUrl?: string;
     enabled?: boolean;
+    badgeEnabled?: boolean;
     authToken?: string;
     pairedDeviceId?: string;
   }): RegisteredPushDevice | null {
@@ -143,10 +149,14 @@ export class PushNotifier {
     const derived = deriveRelayCredentials(authToken);
     const rid = (opts.rid || derived.rid).trim();
     const relayUrl = (opts.relayUrl || DEFAULT_RELAY_URL).trim().replace(/\/+$/, '');
+    const prevSame = this.devices.get(rid);
+    const resolvedBadgeEnabled =
+      typeof opts.badgeEnabled === 'boolean' ? opts.badgeEnabled : prevSame?.badgeEnabled;
     const record: RegisteredPushDevice = {
       rid,
       relayUrl,
       enabled: opts.enabled !== false,
+      ...(typeof resolvedBadgeEnabled === 'boolean' ? { badgeEnabled: resolvedBadgeEnabled } : {}),
       updatedAt: Date.now(),
       ...(authToken !== legacy ? { keyHex: derived.key.toString('hex') } : {}),
       ...(opts.pairedDeviceId ? { pairedDeviceId: opts.pairedDeviceId } : {}),
@@ -197,7 +207,11 @@ export class PushNotifier {
     }
 
     const legacyKey = token ? deriveRelayCredentials(token).key : null;
-    const bodyBuf = Buffer.from(JSON.stringify(payload), 'utf8');
+    const { badge: rawBadge, ...basePayload } = payload;
+    const validBadge =
+      typeof rawBadge === 'number' && Number.isFinite(rawBadge) && rawBadge >= 0
+        ? Math.floor(rawBadge)
+        : undefined;
     const results: Array<{ rid: string; status: number; reason?: string }> = [];
     let sent = 0;
 
@@ -205,6 +219,11 @@ export class PushNotifier {
       if (!dev.enabled) continue;
       const key = dev.keyHex ? Buffer.from(dev.keyHex, 'hex') : legacyKey;
       if (!key) continue;
+      const devicePayload =
+        dev.badgeEnabled === true && validBadge !== undefined
+          ? { ...basePayload, badge: validBadge }
+          : basePayload;
+      const bodyBuf = Buffer.from(JSON.stringify(devicePayload), 'utf8');
       const urlPath = `/v1/push/${encodeURIComponent(dev.rid)}`;
       const headers = {
         'content-type': 'application/json',

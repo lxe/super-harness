@@ -305,6 +305,24 @@ public struct HostConnectionSheet: View {
 
             divider
 
+            Toggle(isOn: Binding(
+                get: { store.appIconBadgeEnabled },
+                set: { store.setAppIconBadgeEnabled($0) }
+            )) {
+                iconLabel(
+                    icon: "app.badge",
+                    title: "App Icon Badge",
+                    detail: store.appIconBadgeEnabled
+                        ? (store.unreadSessionCount > 0 ? "\(store.unreadSessionCount) unread" : "Shows unread session count")
+                        : "Off"
+                )
+            }
+            .tint(SHColor.toggleOn)
+            .modifier(RowPadding())
+            .accessibilityIdentifier("settings.appIconBadge")
+
+            divider
+
             Button {
                 Task {
                     isSendingTestPush = true

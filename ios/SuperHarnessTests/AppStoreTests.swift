@@ -951,4 +951,31 @@ final class AppStoreTests: XCTestCase {
         store.dismissSessionNotice(for: sid)
         XCTAssertNil(store.sessionNotices[sid])
     }
+
+    func testAppIconBadgeIsOptInAndCountsVisibleUnreadSessions() {
+        let suite = "sh.tests.badge.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        store.sessions = [
+            UnifiedSession(id: "claude:1", harness: .claudeCli, harnessGroup: .claude, title: "One", status: .idle, createdAt: now, updatedAt: now, unread: true),
+            UnifiedSession(id: "muse:2", harness: .muse, harnessGroup: .muse, title: "Two", status: .idle, createdAt: now, updatedAt: now, unread: true),
+            UnifiedSession(id: "codex:3", harness: .codex, harnessGroup: .codex, title: "Read", status: .idle, createdAt: now, updatedAt: now, unread: false),
+            UnifiedSession(id: "claude:arch", harness: .claudeCli, harnessGroup: .claude, title: "Archived", status: .archived, createdAt: now, updatedAt: now, unread: true),
+            UnifiedSession(id: "master:root", harness: .master, harnessGroup: .master, title: "Master", status: .idle, createdAt: now, updatedAt: now, unread: true),
+        ]
+
+        XCTAssertFalse(store.appIconBadgeEnabled)
+        XCTAssertEqual(store.unreadSessionCount, 2)
+        XCTAssertEqual(store.effectiveAppIconBadgeCount, 0)
+
+        store.setAppIconBadgeEnabled(true)
+        XCTAssertTrue(store.appIconBadgeEnabled)
+        XCTAssertEqual(store.effectiveAppIconBadgeCount, 2)
+
+        store.setAppIconBadgeEnabled(false)
+        XCTAssertEqual(store.effectiveAppIconBadgeCount, 0)
+    }
 }

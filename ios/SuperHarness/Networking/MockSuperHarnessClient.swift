@@ -1193,7 +1193,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         )
     }
 
-    public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool { true }
+    public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool, badgeEnabled: Bool) async -> Bool { true }
     public func sendTestPush() async throws -> Bool { true }
 
     /// The demo updater: waits, updates, restarts, then reports the new version as installed.

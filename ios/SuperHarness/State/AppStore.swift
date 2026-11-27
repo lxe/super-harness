@@ -157,6 +157,7 @@ public final class AppStore {
         static let deviceId = "sh.deviceId"
         static let didLaunch = "sh.didLaunch"
         static let pushEnabled = "sh.pushEnabled"
+        static let appIconBadgeEnabled = "sh.appIconBadgeEnabled"
         static let allowExtremeReasoning = "sh.allowExtremeReasoning"
         static let chatTextSize = "sh.chatTextSize"
         static let chatDensity = "sh.chatDensity"
@@ -243,6 +244,7 @@ public final class AppStore {
     nonisolated public static let dictationSetupMessage = "Set up dictation in Superharness on your desktop"
     public var isCheckingDictation: Bool = false
     public var pushNotificationsEnabled: Bool = true
+    public var appIconBadgeEnabled: Bool = false
     /// Order of the harness gauges, the harness sections in the All view and the usage pills.
     /// Kept on the phone and shared through the host's `settings.harnessOrder`.
     public private(set) var harnessOrder: [HarnessGroup] = HarnessGroup.allCases
@@ -270,7 +272,9 @@ public final class AppStore {
 
     // MARK: - Domain State
     public var harnesses: [HarnessDetection] = []
-    public var sessions: [UnifiedSession] = []
+    public var sessions: [UnifiedSession] = [] {
+        didSet { syncAppIconBadge() }
+    }
     public var folders: [SessionFolder] = []
     public var usage: UsageSnapshot?
     public var catalog: HarnessCatalog?
@@ -511,6 +515,7 @@ public final class AppStore {
         if defaults.object(forKey: StorageKey.pushEnabled) != nil {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
+        self.appIconBadgeEnabled = defaults.bool(forKey: StorageKey.appIconBadgeEnabled)
         self.allowExtremeReasoning = defaults.bool(forKey: StorageKey.allowExtremeReasoning)
         if let raw = defaults.string(forKey: StorageKey.chatTextSize), let size = ChatTextSize(rawValue: raw) {
             self.chatTextSize = size
@@ -2665,6 +2670,34 @@ public final class AppStore {
         attachmentUploadTasks[localId] = uploadTask
     }
 
+    public var unreadSessionCount: Int {
+        sessions.reduce(into: 0) { count, s in
+            if !s.id.hasPrefix("master:"), s.status != .archived, !s.hidden, s.isUnread {
+                count += 1
+            }
+        }
+    }
+
+    public var effectiveAppIconBadgeCount: Int {
+        appIconBadgeEnabled ? unreadSessionCount : 0
+    }
+
+    public func syncAppIconBadge() {
+        PushNotificationCoordinator.shared.setAppIconBadge(effectiveAppIconBadgeCount)
+    }
+
+    public func setAppIconBadgeEnabled(_ enabled: Bool) {
+        appIconBadgeEnabled = enabled
+        defaults.set(enabled, forKey: StorageKey.appIconBadgeEnabled)
+        syncAppIconBadge()
+        Task {
+            if enabled {
+                _ = await PushNotificationCoordinator.shared.requestAuthorizationAndRegister()
+            }
+            PushNotificationCoordinator.shared.syncCurrentTokenIfAvailable()
+        }
+    }
+
     public func setPushNotificationsEnabled(_ enabled: Bool) {
         pushNotificationsEnabled = enabled
         defaults.set(enabled, forKey: StorageKey.pushEnabled)
@@ -2676,8 +2709,18 @@ public final class AppStore {
         }
     }
 
-    public func registerPushDeviceOnHost(rid: String, relayUrl: String, enabled: Bool) async {
-        _ = await client.registerPushDevice(rid: rid, relayUrl: relayUrl, enabled: enabled)
+    public func registerPushDeviceOnHost(
+        rid: String,
+        relayUrl: String,
+        enabled: Bool,
+        badgeEnabled: Bool? = nil
+    ) async {
+        _ = await client.registerPushDevice(
+            rid: rid,
+            relayUrl: relayUrl,
+            enabled: enabled,
+            badgeEnabled: badgeEnabled ?? appIconBadgeEnabled
+        )
     }
 
     public func sendTestPushNotification() async -> Bool {

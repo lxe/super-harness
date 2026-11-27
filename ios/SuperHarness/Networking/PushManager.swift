@@ -19,6 +19,7 @@ public final class PushNotificationCoordinator: NSObject {
     public private(set) var lastRegistrationStatus: String = "Not registered"
 
     private var hasRegisteredBGTask = false
+    private var lastAppliedBadgeCount: Int?
 
     public func configure(store: AppStore) {
         self.store = store
@@ -26,6 +27,20 @@ public final class PushNotificationCoordinator: NSObject {
         UNUserNotificationCenter.current().delegate = self
         #endif
         registerBackgroundRefreshIfNeeded()
+        setAppIconBadge(store.effectiveAppIconBadgeCount)
+    }
+
+    public func setAppIconBadge(_ count: Int) {
+        let clamped = max(0, count)
+        if lastAppliedBadgeCount == clamped { return }
+        lastAppliedBadgeCount = clamped
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        #if canImport(UIKit)
+        let center = UNUserNotificationCenter.current()
+        Task {
+            try? await center.setBadgeCount(clamped)
+        }
+        #endif
     }
 
     public func requestAuthorizationAndRegister() async -> Bool {
@@ -155,7 +170,12 @@ public final class PushNotificationCoordinator: NSObject {
         }
 
         // Always notify the desktop host of our rid + relayUrl so it can push on completions/questions.
-        await store.registerPushDeviceOnHost(rid: rid, relayUrl: relayBase, enabled: store.pushNotificationsEnabled)
+        await store.registerPushDeviceOnHost(
+            rid: rid,
+            relayUrl: relayBase,
+            enabled: store.pushNotificationsEnabled,
+            badgeEnabled: store.appIconBadgeEnabled
+        )
     }
 }
 
@@ -206,6 +226,7 @@ public final class SuperHarnessAppDelegate: NSObject, UIApplicationDelegate {
         Task { @MainActor in
             if let store = PushNotificationCoordinator.shared.store {
                 await store.refresh()
+                store.syncAppIconBadge()
                 completionHandler(.newData)
             } else {
                 completionHandler(.noData)

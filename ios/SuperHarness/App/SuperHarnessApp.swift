@@ -9,7 +9,7 @@ struct SuperHarnessApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     private func requestPushIfPaired() async {
-        guard store.pushNotificationsEnabled, store.canReceivePushes else { return }
+        guard (store.pushNotificationsEnabled || store.appIconBadgeEnabled), store.canReceivePushes else { return }
         _ = await PushNotificationCoordinator.shared.requestAuthorizationAndRegister()
     }
 
@@ -21,6 +21,7 @@ struct SuperHarnessApp: App {
                 .task {
                     PushNotificationCoordinator.shared.configure(store: store)
                     await store.bootstrap()
+                    store.syncAppIconBadge()
                     await requestPushIfPaired()
                 }
                 // Notifications come from the paired desktop, so the permission prompt waits
@@ -29,6 +30,9 @@ struct SuperHarnessApp: App {
                     Task { await requestPushIfPaired() }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .active || newPhase == .background {
+                        store.syncAppIconBadge()
+                    }
                     if newPhase == .background {
                         PushNotificationCoordinator.shared.scheduleBackgroundRefresh()
                     }

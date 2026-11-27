@@ -82,7 +82,7 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func fetchHarnessUpdateJobs() async throws -> [HarnessUpdateJob]
     func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment
     func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment
-    func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool
+    func registerPushDevice(rid: String, relayUrl: String, enabled: Bool, badgeEnabled: Bool) async -> Bool
     func sendTestPush() async throws -> Bool
     func testConnection() async throws -> ConnectionTestResult
     func eventStream() -> AsyncStream<SuperHarnessServerEvent>
@@ -104,7 +104,7 @@ public extension SuperHarnessClientProtocol {
         return try await uploadAttachment(dataUrl: dataUrl, filename: filename)
     }
 
-    func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool { false }
+    func registerPushDevice(rid: String, relayUrl: String, enabled: Bool, badgeEnabled: Bool) async -> Bool { false }
     func sendTestPush() async throws -> Bool { false }
     func fetchFolders() async throws -> FoldersResponse { FoldersResponse() }
     func updateSettings(sidebarGroupBy: SidebarGroupBy) async throws -> SuperHarnessSettings? { nil }
@@ -624,14 +624,14 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         }
     }
 
-    public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool {
-        struct PushRegBody: Encodable { let rid: String; let relayUrl: String; let enabled: Bool }
+    public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool, badgeEnabled: Bool) async -> Bool {
+        struct PushRegBody: Encodable { let rid: String; let relayUrl: String; let enabled: Bool; let badgeEnabled: Bool }
         struct PushRegResp: Decodable { let ok: Bool }
         do {
             let resp: PushRegResp = try await request(
                 path: "/api/push/register",
                 method: "POST",
-                body: PushRegBody(rid: rid, relayUrl: relayUrl, enabled: enabled)
+                body: PushRegBody(rid: rid, relayUrl: relayUrl, enabled: enabled, badgeEnabled: badgeEnabled)
             )
             return resp.ok
         } catch {

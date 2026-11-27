@@ -378,4 +378,59 @@ describe('ConfigStore pairing persistence across settings updates and restarts',
       process.env.HOME = prevHome;
     }
   });
+
+  it('sends APNs badge count only to devices that opted into badgeEnabled', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-push-badge-'));
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    const receivedByRid = new Map<string, Record<string, unknown>>();
+    const relay = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const rid = (req.url || '').split('/').pop() || '';
+        receivedByRid.set(rid, JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, status: 200 }));
+      });
+    });
+    await new Promise<void>((r) => relay.listen(0, '127.0.0.1', () => r()));
+    const relayPort = (relay.address() as { port: number }).port;
+    const relayUrl = `http://127.0.0.1:${relayPort}`;
+
+    try {
+      const push = new PushNotifier(() => LEGACY);
+      const devWithBadge = push.registerDevice({
+        authToken: 'token-badge-on',
+        pairedDeviceId: 'phone-badge-on',
+        relayUrl,
+        badgeEnabled: true,
+      })!;
+      const devNoBadge = push.registerDevice({
+        authToken: 'token-badge-off',
+        pairedDeviceId: 'phone-badge-off',
+        relayUrl,
+        badgeEnabled: false,
+      })!;
+
+      // Persistence across reload preserves badgeEnabled
+      const reloaded = new PushNotifier(() => LEGACY);
+      const res = await reloaded.notify(
+        {
+          kind: 'task_completed',
+          sessionId: 'claude:abc',
+          title: 'Done',
+          body: 'Finished',
+          badge: 3,
+        },
+        { bypassCooldown: true }
+      );
+      expect(res.sent).toBe(2);
+      expect(receivedByRid.get(devWithBadge.rid)?.badge).toBe(3);
+      expect(receivedByRid.get(devNoBadge.rid)?.badge).toBeUndefined();
+    } finally {
+      await new Promise<void>((r) => relay.close(() => r()));
+      process.env.HOME = prevHome;
+    }
+  });
 });

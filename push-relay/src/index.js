@@ -134,18 +134,22 @@ function buildApnsPayload(body) {
   const title = String(body.title || "Superharness").slice(0, 120);
   const alertBody = String(body.body || "Update from Superharness").slice(0, 240);
   const interruption = kind === "input_needed" ? "time-sensitive" : "active";
+  const aps = {
+    alert: { title, body: alertBody },
+    sound: "default",
+    "thread-id": sessionId || "super-harness",
+    "interruption-level": interruption,
+    "mutable-content": 1,
+  };
+  if (typeof body.badge === "number" && Number.isFinite(body.badge) && body.badge >= 0) {
+    aps.badge = Math.floor(body.badge);
+  }
 
   return {
     pushType: "alert",
     priority: 10,
     payload: {
-      aps: {
-        alert: { title, body: alertBody },
-        sound: "default",
-        "thread-id": sessionId || "super-harness",
-        "interruption-level": interruption,
-        "mutable-content": 1,
-      },
+      aps,
       sh_kind: kind,
       sessionId,
       harness,

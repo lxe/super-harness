@@ -119,6 +119,7 @@ export interface ControlServerHooks {
     rid?: string;
     relayUrl?: string;
     enabled?: boolean;
+    badgeEnabled?: boolean;
     /** The Bearer token the phone authenticated with; the push relay key is derived from it. */
     authToken?: string;
     /** Set when that token belongs to a paired device, so revoking it drops the push key. */
@@ -1108,6 +1109,7 @@ export class ControlServer {
             rid: typeof body.rid === 'string' ? body.rid : undefined,
             relayUrl: typeof body.relayUrl === 'string' ? body.relayUrl : undefined,
             enabled: typeof body.enabled === 'boolean' ? body.enabled : true,
+            badgeEnabled: typeof body.badgeEnabled === 'boolean' ? body.badgeEnabled : undefined,
             authToken: bearer,
             pairedDeviceId: authResult.kind === 'device' ? authResult.deviceId : undefined,
           });

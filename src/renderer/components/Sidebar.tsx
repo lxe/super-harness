@@ -2,10 +2,9 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import {
   Archive,
   Columns2,
-  FolderGit2,
   FolderPlus,
   HelpCircle,
-  Inbox,
+  Hourglass,
   Laptop,
   Layers,
   MoreHorizontal,
@@ -39,7 +38,6 @@ import {
 } from '../ui';
 import {
   canDropSessionIntoSection,
-  computeThreadRecencyOpacity,
   filterSidebarSessions,
   flattenVisibleSessions,
   getGlobalPinnedSessions,
@@ -1020,7 +1018,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
       </span>
     ) : undefined;
 
-    const recencyOpacity = computeThreadRecencyOpacity(s.updatedAt);
+    const isOldThread = Boolean(
+      s.updatedAt && Date.now() - s.updatedAt > 7 * 24 * 60 * 60 * 1000
+    );
     const isBeingDragged = Boolean(activeDrag?.sessions.some((d) => d.id === s.id));
 
     return (
@@ -1033,7 +1033,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
         title={s.title}
         tooltip={s.summary ? `${s.title}\n${s.summary}` : s.lastUserText ? `${s.title}\n${s.lastUserText}` : s.title}
         titleBadge={titleBadge}
-        titleOpacity={recencyOpacity}
         active={isPrimary}
         secondaryActive={isSplit}
         selected={isMultiSelected}
@@ -1058,20 +1057,29 @@ export const Sidebar: React.FC<Props> = React.memo(({
           };
         }}
         meta={
-          s.hostAddress ? (
-            <span
-              title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-              className={remoteHostColorClass(s.hostAddress || s.hostLabel || 'remote')}
-            >
-              <Laptop className="w-3.5 h-3.5" />
-            </span>
-          ) : s.harness === 'claude-tmux' ? (
-            <span
-              title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'local'}`}
-              className="text-ink-muted"
-            >
-              <Laptop className="w-3.5 h-3.5" />
-            </span>
+          s.hostAddress || s.harness === 'claude-tmux' || isOldThread ? (
+            <>
+              {isOldThread && (
+                <span title="Older than 7 days" className="text-ink-faint">
+                  <Hourglass className="w-3 h-3" />
+                </span>
+              )}
+              {s.hostAddress ? (
+                <span
+                  title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
+                  className={remoteHostColorClass(s.hostAddress || s.hostLabel || 'remote')}
+                >
+                  <Laptop className="w-3.5 h-3.5" />
+                </span>
+              ) : s.harness === 'claude-tmux' ? (
+                <span
+                  title={`Live tmux: ${s.tmuxTarget || s.tmuxSessionName || 'local'}`}
+                  className="text-ink-muted"
+                >
+                  <Laptop className="w-3.5 h-3.5" />
+                </span>
+              ) : null}
+            </>
           ) : undefined
         }
         hoverActions={
@@ -1405,18 +1413,18 @@ export const Sidebar: React.FC<Props> = React.memo(({
               if (grp.headless) {
                 const showRowLogos = !isSingleHarnessFilter(filter);
                 const nextGrp = grpIdx < topGroups.length - 1 ? topGroups[grpIdx + 1] : null;
-                // Only draw a bottom divider if the next group doesn't already start with a full-bleed section header
-                const nextHasSectionHeader = Boolean(
-                  nextGrp && !nextGrp.headless && !(isSingleHarnessFilter(filter) && Boolean(nextGrp.harnessLogo))
+                // Only skip the bottom divider if the next group starts with a full-bleed harness separator
+                const nextHasFullBleedSeparator = Boolean(
+                  nextGrp && Boolean(nextGrp.harnessLogo) && !isSingleHarnessFilter(filter)
                 );
                 return (
                   <div
                     key={grp.id}
                     className={`space-y-0.5 ${grpIdx === 0 ? 'pt-1.5' : ''} ${
                       nextGrp
-                        ? nextHasSectionHeader
+                        ? nextHasFullBleedSeparator
                           ? 'pb-1.5'
-                          : '-mx-2.5 px-2.5 pb-1.5 border-b border-line-hairline'
+                          : '-mx-2.5 px-2.5 pb-1.5 mb-2 border-b border-line-hairline'
                         : ''
                     }`}
                   >
@@ -1439,11 +1447,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
               const isHarnessDivider = Boolean(grp.harnessLogo);
               const topIcon = grp.harnessLogo ? (
                 <HarnessLogo harness={grp.harnessLogo} size={14} />
-              ) : grp.isUngrouped ? (
-                <Inbox className="w-4 h-4 text-ink-secondary" />
-              ) : (
-                <FolderGit2 className="w-4 h-4 text-ink-secondary" />
-              );
+              ) : undefined;
 
               const allGroupSessions: UnifiedSession[] = [
                 ...(grp.pinnedItems ?? []),
@@ -1507,7 +1511,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   )}
 
                   {!isTopClosed && (
-                    <div className="py-1.5 space-y-1.5">
+                    <div className={isHarnessDivider ? 'py-1.5 space-y-1.5' : 'mt-0.5 pb-3 space-y-0.5'}>
                       {/* Individual harness pins right below the harness separator (no extra Pinned section) */}
                       {grp.pinnedItems && grp.pinnedItems.length > 0 && (
                         <div className="space-y-0.5">

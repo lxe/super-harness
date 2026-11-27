@@ -44,7 +44,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   onContextMenu,
   className,
 }) => {
-  const isTopLevel = variant === 'separator' || level === 1;
+  const isTopLevel = variant === 'separator';
 
   const pillContent = (
     <div
@@ -54,11 +54,11 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
         'group w-full flex items-center gap-1 transition-colors select-none',
         isTopLevel
           ? cn(
-              'h-[34px] px-4 rounded-none bg-surface-canvas hover:bg-surface-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[14px] font-normal tracking-[-0.005em] text-ink-primary',
+              'h-[34px] pl-4 pr-[5px] rounded-none bg-surface-canvas hover:bg-surface-subtle shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_1px_2px_rgba(0,0,0,0.20)] text-[14px] font-normal tracking-[-0.005em] text-ink-primary',
               !sticky && '-mx-2.5 w-[calc(100%+1.25rem)]'
             )
-          : 'h-7 px-2.5 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[12.5px] font-medium tracking-[0.01em] text-ink-faint hover:text-ink-secondary',
-        !isTopLevel && sticky && 'sticky top-[34px] z-10',
+          : 'h-7 pl-2.5 pr-1 rounded-lg bg-surface-rail hover:bg-surface-subtle text-[12.5px] font-medium tracking-[0.01em] text-ink-faint hover:text-ink-secondary',
+        !isTopLevel && sticky && (level === 2 ? 'sticky top-[34px] z-10' : 'sticky top-0 z-10'),
         dropTarget && 'bg-indigo-500/20 text-ink-primary ring-1 ring-inset ring-indigo-400/50',
         className
       )}
@@ -102,7 +102,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           }}
           title={addLabel || `New conversation in ${label}`}
           aria-label={addLabel || `New conversation in ${label}`}
-          className="w-5 h-5 rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.08] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none"
+          className={cn(
+            'rounded-md flex items-center justify-center text-ink-faint hover:text-ink-primary hover:bg-white/[0.08] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity shrink-0 cursor-pointer focus:outline-none focus-visible:shadow-none',
+            isTopLevel ? 'w-6 h-6' : 'w-5 h-5'
+          )}
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
@@ -191,7 +194,13 @@ export const NavRow: React.FC<NavRowProps> = ({
             )}
           </span>
         )}
-        <span className="min-w-0 flex-1 inline-flex items-center gap-1.5">
+        <span
+          className={cn(
+            'min-w-0 flex-1 inline-flex items-center gap-1.5',
+            Boolean(hoverActions) && !meta && 'group-hover:pr-7',
+            Boolean(hoverActions) && Boolean(meta) && 'group-hover:pr-1'
+          )}
+        >
           {!icon && unread && (
             <span
               aria-label="Unread"

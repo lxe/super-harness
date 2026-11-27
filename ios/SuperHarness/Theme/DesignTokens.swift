@@ -419,6 +419,29 @@ public extension View {
             }
     }
 
+    /// Background for a small control while it is pressed or switched on: pressed into the
+    /// panel, with a soft inner shadow along the top and no lift.
+    func shPressedControl<S: InsettableShape>(_ fill: Color, in shape: S) -> some View {
+        self
+            .background(
+                shape.fill(
+                    fill.shadow(.inner(color: .black.opacity(0.22), radius: 1.25, y: 0.75))
+                )
+            )
+            .overlay {
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0), .white.opacity(0.035)],
+                            startPoint: .center,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.5
+                    )
+                    .allowsHitTesting(false)
+            }
+    }
+
     /// Clips the view to a rounded shape and draws a recessed well for terminal, diff,
     /// and tool output.
     func shRecessedWell(_ fill: Color = SHColor.surfaceCode, cornerRadius: CGFloat) -> some View {
@@ -553,5 +576,31 @@ public extension EnvironmentValues {
     var shChatMetrics: SHChatMetrics {
         get { self[SHChatMetricsKey.self] }
         set { self[SHChatMetricsKey.self] = newValue }
+    }
+}
+
+/// A small control that sits raised and presses in: raised at rest, pressed into the panel while
+/// held or while `isOn` (for example while the menu it opens is showing).
+public struct SHControlPressStyle<S: InsettableShape>: ButtonStyle {
+    public let fill: Color
+    public let shape: S
+    public var isOn: Bool = false
+
+    public init(fill: Color, shape: S, isOn: Bool = false) {
+        self.fill = fill
+        self.shape = shape
+        self.isOn = isOn
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed || isOn
+        Group {
+            if pressed {
+                configuration.label.shPressedControl(fill, in: shape)
+            } else {
+                configuration.label.shRaisedControl(fill, in: shape)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: pressed)
     }
 }

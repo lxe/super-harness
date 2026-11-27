@@ -1437,7 +1437,7 @@ public struct SHThinkingEffortSlider: View {
                     Capsule()
                         .fill(
                             SHColor.surfaceCode
-                                .shadow(.inner(color: .black.opacity(0.50), radius: 2.2, y: 1.2))
+                                .shadow(.inner(color: .black.opacity(0.26), radius: 1.5, y: 0.75))
                         )
                         .frame(width: trackWidth, height: trackHeight)
 
@@ -1445,7 +1445,7 @@ public struct SHThinkingEffortSlider: View {
                     Capsule()
                         .fill(
                             activeFillTint
-                                .shadow(.inner(color: .black.opacity(0.22), radius: 1.5, y: 0.9))
+                                .shadow(.inner(color: .black.opacity(0.10), radius: 1, y: 0.5))
                         )
                         .frame(width: max(trackHeight, fillWidth), height: trackHeight)
                         .opacity(isOffSelection ? 0 : 1)
@@ -1472,9 +1472,9 @@ public struct SHThinkingEffortSlider: View {
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    Color.black.opacity(0.32),
+                                    Color.black.opacity(0.16),
                                     Color.clear,
-                                    Color.white.opacity(0.06),
+                                    Color.white.opacity(0.04),
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
@@ -1493,9 +1493,9 @@ public struct SHThinkingEffortSlider: View {
                         .frame(width: knobDiameter, height: knobDiameter)
                         .overlay(
                             Circle()
-                                .strokeBorder(Color.black.opacity(0.16), lineWidth: 0.5)
+                                .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
                         )
-                        .shadow(color: Color.black.opacity(0.22), radius: 2, y: 1)
+                        .shadow(color: Color.black.opacity(0.14), radius: 1.25, y: 0.5)
                         .position(x: thumbX, y: trackHeight / 2)
                         .animation(.spring(response: 0.22, dampingFraction: 0.86), value: idx)
                 }
@@ -1772,9 +1772,8 @@ struct SHModelEffortMenu: View, Equatable {
             }
             .padding(.horizontal, 13)
             .frame(height: ComposerView.controlSize)
-            .shRaisedControl(SHColor.surfaceBubble, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SHControlPressStyle(fill: SHColor.surfaceBubble, shape: Capsule(), isOn: isPopoverPresented))
         .accessibilityLabel(accessibilityText)
         .accessibilityIdentifier(identifier)
         .popover(
@@ -1855,7 +1854,7 @@ struct SHModelEffortMenu: View, Equatable {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(
                                         RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
-                                            .fill(item.isSelected ? SHColor.surfaceRaised : Color.clear)
+                                            .fill(isChecked ? Color.white.opacity(0.07) : Color.clear)
                                     )
                                     .contentShape(Rectangle())
                                 }

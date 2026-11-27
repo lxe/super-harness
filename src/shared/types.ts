@@ -603,6 +603,8 @@ export interface SuperHarnessApi {
     patch: Partial<SuperHarnessSettings>
   ) => Promise<SuperHarnessState>;
   clearMasterHistory: () => Promise<SuperHarnessState>;
+  /** Summarize every recently changed thread now (Settings → Thread summaries). */
+  refreshSummaries: () => Promise<{ ok: boolean; summarized: number; pending: number; costUsd?: number; error?: string }>;
   pickDirectory: () => Promise<string | null>;
   getSystemApps: () => Promise<DetectedSystemApps>;
   readFilePreview: (

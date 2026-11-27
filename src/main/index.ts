@@ -893,6 +893,8 @@ function registerIpcHandlers(): void {
     return next;
   });
 
+  ipcMain.handle('sh:refresh-summaries', async () => sessionSummarizer.refresh({ force: true }));
+
   ipcMain.handle('sh:clear-master', async () => {
     return store.clearMasterMessages();
   });

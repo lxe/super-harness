@@ -149,6 +149,8 @@ export const SettingsModal: React.FC<Props> = ({
   const [navSearch, setNavSearch] = useState('');
   const [systemApps, setSystemApps] = useState<DetectedSystemApps | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [summaryRefreshing, setSummaryRefreshing] = useState(false);
+  const [summaryRefreshNote, setSummaryRefreshNote] = useState<string | null>(null);
   const [busyHarness, setBusyHarness] = useState<string | null>(null);
   const [copiedBin, setCopiedBin] = useState<string | null>(null);
   const [expandedHarness, setExpandedHarness] = useState<Record<string, boolean>>({});
@@ -498,6 +500,81 @@ export const SettingsModal: React.FC<Props> = ({
                           })
                         }
                       />
+                    }
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup title="Thread summaries">
+                  <SettingsRow
+                    label="Summarize threads"
+                    description="A small model writes one line on what each thread is doing, shown under its title"
+                    control={
+                      <Switch
+                        checked={settings.summaries?.enabled ?? true}
+                        label="Summarize threads"
+                        onChange={(enabled) =>
+                          onUpdateSettings({
+                            summaries: {
+                              enabled,
+                              model: settings.summaries?.model || 'claude-haiku-5-5',
+                            },
+                          })
+                        }
+                      />
+                    }
+                  />
+                  <SettingsRow
+                    label="Model"
+                    description="Runs through Claude Code after a thread goes quiet"
+                    control={
+                      <Select
+                        inputSize="sm"
+                        className="w-48"
+                        disabled={!(settings.summaries?.enabled ?? true)}
+                        value={settings.summaries?.model || 'claude-haiku-5-5'}
+                        onChange={(e) =>
+                          onUpdateSettings({
+                            summaries: {
+                              enabled: settings.summaries?.enabled ?? true,
+                              model: e.target.value,
+                            },
+                          })
+                        }
+                      >
+                        <option value="claude-haiku-5-5">Claude Haiku 5.5</option>
+                        <option value="claude-sonnet-5-5">Claude Sonnet 5.5</option>
+                      </Select>
+                    }
+                  />
+                  <SettingsRow
+                    label="Refresh now"
+                    description={summaryRefreshNote ?? 'Summarize every recently changed thread right away'}
+                    control={
+                      <Button
+                        size="sm"
+                        disabled={summaryRefreshing || !(settings.summaries?.enabled ?? true)}
+                        onClick={() => {
+                          setSummaryRefreshing(true);
+                          setSummaryRefreshNote(null);
+                          window.superHarness
+                            .refreshSummaries()
+                            .then((r) =>
+                              setSummaryRefreshNote(
+                                r.ok
+                                  ? `Updated ${r.summarized} thread${r.summarized === 1 ? '' : 's'}${
+                                      typeof r.costUsd === 'number' ? ` · $${r.costUsd.toFixed(3)}` : ''
+                                    }`
+                                  : r.error || 'Refresh failed'
+                              )
+                            )
+                            .catch((err: unknown) =>
+                              setSummaryRefreshNote(err instanceof Error ? err.message : String(err))
+                            )
+                            .finally(() => setSummaryRefreshing(false));
+                        }}
+                      >
+                        {summaryRefreshing ? 'Summarizing…' : 'Refresh'}
+                      </Button>
                     }
                   />
                 </SettingsGroup>

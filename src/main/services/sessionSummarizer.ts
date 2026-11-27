@@ -46,6 +46,22 @@ export interface SummarizerOptions {
   now?: () => number;
 }
 
+export const SUMMARIZER_CWD_BASENAME = 'super-harness-summaries';
+
+const activeSummarizerPids = new Set<number>();
+
+/** Returns true if `cwd` is the temporary working directory used by the background summarizer. */
+export function isInternalSummarizerCwd(cwd?: string | null): boolean {
+  if (!cwd) return false;
+  const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '');
+  return norm === SUMMARIZER_CWD_BASENAME || norm.endsWith(`/${SUMMARIZER_CWD_BASENAME}`);
+}
+
+/** Returns true if `pid` belongs to a currently running internal summarizer subprocess. */
+export function isSummarizerPid(pid?: number | null): boolean {
+  return typeof pid === 'number' && Number.isFinite(pid) && activeSummarizerPids.has(pid);
+}
+
 const FILE = path.join(os.homedir(), '.config', 'super-harness', 'summaries.json');
 const QUIET_MS = 20_000;
 const MIN_GAP_MS = 90_000;
@@ -155,7 +171,7 @@ export function parseSummaryReply(raw: string): Map<number, string> {
 async function callClaude(prompt: string, model: string): Promise<{ text: string; costUsd?: number }> {
   const bin = await whichBinary('claude');
   if (!bin) throw new Error('claude binary not found');
-  const cwd = path.join(os.tmpdir(), 'super-harness-summaries');
+  const cwd = path.join(os.tmpdir(), SUMMARIZER_CWD_BASENAME);
   fs.mkdirSync(cwd, { recursive: true });
   const args = [
     '-p',
@@ -183,6 +199,11 @@ async function callClaude(prompt: string, model: string): Promise<{ text: string
       env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const childPid = child.pid;
+    if (childPid) activeSummarizerPids.add(childPid);
+    const releasePid = () => {
+      if (childPid) activeSummarizerPids.delete(childPid);
+    };
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), 120_000);
@@ -190,10 +211,12 @@ async function callClaude(prompt: string, model: string): Promise<{ text: string
     child.stderr.on('data', (c: Buffer) => (stderr += c.toString('utf8')));
     child.on('error', (e) => {
       clearTimeout(timer);
+      releasePid();
       reject(e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      releasePid();
       try {
         const env = JSON.parse(stdout) as {
           result?: string;

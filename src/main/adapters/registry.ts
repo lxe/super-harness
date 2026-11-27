@@ -1,4 +1,5 @@
 import { readLastUserText } from '../utils/lastUserText';
+import { isInternalSummarizerCwd, isSummarizerPid } from '../services/sessionSummarizer';
 import type {
   HarnessDetection,
   HarnessGroup,
@@ -119,10 +120,16 @@ export class HarnessRegistry {
       dispatchMode: 'master',
     };
 
-    // The orchestrator's own native sessions live behind the pinned master thread.
+    // The orchestrator's own native sessions live behind the pinned master thread,
+    // and internal background summarizer runs must never surface as user sessions.
     const masterNativeIds = this.store.getMasterNativeIds();
     const decorated = mergedRaw
-      .filter((raw) => !masterNativeIds.has(raw.nativeId))
+      .filter(
+        (raw) =>
+          !masterNativeIds.has(raw.nativeId) &&
+          !isInternalSummarizerCwd(raw.cwd) &&
+          !isSummarizerPid(raw.pid)
+      )
       .map((raw) => {
         const lastUserText = raw.lastUserText ?? readLastUserText(raw.transcriptPath, raw.harnessGroup);
         const summary = this.summaryLookup(raw.id);

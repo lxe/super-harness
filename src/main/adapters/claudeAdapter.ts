@@ -26,6 +26,11 @@ import { computeClaudeSessionStats } from '../utils/sessionStats';
 import { offloadPool } from '../workers/offloadPool';
 import { RemoteClaudeMirror } from './remoteClaude';
 import {
+  isInternalSummarizerCwd,
+  isSummarizerPid,
+  SUMMARIZER_CWD_BASENAME,
+} from '../services/sessionSummarizer';
+import {
   driveLocalClaudeQuestionTmux,
   extractPendingQuestionBlock,
   resolveClaudeQuestionAnswers,
@@ -709,6 +714,7 @@ export async function detectClaude(
 
       for (const data of activeFiles) {
         if (!data.sessionId || !data.pid) continue;
+        if (isSummarizerPid(Number(data.pid)) || isInternalSummarizerCwd(data.cwd)) continue;
         if (liveBySessionId.has(data.sessionId)) continue;
         liveBySessionId.set(data.sessionId, data);
         if (data.bridgeSessionId) remoteActiveCount++;
@@ -864,6 +870,7 @@ export async function detectClaude(
     const jsonlFiles: Array<{ file: string; mtime: number; nativeId: string }> = [];
     try {
       for (const projDir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+        if (projDir.includes(SUMMARIZER_CWD_BASENAME)) continue;
         const fullDir = path.join(CLAUDE_PROJECTS_DIR, projDir);
         let entries: fs.Dirent[];
         try {
@@ -895,6 +902,7 @@ export async function detectClaude(
       seenCliIds.add(jf.nativeId);
       const meta = readJsonlHeadMeta(jf.file);
       const cwd = meta.cwd || os.homedir();
+      if (isInternalSummarizerCwd(cwd)) continue;
       const tailTitles = readJsonlTitleMeta(jf.file);
       const title =
         cleanTextPreview(

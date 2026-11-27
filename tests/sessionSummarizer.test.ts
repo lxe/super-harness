@@ -6,6 +6,7 @@ import type { UnifiedMessage, UnifiedSession } from '../src/shared/types';
 import {
   SessionSummarizer,
   buildThreadDigest,
+  isInternalSummarizerCwd,
   parseSummaryReply,
 } from '../src/main/services/sessionSummarizer';
 
@@ -145,5 +146,13 @@ describe('SessionSummarizer', () => {
     await s.refresh();
     expect(prompt).toContain('Previous summary: Drafting the API');
     expect(s.get('c:a')).toBe('Done: API shipped');
+  });
+
+  it('recognizes internal summarizer temp working directories across platforms', () => {
+    expect(isInternalSummarizerCwd('/tmp/super-harness-summaries')).toBe(true);
+    expect(isInternalSummarizerCwd('/var/folders/xx/T/super-harness-summaries/')).toBe(true);
+    expect(isInternalSummarizerCwd('C:\\Users\\lxe\\AppData\\Local\\Temp\\super-harness-summaries')).toBe(true);
+    expect(isInternalSummarizerCwd('/home/lxe/super-harness')).toBe(false);
+    expect(isInternalSummarizerCwd(undefined)).toBe(false);
   });
 });

@@ -144,6 +144,7 @@ public enum SessionRowFormatting {
 }
 
 public struct SessionListView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @AppStorage("sh.collapsedSections") private var collapsedSectionsRaw: String = ""
     /// A chat being dragged toward the pinned area: which one, and where the finger is.
     @State private var pinDrag: PinDragState?
@@ -723,7 +724,9 @@ public struct SessionListView: View {
 
     @ViewBuilder
     private func sessionRowButton(_ session: UnifiedSession, isPinned: Bool = false) -> some View {
-        let isSelected = store.selectedSessionId == session.id
+        // Persistent selection highlight only belongs in iPad split view; on iPhone's
+        // NavigationStack the list is full-screen, so rows only highlight while pressed.
+        let isSelected = sizeClass == .regular && store.selectedSessionId == session.id
         let isBusy = store.isSessionBusy(session.id)
 
         Button {

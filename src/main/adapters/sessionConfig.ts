@@ -78,7 +78,7 @@ export function normalizeEffort(v: string, allowed: readonly string[]): string |
 }
 
 /**
- * Codex turn/start overrides for a preset. Super Harness auto-accepts Codex approval
+ * Codex turn/start overrides for a preset. Superharness auto-accepts Codex approval
  * requests (it has no approval UI), so the sandbox is the real boundary and escalation is
  * turned off ("never") for every preset; otherwise a sandboxed turn could ask to escape
  * and be approved automatically. `default` sends nothing (the user's Codex config rules).

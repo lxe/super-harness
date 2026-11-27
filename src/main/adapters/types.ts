@@ -114,7 +114,7 @@ export interface HarnessDriver {
   /**
    * Archive natively if the harness supports it (e.g., `codex archive`,
    * Claude Desktop `isArchived`, tmux `kill-session`). Return `null` to fall
-   * back to Super Harness's local hide-session behavior.
+   * back to Superharness's local hide-session behavior.
    */
   archiveSession(
     session: UnifiedSession,
@@ -147,7 +147,7 @@ export interface HarnessDriver {
 
   /**
    * Optional sink for native push activity (e.g. Codex app-server daemon
-   * notifications for turns Super Harness did not start). LiveSyncService
+   * notifications for turns Superharness did not start). LiveSyncService
    * uses it to push transcript refreshes without FS polling.
    */
   setActivitySink?(sink: ((sessionId: string) => void) | null): void;
@@ -155,7 +155,7 @@ export interface HarnessDriver {
   /**
    * Validate and apply a model / reasoning effort / permission mode change for one
    * session. Return one result per requested field; fields with status `applied` or
-   * `next_message` are persisted as Super Harness overrides by the caller. Drivers
+   * `next_message` are persisted as Superharness overrides by the caller. Drivers
    * without this hook report every field as unsupported.
    */
   applySessionConfig?(

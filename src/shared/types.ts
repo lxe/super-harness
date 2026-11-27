@@ -58,7 +58,7 @@ export interface UnifiedSession {
   remoteId?: string;
   tmuxTarget?: string;
   tmuxSessionName?: string;
-  /** Address of the machine running this session when it is not the Super Harness host (e.g. `192.168.0.3`). */
+  /** Address of the machine running this session when it is not the Superharness host (e.g. `192.168.0.3`). */
   hostAddress?: string;
   /** Friendly name of that machine (e.g. `lxebook-2021`). */
   hostLabel?: string;
@@ -73,9 +73,9 @@ export interface UnifiedSession {
   createdAt: number;
   updatedAt: number;
   tokenCount?: number;
-  /** Super Harness organization overlay */
+  /** Superharness organization overlay */
   pinned: boolean;
-  /** Pinned globally to the top of Super Harness (above all harnesses) */
+  /** Pinned globally to the top of Superharness (above all harnesses) */
   pinnedToTop?: boolean;
   folderId?: string | null;
   tags: string[];
@@ -274,7 +274,7 @@ export interface SessionOverride {
   nativeSectionOrder?: number;
   model?: string;
   reasoningEffort?: string;
-  /** Harness-native permission mode chosen in Super Harness (see SessionConfigChange). */
+  /** Harness-native permission mode chosen in Superharness (see SessionConfigChange). */
   permissionMode?: string;
   pinned?: boolean;
   pinnedToTop?: boolean;
@@ -284,7 +284,7 @@ export interface SessionOverride {
 
 /**
  * A request to change how a session runs. Values are harness-native after validation;
- * an empty string clears the Super Harness override (back to the harness's own default).
+ * an empty string clears the Superharness override (back to the harness's own default).
  */
 export interface SessionConfigChange {
   model?: string;
@@ -300,9 +300,9 @@ export interface SessionConfigChange {
 /**
  * What happened to one requested setting:
  * - applied: in effect now
- * - next_message: stored; Super Harness applies it when it next sends to this session
+ * - next_message: stored; Superharness applies it when it next sends to this session
  * - needs_restart: would take effect only after restarting the live process (pass restart: true)
- * - unsupported: this harness or session can't change it from Super Harness (detail says why)
+ * - unsupported: this harness or session can't change it from Superharness (detail says why)
  * - invalid: value not accepted (detail lists valid values)
  * - failed: tried and could not confirm it took effect
  */

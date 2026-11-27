@@ -60,7 +60,7 @@ export async function whichBinary(name: string): Promise<string | null> {
 /**
  * Resolves the newest installed Codex binary, preferring the managed app-server
  * daemon release (`~/.codex/packages/app-server-daemon/releases/.../bin/codex`)
- * so Super Harness always matches the running daemon & `~/.codex/config.toml` schema.
+ * so Superharness always matches the running daemon & `~/.codex/config.toml` schema.
  */
 export async function resolveCodexBinary(): Promise<string | null> {
   const releasesDir = path.join(os.homedir(), '.codex', 'packages', 'app-server-daemon', 'releases');

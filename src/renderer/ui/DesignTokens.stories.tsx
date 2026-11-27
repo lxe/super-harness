@@ -29,7 +29,7 @@ const BRANDS = [
 const TokensOverview: React.FC = () => (
   <div className="w-[760px] max-w-full space-y-8 p-6 bg-surface-canvas text-ink-primary rounded-2xl border border-line-hairline">
     <div>
-      <h1 className="text-base font-semibold tracking-tight">Super Harness Design System</h1>
+      <h1 className="text-base font-semibold tracking-tight">Superharness Design System</h1>
       <p className="text-caption text-ink-muted mt-1">
         Calm obsidian charcoal elevation scale, 4-step ink contrast hierarchy, 4px spacing grid, and harness brand tokens.
       </p>

@@ -272,7 +272,7 @@ function readPiTailState(filePath: string, mtimeMs: number): PiTailState {
 }
 
 // ---------------------------------------------------------------------------
-// Terminal holders (Pi TUI / print processes Super Harness did not start)
+// Terminal holders (Pi TUI / print processes Superharness did not start)
 // ---------------------------------------------------------------------------
 
 export interface PiHolderProcess {
@@ -335,7 +335,7 @@ export function findPiHolderProcesses(processes: ProcessRow[], ownPids: Set<numb
  * but all of them are marked ambiguous, and dispatch refuses rather than risk typing into
  * the wrong terminal or forking a session another process is writing.
  *
- * `sessions` must exclude files Super Harness itself last wrote.
+ * `sessions` must exclude files Superharness itself last wrote.
  */
 export function assignPiHolders(
   holders: PiHolderProcess[],
@@ -705,7 +705,7 @@ export function loadPiTranscript(sessionId: string, filePath: string | undefined
 // Driver
 // ---------------------------------------------------------------------------
 
-/** New threads Super Harness started that Pi has not written to disk yet. */
+/** New threads Superharness started that Pi has not written to disk yet. */
 const pendingPiStarts = new Map<string, { session: UnifiedSession; expiresAt: number }>();
 
 export function registerPendingPiStart(p: { nativeId: string; cwd: string; title: string; model?: string }): void {
@@ -754,15 +754,15 @@ export function buildPiUndeliverableError(title: string, reason: 'terminal' | 'a
   if (reason === 'ambiguous') {
     return (
       `Your message was not sent to "${title}": Pi terminals are open in this session's folder and several Pi ` +
-      `sessions there were written since they started, so Super Harness cannot tell which terminal holds this ` +
+      `sessions there were written since they started, so Superharness cannot tell which terminal holds this ` +
       `session (Pi keeps no lock). Sending could reach the wrong terminal or fork the conversation. Type it in ` +
       `the terminal that has this session open, or close the Pi terminals in this folder and press Retry.`
     );
   }
   return (
     `Your message was not sent to "${title}": the session is open in a Pi terminal that is not inside tmux, so ` +
-    `Super Harness cannot type into it, and writing from a second Pi process would fork the conversation. ` +
-    `Type it in that terminal, or close the terminal and press Retry (Super Harness will then drive the session itself).`
+    `Superharness cannot type into it, and writing from a second Pi process would fork the conversation. ` +
+    `Type it in that terminal, or close the terminal and press Retry (Superharness will then drive the session itself).`
   );
 }
 
@@ -849,7 +849,7 @@ export function createPiDriver(): HarnessDriver {
         sessionId: session.nativeId,
       });
       if (!pool.isStreaming(session.id)) {
-        // Super Harness overrides apply before the run starts.
+        // Superharness overrides apply before the run starts.
         if (session.model?.trim() && session.model.includes('/')) await pool.setModel(w, session.model);
         if (session.reasoningEffort?.trim()) await pool.setThinking(w, session.reasoningEffort.trim());
       }
@@ -899,7 +899,7 @@ export function createPiDriver(): HarnessDriver {
         return {
           ok: false,
           error:
-            'Super Harness typed your message into the Pi terminal (tmux) but could not confirm Pi took it within 4 seconds. Check that terminal before resending, to avoid a duplicate.',
+            'Superharness typed your message into the Pi terminal (tmux) but could not confirm Pi took it within 4 seconds. Check that terminal before resending, to avoid a duplicate.',
         };
       }
       return { ok: true, dispatchedVia: `Pi terminal typing via tmux → ${target}` };
@@ -1109,7 +1109,7 @@ export function createPiDriver(): HarnessDriver {
           return {
             status: 'unsupported',
             detail:
-              'Pi has no permission modes: its tools run without approval prompts. Restricting tools is a launch-time --tools allowlist, which Super Harness does not manage.',
+              'Pi has no permission modes: its tools run without approval prompts. Restricting tools is a launch-time --tools allowlist, which Superharness does not manage.',
           };
         }
         if (terminal) {
@@ -1162,7 +1162,7 @@ export function createPiDriver(): HarnessDriver {
     },
 
     async controlDaemon() {
-      return { ok: false, error: 'Pi has no daemon to start or stop; Super Harness runs Pi sessions itself.' };
+      return { ok: false, error: 'Pi has no daemon to start or stop; Superharness runs Pi sessions itself.' };
     },
 
     async archiveSession() {

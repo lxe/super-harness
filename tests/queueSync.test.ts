@@ -76,7 +76,7 @@ describe('Codex native queue (app-server thread/queue/*)', () => {
   });
 });
 
-describe('Persistent Super Harness queue storage', () => {
+describe('Persistent Superharness queue storage', () => {
   it('round-trips queued items while stripping inline previewDataUrl blobs', () => {
     const input: Record<string, QueuedMessageItem[]> = {
       'antigravity:abc': [
@@ -137,7 +137,7 @@ describe('Persistent Super Harness queue storage', () => {
     ).toBe(true);
     expect(
       isBusyDispatchError(
-        'This Antigravity conversation is already running a turn in Super Harness. Wait for it to finish or queue your message.'
+        'This Antigravity conversation is already running a turn in Superharness. Wait for it to finish or queue your message.'
       )
     ).toBe(true);
     expect(isBusyDispatchError('thread already has an active writer')).toBe(true);

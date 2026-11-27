@@ -200,7 +200,7 @@ export class MasterEngine {
   /** Ask the outgoing harness to fold the conversation into MEMORY.md before a switch. */
   private async compactSegment(seg: MasterSegment, nextEngine: HarnessGroup, cwd: string): Promise<void> {
     const prompt = [
-      `Super Harness is moving this orchestrator conversation from ${ENGINE_NAMES[seg.engine] ?? seg.engine} to ${ENGINE_NAMES[nextEngine] ?? nextEngine}.`,
+      `Superharness is moving this orchestrator conversation from ${ENGINE_NAMES[seg.engine] ?? seg.engine} to ${ENGINE_NAMES[nextEngine] ?? nextEngine}.`,
       'Before the switch: call sh_read_memory, then call sh_write_memory with a compact but complete markdown summary that lets the next orchestrator continue this conversation without losing context:',
       "what's going on, open threads and which sessions own them (with session ids), lxe's decisions and preferences, next steps, and a brief note on the last few exchanges.",
       'Keep the existing headings. Then reply with one line: "Memory compacted for the switch."',
@@ -352,10 +352,10 @@ export class MasterEngine {
       .join('\n');
 
     return [
-      'You are the Master Orchestrator inside Super Harness — a unified desktop & mobile multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, Antigravity, and Muse.',
-      'You have MCP tools (`sh_list_harnesses`, `sh_list_folders`, `sh_list_sessions`, `sh_read_session`, `sh_send_message`, `sh_start_session`, `sh_organize`, `sh_update_settings`, `sh_control_harness`, `sh_restart_app`) — and equivalent local Control API endpoints at `$SUPER_HARNESS_URL` (Bearer `$SUPER_HARNESS_TOKEN`) — to inspect, organize, configure, and drive Super Harness live across both Desktop and Mobile.',
-      'Use these tools proactively whenever the user asks to organize sessions into folders, inspect/search sessions, send instructions to another harness, launch new sessions, or update Super Harness settings.',
-      'This is one continuous conversation with lxe, pinned at the top of Super Harness. Your memory lives in ~/.config/super-harness/orchestrator/MEMORY.md: read it with `sh_read_memory` when you need context, and keep it current with `sh_write_memory` (a compact summary, not a log) whenever work starts or finishes, lxe decides something, or a task changes owner.',
+      'You are the Master Orchestrator inside Superharness — a unified desktop & mobile multiplexer over Codex, Claude Desktop, Claude tmux/remote-control, Antigravity, and Muse.',
+      'You have MCP tools (`sh_list_harnesses`, `sh_list_folders`, `sh_list_sessions`, `sh_read_session`, `sh_send_message`, `sh_start_session`, `sh_organize`, `sh_update_settings`, `sh_control_harness`, `sh_restart_app`) — and equivalent local Control API endpoints at `$SUPER_HARNESS_URL` (Bearer `$SUPER_HARNESS_TOKEN`) — to inspect, organize, configure, and drive Superharness live across both Desktop and Mobile.',
+      'Use these tools proactively whenever the user asks to organize sessions into folders, inspect/search sessions, send instructions to another harness, launch new sessions, or update Superharness settings.',
+      'This is one continuous conversation with lxe, pinned at the top of Superharness. Your memory lives in ~/.config/super-harness/orchestrator/MEMORY.md: read it with `sh_read_memory` when you need context, and keep it current with `sh_write_memory` (a compact summary, not a log) whenever work starts or finishes, lxe decides something, or a task changes owner.',
       'To change another session\'s model, reasoning effort or permission mode, use `sh_update_session` and report its per-field status honestly (applied / next message / needs restart / unsupported).',
       'When asked to put sessions working on a topic/project into a new or existing folder:',
       '  1. Call `sh_list_folders` and `sh_list_sessions` (without overly narrow filters first if titles may be generic) — and call `sh_read_session` on any ambiguous session to confirm what it is working on.',

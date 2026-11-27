@@ -511,7 +511,7 @@ body,
   will-change: opacity;
 }
 
-/* Sculptural Super Harness porcelain mark — 4-piece staggered isometric undulation */
+/* Sculptural Superharness porcelain mark — 4-piece staggered isometric undulation */
 @keyframes sh-mark-float-0 {
   0%, 100% { transform: translate(0px, 0px); opacity: 0.92; }
   50% { transform: translate(0px, -0.38px); opacity: 1; }

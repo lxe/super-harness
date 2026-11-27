@@ -719,7 +719,7 @@ export const SessionPane: React.FC<Props> = ({
                   return;
                 }
               } catch {
-                // Fall back to Super Harness persistent queue below
+                // Fall back to Superharness persistent queue below
               }
             }
             const queuedItem: QueuedMessageItem = {
@@ -801,7 +801,7 @@ export const SessionPane: React.FC<Props> = ({
           return;
         }
       } catch {
-        // Fall back to Super Harness's persistent queue below
+        // Fall back to Superharness's persistent queue below
       }
     }
 

@@ -5,10 +5,10 @@ import path from 'node:path';
 import type { ImageAttachment, StreamEvent, UnifiedBlock } from '../../shared/types';
 
 /**
- * Pool of long-lived `pi --mode rpc` workers, one per Pi session Super Harness drives.
+ * Pool of long-lived `pi --mode rpc` workers, one per Pi session Superharness drives.
  *
  * Protocol (Pi 1.4 `docs/rpc.md`): one JSON command per line on stdin, `response` records
- * (correlated by `id`) and session events on stdout. Super Harness uses:
+ * (correlated by `id`) and session events on stdout. Superharness uses:
  *  - `prompt` to start a run, or `prompt` with `streamingBehavior: "steer"` while a run is
  *    active (Pi delivers it after the current tool calls, before the next model call);
  *  - `follow_up` only for an explicit queue request (delivered when the run finishes);
@@ -128,7 +128,7 @@ export function buildPiRpcArgs(opts: Omit<PiSpawnOptions, 'bin' | 'cwd'>): strin
 
 /**
  * Where the pool remembers the session-file stamp each worker left behind, so a restart of
- * Super Harness still knows which Pi sessions it wrote last (see `wroteLast`).
+ * Superharness still knows which Pi sessions it wrote last (see `wroteLast`).
  */
 export const PI_WRITTEN_STAMPS_PATH = path.join(os.homedir(), '.config', 'super-harness', 'pi-written.json');
 
@@ -163,7 +163,7 @@ export class PiRpcPool {
     }
   }
 
-  /** True when the session file is exactly as a Super Harness worker last left it. */
+  /** True when the session file is exactly as a Superharness worker last left it. */
   wroteLast(key: string, filePath: string): boolean {
     const stamp = this.lastWritten.get(key);
     return Boolean(stamp) && stamp === fileStamp(filePath);
@@ -294,7 +294,7 @@ export class PiRpcPool {
       return;
     }
     if (type === 'extension_ui_request') {
-      // Super Harness has no UI for extension dialogs; cancel so the run never stalls.
+      // Superharness has no UI for extension dialogs; cancel so the run never stalls.
       const id = typeof obj.id === 'string' ? obj.id : undefined;
       const method = String(obj.method ?? '');
       if (id && ['select', 'confirm', 'input', 'editor'].includes(method)) {
@@ -438,7 +438,7 @@ export class PiRpcPool {
     return this.request(w, { type: 'get_state' });
   }
 
-  /** Aborts the active run (queued steers return to nothing: Super Harness has no editor to restore). */
+  /** Aborts the active run (queued steers return to nothing: Superharness has no editor to restore). */
   abort(key: string): boolean {
     const w = this.workers.get(key);
     if (!w || w.closed) return false;

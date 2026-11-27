@@ -1,10 +1,10 @@
-# Super Harness — Architecture
+# Superharness — Architecture
 
 ## 1. Core Principles
 
 Running multiple local AI coding harnesses simultaneously — **OpenAI Codex** (Desktop app + `app-server` daemon + CLI), **Claude** (Desktop + Code CLI + `tmux --remote-control`), **Google Antigravity** (Desktop + CLI), and **Meta Muse** (terminal TUI + headless `muse exec`) — creates fragmented windows, inconsistent tool/diff rendering, and no shared orchestration plane.
 
-**Super Harness** solves this as a **non-destructive multiplexing chrome + control plane**:
+**Superharness** solves this as a **non-destructive multiplexing chrome + control plane**:
 - Native harnesses remain the source of truth for their own transcripts, auth, sandboxes, and daemons.
 - Every harness integration lives behind a single cohesive **`HarnessDriver`** interface (`src/main/adapters/types.ts`) — keeping all harness-specific paths, SQLite schemas, JSONL formats, FS watch targets, and dispatch protocols cleanly encapsulated without unnecessary layers of abstraction.
 - All transcripts normalize into one **`UnifiedMessage[]` / `UnifiedBlock[]`** model and render through a shared obsidian design system (`src/renderer/ui/`).
@@ -21,7 +21,7 @@ All four built-in drivers are registered once in `src/main/adapters/index.ts`:
 | **Transcripts** | Native app-server `thread/items/list` + `thread/queue/list` on the shared daemon (SQLite `thread_history_1` + rollout JSONL only as offline cold fallback) | Progressive UTF-8 tail-read JSONL with pre-`JSON.parse` telemetry filtering + `queue-operation` + `tmux capture-pane` | Progressive UTF-8 tail-read `transcript.jsonl` (`USER_INPUT`, `PLANNER_RESPONSE`, `GENERIC`, `ask_question`) | MSP `session/read` host-folded `Item[]` (inline/snapshot history) via `MuseMspClient`; progressive UTF-8 tail-read event-log `session.jsonl` only as fallback when no MSP host answers |
 | **Live Watch** | `state_5.sqlite`, `thread_history_1.sqlite(-wal)`, `queue_1.sqlite(-wal)`, today's rollout dir | `~/.claude/sessions/*.json`, project `.jsonl` dirs | `~/.gemini/antigravity{,-cli}/brain` & active `transcript.jsonl` | `session-index.db` in the Muse data dir, today's `sessions/YYYY/MM/DD` shard, active `session.jsonl` |
 | **Dispatch** | Native app-server `turn/start`/`turn/steer`/`turn/interrupt` + `thread/queue/add` on the managed daemon via `CodexAppServerClient` (daemon auto-started; no exec/queue-CLI fallback) | Desktop's own stream-json host protocol (persistent `--input-format stream-json` pool: `initialize`/`interrupt`/`set_model` control requests, `can_use_tool` answers, partial `stream_event` deltas) for owned/idle sessions; live tmux TUIs via hardened tmux typing (paste-buffer + transcript ack — no metadata-free native wire exists) | Native hub language-server Connect+JSON (`SendUserCascadeMessage`/`StartCascade` on the Desktop hub LS from `daemon/hub_*.json`) via `AntigravityLsClient`; `agy acp` only as the labelled separate-engine/CLI cold-resume fallback when no hub is live | Native MSP `turn/start` on the holding host: pooled `muse serve` (Super-Harness-hosted/resumed sessions) or `muse attach --stdio` (attachable hosts) via `MuseMspClient`; terminal-held sessions (`attachable:false`) dispatch by typing into their tmux pane when one is hosting the terminal (paste-buffer + transcript ack), else refuse honestly — no peer/exec fallback |
-| **Archive** | `codex archive <id>` | Claude Desktop `isArchived: true` or `tmux kill-session` | Super Harness local archive | Super Harness local archive (no native archive command) |
+| **Archive** | `codex archive <id>` | Claude Desktop `isArchived: true` or `tmux kill-session` | Superharness local archive | Superharness local archive (no native archive command) |
 
 Because every driver implements `HarnessDriver`, the three main-process coordinators remain completely harness-agnostic:
 - **`HarnessRegistry`** (`src/main/adapters/registry.ts`): Parallel discovery, metadata override decoration, and fingerprint-keyed `TranscriptCache`.

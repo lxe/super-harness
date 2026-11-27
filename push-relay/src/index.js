@@ -1,4 +1,4 @@
-// Super Harness APNs Push Relay (Cloudflare Worker)
+// Superharness APNs Push Relay (Cloudflare Worker)
 // Holds the APNs AuthKey (.p8) as a Worker secret so desktop hosts can push task-completion,
 // input-needed, and silent background-sync notifications to the iOS companion app without
 // shipping the .p8 key on every host.
@@ -131,8 +131,8 @@ function buildApnsPayload(body) {
     };
   }
 
-  const title = String(body.title || "Super Harness").slice(0, 120);
-  const alertBody = String(body.body || "Update from Super Harness").slice(0, 240);
+  const title = String(body.title || "Superharness").slice(0, 120);
+  const alertBody = String(body.body || "Update from Superharness").slice(0, 240);
   const interruption = kind === "input_needed" ? "time-sensitive" : "active";
 
   return {

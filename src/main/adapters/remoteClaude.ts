@@ -464,7 +464,7 @@ export class RemoteClaudeMirror {
     if (!e.tmux) {
       return {
         ok: false,
-        error: `This Claude session on ${e.label} is not running in tmux, so Super Harness cannot type into it. Use the Claude app for it.`,
+        error: `This Claude session on ${e.label} is not running in tmux, so Superharness cannot type into it. Use the Claude app for it.`,
       };
     }
     try {

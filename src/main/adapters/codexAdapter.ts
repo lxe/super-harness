@@ -1183,7 +1183,7 @@ export function createCodexDriver(): HarnessDriver {
   return {
     async applySessionConfig(session, change) {
       const next =
-        'Applies to the next turn Super Harness starts in this thread; turns started from the Codex app keep the app\'s own settings.';
+        'Applies to the next turn Superharness starts in this thread; turns started from the Codex app keep the app\'s own settings.';
       return resultsFor(change, (field, requested) => {
         if (!requested.trim()) return { status: 'next_message', value: '', detail: 'Override cleared. ' + next };
         if (field === 'model') return { status: 'next_message', value: requested.trim(), detail: next };
@@ -1199,7 +1199,7 @@ export function createCodexDriver(): HarnessDriver {
           detail:
             (mode === 'default' ? 'Back to your Codex config. ' : '') +
             next +
-            ' Super Harness auto-accepts Codex approvals, so escalation is off and the sandbox is the boundary.',
+            ' Superharness auto-accepts Codex approvals, so escalation is off and the sandbox is the boundary.',
         };
       });
     },
@@ -1537,7 +1537,7 @@ export function createCodexDriver(): HarnessDriver {
         const ok = await appServer.archiveThread(session.nativeId);
         if (ok) return { ok: true, method: 'Codex app-server archive' };
       }
-      // No daemon: fall back to Super Harness local hide (dispatcher).
+      // No daemon: fall back to Superharness local hide (dispatcher).
       return null;
     },
   };

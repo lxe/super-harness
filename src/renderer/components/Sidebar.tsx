@@ -767,7 +767,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
     });
   }, [workerSessions, orderTick]);
 
-  // Global Super Harness top-pinned chats across ALL harnesses (strict manual order; filtered by search query)
+  // Global Superharness top-pinned chats across ALL harnesses (strict manual order; filtered by search query)
   const allGlobalPinned = useMemo(
     () => getGlobalPinnedSessions(stabilizedWorkerSessions, pinnedOrder),
     [stabilizedWorkerSessions, pinnedOrder]

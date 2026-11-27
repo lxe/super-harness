@@ -1,6 +1,6 @@
-# Super Harness Push Relay (Cloudflare Worker)
+# Superharness Push Relay (Cloudflare Worker)
 
-Stateless APNs relay for the Super Harness iOS companion app (`com.lxe.superharness`), reusing your Cloudflare account and Apple Developer Team APNs AuthKey (`.p8`).
+Stateless APNs relay for the Superharness iOS companion app (`com.lxe.superharness`), reusing your Cloudflare account and Apple Developer Team APNs AuthKey (`.p8`).
 
 ## One-time Deploy
 

@@ -21,7 +21,7 @@ export const ModalDemo: StoryObj = {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="Super Harness Settings"
+          title="Superharness Settings"
           subtitle="Configure apps, discovery, and Master Orchestrator"
           icon={<Settings className="w-4 h-4" />}
           footer={

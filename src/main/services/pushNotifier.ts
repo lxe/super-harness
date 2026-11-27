@@ -64,7 +64,7 @@ export function signRelayRequest(
 }
 
 /**
- * Sends APNs push notifications through the Super Harness Cloudflare Push Relay
+ * Sends APNs push notifications through the Superharness Cloudflare Push Relay
  * whenever a session completes a task or requests user input / approval.
  */
 export class PushNotifier {

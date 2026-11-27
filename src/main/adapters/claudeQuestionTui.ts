@@ -64,7 +64,7 @@ export function matchOptionChoice(q: QuestionItem, rawAnswer: string): ResolvedQ
 
 /**
  * Parses a reply formatted as `<Question>: <Answer>` (one per question, as sent by
- * Super Harness Desktop and iOS) or a single answer for 1-question prompts, and
+ * Superharness Desktop and iOS) or a single answer for 1-question prompts, and
  * resolves each question to its option index or custom text.
  */
 export function resolveClaudeQuestionAnswers(

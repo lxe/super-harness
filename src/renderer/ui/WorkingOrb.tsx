@@ -121,7 +121,7 @@ const SIZE_PX: Record<NonNullable<WorkingOrbProps['size']>, number> = {
 };
 
 /**
- * Kinetic 4-piece sculptural Super Harness mark activity indicator,
+ * Kinetic 4-piece sculptural Superharness mark activity indicator,
  * tinted to the exact harness/status colorway.
  */
 export const WorkingOrb: React.FC<WorkingOrbProps> = ({

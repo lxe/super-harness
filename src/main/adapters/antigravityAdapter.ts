@@ -1179,7 +1179,7 @@ export function createAntigravityDriver(): HarnessDriver {
           return {
             status: 'next_message',
             value: requested.trim(),
-            detail: 'Applies to the next message Super Harness sends (mapped to the hub\'s planModel; unknown slugs fall back to the recommended model).',
+            detail: 'Applies to the next message Superharness sends (mapped to the hub\'s planModel; unknown slugs fall back to the recommended model).',
           };
         }
         return {
@@ -1187,7 +1187,7 @@ export function createAntigravityDriver(): HarnessDriver {
           detail:
             field === 'reasoningEffort'
               ? 'The Antigravity language server takes no per-message reasoning effort; pick a model variant instead.'
-              : 'Antigravity exposes no permission mode Super Harness can set per conversation.',
+              : 'Antigravity exposes no permission mode Superharness can set per conversation.',
         };
       });
     },
@@ -1436,7 +1436,7 @@ export function createAntigravityDriver(): HarnessDriver {
     },
 
     async archiveSession(): Promise<null> {
-      // Fall back to Super Harness local hide-session behavior
+      // Fall back to Superharness local hide-session behavior
       return null;
     },
 

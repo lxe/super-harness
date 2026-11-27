@@ -125,7 +125,7 @@ const PERMISSIVE_CLAUDE_MODES = new Set(['bypassPermissions', 'acceptEdits', 'au
  * error `{subtype:'error',request_id,error}`, and deliberate silence
  * (`null`) for `request_user_dialog` when no dialog handler exists.
  *
- * `can_use_tool`: Desktop prompts its user; Super Harness has no permission
+ * `can_use_tool`: Desktop prompts its user; Superharness has no permission
  * card on this lane, so permissive session modes allow and manual/plan
  * modes deny (fail-closed, same outcome as today's non-interactive runs).
  * `elicitation`: declined, Desktop's verbatim no-handler fallback.
@@ -149,7 +149,7 @@ export function buildClaudeControlResponse(
           : {
               behavior: 'deny',
               message:
-                'Super Harness cannot prompt for tool permission in this session mode; the tool call was denied.',
+                'Superharness cannot prompt for tool permission in this session mode; the tool call was denied.',
             }
       );
     case 'elicitation':
@@ -162,7 +162,7 @@ export function buildClaudeControlResponse(
         response: {
           subtype: 'error',
           request_id: requestId,
-          error: `Super Harness does not handle ${subtype || 'unknown control request'}`,
+          error: `Superharness does not handle ${subtype || 'unknown control request'}`,
         },
       };
   }

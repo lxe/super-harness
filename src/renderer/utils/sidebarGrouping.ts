@@ -190,7 +190,7 @@ export function computeThreadRecencyOpacity(updatedAt: number, now = Date.now())
 }
 
 /**
- * Returns all Super Harness top-pinned chats across every harness in strict
+ * Returns all Superharness top-pinned chats across every harness in strict
  * manual order (never auto-reordering on message activity). Any newly pinned
  * chat not yet in `pinnedOrder` appends stably by creation time / ID.
  */
@@ -316,7 +316,7 @@ function splitNativePinnedAndSections(
  * the harness switcher across all 5 view modes (`native`, `harness`, `project`,
  * `folders`, `recent`).
  *
- * - Global Super Harness top-pinned chats (`pinnedToTop`) are excluded here
+ * - Global Superharness top-pinned chats (`pinnedToTop`) are excluded here
  *   because they live permanently above the harness switcher across all tabs.
  * - Individual harness pins (`pinned`) float directly below their harness
  *   header (or at the top of a single-harness tab) with no extra "Pinned" section.

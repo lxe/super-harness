@@ -186,7 +186,7 @@ export class HarnessDispatcher {
   /**
    * Change a session's model / reasoning effort / permission mode through its driver.
    * Fields the driver accepts (applied now or on the next message) are persisted as
-   * Super Harness overrides so every later dispatch, on any client, uses them.
+   * Superharness overrides so every later dispatch, on any client, uses them.
    */
   async updateSessionConfig(sessionId: string, change: SessionConfigChange): Promise<SessionConfigResult> {
     const session = this.registry.getSession(sessionId);
@@ -204,7 +204,7 @@ export class HarnessDispatcher {
           field,
           requested: String(change[field]),
           status: 'unsupported' as const,
-          detail: `${session.harness} sessions don't support changing this from Super Harness.`,
+          detail: `${session.harness} sessions don't support changing this from Superharness.`,
         }));
     const keep = results.filter((r) => r.status === 'applied' || r.status === 'next_message');
     if (keep.length > 0) {
@@ -235,7 +235,7 @@ export class HarnessDispatcher {
 
   /**
    * Archives a session using the owning HarnessDriver's native archive method
-   * when available, falling back to hiding it in Super Harness state.
+   * when available, falling back to hiding it in Superharness state.
    */
   async archiveSession(
     sessionId: string,
@@ -267,7 +267,7 @@ export class HarnessDispatcher {
       this.store.applyOrganize([{ type: 'hide_session', sessionId }]);
       this.registry.invalidateTranscriptCache(sessionId);
       this.triggerRefresh();
-      return { ok: true, method: 'Super Harness archive' };
+      return { ok: true, method: 'Superharness archive' };
     } catch (err) {
       return {
         ok: false,

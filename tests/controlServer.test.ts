@@ -230,13 +230,13 @@ describe('ControlServer mobile API gateway', () => {
     const createFolderRes = await fetch(`${base}/api/organize`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create_folder', name: 'Super Harness' }),
+      body: JSON.stringify({ action: 'create_folder', name: 'Superharness' }),
     });
     expect(createFolderRes.status).toBe(200);
     const createdState = (await createFolderRes.json()) as {
       folders: Array<{ id: string; name: string }>;
     };
-    const shFolder = createdState.folders.find((f) => f.name === 'Super Harness');
+    const shFolder = createdState.folders.find((f) => f.name === 'Superharness');
     expect(shFolder).toBeTruthy();
 
     const assignRes = await fetch(`${base}/api/organize`, {

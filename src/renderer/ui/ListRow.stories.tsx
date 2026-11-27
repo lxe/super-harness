@@ -31,7 +31,7 @@ export const SidebarTree: StoryObj = {
           <div className="space-y-0.5 pl-1">
             <NavRow
               icon={<HarnessLogo harness="antigravity" size={15} />}
-              title="Super Harness MVP Development"
+              title="Superharness MVP Development"
               active={active === 's1'}
               working
               onClick={() => setActive('s1')}

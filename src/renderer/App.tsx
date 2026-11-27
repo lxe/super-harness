@@ -380,7 +380,7 @@ export const App: React.FC = () => {
     []
   );
 
-  // Persist Super Harness session queues across restarts
+  // Persist Superharness session queues across restarts
   useEffect(() => {
     saveStoredQueues(queuedBySession);
   }, [queuedBySession]);

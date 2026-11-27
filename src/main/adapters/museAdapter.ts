@@ -931,7 +931,7 @@ export type MuseUndeliverableKind = 'tui-held' | 'other';
  * delivered as a native MSP user turn. A session held by a plain Muse
  * terminal exposes no MSP attach endpoint (`muse sessions --json` reports
  * `attachable: false`; `muse attach --stdio` exits 4), so no client can
- * submit a real user turn to it — Super Harness refuses rather than
+ * submit a real user turn to it — Superharness refuses rather than
  * stamping the message as a peer/cross-session delivery.
  */
 export function buildMuseUndeliverableError(
@@ -942,17 +942,17 @@ export function buildMuseUndeliverableError(
   const label = nameTag ? `${nameTag} ("${session.title}")` : `"${session.title}"`;
   if (kind === 'tui-held') {
     return (
-      `Your message was not delivered: ${label} is open in a Muse terminal that Super Harness cannot type into ` +
+      `Your message was not delivered: ${label} is open in a Muse terminal that Superharness cannot type into ` +
       `(it has no MSP attach endpoint and is not running inside tmux). Use Restart in tmux in this session's ` +
-      `header menu and Super Harness will close that terminal process and relaunch the same session inside tmux, ` +
+      `header menu and Superharness will close that terminal process and relaunch the same session inside tmux, ` +
       `after which it can type into that terminal for you. Or type the message in that terminal instead; or close ` +
-      `the terminal session entirely and press Retry here, and Super Harness will host the session itself over ` +
+      `the terminal session entirely and press Retry here, and Superharness will host the session itself over ` +
       `Muse's native MSP API.`
     );
   }
   return (
     `Your message was not delivered to ${label}: Muse's MSP host did not accept it. ` +
-    `Press Retry — if the session is no longer held by a terminal, Super Harness will resume it over MSP and deliver it.`
+    `Press Retry — if the session is no longer held by a terminal, Superharness will resume it over MSP and deliver it.`
   );
 }
 
@@ -1117,7 +1117,7 @@ export type MuseHolderKind = 'tui' | 'serve' | 'other';
 /**
  * Classifies a `/proc/<pid>/cmdline` (NUL-separated) so the restart lane
  * only ever signals a plain interactive Muse terminal — never a `muse
- * serve` host (Super Harness's own pooled host included) and never a
+ * serve` host (Superharness's own pooled host included) and never a
  * headless/bridge invocation. Misclassification fails safe: anything
  * unrecognized is 'other' and is refused.
  */
@@ -1243,7 +1243,7 @@ function mspSessionTimestamp(raw: unknown, fallback: number): number {
  * Cohesive HarnessDriver encapsulating all Muse (Meta) integration:
  * session-index.db discovery plus an exact bi-directional MSP mirror —
  * dispatch submits genuine user turns with MSP `turn/start` on the host
- * that holds the session (Super Harness's pooled `muse serve`, or
+ * that holds the session (Superharness's pooled `muse serve`, or
  * `muse attach --stdio` when the holding host is attachable), and
  * transcripts fold the host's own `Item[]` from `session/read`. The raw
  * event-log fold (`parseMuseJsonlLines`) remains only as the fallback when
@@ -1267,13 +1267,13 @@ export function createMuseDriver(): HarnessDriver {
 
   return {
     async applySessionConfig(session, change) {
-      const next = 'Applies to the next turn Super Harness sends to this Muse session.';
+      const next = 'Applies to the next turn Superharness sends to this Muse session.';
       return resultsFor(change, (field, requested) => {
         if (field === 'permissionMode') {
           return {
             status: 'unsupported',
             detail:
-              'Super Harness runs Muse turns with approvalMode allowAll because it has no approval UI for Muse yet; a stricter mode would stall turns waiting for approvals nobody can answer.',
+              'Superharness runs Muse turns with approvalMode allowAll because it has no approval UI for Muse yet; a stricter mode would stall turns waiting for approvals nobody can answer.',
           };
         }
         if (!requested.trim()) return { status: 'next_message', value: '', detail: 'Override cleared. ' + next };
@@ -1425,7 +1425,7 @@ export function createMuseDriver(): HarnessDriver {
               return {
                 ok: false,
                 error:
-                  'Super Harness typed your message into the tmux Muse terminal but could not confirm it landed in the session log within 4 seconds. Check that terminal before resending, to avoid a duplicate.',
+                  'Superharness typed your message into the tmux Muse terminal but could not confirm it landed in the session log within 4 seconds. Check that terminal before resending, to avoid a duplicate.',
               };
             }
             return {
@@ -1560,7 +1560,7 @@ export function createMuseDriver(): HarnessDriver {
     },
 
     async controlDaemon() {
-      // Super Harness hosts Muse sessions itself over MSP (`muse serve`);
+      // Superharness hosts Muse sessions itself over MSP (`muse serve`);
       // there is no separate remote daemon/desktop to start or stop. The
       // Settings UI hides these controls via canControlDaemon=false — this
       // clean one-liner is for MCP/API callers that ask anyway.
@@ -1568,7 +1568,7 @@ export function createMuseDriver(): HarnessDriver {
     },
 
     /**
-     * Restart a terminal-held Muse session inside tmux so Super Harness
+     * Restart a terminal-held Muse session inside tmux so Superharness
      * can reach it with the terminal typing lane. The holding process is
      * identified as the muse process with this session's log open,
      * cross-checked against Muse's live registry pid, and re-verified
@@ -1594,7 +1594,7 @@ export function createMuseDriver(): HarnessDriver {
         return {
           ok: false,
           error:
-            'This Muse session is already reachable over Muse\u2019s MSP API, so there is nothing to restart. Send your message here and Super Harness will deliver it natively.',
+            'This Muse session is already reachable over Muse\u2019s MSP API, so there is nothing to restart. Send your message here and Superharness will deliver it natively.',
         };
       }
 
@@ -1618,7 +1618,7 @@ export function createMuseDriver(): HarnessDriver {
         return {
           ok: false,
           error:
-            'This Muse session is in the middle of a turn in its terminal. Restarting now would kill that work, so Super Harness left it running. Wait for the turn to finish (or stop it in that terminal), then use Restart in tmux again.',
+            'This Muse session is in the middle of a turn in its terminal. Restarting now would kill that work, so Superharness left it running. Wait for the turn to finish (or stop it in that terminal), then use Restart in tmux again.',
         };
       }
 
@@ -1627,7 +1627,7 @@ export function createMuseDriver(): HarnessDriver {
         return {
           ok: false,
           error:
-            'Super Harness could not identify the exact terminal process holding this Muse session, so it did not close anything. Close that terminal yourself, then use Restart in tmux again.',
+            'Superharness could not identify the exact terminal process holding this Muse session, so it did not close anything. Close that terminal yourself, then use Restart in tmux again.',
         };
       }
 
@@ -1638,24 +1638,24 @@ export function createMuseDriver(): HarnessDriver {
         if (registryPid && registryPid !== holderPid) {
           return {
             ok: false,
-            error: `Super Harness found conflicting records for the process holding this Muse session (log holder pid ${holderPid}, live registry pid ${registryPid}), so it did not close anything. Close that terminal yourself, then use Restart in tmux again.`,
+            error: `Superharness found conflicting records for the process holding this Muse session (log holder pid ${holderPid}, live registry pid ${registryPid}), so it did not close anything. Close that terminal yourself, then use Restart in tmux again.`,
           };
         }
         if (holderPid === process.pid) {
-          return { ok: false, error: 'This session is held by Super Harness itself; nothing to restart.' };
+          return { ok: false, error: 'This session is held by Superharness itself; nothing to restart.' };
         }
         const kind = classifyMuseHolderCmdline(readProcessCmdline(holderPid));
         if (kind === 'serve') {
           return {
             ok: false,
             error:
-              'This Muse session is held by a `muse serve` host process, not a plain terminal, so Super Harness will not close it. It should already be reachable over MSP; press Retry on your message.',
+              'This Muse session is held by a `muse serve` host process, not a plain terminal, so Superharness will not close it. It should already be reachable over MSP; press Retry on your message.',
           };
         }
         if (kind !== 'tui') {
           return {
             ok: false,
-            error: `The process holding this Muse session (pid ${holderPid}) is not a plain Muse terminal, so Super Harness did not close it. Close it yourself, then use Restart in tmux again.`,
+            error: `The process holding this Muse session (pid ${holderPid}) is not a plain Muse terminal, so Superharness did not close it. Close it yourself, then use Restart in tmux again.`,
           };
         }
         // Re-verify immediately before signalling: same pid, still the log
@@ -1667,7 +1667,7 @@ export function createMuseDriver(): HarnessDriver {
           return {
             ok: false,
             error:
-              'The terminal holding this Muse session changed while Super Harness was checking it, so nothing was closed. Use Restart in tmux again.',
+              'The terminal holding this Muse session changed while Superharness was checking it, so nothing was closed. Use Restart in tmux again.',
           };
         }
         try {
@@ -1685,7 +1685,7 @@ export function createMuseDriver(): HarnessDriver {
         if (!exited) {
           return {
             ok: false,
-            error: `The Muse terminal process (pid ${holderPid}) did not close within 30 seconds of being asked, so Super Harness did not start a second copy of the session. Close that terminal yourself, then use Restart in tmux again.`,
+            error: `The Muse terminal process (pid ${holderPid}) did not close within 30 seconds of being asked, so Superharness did not start a second copy of the session. Close that terminal yourself, then use Restart in tmux again.`,
           };
         }
         invalidateMuseLiveSessionsCache();
@@ -1716,7 +1716,7 @@ export function createMuseDriver(): HarnessDriver {
       } catch (err) {
         return {
           ok: false,
-          error: `The old terminal was closed, but Super Harness could not relaunch the session in tmux: ${err instanceof Error ? err.message : String(err)}. Nothing was lost — resume it manually with: tmux new-session -s ${tmuxSession} 'muse resume ${session.nativeId}'`,
+          error: `The old terminal was closed, but Superharness could not relaunch the session in tmux: ${err instanceof Error ? err.message : String(err)}. Nothing was lost — resume it manually with: tmux new-session -s ${tmuxSession} 'muse resume ${session.nativeId}'`,
         };
       }
 
@@ -1733,12 +1733,12 @@ export function createMuseDriver(): HarnessDriver {
       ctx.triggerRefresh(800);
       return {
         ok: false,
-        error: `Super Harness relaunched the session in tmux session '${tmuxSession}' but could not confirm the Muse terminal finished starting there. Inspect it with: tmux attach -t ${tmuxSession} — if it is waiting on a prompt, answer it there and Super Harness will be able to type into it.`,
+        error: `Superharness relaunched the session in tmux session '${tmuxSession}' but could not confirm the Muse terminal finished starting there. Inspect it with: tmux attach -t ${tmuxSession} — if it is waiting on a prompt, answer it there and Superharness will be able to type into it.`,
       };
     },
 
     async archiveSession() {
-      // No native archive command; fall back to Super Harness local hide.
+      // No native archive command; fall back to Superharness local hide.
       return null;
     },
   };

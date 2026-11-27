@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * Adds Super Harness to the desktop's login autostart (Linux, XDG), so Claude
+ * Adds Superharness to the desktop's login autostart (Linux, XDG), so Claude
  * tmux sessions come back after a reboot without opening the app by hand.
  *
  * It installs the entry once. If the user later deletes
@@ -31,8 +31,8 @@ export function ensureLoginAutostart(opts: { execLine: string; log?: (m: string)
     const lines = [
       '[Desktop Entry]',
       'Type=Application',
-      'Name=Super Harness',
-      'Comment=Start Super Harness at login and bring back Claude tmux sessions',
+      'Name=Superharness',
+      'Comment=Start Superharness at login and bring back Claude tmux sessions',
       `Exec=${exec}`,
       ...(workDir ? [`Path=${workDir}`] : []),
       'Icon=super-harness',

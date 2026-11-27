@@ -20,7 +20,7 @@ const PIECE_PATHS = [
 ];
 
 /**
- * Super Harness porcelain sculptural mark.
+ * Superharness porcelain sculptural mark.
  * When `animated` is true, the 4 isometric pieces gently undulate out of phase
  * and expand slightly on hover.
  */

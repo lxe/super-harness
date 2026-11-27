@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
  * Every refresh records the live Claude tmux sessions with the current boot
  * ID. A record whose tmux session disappears during the same boot was closed
  * on purpose and is dropped. A record from an earlier boot died with the
- * machine: on launch Super Harness starts it again in a tmux session of the
+ * machine: on launch Superharness starts it again in a tmux session of the
  * same name with `claude --resume <id> --remote-control`.
  */
 

@@ -177,7 +177,7 @@ interface ActiveTurnRun {
 
 /**
  * Builds the client response for a server->client request (approvals,
- * elicitation, user input, dynamic tool calls). Super Harness dispatches
+ * elicitation, user input, dynamic tool calls). Superharness dispatches
  * turns with the same no-interactive-approval posture as its other
  * harnesses (Codex turns here inherit the user's own approval config; when
  * the server still asks, command/file approvals are accepted so the turn
@@ -205,7 +205,7 @@ export function buildCodexServerRequestResponse(
       return { result: { answers: {} } };
     default:
       return {
-        error: { code: -32601, message: `Super Harness does not handle ${method}` },
+        error: { code: -32601, message: `Superharness does not handle ${method}` },
       };
   }
 }
@@ -404,7 +404,7 @@ export class CodexAppServerClient {
         {
           clientInfo: {
             name: 'super-harness',
-            title: 'Super Harness',
+            title: 'Superharness',
             version: '0.1.0',
           },
           capabilities: {
@@ -528,7 +528,7 @@ export class CodexAppServerClient {
     if (!threadId) return;
 
     // Every thread notification is daemon activity the UI mirrors, whether
-    // or not Super Harness started the turn (Desktop/TUI turns included).
+    // or not Superharness started the turn (Desktop/TUI turns included).
     this.emitDaemonActivity(threadId);
 
     if (method === 'turn/started') {
@@ -653,7 +653,7 @@ export class CodexAppServerClient {
     attachments?: ImageAttachment[];
     model?: string;
     reasoningEffort?: string;
-    /** Super Harness permission preset (see codexTurnPolicy). */
+    /** Superharness permission preset (see codexTurnPolicy). */
     permissionMode?: string;
     runId: string;
     onEvent: (ev: StreamEvent) => void;

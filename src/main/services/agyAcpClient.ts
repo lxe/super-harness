@@ -84,7 +84,7 @@ interface ActivePromptRun {
  * Persistent JSON-RPC 2.0 client for Antigravity's official Agent Client Protocol
  * (`agy acp --app-data-dir <antigravity | antigravity-cli>`).
  *
- * Gives Super Harness direct, native, bidirectional read+write control over BOTH
+ * Gives Superharness direct, native, bidirectional read+write control over BOTH
  * Antigravity Desktop conversations (`~/.gemini/antigravity`) and Antigravity CLI
  * conversations (`~/.gemini/antigravity-cli`), including native multimodal image blocks
  * and live `session/cancel`.
@@ -339,7 +339,7 @@ class AcpConnection {
         await this.cancel(nativeSessionId);
       } else {
         throw new Error(
-          'This Antigravity conversation is already running a turn in Super Harness. Wait for it to finish or queue your message.'
+          'This Antigravity conversation is already running a turn in Superharness. Wait for it to finish or queue your message.'
         );
       }
     }
@@ -347,7 +347,7 @@ class AcpConnection {
     const transcriptPath = this.getTranscriptPath(nativeSessionId);
     if (!force && isExternalAntigravityTurnActive(transcriptPath)) {
       throw new Error(
-        'Antigravity Desktop is currently running a turn on this conversation. Wait for it to finish before sending from Super Harness so the conversation does not fork.'
+        'Antigravity Desktop is currently running a turn on this conversation. Wait for it to finish before sending from Superharness so the conversation does not fork.'
       );
     }
 

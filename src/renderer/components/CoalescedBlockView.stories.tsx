@@ -100,7 +100,7 @@ export const FullConversationFlow: StoryObj = {
         <CoalescedBlockView
           block={{
             type: 'text',
-            text: 'Added **Pin to Super Harness top** across the sidebar, context menu, and session header.',
+            text: 'Added **Pin to Superharness top** across the sidebar, context menu, and session header.',
           }}
         />
 

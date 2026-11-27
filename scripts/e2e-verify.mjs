@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * End-to-End Multi-Harness Verification Suite for Super Harness.
+ * End-to-End Multi-Harness Verification Suite for Superharness.
  *
  * Tests real live round-trips across:
  *  1. Discovery & subagent nesting + native sections

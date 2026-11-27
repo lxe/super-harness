@@ -47,7 +47,7 @@ export const HouseRulesSettingsLayout: StoryObj = {
           />
           <SettingsRow
             label="Also show"
-            description="Hidden here means hidden in Super Harness"
+            description="Hidden here means hidden in Superharness"
             control={
               <div className="flex items-center gap-5">
                 <Checkbox checked={archived} onChange={setArchived} label="Archived" />

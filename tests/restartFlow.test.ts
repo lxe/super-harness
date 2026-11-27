@@ -7,7 +7,7 @@ import { shouldDelegateToDetachedRestart } from '../scripts/launch-electron.mjs'
 // @ts-expect-error ESM .mjs helper script
 import { parseSingletonLockPid } from '../scripts/restart-electron.mjs';
 
-describe('Detached Super Harness restart flow', () => {
+describe('Detached Superharness restart flow', () => {
   it('parses Electron SingletonLock symlink PIDs cleanly and rejects invalid targets', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-restart-test-'));
     const validLock = path.join(tmpDir, 'SingletonLock');
@@ -21,7 +21,7 @@ describe('Detached Super Harness restart flow', () => {
     expect(parseSingletonLockPid(path.join(tmpDir, 'missing'))).toBeNull();
   });
 
-  it('delegates launch-electron.mjs to detached restart when invoked inside Super Harness or with --restart/--replace', () => {
+  it('delegates launch-electron.mjs to detached restart when invoked inside Superharness or with --restart/--replace', () => {
     expect(shouldDelegateToDetachedRestart(['.'], {})).toBe(false);
     expect(shouldDelegateToDetachedRestart(['--restart', '.'], {})).toBe(true);
     expect(shouldDelegateToDetachedRestart(['--replace', '.'], {})).toBe(true);

@@ -43,7 +43,7 @@ export class BonjourAdvertiser {
       });
       const host = `sh-${cfg.hostId}.local`;
       const svc = this.bonjour.publish({
-        name: cfg.name.slice(0, 63) || 'Super Harness',
+        name: cfg.name.slice(0, 63) || 'Superharness',
         type: 'superharness',
         protocol: 'tcp',
         port: cfg.port,

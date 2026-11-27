@@ -1,7 +1,7 @@
 /**
  * Standalone zero-dependency MCP stdio server (`super-harness-mcp`).
  * Spawned by Claude CLI (`--mcp-config`), Codex CLI (`-c mcp_servers...`), or
- * Antigravity CLI when running the Super Harness Master Session.
+ * Antigravity CLI when running the Superharness Master Session.
  *
  * Bridges MCP `tools/list` and `tools/call` to the Electron main process
  * loopback Control HTTP API (`SUPER_HARNESS_URL` + `SUPER_HARNESS_TOKEN`).
@@ -22,7 +22,7 @@ const TOOLS = [
   {
     name: 'sh_list_folders',
     description:
-      'List all custom Super Harness folders, their IDs/colors/session counts, and the current sidebarGroupBy mode.',
+      'List all custom Superharness folders, their IDs/colors/session counts, and the current sidebarGroupBy mode.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -44,7 +44,7 @@ const TOOLS = [
   },
   {
     name: 'sh_read_session',
-    description: 'Read recent coalesced messages from any session by its Super Harness ID.',
+    description: 'Read recent coalesced messages from any session by its Superharness ID.',
     inputSchema: {
       type: 'object',
       required: ['sessionId'],
@@ -86,7 +86,7 @@ const TOOLS = [
   {
     name: 'sh_organize',
     description:
-      'Organize the Super Harness sidebar (syncs live to both Desktop and Mobile): create/rename/delete/reorder custom folders, assign sessions to folders (by folderId or folderName — auto-creates if missing), move sessions between native harness sections, pin/unpin, rename, tag, or hide sessions.',
+      'Organize the Superharness sidebar (syncs live to both Desktop and Mobile): create/rename/delete/reorder custom folders, assign sessions to folders (by folderId or folderName — auto-creates if missing), move sessions between native harness sections, pin/unpin, rename, tag, or hide sessions.',
     inputSchema: {
       type: 'object',
       required: ['actions'],
@@ -134,7 +134,7 @@ const TOOLS = [
   {
     name: 'sh_update_settings',
     description:
-      'Update Super Harness settings such as sidebarGroupBy (native|folders|project|harness|recent), pollIntervalMs, maxSessionsPerHarness, showArchived, or enabledHarnesses.',
+      'Update Superharness settings such as sidebarGroupBy (native|folders|project|harness|recent), pollIntervalMs, maxSessionsPerHarness, showArchived, or enabledHarnesses.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -161,7 +161,7 @@ const TOOLS = [
   {
     name: 'sh_update_session',
     description:
-      "Change one session's model, reasoning effort and/or permission mode. Returns a per-field status: applied (in effect now), next_message (Super Harness applies it on the next message it sends), needs_restart (pass restart:true to restart the live terminal process; the conversation resumes), unsupported, invalid (detail lists valid values) or failed. Support by harness: Claude Desktop/CLI sessions — all three, on the next message. Claude in tmux — permission mode switches live (Shift+Tab, verified); model and effort need restart:true (typing /model or /effort would also change the user's global defaults). Codex — all three on the next turn; permission presets default, read-only, auto (workspace-write sandbox), full-access (no sandbox), with escalation off because Super Harness auto-accepts approvals. Muse — model and effort on the next turn; permission mode unsupported (Super Harness runs Muse turns allow-all). Antigravity — model on the next message; effort and permission mode unsupported. Pi — model (provider/modelId) and thinking level (off, minimal, low, medium, high, xhigh, max) apply immediately when Super Harness hosts the session, otherwise on the next message; unsupported while the session is open in a Pi terminal; permission mode unsupported (Pi has none). Sessions on another machine — unsupported. Aliases like 'bypass', 'yolo', 'full-auto', 'plan', 'sonnet', 'opus' are accepted; an empty string clears the override.",
+      "Change one session's model, reasoning effort and/or permission mode. Returns a per-field status: applied (in effect now), next_message (Superharness applies it on the next message it sends), needs_restart (pass restart:true to restart the live terminal process; the conversation resumes), unsupported, invalid (detail lists valid values) or failed. Support by harness: Claude Desktop/CLI sessions — all three, on the next message. Claude in tmux — permission mode switches live (Shift+Tab, verified); model and effort need restart:true (typing /model or /effort would also change the user's global defaults). Codex — all three on the next turn; permission presets default, read-only, auto (workspace-write sandbox), full-access (no sandbox), with escalation off because Superharness auto-accepts approvals. Muse — model and effort on the next turn; permission mode unsupported (Superharness runs Muse turns allow-all). Antigravity — model on the next message; effort and permission mode unsupported. Pi — model (provider/modelId) and thinking level (off, minimal, low, medium, high, xhigh, max) apply immediately when Superharness hosts the session, otherwise on the next message; unsupported while the session is open in a Pi terminal; permission mode unsupported (Pi has none). Sessions on another machine — unsupported. Aliases like 'bypass', 'yolo', 'full-auto', 'plan', 'sonnet', 'opus' are accepted; an empty string clears the override.",
     inputSchema: {
       type: 'object',
       required: ['sessionId'],
@@ -199,7 +199,7 @@ const TOOLS = [
   {
     name: 'sh_restart_app',
     description:
-      'Safely restart Super Harness via a detached watchdog (optionally running npm run build first) so the app comes back cleanly without dying mid-shutdown.',
+      'Safely restart Superharness via a detached watchdog (optionally running npm run build first) so the app comes back cleanly without dying mid-shutdown.',
     inputSchema: {
       type: 'object',
       properties: {

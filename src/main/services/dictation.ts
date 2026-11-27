@@ -152,7 +152,7 @@ export async function transcribeAudio(
   opts: { language?: string; prompt?: string } = {}
 ): Promise<DictationResult & { ok: true; text: string; timing: { upstreamMs: number } }> {
   if (!isDictationConfigured(cfg)) {
-    throw new DictationError('Dictation is not set up. Add a server in Super Harness Settings → Dictation.', 503);
+    throw new DictationError('Dictation is not set up. Add a server in Superharness Settings → Dictation.', 503);
   }
   if (audio.length === 0) throw new DictationError('Empty audio payload', 400);
   const base = normalizeDictationBaseUrl(cfg.baseUrl);

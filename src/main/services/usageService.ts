@@ -466,7 +466,7 @@ const MUSE_QUOTA_SAMPLE_MAX_AGE_MS = 14 * DAY_MS;
 
 /**
  * Appends a Muse quota sample to the persisted history (throttled to one
- * per 10 min unless a percentage changed, pruned to 14 days). Super Harness
+ * per 10 min unless a percentage changed, pruned to 14 days). Superharness
  * builds this history itself — Muse exposes no quota history file like
  * Claude Desktop's plan-usage-history — so "+N% today" appears once the app
  * has sampled across a day boundary. Returns the same array reference when

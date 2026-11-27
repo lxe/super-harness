@@ -78,7 +78,7 @@ describe('buildClaudeControlResponse (Desktop SDK shapes, verified in app.asar)'
       response: {
         subtype: 'error',
         request_id: 'req-1',
-        error: 'Super Harness does not handle hook_callback',
+        error: 'Superharness does not handle hook_callback',
       },
     });
   });

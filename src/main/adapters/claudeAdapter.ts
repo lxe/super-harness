@@ -528,7 +528,7 @@ export function pickClaudeTitle(parts: {
 }
 
 /**
- * Sessions Super Harness just launched in tmux but Claude has not yet registered in
+ * Sessions Superharness just launched in tmux but Claude has not yet registered in
  * ~/.claude/sessions. Discovery reports them right away so a new thread appears once
  * and stays put, instead of popping in and out while Claude starts up.
  */
@@ -2191,7 +2191,7 @@ export function createClaudeDriver(): HarnessDriver {
       const liveTmux = session.dispatchMode === 'tmux-send' && Boolean(session.tmuxTarget);
       if (!liveTmux) {
         const next =
-          'Applies when Super Harness next sends a message to this session (live set_model / set_permission_mode on its Claude process, or resume flags). The Claude Desktop app\'s own picker is not changed.';
+          'Applies when Superharness next sends a message to this session (live set_model / set_permission_mode on its Claude process, or resume flags). The Claude Desktop app\'s own picker is not changed.';
         return resultsFor(change, (field) =>
           bad[field] ?? { status: 'next_message', value: norm[field] ?? '', detail: next }
         );

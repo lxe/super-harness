@@ -714,7 +714,7 @@ export class MuseMspConnection {
         {
           clientInfo: {
             name: isValidMspClientName(name) ? name : 'super_harness',
-            title: 'Super Harness',
+            title: 'Superharness',
             version: this.opts.clientVersion ?? '0.1.0',
           },
           capabilities: { experimentalApi: false, userInputDialogs: false },
@@ -755,7 +755,7 @@ export class MuseMspConnection {
       excludeItems: true,
     });
     this.resumedSessions.add(nativeSessionId);
-    // Super Harness has no approval UI on this lane yet; match the other
+    // Superharness has no approval UI on this lane yet; match the other
     // dispatched harnesses' posture instead of blocking on a prompt nobody
     // can answer. Best-effort: older hosts may reject, turn still proceeds.
     try {

@@ -1495,7 +1495,7 @@ public struct SHThinkingEffortSlider: View {
                             Circle()
                                 .strokeBorder(Color.black.opacity(0.16), lineWidth: 0.5)
                         )
-                        .shadow(color: Color.black.opacity(0.42), radius: 3.5, y: 1.5)
+                        .shadow(color: Color.black.opacity(0.22), radius: 2, y: 1)
                         .position(x: thumbX, y: trackHeight / 2)
                         .animation(.spring(response: 0.22, dampingFraction: 0.86), value: idx)
                 }
@@ -1784,7 +1784,8 @@ struct SHModelEffortMenu: View, Equatable {
         ) {
             popoverContent
                 .presentationCompactAdaptation(.popover)
-                .presentationBackground(SHColor.surfacePopover)
+                // No presentationBackground: the system's glass fills the panel and its arrow alike,
+                // so the two read as one shape.
         }
         .onChange(of: isPopoverPresented) { _, presented in
             if !presented {
@@ -1801,7 +1802,7 @@ struct SHModelEffortMenu: View, Equatable {
         let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight + 10, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
-        let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12 + 1)
+        let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12)
         // The model list needs no heading; a little space separates it from the Thinking section.
         let modelHeaderHeight: CGFloat = 6
         let totalHeight = thinkingSectionHeight + modelHeaderHeight + listHeight
@@ -1821,10 +1822,6 @@ struct SHModelEffortMenu: View, Equatable {
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 12)
-
-                Rectangle()
-                    .fill(SHColor.lineHairline)
-                    .frame(height: 1)
             }
 
             VStack(alignment: .leading, spacing: 0) {

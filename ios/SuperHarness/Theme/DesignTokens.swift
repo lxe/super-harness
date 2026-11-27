@@ -427,16 +427,19 @@ public extension View {
     func shPressedControl<S: InsettableShape>(_ fill: Color, in shape: S) -> some View {
         self
             .background(
+                // A shade darker than the raised fill, with a clear shadow cast under the top edge,
+                // so the control reads as pushed into the panel rather than flat.
                 shape.fill(
-                    fill.shadow(.inner(color: .black.opacity(0.22), radius: 1.25, y: 0.75))
+                    SHColor.surfaceCode
+                        .shadow(.inner(color: .black.opacity(0.55), radius: 2, y: 1.5))
                 )
             )
             .overlay {
                 shape
                     .strokeBorder(
                         LinearGradient(
-                            colors: [.white.opacity(0), .white.opacity(0.035)],
-                            startPoint: .center,
+                            colors: [.black.opacity(0.25), .white.opacity(0), .white.opacity(0.06)],
+                            startPoint: .top,
                             endPoint: .bottom
                         ),
                         lineWidth: 0.5

@@ -1067,6 +1067,75 @@ function parseClaudeImageBlock(
   return null;
 }
 
+const CLAUDE_VIDEO_MIME_BY_EXT: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+};
+
+const CLAUDE_IMAGE_EXTS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.svg',
+  '.bmp',
+  '.ico',
+]);
+
+/** Converts Claude's `SendUserFile` tool_use input into renderable video/image/notice blocks. */
+export function buildClaudeSendUserFileBlocks(input: Record<string, unknown>): UnifiedBlock[] {
+  const rawFiles = Array.isArray(input.files)
+    ? input.files
+    : typeof input.file_path === 'string'
+      ? [input.file_path]
+      : typeof input.path === 'string'
+        ? [input.path]
+        : [];
+  const caption = typeof input.caption === 'string' ? input.caption.trim() : '';
+  const out: UnifiedBlock[] = [];
+  for (const entry of rawFiles) {
+    const rawPath =
+      typeof entry === 'string'
+        ? entry.trim()
+        : entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).path === 'string'
+          ? String((entry as Record<string, unknown>).path).trim()
+          : '';
+    if (!rawPath) continue;
+    const resolvedPath = rawPath.startsWith('~/')
+      ? path.join(os.homedir(), rawPath.slice(2))
+      : rawPath;
+    const ext = path.extname(resolvedPath).toLowerCase();
+    const baseName = path.basename(resolvedPath) || resolvedPath;
+    const label = rawFiles.length === 1 && caption ? caption : baseName;
+    if (CLAUDE_VIDEO_MIME_BY_EXT[ext]) {
+      out.push({
+        type: 'video',
+        path: resolvedPath,
+        name: label,
+        mimeType: CLAUDE_VIDEO_MIME_BY_EXT[ext],
+      });
+    } else if (CLAUDE_IMAGE_EXTS.has(ext)) {
+      out.push({
+        type: 'image',
+        path: resolvedPath,
+        name: label,
+      });
+    } else {
+      out.push({
+        type: 'notice',
+        title: baseName,
+        detail: caption ? `${caption}\n${resolvedPath}` : resolvedPath,
+      });
+    }
+  }
+  return out;
+}
+
 export function parseClaudeJsonlLines(
   lines: string[],
   sessionId: string,
@@ -1478,6 +1547,20 @@ export function parseClaudeJsonlLines(
             };
             blocks.push(cmdBlock);
             if (toolUseId) toolBlockById.set(toolUseId, cmdBlock);
+          } else if (name === 'SendUserFile') {
+            const fileBlocks = buildClaudeSendUserFileBlocks(input);
+            if (fileBlocks.length > 0) {
+              blocks.push(...fileBlocks);
+            } else {
+              const tcBlock: UnifiedBlock = {
+                type: 'tool_call',
+                name,
+                args: JSON.stringify(input, null, 2).slice(0, 4000),
+                status: 'completed',
+              };
+              blocks.push(tcBlock);
+              if (toolUseId) toolBlockById.set(toolUseId, tcBlock);
+            }
           } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
             const filePath = String(input.file_path ?? input.path ?? 'file');
             const diff =
@@ -1732,6 +1815,11 @@ export function parseClaudeStreamLine(
                 status: 'running',
               },
             });
+          } else if (name === 'SendUserFile') {
+            const fileBlocks = buildClaudeSendUserFileBlocks(input);
+            for (const block of fileBlocks) {
+              emitStream({ sessionId, runId, kind: 'block', block });
+            }
           } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
             const filePath = String(input.file_path ?? input.path ?? 'file');
             emitStream({

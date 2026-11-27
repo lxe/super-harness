@@ -185,6 +185,8 @@ const MEDIA_MIME_TYPES: Record<string, string> = {
   '.m4v': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
 };
 
 /**
@@ -754,9 +756,35 @@ export class ControlServer {
             }
           }
 
+          const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+          if (rangeHeader) {
+            const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+            if (match) {
+              const fileSize = stat.size;
+              const start = match[1] ? Number(match[1]) : 0;
+              const end = match[2] ? Math.min(Number(match[2]), fileSize - 1) : fileSize - 1;
+              if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && start < fileSize && start <= end) {
+                const chunkSize = end - start + 1;
+                res.writeHead(206, {
+                  'Content-Type': contentType,
+                  'Content-Length': String(chunkSize),
+                  'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                  'Accept-Ranges': 'bytes',
+                  'Cache-Control': 'private, max-age=300',
+                });
+                fs.createReadStream(filePath, { start, end }).pipe(res);
+                return;
+              }
+              res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+              res.end();
+              return;
+            }
+          }
+
           res.writeHead(200, {
             'Content-Type': contentType,
             'Content-Length': String(stat.size),
+            'Accept-Ranges': 'bytes',
             // Transcoding was wanted but failed (often a damaged or partial image): don't let
             // clients cache this body.
             'Cache-Control': shouldCompressWebp ? 'no-store' : 'private, max-age=300',

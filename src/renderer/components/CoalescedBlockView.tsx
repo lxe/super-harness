@@ -488,17 +488,22 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
     const src = mediaUrlForPath(block.path);
     const label = block.name || block.path.split('/').pop() || 'Video attachment';
     return (
-      <div className="my-2 max-w-md rounded-xl overflow-hidden border border-line-subtle bg-black/50">
+      <div className="my-2 max-w-lg rounded-xl overflow-hidden border border-line-subtle bg-black/50">
         <video
           src={src}
           controls
           preload="metadata"
           playsInline
-          className="w-full max-h-72 block bg-black"
+          className="w-full max-h-80 block bg-black"
         />
-        <div className="px-3 py-1.5 text-micro text-ink-muted truncate border-t border-line-hairline">
+        <button
+          type="button"
+          onClick={() => onOpenPath?.(block.path)}
+          title={block.path}
+          className="w-full text-left px-3 py-1.5 text-micro text-ink-muted hover:text-ink-primary hover:bg-white/[0.04] truncate border-t border-line-hairline transition-colors cursor-pointer"
+        >
           {label}
-        </div>
+        </button>
       </div>
     );
   }

@@ -629,7 +629,7 @@ private struct SHMarkdownBlockListView: View {
             inlineText(content)
                 .font(metrics.body)
                 .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                .lineSpacing(metrics.lineSpacing(3))
+                .lineSpacing(metrics.lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
 
         case .codeBlock(_, let language, let code):
@@ -647,7 +647,7 @@ private struct SHMarkdownBlockListView: View {
                 }
 
         case .unorderedList(_, let items):
-            VStack(alignment: .leading, spacing: 5 + metrics.density.extraLineSpacing) {
+            VStack(alignment: .leading, spacing: metrics.listItemGap) {
                 ForEach(items) { item in
                     HStack(alignment: .top, spacing: 7) {
                         if let checked = item.taskChecked {
@@ -664,7 +664,7 @@ private struct SHMarkdownBlockListView: View {
                         inlineText(item.text)
                             .font(metrics.body)
                             .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                            .lineSpacing(metrics.lineSpacing(2.5))
+                            .lineSpacing(metrics.lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.indentLevel) * 16)
@@ -672,7 +672,7 @@ private struct SHMarkdownBlockListView: View {
             }
 
         case .orderedList(_, let items):
-            VStack(alignment: .leading, spacing: 5 + metrics.density.extraLineSpacing) {
+            VStack(alignment: .leading, spacing: metrics.listItemGap) {
                 ForEach(items) { item in
                     HStack(alignment: .top, spacing: 6) {
                         Text("\(item.ordinal ?? 1).")
@@ -682,7 +682,7 @@ private struct SHMarkdownBlockListView: View {
                         inlineText(item.text)
                             .font(metrics.body)
                             .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                            .lineSpacing(metrics.lineSpacing(2.5))
+                            .lineSpacing(metrics.lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.indentLevel) * 16)

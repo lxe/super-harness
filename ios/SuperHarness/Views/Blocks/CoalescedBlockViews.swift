@@ -107,12 +107,6 @@ public struct CollapsedTraceGroupView: View, Equatable {
                 }
                 .padding(.top, 2)
                 .padding(.leading, 10)
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(SHColor.lineHairline)
-                        .frame(width: 1.5)
-                        .padding(.vertical, 2)
-                }
             }
         }
     }

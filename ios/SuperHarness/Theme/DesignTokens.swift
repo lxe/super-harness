@@ -457,19 +457,34 @@ public enum ChatDensity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var extraLineSpacing: CGFloat {
+    // The three gaps form a clear ladder at every density: lines inside a paragraph or list
+    // item are closest, list items are further apart, and paragraphs further still, so the
+    // eye can tell a wrapped line from a new item from a new paragraph.
+
+    /// Extra space between wrapped lines of the same paragraph or list item.
+    var lineSpacing: CGFloat {
         switch self {
-        case .compact: return 0
-        case .comfortable: return 2
-        case .spacious: return 4
+        case .compact: return 2.5
+        case .comfortable: return 3.5
+        case .spacious: return 5
         }
     }
 
+    /// Space between one list item and the next.
+    var listItemGap: CGFloat {
+        switch self {
+        case .compact: return 6
+        case .comfortable: return 9
+        case .spacious: return 12
+        }
+    }
+
+    /// Space between paragraphs and other blocks inside a message.
     var blockGap: CGFloat {
         switch self {
-        case .compact: return 8
-        case .comfortable: return 11
-        case .spacious: return 15
+        case .compact: return 10
+        case .comfortable: return 14
+        case .spacious: return 19
         }
     }
 
@@ -493,13 +508,10 @@ public struct SHChatMetrics: Equatable, Sendable {
     }
 
     public var scale: CGFloat { textSize.scale }
-    public var blockGap: CGFloat { density.blockGap }
+    public var blockGap: CGFloat { density.blockGap * scale }
     public var messageGap: CGFloat { density.messageGap }
-
-    /// Line spacing for running text; `base` is the spacing at the compact density.
-    public func lineSpacing(_ base: CGFloat) -> CGFloat {
-        (base + density.extraLineSpacing) * scale
-    }
+    public var lineSpacing: CGFloat { density.lineSpacing * scale }
+    public var listItemGap: CGFloat { density.listItemGap * scale }
 
     public func font(_ size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
         .system(size: size * scale, weight: weight, design: design)

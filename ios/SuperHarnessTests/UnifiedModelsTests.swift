@@ -973,9 +973,14 @@ final class UnifiedModelsTests: XCTestCase {
         store.chatTextSize = .extraLarge
         store.chatDensity = .compact
         XCTAssertEqual(store.chatMetrics.scale, 1.22)
-        XCTAssertEqual(store.chatMetrics.blockGap, 8)
         XCTAssertEqual(store.chatMetrics.messageGap, 16)
-        XCTAssertEqual(store.chatMetrics.lineSpacing(3), 3 * 1.22, accuracy: 0.001)
+        XCTAssertEqual(store.chatMetrics.lineSpacing, 2.5 * 1.22, accuracy: 0.001)
+        // At every density: lines are closer than list items, and list items closer than paragraphs.
+        for density in ChatDensity.allCases {
+            let metrics = SHChatMetrics(textSize: .standard, density: density)
+            XCTAssertLessThan(metrics.lineSpacing * 2, metrics.listItemGap)
+            XCTAssertLessThan(metrics.listItemGap, metrics.blockGap)
+        }
 
         let reopened = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
         defer { reopened.stopEventStream() }

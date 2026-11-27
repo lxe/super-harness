@@ -239,7 +239,81 @@ function findClaudeTranscriptPath(cliSessionId: string, cwd?: string): string | 
 interface ClaudeActivityResult {
   working: boolean;
   mtimeMs: number;
+  /** Timestamp (ms) of the newest actual user/assistant conversation record in the JSONL. */
+  lastMessageMs?: number;
   activeTool?: string;
+}
+
+const lastMsgTsCache = new Map<string, { size: number; mtimeMs: number; lastMessageMs: number }>();
+
+/**
+ * Finds the timestamp (ms) of the newest real `user` or `assistant` conversation record
+ * in a Claude `.jsonl` transcript, ignoring background housekeeping lines Claude appends
+ * while idle (`permission-mode`, `session-owner`, `atis-latch`, `bridge-session`,
+ * `cost-state`, `last-prompt`, etc.) that bump the file's mtime without real chat activity.
+ */
+export function readLastClaudeMessageMs(transcriptPath: string, preStat?: fs.Stats): number {
+  let st: fs.Stats;
+  try {
+    st = preStat ?? fs.statSync(transcriptPath);
+  } catch {
+    return 0;
+  }
+  const cached = lastMsgTsCache.get(transcriptPath);
+  if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) {
+    return cached.lastMessageMs;
+  }
+
+  let found = 0;
+  const windows = [32 * 1024, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024];
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(transcriptPath, 'r');
+    for (const win of windows) {
+      const readLen = Math.min(st.size, win);
+      if (readLen <= 0) break;
+      const offset = st.size - readLen;
+      const buf = Buffer.allocUnsafe(readLen);
+      const bytesRead = fs.readSync(fd, buf, 0, readLen, offset);
+      const text = buf.subarray(0, bytesRead).toString('utf8');
+      const lines = text.split('\n');
+      const startIdx = offset > 0 ? 1 : 0;
+      for (let i = lines.length - 1; i >= startIdx; i--) {
+        const line = lines[i];
+        if (!line || (!line.includes('"user"') && !line.includes('"assistant"'))) continue;
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (obj.type !== 'user' && obj.type !== 'assistant') continue;
+        if (obj.isSidechain === true || obj.isMeta === true || obj.isCompactSummary === true) {
+          continue;
+        }
+        const ts = normalizeTimestamp(obj.timestamp as string | number | undefined);
+        if (ts > 0) {
+          found = ts;
+          break;
+        }
+      }
+      if (found > 0 || readLen >= st.size) break;
+    }
+  } catch {
+    // ignore unreadable file
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (lastMsgTsCache.size > 400) lastMsgTsCache.clear();
+  lastMsgTsCache.set(transcriptPath, { size: st.size, mtimeMs: st.mtimeMs, lastMessageMs: found });
+  return found;
 }
 
 function isClaudeLocalCommandText(text: string): boolean {
@@ -268,17 +342,19 @@ function inspectClaudeTranscriptActivity(
   transcriptPath: string | undefined,
   isLivePid: boolean
 ): ClaudeActivityResult {
-  if (!transcriptPath) return { working: false, mtimeMs: 0 };
+  if (!transcriptPath) return { working: false, mtimeMs: 0, lastMessageMs: 0 };
   let st: fs.Stats;
   try {
     st = fs.statSync(transcriptPath);
   } catch {
-    return { working: false, mtimeMs: 0 };
+    return { working: false, mtimeMs: 0, lastMessageMs: 0 };
   }
 
+  const lastMessageMs = readLastClaudeMessageMs(transcriptPath, st);
   const ageMs = Date.now() - st.mtimeMs;
-  if (ageMs > 15 * 60 * 1000) {
-    return { working: false, mtimeMs: st.mtimeMs };
+  const msgAgeMs = lastMessageMs > 0 ? Math.max(0, Date.now() - lastMessageMs) : ageMs;
+  if (ageMs > 15 * 60 * 1000 || msgAgeMs > 15 * 60 * 1000) {
+    return { working: false, mtimeMs: st.mtimeMs, lastMessageMs };
   }
 
   try {
@@ -390,12 +466,12 @@ function inspectClaudeTranscriptActivity(
     const maxToolAge = isLivePid ? 15 * 60 * 1000 : 5 * 60 * 1000;
 
     const working =
-      (hasPendingTool && ageMs < maxToolAge) ||
-      (turnState === 'working' && ageMs < maxIdleAge);
+      (hasPendingTool && msgAgeMs < maxToolAge) ||
+      (turnState === 'working' && msgAgeMs < maxIdleAge);
 
-    return { working, mtimeMs: st.mtimeMs, activeTool };
+    return { working, mtimeMs: st.mtimeMs, lastMessageMs, activeTool };
   } catch {
-    return { working: false, mtimeMs: st.mtimeMs };
+    return { working: false, mtimeMs: st.mtimeMs, lastMessageMs };
   }
 }
 
@@ -758,11 +834,14 @@ export async function detectClaude(
           data.status === 'busy' ||
           busySessionIds.has(data.sessionId) ||
           activity.working;
-        const updatedAt = Math.max(
-          normalizeTimestamp(data.updatedAt ?? data.startedAt),
-          normalizeTimestamp(desktopMatch?.data.lastActivityAt ?? 0),
-          activity.mtimeMs
-        );
+        const updatedAt =
+          (activity.lastMessageMs ?? 0) > 0
+            ? activity.lastMessageMs!
+            : Math.max(
+                normalizeTimestamp(data.startedAt),
+                normalizeTimestamp(desktopMatch?.data.lastActivityAt ?? 0),
+                activity.mtimeMs
+              );
 
         liveTmuxSessions.push({
           // Canonical ID across all Claude variants so resuming/exiting a CLI process never changes session.id
@@ -830,10 +909,13 @@ export async function detectClaude(
     const isStarred = nativeSec.starredLocalIds.has(localId);
     const activity = inspectClaudeTranscriptActivity(transcriptPath, desktopRunning);
     const isRunning = !data.isArchived && activity.working;
-    const updatedAt = Math.max(
-      normalizeTimestamp(data.lastActivityAt ?? item.mtime),
-      activity.mtimeMs
-    );
+    const updatedAt =
+      (activity.lastMessageMs ?? 0) > 0
+        ? activity.lastMessageMs!
+        : Math.max(
+            normalizeTimestamp(data.lastActivityAt ?? item.mtime),
+            activity.mtimeMs
+          );
 
     desktopSessions.push({
       id: `claude:${cliId}`,
@@ -933,7 +1015,7 @@ export async function detectClaude(
         isRemote: false,
         transcriptPath: jf.file,
         createdAt: jf.mtime,
-        updatedAt: jf.mtime,
+        updatedAt: (activity.lastMessageMs ?? 0) > 0 ? activity.lastMessageMs! : jf.mtime,
         pinned: false,
         folderId: null,
         tags: ['cli'],

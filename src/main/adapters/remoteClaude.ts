@@ -44,6 +44,7 @@ interface RemoteClaudeEntry {
   transcriptPath?: string;
   size?: number;
   mtimeMs?: number;
+  lastMessageMs?: number;
   customTitle?: string;
   aiTitle?: string;
   lastPrompt?: string;
@@ -148,6 +149,7 @@ const REMOTE_PATH = 'export PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.local/b
 /** Lists live Claude sessions on the remote machine as one JSON array. */
 const DISCOVERY_SCRIPT = String.raw`
 import json, os, glob
+from datetime import datetime
 home = os.path.expanduser('~')
 out = []
 for f in glob.glob(home + '/.claude/sessions/*.json'):
@@ -181,7 +183,29 @@ for f in glob.glob(home + '/.claude/sessions/*.json'):
                 e['preview'] = m['content'][:200]
             if o.get('type') == 'assistant' and 'model' not in e and m.get('model'):
                 e['model'] = m['model']
-        for line in tail.split('\n'):
+        tail_lines = tail.split('\n')
+        for line in reversed(tail_lines):
+            if '"user"' not in line and '"assistant"' not in line:
+                continue
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            if o.get('type') not in ('user', 'assistant'):
+                continue
+            if o.get('isSidechain') or o.get('isMeta') or o.get('isCompactSummary'):
+                continue
+            ts = o.get('timestamp')
+            if isinstance(ts, str) and ts:
+                try:
+                    e['lastMessageMs'] = int(datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp() * 1000)
+                    break
+                except Exception:
+                    pass
+            elif isinstance(ts, (int, float)) and ts > 0:
+                e['lastMessageMs'] = int(ts if ts > 1e11 else ts * 1000)
+                break
+        for line in tail_lines:
             if '"last-prompt"' in line:
                 try:
                     o = json.loads(line)
@@ -271,7 +295,9 @@ export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
       preview: e.preview?.replace(/\s+/g, ' ').trim(),
     }) || `Claude on ${e.label}`).slice(0, 90);
   const running = e.status === 'busy' || e.status === 'running';
-  const updatedAt = Math.max(e.mtimeMs ?? 0, e.startedAt ?? 0);
+  const updatedAt = e.lastMessageMs
+    ? e.lastMessageMs
+    : Math.max(e.mtimeMs ?? 0, e.startedAt ?? 0);
   return {
     id: `claude:${e.sessionId}`,
     nativeId: e.sessionId,

@@ -443,7 +443,6 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                               <MenuItem
                                 key={lvl}
                                 active={isSelected}
-                                title={hint || undefined}
                                 onClick={() => handleSelectThinking(lvl)}
                                 rightSlot={
                                   <span className="inline-flex items-center gap-1.5 shrink-0">

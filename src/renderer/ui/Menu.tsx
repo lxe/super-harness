@@ -155,7 +155,7 @@ export const MenuItem: React.FC<MenuItemProps> = ({
       <button
         type={type}
         className={cn(
-          'w-full h-8 flex items-center gap-2 px-2.5 rounded-lg text-left text-caption transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:shadow-none',
+          'w-full min-h-8 py-1.5 flex items-center gap-2 px-2.5 rounded-lg text-left text-caption transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:shadow-none',
           toneCls,
           className
         )}

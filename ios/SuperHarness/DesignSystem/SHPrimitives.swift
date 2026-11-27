@@ -218,8 +218,9 @@ public struct SHAttachmentThumbStrip: View {
     }
 
     public var body: some View {
+        let hasRemove = onRemove != nil
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: hasRemove ? 12 : 8) {
                 ForEach(items) { item in
                     SHAttachmentThumbTile(
                         item: item,
@@ -230,7 +231,10 @@ public struct SHAttachmentThumbStrip: View {
                     )
                 }
             }
-            .padding(.vertical, 2)
+            .padding(.top, hasRemove ? 10 : 2)
+            .padding(.bottom, hasRemove ? 4 : 2)
+            .padding(.leading, hasRemove ? 2 : 0)
+            .padding(.trailing, hasRemove ? 10 : 0)
         }
     }
 }
@@ -263,14 +267,37 @@ private struct SHAttachmentThumbTile: View {
                 Button {
                     onRemove(item.id)
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(SHColor.inkPrimary, SHColor.surfaceRail)
+                    ZStack {
+                        Circle()
+                            .fill(
+                                SHColor.surfaceBubble
+                                    .shadow(.inner(color: .white.opacity(0.16), radius: 0.5, y: 0.75))
+                            )
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.24), .white.opacity(0.06)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        ),
+                                        lineWidth: 0.75
+                                    )
+                            )
+                            .shadow(color: Color.black.opacity(0.55), radius: 3.5, x: 0, y: 1.5)
+                            .frame(width: 20, height: 20)
+
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(SHColor.inkPrimary)
+                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .offset(x: 5, y: -5)
+                .offset(x: 10, y: -10)
                 .accessibilityLabel("Remove \(item.name)")
+                .accessibilityIdentifier("attachment.remove.\(item.id)")
             }
         }
         .task(id: item.path) {

@@ -1066,7 +1066,12 @@ export class ControlServer {
           const sessionId = String(body.sessionId || '');
           const killTmux = Boolean(body.killTmux);
           const result = await this.dispatcher.archiveSession(sessionId, { killTmux });
-          await this.triggerRefresh();
+          console.log(
+            `[ControlServer] /api/archive session=${sessionId} ok=${result.ok} method=${result.method ?? 'none'}`
+          );
+          // State is already persisted synchronously inside dispatcher.archiveSession;
+          // reply immediately so slow remote-host refreshes cannot time out mobile clients.
+          void this.triggerRefresh();
           sendJson(result);
           return;
         }

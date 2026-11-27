@@ -229,6 +229,16 @@ public final class AppStore {
     @ObservationIgnored private var modelOverrideGeneration: UInt64 = 0
     @ObservationIgnored private var pendingModelSyncTasks: [String: Task<Void, Never>] = [:]
 
+    // MARK: - Optimistic Archive / Hide Reconciliation
+    struct PendingArchiveOverride: Equatable {
+        let markArchived: Bool
+        let createdAt: Date
+        var acknowledgedAt: Date?
+        var serverAcknowledged: Bool
+    }
+    static let archiveOverrideGraceSeconds: TimeInterval = 15.0
+    @ObservationIgnored var pendingArchivedSessionIds: [String: PendingArchiveOverride] = [:]
+
     /// A desktop address and a token are both stored. A store built around an injected client
     /// (tests, previews) counts as paired until it is unpaired.
     public var isPaired: Bool {
@@ -1362,6 +1372,11 @@ public final class AppStore {
         )
 
         if !removedSet.isEmpty {
+            for removedId in removedSet {
+                if pendingArchivedSessionIds[removedId]?.serverAcknowledged == true {
+                    pendingArchivedSessionIds.removeValue(forKey: removedId)
+                }
+            }
             nextSessions.removeAll { removedSet.contains($0.id) }
             indexById = Dictionary(
                 uniqueKeysWithValues: nextSessions.enumerated().map { ($0.element.id, $0.offset) }
@@ -2948,23 +2963,61 @@ public final class AppStore {
     }
 
     public func archiveSession(_ session: UnifiedSession) async {
+        let prevStatus = session.status
+        let prevHidden = session.hidden
+        let prevIsLive = session.isLive
+        pendingArchivedSessionIds[session.id] = PendingArchiveOverride(
+            markArchived: true,
+            createdAt: Date(),
+            acknowledgedAt: nil,
+            serverAcknowledged: false
+        )
         mutateSession(session.id) {
             $0.status = .archived
+            $0.hidden = true
             $0.isLive = false
         }
         let wasActive = selectedSessionId == session.id || detailRoute == .session(session.id)
         if wasActive {
             selectedSessionId = nil
             detailRoute = nil
-            await client.watchSession(sessionId: nil, limit: 80)
+            // Stop watching in the background so it never delays or blocks the archive request.
+            Task { [client] in
+                await client.watchSession(sessionId: nil, limit: 80)
+            }
         }
         do {
-            _ = try await client.archiveSession(sessionId: session.id, killTmux: false)
+            let res = try await client.archiveSession(sessionId: session.id, killTmux: false)
+            if !res.ok {
+                // Fall back to explicit local hide when host archive reports failure.
+                _ = try await client.organize(actions: [OrganizeAction(type: .hideSession, sessionId: session.id)])
+            }
+            if var pending = pendingArchivedSessionIds[session.id] {
+                pending.serverAcknowledged = true
+                pending.acknowledgedAt = Date()
+                pendingArchivedSessionIds[session.id] = pending
+            }
             mutateSession(session.id) {
                 $0.status = .archived
+                $0.hidden = true
                 $0.isLive = false
             }
         } catch {
+            // Best-effort hide fallback before giving up and reverting.
+            if (try? await client.organize(actions: [OrganizeAction(type: .hideSession, sessionId: session.id)])) != nil {
+                if var pending = pendingArchivedSessionIds[session.id] {
+                    pending.serverAcknowledged = true
+                    pending.acknowledgedAt = Date()
+                    pendingArchivedSessionIds[session.id] = pending
+                }
+                return
+            }
+            pendingArchivedSessionIds.removeValue(forKey: session.id)
+            mutateSession(session.id) {
+                $0.status = prevStatus
+                $0.hidden = prevHidden
+                $0.isLive = prevIsLive
+            }
             reportError(error)
         }
     }
@@ -2972,17 +3025,38 @@ public final class AppStore {
     public func toggleHideSession(_ session: UnifiedSession) async {
         let nextHidden = !session.hidden
         let actionType: OrganizeAction.ActionType = nextHidden ? .hideSession : .unhideSession
+        if nextHidden {
+            pendingArchivedSessionIds[session.id] = PendingArchiveOverride(
+                markArchived: false,
+                createdAt: Date(),
+                acknowledgedAt: nil,
+                serverAcknowledged: false
+            )
+        } else {
+            pendingArchivedSessionIds.removeValue(forKey: session.id)
+        }
         mutateSession(session.id) { $0.hidden = nextHidden }
         let wasActive = selectedSessionId == session.id || detailRoute == .session(session.id)
         if wasActive && nextHidden && !showHidden {
             selectedSessionId = nil
             detailRoute = nil
-            await client.watchSession(sessionId: nil, limit: 80)
+            Task { [client] in
+                await client.watchSession(sessionId: nil, limit: 80)
+            }
         }
         do {
             _ = try await client.organize(actions: [OrganizeAction(type: actionType, sessionId: session.id)])
+            if nextHidden, var pending = pendingArchivedSessionIds[session.id] {
+                pending.serverAcknowledged = true
+                pending.acknowledgedAt = Date()
+                pendingArchivedSessionIds[session.id] = pending
+            }
             mutateSession(session.id) { $0.hidden = nextHidden }
         } catch {
+            if nextHidden {
+                pendingArchivedSessionIds.removeValue(forKey: session.id)
+            }
+            mutateSession(session.id) { $0.hidden = !nextHidden }
             reportError(error)
         }
     }
@@ -2996,46 +3070,73 @@ public final class AppStore {
         }
     }
 
-    /// Preserves in-flight or freshly acknowledged local model/effort commits across incoming
-    /// bootstrap/SSE snapshots so stale server state never flashes the UI back to the prior value.
+    /// Preserves in-flight or freshly acknowledged local model/effort and archive/hide commits across
+    /// incoming bootstrap/SSE snapshots so stale server state never flashes the UI back to the prior value.
     func reconcilePendingModelOverrides(on incoming: [UnifiedSession], now: Date = Date()) -> [UnifiedSession] {
-        guard !pendingModelOverrides.isEmpty else { return incoming }
+        if !pendingArchivedSessionIds.isEmpty {
+            let incomingIds = Set(incoming.map(\.id))
+            for (sid, pending) in pendingArchivedSessionIds where pending.serverAcknowledged && !incomingIds.contains(sid) {
+                pendingArchivedSessionIds.removeValue(forKey: sid)
+            }
+        }
+        guard !pendingModelOverrides.isEmpty || !pendingArchivedSessionIds.isEmpty else { return incoming }
         return incoming.map { reconcilePendingModelOverride(on: $0, now: now) }
     }
 
     func reconcilePendingModelOverride(on incoming: UnifiedSession, now: Date = Date()) -> UnifiedSession {
-        guard let pending = pendingModelOverrides[incoming.id] else { return incoming }
+        var result = incoming
+
+        if let pendingArchive = pendingArchivedSessionIds[result.id] {
+            let alreadyApplied = result.hidden || (pendingArchive.markArchived && result.status == .archived)
+            if alreadyApplied && pendingArchive.serverAcknowledged {
+                pendingArchivedSessionIds.removeValue(forKey: result.id)
+            } else {
+                let referenceDate = pendingArchive.acknowledgedAt ?? pendingArchive.createdAt
+                let withinGrace = !pendingArchive.serverAcknowledged
+                    || now.timeIntervalSince(referenceDate) < Self.archiveOverrideGraceSeconds
+                if withinGrace {
+                    result.hidden = true
+                    if pendingArchive.markArchived {
+                        result.status = .archived
+                        result.isLive = false
+                    }
+                } else {
+                    pendingArchivedSessionIds.removeValue(forKey: result.id)
+                }
+            }
+        }
+
+        guard let pending = pendingModelOverrides[result.id] else { return result }
 
         let modelMatches: Bool = {
             guard let targetModel = pending.model else { return true }
-            return incoming.model?.lowercased() == targetModel.lowercased()
+            return result.model?.lowercased() == targetModel.lowercased()
         }()
         let effortMatches: Bool = {
             guard let targetEffort = pending.reasoningEffort else { return true }
-            return incoming.reasoningEffort?.lowercased() == targetEffort.lowercased()
+            return result.reasoningEffort?.lowercased() == targetEffort.lowercased()
         }()
 
         if modelMatches && effortMatches && pending.serverAcknowledged {
-            pendingModelOverrides.removeValue(forKey: incoming.id)
-            return incoming
+            pendingModelOverrides.removeValue(forKey: result.id)
+            return result
         }
 
         let referenceDate = pending.acknowledgedAt ?? pending.createdAt
         let withinGrace = !pending.serverAcknowledged
             || now.timeIntervalSince(referenceDate) < Self.modelOverrideGraceSeconds
         guard withinGrace else {
-            pendingModelOverrides.removeValue(forKey: incoming.id)
-            return incoming
+            pendingModelOverrides.removeValue(forKey: result.id)
+            return result
         }
 
-        var merged = incoming
         if let targetModel = pending.model {
-            merged.model = targetModel
+            result.model = targetModel
         }
         if let targetEffort = pending.reasoningEffort {
-            merged.reasoningEffort = targetEffort
+            result.reasoningEffort = targetEffort
         }
-        return merged
+        return result
     }
 
     /// Synchronously applies the optimistic model/effort update on `@MainActor` (so closing the
@@ -3407,6 +3508,7 @@ public final class AppStore {
         streamingMessagesBySessionId.removeAll()
         pendingOutgoingBySessionId.removeAll()
         pendingModelOverrides.removeAll()
+        pendingArchivedSessionIds.removeAll()
         for task in pendingModelSyncTasks.values { task.cancel() }
         pendingModelSyncTasks.removeAll()
         hostWorkingSessionIds.removeAll()
@@ -3572,6 +3674,7 @@ public final class AppStore {
         streamingMessagesBySessionId.removeAll()
         pendingOutgoingBySessionId.removeAll()
         pendingModelOverrides.removeAll()
+        pendingArchivedSessionIds.removeAll()
         for task in pendingModelSyncTasks.values { task.cancel() }
         pendingModelSyncTasks.removeAll()
         hostWorkingSessionIds.removeAll()

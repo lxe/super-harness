@@ -406,7 +406,7 @@ public struct ComposerView: View {
                         onRemove: onRemoveAttachment
                     )
                     .padding(.horizontal, 12)
-                    .padding(.top, 10)
+                    .padding(.top, 3)
                     .padding(.bottom, 2)
                 }
 

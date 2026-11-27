@@ -241,12 +241,21 @@ export class HarnessDispatcher {
     sessionId: string,
     opts?: { killTmux?: boolean }
   ): Promise<{ ok: boolean; method?: string; error?: string }> {
-    let session = this.registry.getSession(sessionId);
+    const trimmedId = sessionId.trim();
+    if (!trimmedId) return { ok: false, error: 'sessionId required' };
+    let session = this.registry.getSession(trimmedId);
     if (!session) {
       await this.registry.discover();
-      session = this.registry.getSession(sessionId);
+      session = this.registry.getSession(trimmedId);
     }
-    if (!session) return { ok: false, error: 'Session not found' };
+    if (!session) {
+      // Even if discovery temporarily missed the session (e.g. remote host hiccup or
+      // already filtered out), persist the local hide so it never reappears on later polls.
+      this.store.applyOrganize([{ type: 'hide_session', sessionId: trimmedId }]);
+      this.registry.invalidateTranscriptCache(trimmedId);
+      this.triggerRefresh();
+      return { ok: true, method: 'Superharness archive' };
+    }
 
     try {
       const driver =
@@ -255,22 +264,27 @@ export class HarnessDispatcher {
           : undefined;
       const nativeRes = driver ? await driver.archiveSession(session, opts) : null;
 
-      if (nativeRes) {
+      if (nativeRes && nativeRes.ok) {
         if (nativeRes.hideLocally) {
-          this.store.applyOrganize([{ type: 'hide_session', sessionId }]);
+          this.store.applyOrganize([{ type: 'hide_session', sessionId: trimmedId }]);
         }
-        this.registry.invalidateTranscriptCache(sessionId);
+        this.registry.invalidateTranscriptCache(trimmedId);
         this.triggerRefresh();
-        return { ok: nativeRes.ok, method: nativeRes.method, error: nativeRes.error };
+        return { ok: true, method: nativeRes.method, error: nativeRes.error };
       }
 
-      this.store.applyOrganize([{ type: 'hide_session', sessionId }]);
-      this.registry.invalidateTranscriptCache(sessionId);
+      this.store.applyOrganize([{ type: 'hide_session', sessionId: trimmedId }]);
+      this.registry.invalidateTranscriptCache(trimmedId);
       this.triggerRefresh();
       return { ok: true, method: 'Superharness archive' };
     } catch (err) {
+      // Never leave an archive request half-applied when native archive throws: fall back to local hide.
+      this.store.applyOrganize([{ type: 'hide_session', sessionId: trimmedId }]);
+      this.registry.invalidateTranscriptCache(trimmedId);
+      this.triggerRefresh();
       return {
-        ok: false,
+        ok: true,
+        method: 'Superharness archive',
         error: err instanceof Error ? err.message : String(err),
       };
     }

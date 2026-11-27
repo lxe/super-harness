@@ -1516,4 +1516,43 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(ComposerView.selectedModelStem(model: "", availableModels: models), "claude-opus-5-5")
         XCTAssertNil(ComposerView.selectedModelStem(model: "unknown-model", availableModels: models))
     }
+
+    func testArchiveSessionResistsStalePollsUntilHostConfirmsRemoval() async {
+        let suite = "sh.tests.archivereconcile.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        let target = UnifiedSession(
+            id: "claude:test-archive-1",
+            harness: .claudeTmux,
+            harnessGroup: .claude,
+            title: "Test session",
+            cwd: "/home/alice",
+            projectName: "Home (~)",
+            status: .idle,
+            isLive: true,
+            createdAt: now,
+            updatedAt: now
+        )
+        store.sessions = [target]
+
+        await store.archiveSession(target)
+        XCTAssertEqual(store.sessions.first?.status, .archived)
+        XCTAssertEqual(store.sessions.first?.hidden, true)
+        XCTAssertEqual(store.pendingArchivedSessionIds[target.id]?.serverAcknowledged, true)
+        XCTAssertTrue(store.groupedSections.isEmpty, "Archived session must disappear from groupedSections")
+
+        // A stale SSE delta arriving right after archive must NOT resurrect the session
+        store.applySessionsDelta(SessionsDeltaEnvelope(upserts: [target]))
+        XCTAssertEqual(store.sessions.first?.status, .archived)
+        XCTAssertEqual(store.sessions.first?.hidden, true)
+        XCTAssertTrue(store.groupedSections.isEmpty, "Stale SSE upsert must not resurrect archived session")
+
+        // Once the host removes the session via removedIds, the pending archive guard clears cleanly
+        store.applySessionsDelta(SessionsDeltaEnvelope(removedIds: [target.id]))
+        XCTAssertNil(store.pendingArchivedSessionIds[target.id])
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
 }

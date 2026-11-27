@@ -8,6 +8,7 @@ import {
   Laptop,
   ListFilter,
   MoreHorizontal,
+  Pin,
   Search,
   SquarePen,
   X,
@@ -96,16 +97,9 @@ interface ContextMenuState {
   sectionLabel?: string;
 }
 
-/** Crisp solid-filled 45-degree pushpin icon (clean & legible at 10-12px). */
-const FilledPinIcon: React.FC<{ className?: string }> = ({ className = 'w-3 h-3' }) => (
-  <svg
-    viewBox="0 0 16 16"
-    fill="currentColor"
-    aria-hidden="true"
-    className={`shrink-0 ${className}`}
-  >
-    <path d="M9.828 1.515a.75.75 0 0 1 1.06 0l3.597 3.597a.75.75 0 0 1-.16 1.19l-1.91 1.028a.75.75 0 0 0-.368.472l-.55 2.09a.75.75 0 0 1-1.257.338L7.95 7.94l-4.67 4.67a.65.65 0 0 1-.92-.92l4.67-4.67-2.29-2.29a.75.75 0 0 1 .338-1.257l2.09-.55a.75.75 0 0 0 .472-.368l1.028-1.91a.75.75 0 0 1 .16-.13Z" />
-  </svg>
+/** Small upright pin marking a chat pinned inside its harness (same glyph as the "Pin" menu items). */
+const HarnessPinIcon: React.FC<{ className?: string }> = ({ className = 'w-3 h-3' }) => (
+  <Pin aria-hidden="true" strokeWidth={2.25} className={`shrink-0 ${className}`} />
 );
 
 const PINNED_ORDER_STORAGE_KEY = 'sh:pinnedOrder:v1';
@@ -1213,11 +1207,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
     const leadingIcon = showLogo ? (
       <HarnessLogo harness={s.harness} size={15} />
     ) : showPin ? (
-      <FilledPinIcon className="w-3 h-3 text-ink-muted" />
+      <HarnessPinIcon className="w-3 h-3 text-ink-muted" />
     ) : undefined;
     const titleBadge = showInlinePin ? (
       <span title="Pinned in harness" className="text-ink-muted">
-        <FilledPinIcon className="w-2.5 h-2.5" />
+        <HarnessPinIcon className="w-3 h-3" />
       </span>
     ) : undefined;
 

@@ -186,7 +186,7 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertFalse(timeout.message.lowercased().contains("request"))
 
         XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "The Internet connection appears to be offline."), "This phone is offline. Check Wi-Fi, cellular or Tailscale.")
-        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "Could not connect to the server."), "Can't reach your host. Check that Super Harness is running there.")
+        XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "Could not connect to the server."), "Can't reach your host. Check that Superharness is running there.")
         XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "HTTP 401 Unauthorized"), "Your host refused this phone. Pair again in Host Connection.")
         XCTAssertEqual(SHErrorPresentation.friendlyMessage(for: "zxqv"), "Something went wrong talking to your host.")
         XCTAssertEqual(SHErrorPresentation.present("zxqv").detail, "zxqv")
@@ -870,7 +870,7 @@ final class UnifiedModelsTests: XCTestCase {
             id: "muse:aabbccdd-1122-3344-5566-778899001122",
             nativeId: "aabbccdd-1122-3344-5566-778899001122",
             harness: .muse,
-            title: "Super Harness Muse",
+            title: "Superharness Muse",
             cwd: "/tmp",
             projectName: "super-harness"
         )

@@ -218,7 +218,7 @@ public final class AppStore {
         guard let status = dictationStatus else { return nil }
         return status.configured ? nil : Self.dictationSetupMessage
     }
-    nonisolated public static let dictationSetupMessage = "Set up dictation in Super Harness on your desktop"
+    nonisolated public static let dictationSetupMessage = "Set up dictation in Superharness on your desktop"
     public var isCheckingDictation: Bool = false
     public var pushNotificationsEnabled: Bool = true
     /// Order of the harness gauges, the harness sections in the All view and the usage pills.

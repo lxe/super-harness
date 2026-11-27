@@ -82,7 +82,7 @@ public final class DesktopBrowser {
 
     nonisolated private static func describe(_ error: NWError) -> String {
         if case .dns(let code) = error, code == kDNSServiceErr_PolicyDenied {
-            return "Allow Local Network access for Super Harness in the Settings app to find desktops nearby."
+            return "Allow Local Network access for Superharness in the Settings app to find desktops nearby."
         }
         return "Couldn’t look for desktops nearby."
     }

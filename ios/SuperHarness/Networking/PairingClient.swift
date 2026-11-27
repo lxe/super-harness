@@ -25,9 +25,9 @@ public struct PairingLink: Equatable, Sendable {
         public var errorDescription: String? {
             switch self {
             case .notAPairingCode:
-                return "That QR code is not a Super Harness pairing code."
+                return "That QR code is not a Superharness pairing code."
             case .unsupportedVersion:
-                return "This pairing code is from a newer Super Harness. Update the app and try again."
+                return "This pairing code is from a newer Superharness. Update the app and try again."
             case .missingCode:
                 return "The pairing code is incomplete. Show a new code on the desktop and scan again."
             case .missingAddresses:
@@ -170,7 +170,7 @@ public enum PairingError: Error, Equatable, LocalizedError, Sendable {
         case .differentDesktop:
             return "That address belongs to a different desktop from the one showing the code."
         case .pairingClosed:
-            return "The desktop isn’t showing a pairing code. In Super Harness on the desktop, open Settings → Mobile and choose Pair a phone."
+            return "The desktop isn’t showing a pairing code. In Superharness on the desktop, open Settings → Mobile and choose Pair a phone."
         case .wrongCode(let hostMessage):
             // The desktop says exactly what is wrong (expired, not open, mistyped) when it can.
             if let hostMessage, !hostMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -277,7 +277,7 @@ public struct HTTPPairingService: PairingServiceProtocol {
         case 429:
             throw PairingError.tooManyAttempts
         case 404:
-            throw PairingError.server("This desktop’s Super Harness is too old to pair. Update it and try again.")
+            throw PairingError.server("This desktop’s Superharness is too old to pair. Update it and try again.")
         default:
             throw PairingError.server(parsed?.error ?? "The desktop answered with an error (\(status)).")
         }

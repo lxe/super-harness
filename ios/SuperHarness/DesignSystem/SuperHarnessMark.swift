@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Super Harness porcelain mark as four separate pieces, in the order they appear in the
+/// The Superharness porcelain mark as four separate pieces, in the order they appear in the
 /// mark's SVG. Coordinates are in the SVG's viewBox units.
 enum SuperHarnessMarkGeometry {
     static let viewBox = CGRect(x: -1.6782, y: -0.75, width: 15.3564, height: 15.3564)

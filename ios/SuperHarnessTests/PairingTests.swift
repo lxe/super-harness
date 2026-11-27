@@ -252,7 +252,7 @@ final class PairingTests: XCTestCase {
         defer { store.stopEventStream() }
         XCTAssertNil(store.dictationUnavailableReason, "unknown status does not disable the mic")
         store.dictationStatus = DictationStatusResponse(ok: true, configured: false, healthy: false)
-        XCTAssertEqual(store.dictationUnavailableReason, "Set up dictation in Super Harness on your desktop")
+        XCTAssertEqual(store.dictationUnavailableReason, "Set up dictation in Superharness on your desktop")
         store.dictationStatus = DictationStatusResponse(ok: true, configured: true, healthy: true)
         XCTAssertNil(store.dictationUnavailableReason)
     }

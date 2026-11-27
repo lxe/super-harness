@@ -1,8 +1,8 @@
-# Super Harness — Native iOS App Architecture (`ios/`)
+# Superharness — Native iOS App Architecture (`ios/`)
 
 ## 1. Repository & Branch Isolation Rules
 - **Branch**: `feat/ios-app` (branched from `origin/main`).
-- **Strict boundary**: All iOS work MUST live strictly inside `ios/`. Do **not** modify `src/`, `tests/`, `package.json`, or root config files on this branch — the Linux desktop Super Harness MVP session actively pushes rapid commits to `main`. Keeping all iOS files inside `ios/` guarantees zero merge conflicts and clean `rsync` / `git rebase origin/main` updates.
+- **Strict boundary**: All iOS work MUST live strictly inside `ios/`. Do **not** modify `src/`, `tests/`, `package.json`, or root config files on this branch — the Linux desktop Superharness MVP session actively pushes rapid commits to `main`. Keeping all iOS files inside `ios/` guarantees zero merge conflicts and clean `rsync` / `git rebase origin/main` updates.
 - **Reference files** (read-only on MacBook, kept fresh via `rsync` from Linux):
   - `ARCHITECTURE.md`
   - `src/shared/types.ts` (canonical data schema)
@@ -11,7 +11,7 @@
   - `src/renderer/components/` (feature parity reference — adapt UX natively for iOS rather than cloning desktop chrome!)
 
 ## 2. Product Philosophy (Native iOS, Same Baseline Feature Set)
-Super Harness on iOS is a **true native SwiftUI mobile companion** (iPhone-first, iPad `NavigationSplitView` aware) — **not** a shrunk desktop sidebar:
+Superharness on iOS is a **true native SwiftUI mobile companion** (iPhone-first, iPad `NavigationSplitView` aware) — **not** a shrunk desktop sidebar:
 - **Calm Obsidian Visual Language**: Uses exact tokens from `src/renderer/ui/tokens.css`:
   - Surfaces: code `#101114`, rail `#111215`, canvas `#16171b`, subtle `#181a1f`, popover `#1a1c22`, raised `#1f2128`, bubble `#23252c`
   - Ink: primary `#f1f3f7`, secondary `#c8ccd6`, muted `#8b909e`, faint `#5f6472`
@@ -19,7 +19,7 @@ Super Harness on iOS is a **true native SwiftUI mobile companion** (iPhone-first
   - Semantic: success `#34d399`, warning `#fbbf24`, danger `#fb7185`
 - **Native iOS Ergonomics**:
   - Bottom-reachable composer & primary actions, thumb-friendly swipe actions (Pin / Pin-to-Top / Archive / Hide), pull-to-refresh, native `.searchable`, native sheets (`.presentationDetents`), haptic feedback, `PhotosPicker` for image attachments, and `Charts` for 7-day usage spend.
-  - Dual **Live Host Mode** (connects over Tailscale/LAN to Linux Super Harness `ControlServer` HTTP + SSE with Keychain-stored Bearer token) and **Demo Mode** (rich realistic offline fixtures for Master, Antigravity, Codex, and Claude so every view & interaction works immediately in Simulator and previews).
+  - Dual **Live Host Mode** (connects over Tailscale/LAN to Linux Superharness `ControlServer` HTTP + SSE with Keychain-stored Bearer token) and **Demo Mode** (rich realistic offline fixtures for Master, Antigravity, Codex, and Claude so every view & interaction works immediately in Simulator and previews).
 
 ## 3. Baseline Feature Parity Checklist
 1. **Unified Session Inbox (`SessionListView`)**:

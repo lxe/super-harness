@@ -283,7 +283,7 @@ final class LiveE2ETests: XCTestCase {
         let statusPill = app.buttons["header.status"].firstMatch
         XCTAssertTrue(statusPill.waitForExistence(timeout: 6.0), "Session list should appear on launch")
 
-        let firstRow = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Super Harness' OR label CONTAINS 'Tailscale'")).firstMatch
+        let firstRow = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Superharness' OR label CONTAINS 'Tailscale'")).firstMatch
         XCTAssertTrue(firstRow.waitForExistence(timeout: 5.0), "A demo session row should appear")
         firstRow.tap()
 

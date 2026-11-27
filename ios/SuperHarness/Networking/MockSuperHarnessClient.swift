@@ -1288,7 +1288,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         let replyChunks = [
             "Got it — I processed **\"\(prompt)\"** in Demo Mode.\n\n",
             "- Live SSE streaming deltas and tool blocks are updating incrementally.\n",
-            "- Tap **Host Settings** anytime to point Super Harness at your Linux desktop host over Tailscale or LAN.",
+            "- Tap **Host Settings** anytime to point Superharness at your Linux desktop host over Tailscale or LAN.",
         ]
         var assembled = ""
         for chunk in replyChunks {

@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Super Harness</string>
+	<string>Superharness</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -36,13 +36,13 @@
 		<string>_superharness._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Super Harness uses the camera to scan the pairing QR code shown on your desktop.</string>
+	<string>Superharness uses the camera to scan the pairing QR code shown on your desktop.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Super Harness finds and connects to your desktop over your local network or Tailscale.</string>
+	<string>Superharness finds and connects to your desktop over your local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Super Harness records voice dictation and sends it to your desktop for transcription.</string>
+	<string>Superharness records voice dictation and sends it to your desktop for transcription.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Super Harness attaches photos and videos you select to your coding agent conversations.</string>
+	<string>Superharness attaches photos and videos you select to your coding agent conversations.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

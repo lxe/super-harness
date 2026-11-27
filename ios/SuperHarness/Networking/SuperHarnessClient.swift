@@ -617,7 +617,7 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         let resp: PushTestResp = try await request(
             path: "/api/push/test",
             method: "POST",
-            body: PushTestBody(title: "Super Harness", body: "Push notifications are active!")
+            body: PushTestBody(title: "Superharness", body: "Push notifications are active!")
         )
         return resp.ok
     }
@@ -814,7 +814,7 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             title: "Master Orchestrator",
             preview: "Cross-harness control center",
             cwd: "~",
-            projectName: "Super Harness",
+            projectName: "Superharness",
             model: "Master",
             status: .idle,
             isLive: true,

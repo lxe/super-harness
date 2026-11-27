@@ -1,4 +1,4 @@
-# Super Harness — Mobile HTTP & SSE API Contract (Sync Protocol v1)
+# Superharness — Mobile HTTP & SSE API Contract (Sync Protocol v1)
 
 This contract aligns the native iOS companion (`ios/`) with `src/main/services/controlServer.ts` on the Linux desktop host (`MOBILE_PROTOCOL_VERSION = 1`).
 

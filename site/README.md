@@ -1,6 +1,6 @@
 # superharness.tech
 
-The Super Harness website: static HTML and CSS in `src/`, built into `dist/` by
+The Superharness website: static HTML and CSS in `src/`, built into `dist/` by
 `build.mjs`.
 
 ```

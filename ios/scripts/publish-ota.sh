@@ -152,7 +152,7 @@ cat > "$OUT_DIR/manifest.plist" << MANIFEST
         <key>kind</key>
         <string>software</string>
         <key>title</key>
-        <string>Super Harness</string>
+        <string>Superharness</string>
       </dict>
     </dict>
   </array>
@@ -166,7 +166,7 @@ cat > "$OUT_DIR/index.html" << HTML
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Install Super Harness</title>
+  <title>Install Superharness</title>
   <meta name="theme-color" content="#16171b">
   <link rel="icon" type="image/png" href="icon-512.png">
   <link rel="apple-touch-icon" href="icon-512.png">
@@ -205,8 +205,8 @@ cat > "$OUT_DIR/index.html" << HTML
 </head>
 <body>
   <main class="card">
-    <img class="icon" src="icon-512.png" alt="Super Harness">
-    <h1>Super Harness</h1>
+    <img class="icon" src="icon-512.png" alt="Superharness">
+    <h1>Superharness</h1>
     <p class="meta">
       <span class="pill">${GIT_SHA}</span> · v${VERSION} · ${IPA_SIZE}<br>
       Built ${BUILD_HUMAN} (${METHOD})

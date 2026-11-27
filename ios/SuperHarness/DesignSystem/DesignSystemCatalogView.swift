@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Interactive Super Harness Component & Pattern Library showcase.
+/// Interactive Superharness Component & Pattern Library showcase.
 /// Open from Host Settings -> Design System & Patterns.
 public struct DesignSystemCatalogView: View {
     @Environment(\.dismiss) private var dismiss

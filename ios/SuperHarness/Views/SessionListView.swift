@@ -103,8 +103,8 @@ public enum SessionRowFormatting {
     }
 
     /// Compact 1-token label for a collapsed pinned-session pill (5 per row).
-    /// Strips a leading "Super Harness " prefix when followed by more text so multiple
-    /// Super Harness threads stay distinguishable inside narrow pills.
+    /// Strips a leading "Superharness " prefix when followed by more text so multiple
+    /// Superharness threads stay distinguishable inside narrow pills.
     /// Sessions split into rows of `perRow` for the pinned pill grid. Every session is in
     /// exactly one row, in order.
     public static func pillRows(of sessions: [UnifiedSession], perRow: Int) -> [[UnifiedSession]] {
@@ -257,7 +257,7 @@ public struct SessionListView: View {
                 .presentationDragIndicator(.visible)
         }
         .toolbar {
-            // Left: the Super Harness mark in its own glass bubble. It opens Settings and is the
+            // Left: the Superharness mark in its own glass bubble. It opens Settings and is the
             // app's status light: it turns into sync arrows while fetching from the host and a
             // warning mark when the host cannot be reached.
             ToolbarItem(placement: .topBarLeading) {
@@ -1209,7 +1209,7 @@ private struct ManageFoldersSheet: View {
                         Circle()
                             .fill(Color(cssHex: selectedColor))
                             .frame(width: 12, height: 12)
-                        TextField("Folder name (e.g. Super Harness)", text: $newName)
+                        TextField("Folder name (e.g. Superharness)", text: $newName)
                             .foregroundStyle(SHColor.inkPrimary)
                             .submitLabel(.done)
                             .onSubmit { createCurrent() }
@@ -1393,7 +1393,7 @@ public enum SHErrorPresentation {
             return "This phone is offline. Check Wi-Fi, cellular or Tailscale."
         }
         if has("could not connect", "connection refused", "cannot connect", "-1004", "network connection was lost", "-1005") {
-            return "Can't reach your host. Check that Super Harness is running there."
+            return "Can't reach your host. Check that Superharness is running there."
         }
         if has("hostname could not be found", "cannot find host", "-1003") {
             return "Can't find your host. Check the address in Host Connection."
@@ -1706,7 +1706,7 @@ private struct HarnessHoldDragGesture: UIGestureRecognizerRepresentable {
     }
 }
 
-/// The Super Harness mark shown in the middle of the session list's top bar.
+/// The Superharness mark shown in the middle of the session list's top bar.
 struct SHToolbarLogo: View {
     var body: some View {
         // The porcelain mark, a single-colour template tinted porcelain white.
@@ -1716,7 +1716,7 @@ struct SHToolbarLogo: View {
             .scaledToFit()
             .foregroundStyle(SHColor.porcelain)
             .frame(width: 26, height: 26)
-            .accessibilityLabel("Super Harness")
+            .accessibilityLabel("Superharness")
             .accessibilityIdentifier("header.logo")
     }
 }

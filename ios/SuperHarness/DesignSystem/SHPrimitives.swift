@@ -516,9 +516,9 @@ private struct SHAttachmentThumbTile: View {
 }
 
 
-// MARK: - Combined Super Harness Logo + Live Status Core
+// MARK: - Combined Superharness Logo + Live Status Core
 
-/// Renders the official Super Harness 3-arm geometric logo with its center core dynamically
+/// Renders the official Superharness 3-arm geometric logo with its center core dynamically
 /// tinted to reflect live host connection health (green = live, amber = connecting, red = error).
 public struct SuperHarnessStatusLogo: View {
     public let statusColor: Color

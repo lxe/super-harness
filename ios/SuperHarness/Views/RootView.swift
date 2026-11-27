@@ -171,7 +171,7 @@ public struct RootView: View {
 
 // MARK: - Subtle Connection Status Pill
 
-/// The Super Harness mark in the top bar. It opens Settings, and its glyph is the status: the
+/// The Superharness mark in the top bar. It opens Settings, and its glyph is the status: the
 /// mark when all is well, sync arrows while the app is fetching from the host, and a yellow
 /// warning mark when the host cannot be reached. It morphs between these.
 public struct ConnectionStatusPill: View {

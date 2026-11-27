@@ -32,7 +32,7 @@ public enum SHColor {
     /// The app's accent for text buttons, links in chrome and progress marks: a neutral
     /// near-white.
     public static let accentPrimary = Color(hex: 0xE4E6EC)
-    /// The white of the Super Harness porcelain mark.
+    /// The white of the Superharness porcelain mark.
     public static let porcelain = Color(hex: 0xF1F2F5)
     /// The "on" colour of every switch.
     public static let toggleOn = Color(hex: 0x34C38F)

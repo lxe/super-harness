@@ -61,7 +61,16 @@ main { overflow-x: clip; }
 main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 
 /* hero */
-.hero { padding-top: 44px !important; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 48px; align-items: center; }
+/* Centred hero: headline, taglines, the download row, then the desktop and phone screenshots
+   side by side. The two columns are in proportion to the images' aspect ratios, so both
+   screenshots come out the same height. */
+.hero { padding-top: 56px !important; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.hero-copy { display: flex; flex-direction: column; align-items: center; }
+.hero h1 { max-width: 13em; }
+.hero .lede { max-width: 38em; }
+.hero .lede + .lede { margin-top: 10px; }
+.hero .cta { justify-content: center; }
+.hero .note { margin: 28px auto 0; }
 .eyebrow { color: var(--ink-3); font-size: 0.86rem; letter-spacing: 0.02em; margin-bottom: 18px; }
 .lede { margin-top: 22px; font-size: 1.14rem; color: var(--ink-2); max-width: 34em; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; align-items: center; }
@@ -71,7 +80,6 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
   box-shadow: 0 10px 24px -12px rgba(238, 240, 245, 0.45), inset 0 -2px 0 rgba(0, 0, 0, 0.12);
 }
 .button:hover { background: #fff; }
-.cta-store { margin-top: 12px; }
 .store {
   display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 18px 0 14px; border-radius: 14px;
   background: var(--raised); color: var(--ink); text-decoration: none; box-shadow: var(--raise-hi);
@@ -83,13 +91,12 @@ main > section { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
 .store.soon small { color: var(--ink-4); }
 .note { margin-top: 22px; font-size: 0.86rem; color: var(--ink-4); max-width: 36em; }
 
-.hero-art { position: relative; padding-bottom: 40px; }
+.hero-art { display: grid; grid-template-columns: minmax(0, 1.304fr) minmax(0, 0.46fr); gap: 28px; align-items: start; width: 100%; max-width: 1080px; margin-top: 56px; }
 /* Screenshots sit in a plain hairline border: no window bar, no phone body. */
 .window { margin: 0; border-radius: 12px; overflow: hidden; background: var(--rail); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: var(--deep); }
 .window img { display: block; width: 100%; }
 .phone { margin: 0; border-radius: 26px; overflow: hidden; background: var(--canvas); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: var(--deep); }
 .phone img { display: block; width: 100%; }
-.hero-phone { position: absolute; width: 34%; right: -4%; bottom: -9%; }
 
 /* harness strip */
 .harnesses { margin-top: 84px !important; text-align: center; }
@@ -153,9 +160,8 @@ pre code { font-size: 0.86rem; }
 .missing p { margin-top: 16px; }
 
 @media (max-width: 980px) {
-  .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 24px !important; }
-  .hero-art { padding-right: 5%; }
-  .hero-phone { right: 0; }
+  .hero { padding-top: 32px !important; }
+  .hero-art { gap: 16px; margin-top: 40px; }
   .harnesses ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .harnesses li:last-child { grid-column: 1 / -1; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

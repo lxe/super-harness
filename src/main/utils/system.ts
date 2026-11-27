@@ -63,7 +63,11 @@ export async function whichBinary(name: string): Promise<string | null> {
  * so Superharness always matches the running daemon & `~/.codex/config.toml` schema.
  */
 export async function resolveCodexBinary(): Promise<string | null> {
-  const releasesDir = path.join(os.homedir(), '.codex', 'packages', 'app-server-daemon', 'releases');
+  const daemonDir = path.join(os.homedir(), '.codex', 'packages', 'app-server-daemon');
+  const releasesDir = path.join(daemonDir, 'releases');
+  // `current` is the release the daemon runs; old releases can linger after an update.
+  const current = path.join(daemonDir, 'current', 'bin', 'codex');
+  if (fs.existsSync(current)) return current;
   try {
     if (fs.existsSync(releasesDir)) {
       const entries = fs
@@ -81,6 +85,54 @@ export async function resolveCodexBinary(): Promise<string | null> {
     // fall back to PATH
   }
   return whichBinary('codex');
+}
+
+const versionCache = new Map<string, { key: string; version: string | null }>();
+
+/**
+ * `--version` of a binary, cached until the file it resolves to changes (an update swaps the
+ * symlink target or rewrites the file), so updates show up without restarting Superharness.
+ */
+export async function getBinaryVersionCached(
+  binPath: string | null,
+  /** Other files whose change means a new version (e.g. a launcher's version-state file). */
+  alsoWatch: Array<string | null> = []
+): Promise<string | null> {
+  if (!binPath) return null;
+  let key = '';
+  try {
+    const real = fs.realpathSync(binPath);
+    const st = fs.statSync(real);
+    key = `${real}:${st.size}:${Math.floor(st.mtimeMs)}`;
+    for (const extra of alsoWatch) {
+      if (!extra) continue;
+      try {
+        key += `|${Math.floor(fs.statSync(extra).mtimeMs)}`;
+      } catch {
+        key += '|-';
+      }
+    }
+  } catch {
+    key = '';
+  }
+  const hit = versionCache.get(binPath);
+  if (hit && key && hit.key === key) return hit.version;
+  const version = await getBinaryVersion(binPath);
+  if (key) versionCache.set(binPath, { key, version });
+  return version;
+}
+
+/**
+ * The Muse launcher (`~/.local/bin/muse`) keeps the version it runs in `.muse-version` beside
+ * itself and replaces only `muse-bin-<version>` on update, so that file marks a new version.
+ */
+export function museVersionStateFile(launcherPath: string | null): string | null {
+  if (!launcherPath) return null;
+  try {
+    return path.join(path.dirname(fs.realpathSync(launcherPath)), '.muse-version');
+  } catch {
+    return null;
+  }
 }
 
 export async function getBinaryVersion(binPath: string | null): Promise<string | null> {

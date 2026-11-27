@@ -31,7 +31,7 @@ import { readProgressiveJsonlTail } from '../utils/tailReader';
 import { computeCodexSessionStats } from '../utils/sessionStats';
 import {
   cleanTextPreview,
-  getBinaryVersion,
+  getBinaryVersionCached,
   normalizeTimestamp,
   projectNameFromCwd,
   resolveCodexBinary,
@@ -180,9 +180,7 @@ export async function detectCodex(
   showArchived: boolean
 ): Promise<{ detection: HarnessDetection; sessions: UnifiedSession[] }> {
   const binPath = await resolveCodexBinary();
-  if (cachedCodexVersion === undefined) {
-    cachedCodexVersion = await getBinaryVersion(binPath);
-  }
+  cachedCodexVersion = await getBinaryVersionCached(binPath);
 
   const codexProcs = processes.filter(
     (p) =>

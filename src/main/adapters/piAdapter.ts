@@ -19,7 +19,7 @@ import type {
 } from '../../shared/types';
 import { PiRpcPool, splitPiModelRef, type PiRpcTurnHooks } from '../services/piRpcClient';
 import { readJsonlTailLines, readProgressiveJsonlTail } from '../utils/tailReader';
-import { cleanTextPreview, getBinaryVersion, projectNameFromCwd, whichBinary, type ProcessRow } from '../utils/system';
+import { cleanTextPreview, getBinaryVersionCached, projectNameFromCwd, whichBinary, type ProcessRow } from '../utils/system';
 import { findTmuxPaneForPids, parseTmuxPaneList } from './museAdapter';
 import { invalid, normalizeEffort, resultsFor } from './sessionConfig';
 import {
@@ -913,7 +913,7 @@ export function createPiDriver(): HarnessDriver {
 
     async detect(processes: ProcessRow[], maxSessions: number) {
       const bin = await whichBinary('pi');
-      if (cachedVersion === undefined) cachedVersion = await getBinaryVersion(bin);
+      cachedVersion = await getBinaryVersionCached(bin);
       const dir = piSessionsDir();
       const files: Array<{ path: string; st: fs.Stats }> = [];
       try {

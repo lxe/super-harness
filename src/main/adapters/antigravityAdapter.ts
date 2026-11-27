@@ -28,7 +28,7 @@ import { readProgressiveJsonlTail } from '../utils/tailReader';
 import { computeAntigravitySessionStats } from '../utils/sessionStats';
 import {
   cleanTextPreview,
-  getBinaryVersion,
+  getBinaryVersionCached,
   normalizeTimestamp,
   projectNameFromCwd,
   whichBinary,
@@ -213,9 +213,7 @@ export async function detectAntigravity(
   maxSessions: number
 ): Promise<{ detection: HarnessDetection; sessions: UnifiedSession[] }> {
   const binPath = await whichBinary('agy');
-  if (cachedAgyVersion === undefined) {
-    cachedAgyVersion = await getBinaryVersion(binPath);
-  }
+  cachedAgyVersion = await getBinaryVersionCached(binPath);
 
   const agyProcs = processes.filter(
     (p) =>

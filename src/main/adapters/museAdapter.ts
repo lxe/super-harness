@@ -22,7 +22,8 @@ import { querySqliteReadOnly } from '../utils/sqlite';
 import { readJsonlTailLines, readProgressiveJsonlTail } from '../utils/tailReader';
 import {
   cleanTextPreview,
-  getBinaryVersion,
+  getBinaryVersionCached,
+  museVersionStateFile,
   projectNameFromCwd,
   whichBinary,
   type ProcessRow,
@@ -726,9 +727,7 @@ export async function detectMuse(
   maxSessions: number
 ): Promise<{ detection: HarnessDetection; sessions: UnifiedSession[] }> {
   const binPath = await whichBinary('muse');
-  if (cachedMuseVersion === undefined) {
-    cachedMuseVersion = await getBinaryVersion(binPath);
-  }
+  cachedMuseVersion = await getBinaryVersionCached(binPath, [museVersionStateFile(binPath)]);
 
   // The installed binary reports a versioned comm (e.g. `muse-bin-1.4.14`).
   const museProcs = processes.filter(

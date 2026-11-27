@@ -40,7 +40,7 @@ import {
 } from './sessionConfig';
 import {
   cleanTextPreview,
-  getBinaryVersion,
+  getBinaryVersionCached,
   isSameProcessAlive,
   normalizeTimestamp,
   projectNameFromCwd,
@@ -591,9 +591,7 @@ export async function detectClaude(
   showArchived: boolean
 ): Promise<{ detection: HarnessDetection; sessions: UnifiedSession[] }> {
   const binPath = await whichBinary('claude');
-  if (cachedClaudeVersion === undefined) {
-    cachedClaudeVersion = await getBinaryVersion(binPath);
-  }
+  cachedClaudeVersion = await getBinaryVersionCached(binPath);
 
   const claudeProcs = processes.filter(
     (p) =>

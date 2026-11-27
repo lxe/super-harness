@@ -151,7 +151,10 @@ export function resolveSessionModelControls(
   const { models: collapsedCatalog } = collapseEffortVariantModels(catalogModels);
   const matchedInCollapsed = normalizedBaseModelId
     ? collapsedCatalog.find(
-        (m) => m.id === normalizedBaseModelId || m.id === trimmedModel
+        (m) =>
+          m.id === normalizedBaseModelId ||
+          m.id === trimmedModel ||
+          Boolean(m.aliases?.includes(normalizedBaseModelId) || (trimmedModel && m.aliases?.includes(trimmedModel)))
       )
     : undefined;
 

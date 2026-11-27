@@ -21,12 +21,6 @@ const CODEX_DIR = path.join(HOME, '.codex');
 const CODEX_MODELS_CACHE = path.join(CODEX_DIR, 'models_cache.json');
 const CODEX_CONFIG_TOML = path.join(CODEX_DIR, 'config.toml');
 const CODEX_STATE_DB = path.join(CODEX_DIR, 'state_5.sqlite');
-const CLAUDE_DESKTOP_SESSIONS_DIR = path.join(
-  HOME,
-  '.config',
-  'Claude',
-  'claude-code-sessions'
-);
 const CLAUDE_SETTINGS_PATH = path.join(HOME, '.claude', 'settings.json');
 const AGY_APP_DB = path.join(HOME, '.gemini', 'antigravity', 'conversation_summaries.db');
 const AGY_CLI_DB = path.join(HOME, '.gemini', 'antigravity-cli', 'conversation_summaries.db');
@@ -256,97 +250,86 @@ function readClaudeDefaultEffort(): string | undefined {
   }
 }
 
-function formatClaudeModelLabel(id: string): string {
-  if (id === 'opus') return 'Opus (latest alias)';
-  if (id === 'sonnet') return 'Sonnet (latest alias)';
-  if (id === 'haiku') return 'Haiku (latest alias)';
-  const ctxMatch = id.match(/\[([^\]]+)\]$/);
-  const base = id.replace(/\[[^\]]+\]$/, '');
-  const nice = base
-    .replace(/^claude-/, 'Claude ')
-    .replace(/-/g, ' ')
-    .replace(/\b([a-z])/g, (c) => c.toUpperCase())
-    .replace(/(\d)\s+(\d)/g, '$1.$2');
-  return ctxMatch ? `${nice} (${ctxMatch[1].toUpperCase()})` : nice;
+/**
+ * Claude Code's own /model picker, main section: one row per tier, newest
+ * model first. Update when Claude Code's picker changes (its built-in list
+ * lives in the CLI; extra rows such as Fable come from ~/.claude.json).
+ */
+const CLAUDE_PICKER_TIERS: Array<{ family: string; id: string; label: string; description: string }> = [
+  { family: 'opus', id: 'claude-opus-5-5', label: 'Opus 5.5', description: 'For complex work and everyday tasks' },
+  { family: 'sonnet', id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', description: 'Most efficient for everyday tasks' },
+  { family: 'haiku', id: 'claude-haiku-5-5', label: 'Haiku 5.5', description: 'Fastest for quick answers' },
+];
+
+const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** `opus`, `opus[1m]`, `claude-opus-5-5[1m]` → `opus`; null when it isn't a Claude tier ID. */
+function claudeFamily(id: string): string | null {
+  const m = id.toLowerCase().match(/^(?:claude-)?(opus|sonnet|haiku|fable)\b/);
+  return m ? m[1] : null;
 }
 
-function collectClaudeModels(sessions: UnifiedSession[]): HarnessModelOption[] {
-  const counts = new Map<string, number>();
-  let settingsDefault: string | undefined;
+/** Same ID with and without the `[1m]` context suffix. */
+function withContextVariants(id: string): string[] {
+  const base = id.replace(/\[[^\]]+\]$/, '');
+  return Array.from(new Set([id, base, `${base}[1m]`]));
+}
 
+/** Extra picker rows Claude Code caches for this account (e.g. Fable). */
+function readClaudeAdditionalModels(): Array<{ value: string; label: string; description?: string }> {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(HOME, '.claude.json'), 'utf8')) as {
+      additionalModelOptionsCache?: Array<{ value?: string; label?: string; description?: string }>;
+    };
+    return (j.additionalModelOptionsCache ?? [])
+      .filter((o): o is { value: string; label: string; description?: string } =>
+        typeof o?.value === 'string' && typeof o?.label === 'string'
+      );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The Claude model list mirrors Claude Code's /model picker: Opus, then any
+ * extra rows the account has (Fable), then Sonnet and Haiku. A row whose tier
+ * matches the default in ~/.claude/settings.json launches that exact ID (so
+ * `opus[1m]` keeps its 1M context) and carries the Default badge.
+ */
+export function collectClaudeModels(): HarnessModelOption[] {
+  let settingsDefault: string | undefined;
   try {
     if (fs.existsSync(CLAUDE_SETTINGS_PATH)) {
       const s = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS_PATH, 'utf8')) as { model?: string };
-      if (typeof s.model === 'string' && s.model.trim()) {
-        settingsDefault = s.model.trim();
-      }
+      if (typeof s.model === 'string' && s.model.trim()) settingsDefault = s.model.trim();
     }
   } catch {
     // ignore
   }
+  const defaultFamily = settingsDefault ? claudeFamily(settingsDefault) : null;
 
-  for (const s of sessions) {
-    if (s.harnessGroup === 'claude' && s.model) {
-      counts.set(s.model, (counts.get(s.model) ?? 0) + 1);
-    }
-  }
-
-  // Also scan recent Claude Desktop metadata for observed models
-  if (fs.existsSync(CLAUDE_DESKTOP_SESSIONS_DIR)) {
-    const walk = (dir: string, depth: number) => {
-      if (depth > 3) return;
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const e of entries) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) walk(p, depth + 1);
-        else if (e.isFile() && e.name.startsWith('local_') && e.name.endsWith('.json')) {
-          try {
-            const j = JSON.parse(fs.readFileSync(p, 'utf8')) as { model?: string };
-            if (typeof j.model === 'string' && j.model.trim()) {
-              counts.set(j.model.trim(), (counts.get(j.model.trim()) ?? 0) + 1);
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
-    };
-    walk(CLAUDE_DESKTOP_SESSIONS_DIR, 0);
-  }
-
-  const out: HarnessModelOption[] = [];
-  const seen = new Set<string>();
-
-  const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
-
-  const pushModel = (id: string, isDefault?: boolean) => {
-    if (!id || seen.has(id)) return;
-    seen.add(id);
-    out.push({
-      id,
-      label: formatClaudeModelLabel(id),
+  const row = (family: string, id: string, label: string, description?: string): HarnessModelOption => {
+    const isDefault = Boolean(defaultFamily && defaultFamily === family);
+    const launchId = isDefault ? settingsDefault! : id;
+    return {
+      id: launchId,
+      label,
+      description,
       isDefault,
       reasoningLevels: CLAUDE_EFFORT_LEVELS,
-    });
+      aliases: Array.from(new Set([...withContextVariants(id), ...withContextVariants(launchId), family])),
+    };
   };
 
-  if (settingsDefault) pushModel(settingsDefault, true);
-
-  const sortedObserved = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-  for (const [id] of sortedObserved.slice(0, 10)) {
-    pushModel(id, !settingsDefault && out.length === 0);
+  const [opus, ...rest] = CLAUDE_PICKER_TIERS;
+  const out: HarnessModelOption[] = [row(opus.family, opus.id, opus.label, opus.description)];
+  for (const extra of readClaudeAdditionalModels()) {
+    const family = claudeFamily(extra.value) ?? extra.value;
+    // "Fable 5.2 · Most capable for…" → label "Fable 5.2", description after the dot
+    const [head, ...tail] = (extra.description ?? '').split(' · ');
+    out.push(row(family, extra.value, head?.trim() || extra.label, tail.join(' · ').trim() || undefined));
   }
-
-  // Always include Claude CLI's official shorthand aliases as reliable fallbacks
-  for (const alias of ['opus', 'sonnet', 'haiku']) {
-    pushModel(alias, false);
-  }
-
+  for (const t of rest) out.push(row(t.family, t.id, t.label, t.description));
   return out;
 }
 
@@ -444,7 +427,7 @@ export class HarnessCatalogService {
       const codexModels = fs.existsSync(CODEX_MODELS_CACHE)
         ? parseCodexModelsCache(fs.readFileSync(CODEX_MODELS_CACHE, 'utf8'), codexCfg.model)
         : [];
-      const claudeModels = collectClaudeModels(sessions);
+      const claudeModels = collectClaudeModels();
       const claudeEffort = readClaudeDefaultEffort();
 
       const rawProjects: Array<{

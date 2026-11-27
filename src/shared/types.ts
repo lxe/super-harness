@@ -600,6 +600,8 @@ export interface HarnessModelOption {
   reasoningLevels?: string[];
   /** Model's own default reasoning level (e.g. 'low', 'medium', 'high'). */
   defaultReasoningLevel?: string;
+  /** Other IDs that mean this same model (e.g. `opus`, `claude-opus-5-5[1m]`), for matching a session's model. */
+  aliases?: string[];
 }
 
 export interface HarnessProjectOption {

@@ -5,9 +5,7 @@ import {
   Check,
   ChevronDown,
   ImagePlus,
-  ListPlus,
   Search,
-  Square,
   X,
 } from 'lucide-react';
 import type {
@@ -487,21 +485,6 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {isAgentBusy &&
-              !isMaster &&
-              onQueue &&
-              (Boolean(input.trim()) || attachments.length > 0) && (
-                <button
-                  type="button"
-                  disabled={sending}
-                  onClick={onQueue}
-                  title="Queue for after current turn (Ctrl/Option+Enter)"
-                  aria-label="Queue message"
-                  className="w-7 h-7 rounded-full border border-line-subtle bg-white/[0.04] text-ink-muted hover:text-ink-primary hover:bg-white/[0.09] hover:border-line-strong disabled:opacity-25 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer"
-                >
-                  <ListPlus className="w-3.5 h-3.5" strokeWidth={1.75} />
-                </button>
-              )}
             {(isStreaming || isAgentBusy) &&
             (isMaster || (!input.trim() && attachments.length === 0)) ? (
               <button
@@ -509,9 +492,19 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                 onClick={onAbort}
                 title="Stop"
                 aria-label="Stop"
-                className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white transition-all cursor-pointer"
+                className="group w-7 h-7 rounded-full block shrink-0 cursor-pointer"
               >
-                <Square className="w-3 h-3 fill-current" />
+                {/* Circle and square share one SVG so they rasterize together: separately laid-out
+                    elements snap to device pixels independently and drift apart at fractional DPR. */}
+                <svg aria-hidden viewBox="0 0 28 28" className="block w-7 h-7">
+                  <circle
+                    cx="14"
+                    cy="14"
+                    r="14"
+                    className="fill-ink-primary group-hover:fill-white transition-colors"
+                  />
+                  <rect x="9" y="9" width="10" height="10" rx="2" className="fill-surface-rail" />
+                </svg>
               </button>
             ) : (
               <button

@@ -145,7 +145,7 @@ public struct DraftChatView: View {
         VStack(alignment: .leading, spacing: SHSpacing.sm) {
             sectionTitle("Harness")
             VStack(spacing: 0) {
-                ForEach(Array(StartHarnessKind.allCases.enumerated()), id: \.element) { index, kind in
+                ForEach(Array(StartHarnessKind.pickable.enumerated()), id: \.element) { index, kind in
                     if index > 0 {
                         Rectangle()
                             .fill(SHColor.lineHairline)

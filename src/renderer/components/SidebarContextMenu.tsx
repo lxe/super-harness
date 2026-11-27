@@ -15,7 +15,7 @@ import {
   SquarePen,
   Trash2,
 } from 'lucide-react';
-import type { OrganizeAction, UnifiedSession } from '../../shared/types';
+import type { OrganizeAction, SessionFolder, UnifiedSession } from '../../shared/types';
 import type { HarnessSectionOption } from '../utils/sidebarGrouping';
 import { MenuDivider, MenuHeader, MenuItem, PopoverSurface } from '../ui';
 
@@ -31,6 +31,8 @@ export interface SidebarContextMenuProps {
   sectionLabel?: string;
   /** Sections available for the target session(s)' harness group (when all targets share one harness). */
   availableSections?: HarnessSectionOption[];
+  /** Custom folders the target session(s) can be filed into. */
+  folders?: SessionFolder[];
   onClose: () => void;
   onClearSelection: () => void;
   onOpenInSplit: (sessionId: string) => void;
@@ -49,6 +51,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   targets,
   sectionLabel,
   availableSections,
+  folders = [],
   onClose,
   onClearSelection,
   onOpenInSplit,
@@ -56,9 +59,13 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
   onOrganize,
   onArchiveMany,
 }) => {
-  const [showMoveSections, setShowMoveSections] = useState(false);
+  const [openSubmenu, setOpenSubmenu] = useState<'section' | 'folder' | null>(null);
   const [creatingSection, setCreatingSection] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const showMoveSections = openSubmenu === 'section';
+  const showMoveFolders = openSubmenu === 'folder';
 
   if (targets.length === 0) return null;
 
@@ -100,6 +107,31 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
     const trimmed = newSectionName.trim();
     if (!trimmed) return;
     moveTargetsToSection(trimmed, 500);
+  };
+
+  const currentSingleFolder = !isMulti ? (single.folderId ?? null) : undefined;
+  const sortedFolders = [...folders].sort((a, b) => a.order - b.order);
+
+  /** Files every target into a folder: an existing one by ID, a new one by name, or Unfiled (both null). */
+  const moveTargetsToFolder = (folderId: string | null, folderName?: string) => {
+    onOrganize(
+      targets.map((t) => ({
+        type: 'assign_folder' as const,
+        sessionId: t.id,
+        folderId,
+        ...(folderName ? { folderName } : {}),
+      }))
+    );
+    if (isMulti) onClearSelection();
+    onClose();
+  };
+
+  const commitNewFolder = () => {
+    const trimmed = newFolderName.trim();
+    if (!trimmed) return;
+    const existing = folders.find((f) => f.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) moveTargetsToFolder(existing.id);
+    else moveTargetsToFolder(null, trimmed);
   };
 
   if (isSection) {
@@ -272,7 +304,7 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
                 <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
               )
             }
-            onClick={() => setShowMoveSections((v) => !v)}
+            onClick={() => setOpenSubmenu((v) => (v === 'section' ? null : 'section'))}
           >
             {isMulti
               ? `Move ${targets.length} to section`
@@ -340,6 +372,80 @@ export const SidebarContextMenu: React.FC<SidebarContextMenuProps> = ({
           )}
         </div>
       )}
+
+      <div>
+        <MenuItem
+          icon={<FolderInput className="w-3.5 h-3.5" />}
+          rightSlot={
+            showMoveFolders ? (
+              <ChevronDown className="w-3.5 h-3.5 text-ink-faint" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-ink-faint" />
+            )
+          }
+          onClick={() => setOpenSubmenu((v) => (v === 'folder' ? null : 'folder'))}
+        >
+          {isMulti ? `Move ${targets.length} to folder` : 'Move to folder'}
+        </MenuItem>
+
+        {showMoveFolders && (
+          <div className="mt-1 ml-2 pl-2 border-l border-line-hairline space-y-0.5 max-h-48 overflow-y-auto">
+            {sortedFolders.map((f) => (
+              <MenuItem
+                key={f.id}
+                icon={<Folder className="w-3.5 h-3.5" style={{ color: f.color }} />}
+                rightSlot={
+                  currentSingleFolder === f.id ? (
+                    <Check className="w-3.5 h-3.5 text-ink-primary" />
+                  ) : undefined
+                }
+                onClick={() => moveTargetsToFolder(f.id)}
+              >
+                <span className="truncate">{f.name}</span>
+              </MenuItem>
+            ))}
+
+            <MenuItem
+              icon={<Inbox className="w-3.5 h-3.5 text-ink-muted" />}
+              rightSlot={
+                currentSingleFolder === null ? (
+                  <Check className="w-3.5 h-3.5 text-ink-primary" />
+                ) : undefined
+              }
+              onClick={() => moveTargetsToFolder(null)}
+            >
+              Unfiled
+            </MenuItem>
+
+            {creatingFolder ? (
+              <div className="px-1.5 py-1 flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') commitNewFolder();
+                    if (e.key === 'Escape') {
+                      setCreatingFolder(false);
+                      setNewFolderName('');
+                    }
+                  }}
+                  placeholder="Folder name..."
+                  className="w-full px-2 py-1 text-caption rounded-md bg-surface-base border border-line-subtle text-ink-primary placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+                />
+              </div>
+            ) : (
+              <MenuItem
+                icon={<Plus className="w-3.5 h-3.5 text-ink-muted" />}
+                onClick={() => setCreatingFolder(true)}
+              >
+                New folder…
+              </MenuItem>
+            )}
+          </div>
+        )}
+      </div>
 
       <MenuDivider />
       <MenuItem

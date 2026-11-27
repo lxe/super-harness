@@ -115,7 +115,7 @@ public enum HarnessGroup: String, Codable, CaseIterable, Identifiable, Sendable,
         switch self {
         case .antigravity: return .antigravity
         case .codex: return .codex
-        case .claude: return .claudeCli
+        case .claude: return .claudeTmux
         case .muse: return .muse
         case .pi: return .pi
         }
@@ -140,6 +140,10 @@ public enum StartHarnessKind: String, Codable, CaseIterable, Identifiable, Senda
     case pi
 
     public var id: String { rawValue }
+
+    /// Harnesses offered when starting a new session. New Claude sessions always
+    /// run in tmux; `claudeCli` stays decodable for existing sessions only.
+    public static var pickable: [StartHarnessKind] { allCases.filter { $0 != .claudeCli } }
 
     public var label: String {
         switch self {

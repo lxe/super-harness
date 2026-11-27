@@ -12,7 +12,6 @@ import {
   Radio,
   Search,
   Sparkles,
-  Terminal,
   X,
 } from 'lucide-react';
 import type {
@@ -101,11 +100,6 @@ export const DraftSessionPane: React.FC<Props> = ({
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
-  // Remember preferred Claude launch mode (defaults to idiomatic tmux + remote-control)
-  const [claudeMode, setClaudeMode] = useState<'claude-tmux' | 'claude-cli'>(
-    draft.harness === 'claude-cli' ? 'claude-cli' : 'claude-tmux'
-  );
-  const [claudeMenuOpen, setClaudeMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
@@ -117,16 +111,9 @@ export const DraftSessionPane: React.FC<Props> = ({
   const [newProjectError, setNewProjectError] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const claudeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const projectTriggerRef = useRef<HTMLButtonElement | null>(null);
   const modelTriggerRef = useRef<HTMLButtonElement | null>(null);
   const thinkingTriggerRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (draft.harness === 'claude-tmux' || draft.harness === 'claude-cli') {
-      setClaudeMode(draft.harness);
-    }
-  }, [draft.harness]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -396,9 +383,7 @@ export const DraftSessionPane: React.FC<Props> = ({
           : selectedGroup === 'pi'
             ? 'Pi'
             : selectedGroup === 'claude'
-            ? draft.harness === 'claude-cli'
-              ? 'Claude CLI'
-              : 'Claude'
+            ? 'Claude'
             : null;
 
   return (
@@ -443,7 +428,7 @@ export const DraftSessionPane: React.FC<Props> = ({
             </p>
           </div>
 
-          {/* 3-Card Harness Selector (Claude has split dropdown for tmux vs Headless CLI) */}
+          {/* Harness selector cards */}
           <div
             className={`grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 p-1 rounded-2xl transition-all ${
               highlightPicker ? 'ring-2 ring-amber-400/60 bg-amber-400/[0.04]' : ''
@@ -525,113 +510,24 @@ export const DraftSessionPane: React.FC<Props> = ({
               </div>
             </button>
 
-            {/* Claude (defaults to tmux + Remote Control, with dropdown for Headless CLI) */}
-            <div className="relative">
-              <div
-                onClick={() => handleSelectHarness(claudeMode)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleSelectHarness(claudeMode);
-                  }
-                }}
-                className={`h-full text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
-                  selectedGroup === 'claude'
-                    ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
-                    : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1.5">
-                  <div className="flex items-center gap-2 text-label font-semibold min-w-0">
-                    <HarnessLogo harness="claude" size={16} />
-                    <span className="truncate">Claude</span>
-                  </div>
-                  <button
-                    ref={claudeTriggerRef}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setClaudeMenuOpen((v) => !v);
-                      setProjectMenuOpen(false);
-                      setModelMenuOpen(false);
-                      setThinkingMenuOpen(false);
-                    }}
-                    title="Choose Claude runtime mode"
-                    aria-label="Choose Claude runtime mode"
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-micro font-medium text-ink-muted hover:text-ink-primary hover:bg-white/[0.1] transition-colors shrink-0 cursor-pointer"
-                  >
-                    <span>{claudeMode === 'claude-tmux' ? 'tmux' : 'CLI'}</span>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <div className="text-caption text-ink-faint mt-1 leading-snug">
-                  {claudeMode === 'claude-tmux'
-                    ? 'Persistent tmux + remote control'
-                    : 'Resumable headless CLI'}
-                </div>
+            {/* Claude (always tmux + Remote Control) */}
+            <button
+              type="button"
+              onClick={() => handleSelectHarness('claude-tmux')}
+              className={`text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
+                selectedGroup === 'claude'
+                  ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                  : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-label font-semibold">
+                <HarnessLogo harness="claude" size={16} />
+                <span className="truncate">Claude</span>
               </div>
-
-              {claudeMenuOpen && (
-                <PopoverSurface
-                  width="auto"
-                  onClose={() => setClaudeMenuOpen(false)}
-                  ignoreRef={claudeTriggerRef}
-                  className="absolute right-0 top-[calc(100%+6px)] z-40 w-64 p-1.5 space-y-1"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClaudeMode('claude-tmux');
-                      handleSelectHarness('claude-tmux');
-                      setClaudeMenuOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors cursor-pointer ${
-                      claudeMode === 'claude-tmux'
-                        ? 'bg-white/[0.09] text-ink-primary'
-                        : 'text-ink-secondary hover:bg-white/[0.05]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-label font-medium">
-                        <Terminal className="w-3.5 h-3.5 text-brand-claude" />
-                        tmux + Remote Control
-                      </span>
-                      {claudeMode === 'claude-tmux' && <Check className="w-3.5 h-3.5 text-ink-primary" />}
-                    </div>
-                    <p className="text-micro text-ink-muted mt-0.5 leading-snug">
-                      Recommended · persistent shell, live terminal mirror &amp; mobile control
-                    </p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClaudeMode('claude-cli');
-                      handleSelectHarness('claude-cli');
-                      setClaudeMenuOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors cursor-pointer ${
-                      claudeMode === 'claude-cli'
-                        ? 'bg-white/[0.09] text-ink-primary'
-                        : 'text-ink-secondary hover:bg-white/[0.05]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-label font-medium">
-                        <Cpu className="w-3.5 h-3.5 text-ink-muted" />
-                        Headless CLI
-                      </span>
-                      {claudeMode === 'claude-cli' && <Check className="w-3.5 h-3.5 text-ink-primary" />}
-                    </div>
-                    <p className="text-micro text-ink-muted mt-0.5 leading-snug">
-                      Lightweight one-shot / resumable `claude -p` turn without tmux
-                    </p>
-                  </button>
-                </PopoverSurface>
-              )}
-            </div>
+              <div className="text-caption text-ink-faint mt-1 leading-snug">
+                tmux + remote control
+              </div>
+            </button>
           </div>
 
           {error && (
@@ -725,8 +621,8 @@ export const DraftSessionPane: React.FC<Props> = ({
               className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-body text-ink-primary placeholder:text-ink-faint focus:outline-none focus-visible:shadow-none max-h-60 overflow-y-auto leading-relaxed"
             />
 
-            <div className="px-3 pb-3 pt-1 flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <div className="px-3 pb-2.5 pt-0.5 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1 flex-wrap min-w-0">
                 <IconButton
                   label="Attach image (or Ctrl+V to paste)"
                   onClick={() => void handlePickImages()}
@@ -747,16 +643,19 @@ export const DraftSessionPane: React.FC<Props> = ({
                       setProjectMenuOpen((v) => !v);
                       setModelMenuOpen(false);
                       setThinkingMenuOpen(false);
-                      setClaudeMenuOpen(false);
                       setCreatingProject(false);
                       setNewProjectError(null);
                     }}
                     title={draft.cwd}
-                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-caption text-ink-secondary hover:text-ink-primary transition-colors cursor-pointer max-w-[220px]"
+                    className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-caption leading-none transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none max-w-[220px] ${
+                      projectMenuOpen
+                        ? 'bg-white/[0.09] text-ink-primary'
+                        : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.06]'
+                    }`}
                   >
-                    <FolderOpen className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-                    <span className="truncate font-medium">{selectedProjectLabel}</span>
-                    <ChevronDown className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+                    <FolderOpen className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
+                    <span className="truncate leading-none translate-y-[0.5px]">{selectedProjectLabel}</span>
+                    <ChevronDown className="w-3 h-3 text-ink-faint shrink-0 translate-y-[0.5px]" />
                   </button>
 
                   {projectMenuOpen && (
@@ -877,14 +776,23 @@ export const DraftSessionPane: React.FC<Props> = ({
                       setModelMenuOpen((v) => !v);
                       setProjectMenuOpen(false);
                       setThinkingMenuOpen(false);
-                      setClaudeMenuOpen(false);
                     }}
                     disabled={!selectedGroup}
                     title={draft.model || defaultModelOption?.label || 'Select model'}
-                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer max-w-[230px]"
+                    className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-caption leading-none transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none max-w-[230px] disabled:opacity-45 disabled:cursor-not-allowed ${
+                      modelMenuOpen
+                        ? 'bg-white/[0.09] text-ink-primary'
+                        : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.06]'
+                    }`}
                   >
-                    <Cpu className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-                    <span className="truncate font-medium">
+                    <span className="inline-flex items-center justify-center shrink-0">
+                      {draft.harness ? (
+                        <HarnessLogo harness={draft.harness} size={14} />
+                      ) : (
+                        <Cpu className="w-3.5 h-3.5 text-ink-faint" strokeWidth={1.75} />
+                      )}
+                    </span>
+                    <span className="truncate leading-none translate-y-[0.5px]">
                       {selectedModelOption?.label ||
                         draft.model ||
                         (defaultModelOption ? `${defaultModelOption.label}` : 'Default model')}
@@ -994,14 +902,17 @@ export const DraftSessionPane: React.FC<Props> = ({
                       setThinkingMenuOpen((v) => !v);
                       setModelMenuOpen(false);
                       setProjectMenuOpen(false);
-                      setClaudeMenuOpen(false);
                     }}
                     disabled={!selectedGroup || availableThinkingLevels.length === 0}
                     title="Model thinking mode"
-                    className="h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-caption text-ink-secondary hover:text-ink-primary disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-caption leading-none transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none disabled:opacity-45 disabled:cursor-not-allowed ${
+                      thinkingMenuOpen
+                        ? 'bg-white/[0.09] text-ink-primary'
+                        : 'text-ink-muted hover:text-ink-primary hover:bg-white/[0.06]'
+                    }`}
                   >
-                    <Brain className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-                    <span className="font-medium">
+                    <Brain className="w-3.5 h-3.5 text-ink-faint shrink-0" strokeWidth={1.75} />
+                    <span className="leading-none translate-y-[0.5px]">
                       {draft.reasoningEffort
                         ? formatEffortLabel(draft.reasoningEffort)
                         : defaultThinkingLevel
@@ -1081,14 +992,15 @@ export const DraftSessionPane: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={() => onUpdateDraft({ remoteControl: !draft.remoteControl })}
-                    className={`h-8 inline-flex items-center gap-1.5 px-2.5 rounded-lg border text-caption transition-colors cursor-pointer ${
+                    aria-pressed={Boolean(draft.remoteControl)}
+                    className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-caption leading-none transition-colors cursor-pointer focus:outline-none focus-visible:shadow-none ${
                       draft.remoteControl
-                        ? 'bg-indigo-500/15 border-indigo-400/30 text-indigo-200'
-                        : 'bg-white/[0.04] border-line-hairline text-ink-faint hover:text-ink-secondary'
+                        ? 'text-indigo-200 hover:bg-white/[0.06]'
+                        : 'text-ink-faint hover:text-ink-primary hover:bg-white/[0.06]'
                     }`}
                   >
-                    <Radio className="w-3.5 h-3.5" />
-                    <span>Remote</span>
+                    <Radio className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="leading-none translate-y-[0.5px]">Remote</span>
                   </button>
                 )}
               </div>
@@ -1098,7 +1010,7 @@ export const DraftSessionPane: React.FC<Props> = ({
                 disabled={busy}
                 onClick={() => void handleLaunch()}
                 title="Start conversation (Enter)"
-                className="w-8 h-8 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-35 disabled:cursor-not-allowed transition-all cursor-pointer"
+                className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
                 {busy ? (
                   <WorkingOrb tone="master" size="sm" />

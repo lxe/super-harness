@@ -45,7 +45,7 @@ public struct NewSessionSheet: View {
                 // Harness Picker Grid
                 Section("Harness") {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                        ForEach(StartHarnessKind.allCases) { kind in
+                        ForEach(StartHarnessKind.pickable) { kind in
                             harnessCard(kind)
                         }
                     }

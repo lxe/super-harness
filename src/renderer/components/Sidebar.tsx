@@ -39,6 +39,7 @@ import {
   canDropSessionIntoSection,
   filterSidebarSessions,
   flattenVisibleSessions,
+  getAvailableSectionsForHarness,
   getGlobalPinnedSessions,
   groupSessionsForSidebar,
   isSingleHarnessFilter,
@@ -1754,6 +1755,13 @@ export const Sidebar: React.FC<Props> = React.memo(({
           y={ctxMenu.y}
           targets={ctxMenu.sessions}
           sectionLabel={ctxMenu.sectionLabel}
+          availableSections={(() => {
+            const group = ctxMenu.sessions[0]?.harnessGroup;
+            if (!group || group === 'master') return undefined;
+            if (!ctxMenu.sessions.every((t) => t.harnessGroup === group)) return undefined;
+            return getAvailableSectionsForHarness(sessions, group);
+          })()}
+          folders={folders}
           onClose={() => setCtxMenu(null)}
           onClearSelection={() => setSelectedIds(new Set())}
           onOpenInSplit={onOpenInSplit}

@@ -26,6 +26,11 @@ import { computeClaudeSessionStats } from '../utils/sessionStats';
 import { offloadPool } from '../workers/offloadPool';
 import { RemoteClaudeMirror } from './remoteClaude';
 import {
+  driveLocalClaudeQuestionTmux,
+  extractPendingQuestionBlock,
+  resolveClaudeQuestionAnswers,
+} from './claudeQuestionTui';
+import {
   CLAUDE_EFFORTS,
   CLAUDE_PERMISSION_MODES,
   invalid,
@@ -2376,6 +2381,41 @@ export function createClaudeDriver(): HarnessDriver {
               initialSize = fs.statSync(transcriptPath).size;
             } catch {
               initialSize = 0;
+            }
+          }
+
+          // If Claude is waiting on an interactive AskUserQuestion TUI picker, drive the
+          // arrow/Enter wizard directly instead of typing raw text into the option list.
+          if (!attachments?.length && transcriptPath) {
+            try {
+              const recent = await loadClaudeTranscript(
+                session.id,
+                session.nativeId,
+                transcriptPath,
+                session.cwd,
+                10
+              );
+              const pendingQ = extractPendingQuestionBlock(recent);
+              const choices = pendingQ
+                ? resolveClaudeQuestionAnswers(pendingQ.questions, prompt)
+                : null;
+              if (pendingQ && choices) {
+                const handled = await driveLocalClaudeQuestionTmux(
+                  target,
+                  pendingQ.questions,
+                  choices
+                );
+                if (handled) {
+                  ctx.triggerRefresh(800);
+                  ctx.triggerRefresh(2200);
+                  return {
+                    ok: true,
+                    dispatchedVia: `tmux question picker → ${target}`,
+                  };
+                }
+              }
+            } catch {
+              // Non-fatal: fall through to standard typing.
             }
           }
 

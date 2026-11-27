@@ -242,8 +242,22 @@ export const SessionPane: React.FC<Props> = ({
         pendingOptimisticRef.current = null;
         return result;
       }
-      // Once the real transcript contains this user message (or any newer user message), drop the optimistic copy
+      // Once the real transcript contains this user message (or any newer user message,
+      // or an answered AskUserQuestion block matching the reply), drop the optimistic copy
       const matched = incoming.some((m) => {
+        if (m.role === 'assistant' && m.timestamp >= pending.sentAt - 120_000) {
+          const answeredQ = m.blocks.some(
+            (b) =>
+              b.type === 'question' &&
+              Boolean(b.answered) &&
+              b.questions.some(
+                (q) =>
+                  Boolean(q.answer) &&
+                  (pending.promptText.includes(q.question) || pending.promptText.includes(q.answer!))
+              )
+          );
+          if (answeredQ) return true;
+        }
         if (m.role !== 'user') return false;
         if (m.timestamp >= pending.sentAt - 2000) return true;
         if (!pending.promptText) return false;

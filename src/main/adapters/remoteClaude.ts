@@ -6,6 +6,11 @@ import type { ImageAttachment, SessionTranscriptResult, UnifiedSession } from '.
 import { formatPromptWithImagePaths } from './types';
 import { cleanUserPreview } from '../utils/lastUserText';
 import { claudeTmuxTypingSteps, parseClaudeJsonlLines, pickClaudeTitle } from './claudeAdapter';
+import {
+  buildRemoteClaudeQuestionTmuxScript,
+  extractPendingQuestionBlock,
+  resolveClaudeQuestionAnswers,
+} from './claudeQuestionTui';
 
 /**
  * Claude sessions running on other machines (e.g. lxe's Mac), mirrored over SSH.
@@ -463,6 +468,30 @@ export class RemoteClaudeMirror {
       };
     }
     try {
+      // If Claude is waiting on an interactive AskUserQuestion TUI picker, drive the
+      // arrow/Enter wizard directly instead of typing raw text into the option list.
+      if (!attachments?.length) {
+        try {
+          const recent = await this.loadTranscript(sessionId, 10);
+          const pendingQ = extractPendingQuestionBlock(recent);
+          const choices = pendingQ ? resolveClaudeQuestionAnswers(pendingQ.questions, prompt) : null;
+          if (pendingQ && choices) {
+            const qScript = buildRemoteClaudeQuestionTmuxScript(e.tmux, pendingQ.questions, choices);
+            try {
+              await ssh(e.host, 'sh -s', { input: qScript, timeout: 30000 });
+              setTimeout(() => void this.poll(), 800);
+              return { ok: true, dispatchedVia: `tmux question picker over SSH → ${e.label} ${e.tmux}` };
+            } catch (qErr: unknown) {
+              const code = (qErr as { code?: number })?.code;
+              if (code !== 42) throw qErr;
+              // Exit 42: pane is no longer showing AskUserQuestion — fall through to normal typing.
+            }
+          }
+        } catch {
+          // Non-fatal: fall through to standard typing if transcript inspection fails.
+        }
+      }
+
       // Attachments live on this machine; copy them to the host so Claude there can read them.
       let remoteAttachments = attachments;
       if (attachments?.length) {

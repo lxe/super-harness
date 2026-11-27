@@ -292,6 +292,82 @@ const AgentEmbedFrame: React.FC<AgentEmbedFrameProps> = React.memo(
   }
 );
 
+const InteractiveQuestionCard: React.FC<{
+  questions: Extract<UnifiedBlock, { type: 'question' }>['questions'];
+  onQuickReply?: (text: string) => void;
+}> = ({ questions, onQuickReply }) => {
+  const [selected, setSelected] = useState<Record<number, string>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const isMulti = questions.length > 1;
+  const allAnswered = questions.every((q, qi) => q.options.length === 0 || Boolean(selected[qi]));
+
+  const handleSubmitAll = () => {
+    if (!onQuickReply || submitted || !allAnswered) return;
+    const lines = questions
+      .map((q, qi) => (selected[qi] ? `${q.question}: ${selected[qi]}` : null))
+      .filter((x): x is string => Boolean(x));
+    if (lines.length === 0) return;
+    setSubmitted(true);
+    onQuickReply(lines.join('\n'));
+  };
+
+  return (
+    <div className="my-3 rounded-xl border border-line-subtle bg-surface-subtle/60 p-4 space-y-3.5">
+      <div className="flex items-center gap-1.5 text-caption text-ink-muted">
+        <HelpCircle className="w-3.5 h-3.5 text-ink-faint shrink-0" />
+        <span>
+          {questions.length} {questions.length === 1 ? 'question' : 'questions'}
+        </span>
+      </div>
+      <div className="space-y-3.5">
+        {questions.map((q, qi) => (
+          <div key={qi} className="space-y-1.5">
+            <div className="text-label font-medium text-ink-primary">{q.question}</div>
+            {q.options.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {q.options.map((opt, oi) => {
+                  const isPicked = selected[qi] === opt;
+                  return (
+                    <Button
+                      key={oi}
+                      size="sm"
+                      variant={isPicked ? 'primary' : 'secondary'}
+                      disabled={submitted}
+                      onClick={() => {
+                        if (!isMulti) {
+                          setSubmitted(true);
+                          onQuickReply?.(`${q.question}: ${opt}`);
+                        } else {
+                          setSelected((prev) => ({ ...prev, [qi]: opt }));
+                        }
+                      }}
+                      className="text-left font-normal"
+                    >
+                      {opt}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {isMulti && (
+        <div className="pt-1 flex justify-end">
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={!allAnswered || submitted}
+            onClick={handleSubmitAll}
+          >
+            {submitted ? 'Submitting…' : 'Submit answers'}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface Props {
   block: UnifiedBlock;
   onQuickReply?: (text: string) => void;
@@ -459,38 +535,7 @@ export const CoalescedBlockView: React.FC<Props> = React.memo(
       );
     }
 
-    return (
-      <div className="my-3 rounded-xl border border-line-subtle bg-surface-subtle/60 p-4 space-y-3.5">
-        <div className="flex items-center gap-1.5 text-caption text-ink-muted">
-          <HelpCircle className="w-3.5 h-3.5 text-ink-faint shrink-0" />
-          <span>
-            {block.questions.length} {block.questions.length === 1 ? 'question' : 'questions'}
-          </span>
-        </div>
-        <div className="space-y-3.5">
-          {block.questions.map((q, qi) => (
-            <div key={qi} className="space-y-1.5">
-              <div className="text-label font-medium text-ink-primary">{q.question}</div>
-              {q.options.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {q.options.map((opt, oi) => (
-                    <Button
-                      key={oi}
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => onQuickReply?.(`${q.question}: ${opt}`)}
-                      className="text-left font-normal"
-                    >
-                      {opt}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <InteractiveQuestionCard questions={block.questions} onQuickReply={onQuickReply} />;
   }
 
   if (block.type === 'thinking') {

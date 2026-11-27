@@ -78,6 +78,7 @@ import type {
   FilePreviewData,
   HarnessCatalog,
   HarnessGroup,
+  HarnessUpdateJob,
   ImageAttachment,
   MobileApiSettings,
   OrganizeAction,
@@ -123,6 +124,12 @@ export interface ControlServerHooks {
     /** Set when that token belongs to a paired device, so revoking it drops the push key. */
     pairedDeviceId?: string;
   }) => unknown;
+  /** Runs a harness's own updater (progress arrives as SSE `harness_update`). */
+  startHarnessUpdate?: (
+    harness: HarnessGroup
+  ) => { ok: true; job: HarnessUpdateJob } | { ok: false; error: string };
+  cancelHarnessUpdate?: (harness: HarnessGroup) => boolean;
+  getHarnessUpdateJobs?: () => HarnessUpdateJob[];
   /** Phone pairing (/api/pair, per-device tokens). Without it only the legacy token works. */
   pairing?: PairingService;
   sendTestPush?: (opts?: { title?: string; body?: string }) => Promise<unknown>;
@@ -796,6 +803,31 @@ export class ControlServer {
         if (req.method === 'GET' && url.pathname === '/api/harnesses') {
           const { harnesses } = await this.registry.discover();
           res.end(JSON.stringify({ harnesses }));
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/harnesses/updates') {
+          sendJson({ ok: true, jobs: this.hooks.getHarnessUpdateJobs?.() ?? [] });
+          return;
+        }
+
+        const updateRoute = url.pathname.match(/^\/api\/harnesses\/([a-z]+)\/update(\/cancel)?$/);
+        if (req.method === 'POST' && updateRoute) {
+          const harness = updateRoute[1] as HarnessGroup;
+          if (!this.registry.getDriver(harness)) {
+            sendJson({ ok: false, error: `Unknown harness: ${harness}` }, 404);
+            return;
+          }
+          if (updateRoute[2]) {
+            sendJson({ ok: this.hooks.cancelHarnessUpdate?.(harness) ?? false });
+            return;
+          }
+          if (!this.hooks.startHarnessUpdate) {
+            sendJson({ ok: false, error: 'Updates are not available on this host.' }, 404);
+            return;
+          }
+          const result = this.hooks.startHarnessUpdate(harness);
+          sendJson(result, result.ok ? 202 : 409);
           return;
         }
 

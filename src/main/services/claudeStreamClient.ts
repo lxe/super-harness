@@ -606,4 +606,22 @@ export class ClaudeStreamPool {
       this.closeWorker(sid);
     }
   }
+
+  /** Warm workers in the middle of a turn. */
+  activeTurnCount(): number {
+    let n = 0;
+    for (const w of this.workers.values()) if (w.activeTurn) n++;
+    return n;
+  }
+
+  /** Closes idle warm workers (they respawn on the next message); returns how many closed. */
+  closeIdle(): number {
+    let n = 0;
+    for (const [sid, w] of Array.from(this.workers.entries())) {
+      if (w.activeTurn) continue;
+      this.closeWorker(sid);
+      n++;
+    }
+    return n;
+  }
 }

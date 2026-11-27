@@ -1558,6 +1558,17 @@ export function createMuseDriver(): HarnessDriver {
       attachClients.clear();
     },
 
+    activeHostTurns(): number {
+      return pooled.activeTurnCount();
+    },
+
+    async restartHosts(): Promise<string[]> {
+      // Only Superharness's own `muse serve`; attach clients talk to hosts other apps own.
+      if (!pooled.connected || pooled.activeTurnCount() > 0) return [];
+      pooled.close();
+      return ['muse serve'];
+    },
+
     async controlDaemon() {
       // Superharness hosts Muse sessions itself over MSP (`muse serve`);
       // there is no separate remote daemon/desktop to start or stop. The

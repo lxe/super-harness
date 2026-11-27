@@ -473,6 +473,24 @@ export class PiRpcPool {
   closeAll(): void {
     for (const key of Array.from(this.workers.keys())) this.close(key);
   }
+
+  /** Workers in the middle of a turn. */
+  activeTurnCount(): number {
+    let n = 0;
+    for (const w of this.workers.values()) if (!w.closed && w.streaming) n++;
+    return n;
+  }
+
+  /** Closes idle workers (they respawn on the next message); returns how many closed. */
+  closeIdle(): number {
+    let n = 0;
+    for (const [key, w] of Array.from(this.workers.entries())) {
+      if (w.streaming) continue;
+      this.close(key);
+      n++;
+    }
+    return n;
+  }
 }
 
 /** One-shot RPC query in a throwaway `--no-session` process (catalog lookups). */

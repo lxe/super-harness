@@ -40,6 +40,7 @@ import {
 import { SessionSummarizer } from './services/sessionSummarizer';
 import { UsageService } from './services/usageService';
 import { ConfigStore } from './store/configStore';
+import { HarnessUpdateService } from './services/harnessUpdates';
 import { closeSqlitePool } from './utils/sqlite';
 import { notificationTextFromMarkdown } from './utils/notificationText';
 import { ensureRichPath, whichBinary } from './utils/system';
@@ -501,6 +502,28 @@ const sessionSummarizer = new SessionSummarizer({
 });
 registry.setSummaryLookup((id) => sessionSummarizer.get(id));
 
+// Harness updates: installed vs latest per harness, and running each harness's own updater.
+const harnessUpdates = new HarnessUpdateService({
+  cacheFile: path.join(app.getPath('userData'), 'harness-updates.json'),
+  getDetections: () => registry.getCached().harnesses,
+  workingSessions: (harness) =>
+    getActiveWorkingSessionIds().filter((id) => {
+      const s = registry.getSession(id);
+      return s ? s.harnessGroup === harness : id.startsWith(`${harness}:`);
+    }).length,
+  activeHostTurns: (harness) => registry.getDriver(harness)?.activeHostTurns?.() ?? 0,
+  restartHosts: async (harness) => (await registry.getDriver(harness)?.restartHosts?.()) ?? [],
+  refreshDetections: async () => (await refreshAndBroadcast()).harnesses,
+  onInfoChanged: () => {
+    void refreshAndBroadcast();
+  },
+  onJob: (job) => {
+    broadcastToRenderer('sh:harness-update', job);
+    controlServerRef?.broadcastEvent('harness_update', job);
+  },
+});
+registry.setUpdateLookup((detection) => harnessUpdates.infoFor(detection));
+
 const dispatcher = new HarnessDispatcher(registry, store, emitStream, () => {
   void refreshAndBroadcast();
 });
@@ -553,6 +576,9 @@ const controlServer = new ControlServer(
       return dispatcher.queueToSession(sessionId, prompt, attachments);
     },
     registerPushDevice: (opts) => pushNotifier.registerDevice(opts),
+    startHarnessUpdate: (harness) => harnessUpdates.startUpdate(harness),
+    cancelHarnessUpdate: (harness) => harnessUpdates.cancel(harness),
+    getHarnessUpdateJobs: () => harnessUpdates.jobs(),
     pairing: pairingService,
     sendTestPush: (opts) =>
       pushNotifier.notify(
@@ -826,6 +852,21 @@ function registerIpcHandlers(): void {
   ipcMain.handle('sh:refresh', async () => {
     return refreshAndBroadcast();
   });
+
+  ipcMain.handle('sh:harness-updates-check', async () => {
+    await harnessUpdates.checkAll(true);
+    return (await refreshAndBroadcast()).harnesses;
+  });
+
+  ipcMain.handle('sh:harness-update-start', async (_ev, harness: HarnessGroup) =>
+    harnessUpdates.startUpdate(harness)
+  );
+
+  ipcMain.handle('sh:harness-update-cancel', async (_ev, harness: HarnessGroup) =>
+    harnessUpdates.cancel(harness)
+  );
+
+  ipcMain.handle('sh:harness-update-jobs', async () => harnessUpdates.jobs());
 
   ipcMain.handle('sh:transcript', async (_ev, sessionId: string, limit?: number) => {
     return registry.getTranscript(sessionId, limit ?? 120);
@@ -1222,6 +1263,7 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   createWindow();
   liveSync.start();
+  harnessUpdates.start();
   schedulePolling(store.getState().settings.pollIntervalMs);
   // Claude tmux sessions that died with the last boot come back in tmux sessions of the same name.
   void claudeTmuxRecords
@@ -1253,6 +1295,7 @@ app.on('window-all-closed', () => {
   if (pollTimer) clearInterval(pollTimer);
   if (usageTimer) clearInterval(usageTimer);
   liveSync.stop();
+  harnessUpdates.stop();
   dispatcher.shutdown();
   bonjourAdvertiser.stop();
   controlServer.close();

@@ -1172,5 +1172,14 @@ export function createPiDriver(): HarnessDriver {
     shutdown() {
       pool.closeAll();
     },
+
+    activeHostTurns() {
+      return pool.activeTurnCount();
+    },
+
+    async restartHosts() {
+      const n = pool.closeIdle();
+      return n > 0 ? [`${n} Pi ${n === 1 ? 'worker' : 'workers'}`] : [];
+    },
   };
 }

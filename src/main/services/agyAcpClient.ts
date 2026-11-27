@@ -322,6 +322,10 @@ class AcpConnection {
     return sid;
   }
 
+  activeRunCount(): number {
+    return this.activeRuns.size;
+  }
+
   async sendPrompt(
     shSessionId: string,
     nativeSessionId: string,
@@ -566,5 +570,24 @@ export class AgyAcpPool {
       conn.close();
     }
     this.connections.clear();
+  }
+
+  /** Prompts running over Superharness's own `agy acp` connections. */
+  activeTurnCount(): number {
+    let n = 0;
+    for (const conn of this.connections.values()) n += conn.activeRunCount();
+    return n;
+  }
+
+  /** Closes idle connections (they reconnect on the next prompt); returns how many closed. */
+  closeIdle(): number {
+    let n = 0;
+    for (const [dir, conn] of Array.from(this.connections.entries())) {
+      if (conn.activeRunCount() > 0) continue;
+      conn.close();
+      this.connections.delete(dir);
+      n++;
+    }
+    return n;
   }
 }

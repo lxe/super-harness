@@ -2753,6 +2753,15 @@ export function createClaudeDriver(): HarnessDriver {
       streamPool.closeAll();
     },
 
+    activeHostTurns(): number {
+      return streamPool.activeTurnCount();
+    },
+
+    async restartHosts(): Promise<string[]> {
+      const n = streamPool.closeIdle();
+      return n > 0 ? [`${n} Claude ${n === 1 ? 'worker' : 'workers'}`] : [];
+    },
+
     startSession: startClaudeSession,
 
     async controlDaemon(

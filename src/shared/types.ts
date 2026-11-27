@@ -36,6 +36,55 @@ export interface HarnessDetection {
     canControlDaemon: boolean;
   };
   notes?: string;
+  /** Installed vs latest version and how to update (Superharness checks every few hours). */
+  update?: HarnessUpdateInfo;
+}
+
+/** Update status for one harness, attached to its HarnessDetection. */
+export interface HarnessUpdateInfo {
+  /** Installed version, normalized (e.g. `0.172.0`, `1.4.25-R9361.1`). */
+  current: string | null;
+  /** Latest available version; null when it can't be checked. */
+  latest: string | null;
+  updateAvailable: boolean;
+  /** When `latest` was last checked (ms). */
+  checkedAt: number | null;
+  /** Where `latest` comes from, for people (e.g. `npm registry (@openai/codex)`). */
+  latestSource?: string;
+  /** `command`: Superharness can run the updater. `manual`: shows `manualHint` instead. */
+  method: 'command' | 'manual';
+  /** The commands the Update button runs, for display. */
+  command?: string;
+  manualHint?: string;
+  /** The harness also updates itself (e.g. on launch). */
+  selfUpdating?: string;
+  /** A long-running daemon whose version differs from the installed CLI. */
+  staleDaemon?: { name: string; version: string | null; expected: string | null; detail: string };
+  /** Processes (e.g. sessions in tmux) still running an older build until they're restarted. */
+  staleProcesses?: number;
+  /** Why the latest-version check failed. */
+  checkError?: string;
+}
+
+export type HarnessUpdatePhase = 'waiting' | 'updating' | 'restarting' | 'done' | 'failed' | 'cancelled';
+
+/** One run of a harness's updater, streamed to the desktop and the phone (SSE `harness_update`). */
+export interface HarnessUpdateJob {
+  id: string;
+  harness: HarnessGroup;
+  phase: HarnessUpdatePhase;
+  startedAt: number;
+  finishedAt?: number;
+  from: string | null;
+  to: string | null;
+  /** The command running now (or last run). */
+  step?: string;
+  /** Tail of the updater's output (newest last). */
+  log: string[];
+  /** Waiting phase: sessions on this harness that are working. */
+  waitingFor?: number;
+  /** Outcome or error, one or two sentences. */
+  message?: string;
 }
 
 export interface UnifiedSession {
@@ -715,6 +764,14 @@ export interface SuperHarnessApi {
   closePairing: () => Promise<void>;
   revokePairedDevice: (deviceId: string) => Promise<boolean>;
   onPairingEvent: (cb: (ev: PairingEvent) => void) => () => void;
+  /** Checks every harness for a newer version now (normally every few hours). */
+  checkHarnessUpdates: () => Promise<HarnessDetection[]>;
+  startHarnessUpdate: (
+    harness: HarnessGroup
+  ) => Promise<{ ok: true; job: HarnessUpdateJob } | { ok: false; error: string }>;
+  cancelHarnessUpdate: (harness: HarnessGroup) => Promise<boolean>;
+  getHarnessUpdateJobs: () => Promise<HarnessUpdateJob[]>;
+  onHarnessUpdate: (cb: (job: HarnessUpdateJob) => void) => () => void;
   onStreamEvent: (cb: (ev: StreamEvent) => void) => () => void;
   onTranscriptUpdated: (cb: (result: SessionTranscriptResult) => void) => () => void;
   onStateChanged: (cb: (state: SuperHarnessState) => void) => () => void;

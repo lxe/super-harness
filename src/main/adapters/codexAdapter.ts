@@ -1508,6 +1508,13 @@ export function createCodexDriver(): HarnessDriver {
       appServer.close();
     },
 
+    async restartHosts(): Promise<string[]> {
+      // `codex app-server daemon update` restarts the daemon itself; drop the old socket so the
+      // next request connects to the new one.
+      appServer.close();
+      return [];
+    },
+
     setActivitySink(sink: ((sessionId: string) => void) | null): void {
       activitySink = sink;
     },

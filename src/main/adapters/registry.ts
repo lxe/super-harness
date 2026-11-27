@@ -42,6 +42,13 @@ export class HarnessRegistry {
     this.readingLookup = fn;
   }
 
+  private updateLookup: (detection: HarnessDetection) => HarnessDetection['update'] = () => undefined;
+
+  /** Update status (installed vs latest) attached to each detection. */
+  setUpdateLookup(fn: (detection: HarnessDetection) => HarnessDetection['update']): void {
+    this.updateLookup = fn;
+  }
+
   /** Source of one-line thread summaries overlaid on each discovered session. */
   setSummaryLookup(fn: (sessionId: string) => string | undefined): void {
     this.summaryLookup = fn;
@@ -83,7 +90,10 @@ export class HarnessRegistry {
     }
     const results = await Promise.all(pending);
 
-    const harnesses = results.map((r) => r.detection);
+    const harnesses = results.map((r) => {
+      const update = r.detection.installed ? this.updateLookup(r.detection) : undefined;
+      return update ? { ...r.detection, update } : r.detection;
+    });
     const mergedRaw = results.flatMap((r) => r.sessions);
 
     const masterSession: UnifiedSession = {

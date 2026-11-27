@@ -146,6 +146,18 @@ export interface HarnessDriver {
   shutdown?(): void;
 
   /**
+   * Turns running in Superharness's own hosts for this harness (pooled workers, `muse serve`,
+   * `agy acp`). A harness update waits for these, since restartHosts would cut them off.
+   */
+  activeHostTurns?(): number;
+
+  /**
+   * After the harness was updated: close Superharness's own idle hosts so they respawn on the new
+   * binary. Returns what was restarted, in words (e.g. `2 Pi workers`).
+   */
+  restartHosts?(): Promise<string[]>;
+
+  /**
    * Optional sink for native push activity (e.g. Codex app-server daemon
    * notifications for turns Superharness did not start). LiveSyncService
    * uses it to push transcript refreshes without FS polling.

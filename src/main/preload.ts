@@ -80,6 +80,19 @@ const api: SuperHarnessApi = {
   openPairing: () => ipcRenderer.invoke('sh:pairing-open'),
   closePairing: () => ipcRenderer.invoke('sh:pairing-close'),
   revokePairedDevice: (deviceId: string) => ipcRenderer.invoke('sh:revoke-device', deviceId),
+  checkHarnessUpdates: () => ipcRenderer.invoke('sh:harness-updates-check'),
+  startHarnessUpdate: (harness: import('../shared/types').HarnessGroup) =>
+    ipcRenderer.invoke('sh:harness-update-start', harness),
+  cancelHarnessUpdate: (harness: import('../shared/types').HarnessGroup) =>
+    ipcRenderer.invoke('sh:harness-update-cancel', harness),
+  getHarnessUpdateJobs: () => ipcRenderer.invoke('sh:harness-update-jobs'),
+  onHarnessUpdate: (cb: (job: import('../shared/types').HarnessUpdateJob) => void) => {
+    const listener = (_ev: unknown, job: import('../shared/types').HarnessUpdateJob) => cb(job);
+    ipcRenderer.on('sh:harness-update', listener);
+    return () => {
+      ipcRenderer.removeListener('sh:harness-update', listener);
+    };
+  },
   onPairingEvent: (cb: (ev: import('../shared/types').PairingEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, ev: import('../shared/types').PairingEvent) => cb(ev);
     ipcRenderer.on('sh:pairing-event', listener);

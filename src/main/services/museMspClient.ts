@@ -805,6 +805,10 @@ export class MuseMspConnection {
     return this.activeRuns.has(nativeSessionId);
   }
 
+  activeTurnCount(): number {
+    return this.activeRuns.size;
+  }
+
   async sendTurn(opts: {
     shSessionId: string;
     nativeSessionId: string;
@@ -1066,6 +1070,15 @@ export class MuseMspClient {
 
   hasActiveTurn(nativeSessionId: string): boolean {
     return this.connection?.hasActiveTurn(nativeSessionId) ?? false;
+  }
+
+  activeTurnCount(): number {
+    return this.connection?.activeTurnCount() ?? 0;
+  }
+
+  /** Whether a `muse serve` host is running (or connected). */
+  get connected(): boolean {
+    return this.connection !== null || this.child !== null;
   }
 
   close(): void {

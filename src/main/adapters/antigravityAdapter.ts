@@ -1458,6 +1458,15 @@ export function createAntigravityDriver(): HarnessDriver {
       acpPool.closeAll();
     },
 
+    activeHostTurns(): number {
+      return acpPool.activeTurnCount();
+    },
+
+    async restartHosts(): Promise<string[]> {
+      const n = acpPool.closeIdle();
+      return n > 0 ? [n === 1 ? 'the agy acp host' : `${n} agy acp hosts`] : [];
+    },
+
     setActivitySink(sink: ((sessionId: string) => void) | null): void {
       activitySink = sink;
       remote.setActivitySink(sink);

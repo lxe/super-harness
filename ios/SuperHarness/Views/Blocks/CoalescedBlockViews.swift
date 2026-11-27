@@ -205,7 +205,7 @@ private struct CompactTraceRowView: View {
                             .foregroundStyle(failed ? SHColor.statusDanger : SHColor.inkFaint)
                             .frame(width: 14, height: ScrollingCommandText.lineHeight)
                     }
-                    ScrollingCommandText(text: cleanCmd, color: SHColor.inkSecondary, showsAllLines: isDetailOpen)
+                    ScrollingCommandText(text: cleanCmd, color: SHColor.inkSecondary, showsAllLines: false)
                     if let durationMs, durationMs >= 1000 {
                         Text(String(format: "%.1fs", durationMs / 1000.0))
                             .font(.system(size: 10, design: .monospaced))
@@ -221,7 +221,8 @@ private struct CompactTraceRowView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, isDetailOpen && ScrollingCommandText.remainingLines(of: cleanCmd) != nil ? 4 : 8)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if canExpand {
@@ -229,6 +230,13 @@ private struct CompactTraceRowView: View {
                     }
                 }
                 .accessibilityAddTraits(canExpand ? .isButton : [])
+
+                // The rest of a multi-line command, at the card's full width.
+                if isDetailOpen, let rest = ScrollingCommandText.remainingLines(of: cleanCmd) {
+                    ScrollingCommandText(text: rest, color: SHColor.inkSecondary, showsAllLines: true, keepsIndentation: true)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 8)
+                }
 
                 if isDetailOpen, let output, !output.isEmpty {
                     Divider()
@@ -941,7 +949,9 @@ struct CommandBlockView: View, Equatable {
                             .font(.system(size: 11))
                             .foregroundStyle(SHColor.inkMuted)
                             .frame(height: ScrollingCommandText.lineHeight)
-                        ScrollingCommandText(text: "$ \(command.trimmingCharacters(in: .whitespacesAndNewlines))", color: SHColor.inkPrimary, showsAllLines: isExpanded)
+                        // Only the first line shares this row with the duration, status and
+                        // chevron. The rest of a multi-line command is drawn below at full width.
+                        ScrollingCommandText(text: "$ \(command.trimmingCharacters(in: .whitespacesAndNewlines))", color: SHColor.inkPrimary, showsAllLines: false)
                         if let durationMs {
                             Text(durationMs >= 1000 ? String(format: "%.1fs", durationMs / 1000.0) : "\(Int(durationMs))ms")
                                 .font(.system(size: 10, design: .monospaced))
@@ -958,6 +968,11 @@ struct CommandBlockView: View, Equatable {
                                 .frame(height: ScrollingCommandText.lineHeight)
                                 .accessibilityLabel(isExpanded ? "Collapse" : "Expand")
                         }
+                    }
+
+                    if isExpanded, let rest = ScrollingCommandText.remainingLines(of: command) {
+                        ScrollingCommandText(text: rest, color: SHColor.inkPrimary, showsAllLines: true, keepsIndentation: true)
+                            .accessibilityIdentifier("command.restLines")
                     }
 
                     // The working folder is detail: shown only when the block is expanded.
@@ -1037,6 +1052,8 @@ struct ScrollingCommandText: View {
     let text: String
     let color: Color
     let showsAllLines: Bool
+    /// True for the continuation of a command, whose first line may be indented on purpose.
+    var keepsIndentation: Bool = false
 
     static let font = Font.system(size: 11.5, design: .monospaced)
     /// Height of one line at `font`; icons and badges beside the text use it to sit on the first line.
@@ -1047,13 +1064,23 @@ struct ScrollingCommandText: View {
         return trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
     }
 
+    /// Everything after the first line of a multi-line command, with its indentation intact.
+    /// Nil for a one-line command.
+    nonisolated static func remainingLines(of command: String) -> String? {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let breakIndex = trimmed.firstIndex(where: \.isNewline) else { return nil }
+        let rest = trimmed[trimmed.index(after: breakIndex)...]
+            .drop(while: \.isNewline)
+        return rest.isEmpty ? nil : String(rest)
+    }
+
     nonisolated static func isMultiLine(_ command: String) -> Bool {
         command.trimmingCharacters(in: .whitespacesAndNewlines).contains(where: \.isNewline)
     }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            Text(showsAllLines ? text.trimmingCharacters(in: .whitespacesAndNewlines) : Self.firstLine(of: text))
+            Text(showsAllLines ? (keepsIndentation ? text : text.trimmingCharacters(in: .whitespacesAndNewlines)) : Self.firstLine(of: text))
                 .font(Self.font)
                 .foregroundStyle(color)
                 .lineLimit(showsAllLines ? nil : 1)

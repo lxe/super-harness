@@ -988,4 +988,12 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(reopened.chatDensity, .compact)
         XCTAssertGreaterThan(ChatDensity.spacious.messageGap, ChatDensity.comfortable.messageGap)
     }
+
+    func testCommandContinuationKeepsIndentationAndIsNilForOneLine() {
+        XCTAssertNil(ScrollingCommandText.remainingLines(of: "npm test"))
+        XCTAssertNil(ScrollingCommandText.remainingLines(of: "npm test\n"))
+        let command = "cat > a.txt <<'EOF'\n  indented line\nlast\nEOF\n"
+        XCTAssertEqual(ScrollingCommandText.firstLine(of: command), "cat > a.txt <<'EOF'")
+        XCTAssertEqual(ScrollingCommandText.remainingLines(of: command), "  indented line\nlast\nEOF")
+    }
 }

@@ -25,11 +25,12 @@ public enum SHColor {
     public static let brandClaude = Color(hex: 0xD97757)
     public static let brandMuse = Color(hex: 0xA855F7)
     public static let brandPi = Color(hex: 0x22D3EE)
-    public static let brandMaster = Color(hex: 0x818CF8)
+    /// The orchestrator's colour. Neutral: the app keeps purple out entirely.
+    public static let brandMaster = Color(hex: 0xD3D7E0)
 
     // Semantic accents
-    /// The app's accent for text buttons, links in chrome and progress marks. It is a
-    /// neutral near-white: the purple is reserved for the orchestrator's own brand mark.
+    /// The app's accent for text buttons, links in chrome and progress marks: a neutral
+    /// near-white.
     public static let accentPrimary = Color(hex: 0xE4E6EC)
     /// The "on" colour of every switch.
     public static let toggleOn = Color(hex: 0x34C38F)

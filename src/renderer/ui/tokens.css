@@ -4,21 +4,21 @@
  * ============================================================================ */
 
 @theme {
-  /* Unified OKLCH obsidian surface scale (hue 260, uniform chroma, recessed -> elevated) */
-  --color-surface-code: oklch(0.172 0.007 260);
-  --color-surface-rail: oklch(0.184 0.007 260);
-  --color-surface-canvas: oklch(0.206 0.008 260);
-  --color-surface-subtle: oklch(0.222 0.008 260);
-  --color-surface-popover: oklch(0.238 0.009 260);
-  --color-surface-raised: oklch(0.258 0.010 260);
-  --color-surface-bubble: oklch(0.276 0.010 260);
-  --color-surface-hover: oklch(0.294 0.010 260);
+  /* Unified OKLCH cool blue-violet obsidian surface scale (hue 268, subtle cool chroma, recessed -> elevated) */
+  --color-surface-code: oklch(0.172 0.011 268);
+  --color-surface-rail: oklch(0.184 0.012 268);
+  --color-surface-canvas: oklch(0.206 0.013 268);
+  --color-surface-subtle: oklch(0.222 0.014 268);
+  --color-surface-popover: oklch(0.238 0.015 268);
+  --color-surface-raised: oklch(0.258 0.016 268);
+  --color-surface-bubble: oklch(0.276 0.016 268);
+  --color-surface-hover: oklch(0.294 0.016 268);
 
-  /* Ink / text hierarchy (same 260 hue) */
-  --color-ink-primary: oklch(0.955 0.005 260);
-  --color-ink-secondary: oklch(0.835 0.008 260);
-  --color-ink-muted: oklch(0.660 0.011 260);
-  --color-ink-faint: oklch(0.515 0.011 260);
+  /* Ink / text hierarchy (same 268 cool-obsidian hue) */
+  --color-ink-primary: oklch(0.955 0.007 268);
+  --color-ink-secondary: oklch(0.835 0.011 268);
+  --color-ink-muted: oklch(0.660 0.015 268);
+  --color-ink-faint: oklch(0.515 0.015 268);
 
   /* Harness brand accents */
   --color-brand-antigravity: #60a5fa;
@@ -63,19 +63,19 @@
 :root {
   color-scheme: dark;
 
-  --sh-surface-code: oklch(0.172 0.007 260);
-  --sh-surface-rail: oklch(0.184 0.007 260);
-  --sh-surface-canvas: oklch(0.206 0.008 260);
-  --sh-surface-subtle: oklch(0.222 0.008 260);
-  --sh-surface-popover: oklch(0.238 0.009 260);
-  --sh-surface-raised: oklch(0.258 0.010 260);
-  --sh-surface-bubble: oklch(0.276 0.010 260);
-  --sh-surface-hover: oklch(0.294 0.010 260);
+  --sh-surface-code: oklch(0.172 0.011 268);
+  --sh-surface-rail: oklch(0.184 0.012 268);
+  --sh-surface-canvas: oklch(0.206 0.013 268);
+  --sh-surface-subtle: oklch(0.222 0.014 268);
+  --sh-surface-popover: oklch(0.238 0.015 268);
+  --sh-surface-raised: oklch(0.258 0.016 268);
+  --sh-surface-bubble: oklch(0.276 0.016 268);
+  --sh-surface-hover: oklch(0.294 0.016 268);
 
-  --sh-ink-primary: oklch(0.955 0.005 260);
-  --sh-ink-secondary: oklch(0.835 0.008 260);
-  --sh-ink-muted: oklch(0.660 0.011 260);
-  --sh-ink-faint: oklch(0.515 0.011 260);
+  --sh-ink-primary: oklch(0.955 0.007 268);
+  --sh-ink-secondary: oklch(0.835 0.011 268);
+  --sh-ink-muted: oklch(0.660 0.015 268);
+  --sh-ink-faint: oklch(0.515 0.015 268);
 
   --sh-line-hairline: oklch(1 0 0 / 0.055);
   --sh-line-subtle: oklch(1 0 0 / 0.095);

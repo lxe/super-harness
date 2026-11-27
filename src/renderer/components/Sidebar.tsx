@@ -1370,11 +1370,20 @@ export const Sidebar: React.FC<Props> = React.memo(({
               // Headless flat pinned strip (e.g. individual harness pins in single-harness or folder view)
               if (grp.headless) {
                 const showRowLogos = !isSingleHarnessFilter(filter);
+                const nextGrp = grpIdx < topGroups.length - 1 ? topGroups[grpIdx + 1] : null;
+                // Only draw a bottom divider if the next group doesn't already start with a full-bleed section header
+                const nextHasSectionHeader = Boolean(
+                  nextGrp && !nextGrp.headless && !(isSingleHarnessFilter(filter) && Boolean(nextGrp.harnessLogo))
+                );
                 return (
                   <div
                     key={grp.id}
                     className={`space-y-0.5 ${grpIdx === 0 ? 'pt-1.5' : ''} ${
-                      grpIdx < topGroups.length - 1 ? '-mx-2.5 px-2.5 pb-1.5 border-b border-line-hairline' : ''
+                      nextGrp
+                        ? nextHasSectionHeader
+                          ? 'pb-1.5'
+                          : '-mx-2.5 px-2.5 pb-1.5 border-b border-line-hairline'
+                        : ''
                     }`}
                   >
                     {(grp.items ?? []).map((s) =>

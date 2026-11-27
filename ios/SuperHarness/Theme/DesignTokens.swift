@@ -3,20 +3,21 @@ import SwiftUI
 // MARK: - Obsidian Design Tokens (matched to src/renderer/ui/tokens.css)
 
 public enum SHColor {
-    // Surface elevation scale (recessed -> elevated)
-    public static let surfaceCode = Color(hex: 0x101114)
-    public static let surfaceRail = Color(hex: 0x111215)
-    public static let surfaceCanvas = Color(hex: 0x16171B)
-    public static let surfaceSubtle = Color(hex: 0x181A1F)
-    public static let surfacePopover = Color(hex: 0x1A1C22)
-    public static let surfaceRaised = Color(hex: 0x1F2128)
-    public static let surfaceBubble = Color(hex: 0x23252C)
+    // Unified OKLCH hue-268 cool blue-violet obsidian surface scale (matched to src/renderer/ui/tokens.css)
+    public static let surfaceCode = Color(hex: 0x0E1015)
+    public static let surfaceRail = Color(hex: 0x101218)
+    public static let surfaceCanvas = Color(hex: 0x15171D)
+    public static let surfaceSubtle = Color(hex: 0x181B22)
+    public static let surfacePopover = Color(hex: 0x1C1F26)
+    public static let surfaceRaised = Color(hex: 0x20232B)
+    public static let surfaceBubble = Color(hex: 0x242830)
+    public static let surfaceHover = Color(hex: 0x292C35)
 
-    // Ink / text hierarchy
-    public static let inkPrimary = Color(hex: 0xF1F3F7)
-    public static let inkSecondary = Color(hex: 0xC8CCD6)
-    public static let inkMuted = Color(hex: 0x8B909E)
-    public static let inkFaint = Color(hex: 0x5F6472)
+    // Ink / text hierarchy (same 268 cool-obsidian hue)
+    public static let inkPrimary = Color(hex: 0xEEF0F5)
+    public static let inkSecondary = Color(hex: 0xC6C9D0)
+    public static let inkMuted = Color(hex: 0x8E929C)
+    public static let inkFaint = Color(hex: 0x646770)
 
     // Harness brand accents
     public static let brandAntigravity = Color(hex: 0x60A5FA)
@@ -97,11 +98,11 @@ public enum SHRadius {
 public enum SHTypography {
     public static let heroNumber = Font.system(size: 28, weight: .semibold, design: .default)
     public static let title = Font.system(size: 18, weight: .semibold, design: .default)
-    public static let heading = Font.system(size: 15.5, weight: .semibold, design: .default)
+    public static let heading = Font.system(size: 16, weight: .semibold, design: .default)
     public static let body = Font.system(size: 15, weight: .regular, design: .default)
-    public static let label = Font.system(size: 14, weight: .medium, design: .default)
-    public static let caption = Font.system(size: 13, weight: .regular, design: .default)
-    public static let micro = Font.system(size: 12, weight: .regular, design: .default)
+    public static let label = Font.system(size: 14.5, weight: .medium, design: .default)
+    public static let caption = Font.system(size: 13.5, weight: .regular, design: .default)
+    public static let micro = Font.system(size: 12.5, weight: .regular, design: .default)
     public static let mono = Font.system(size: 12.5, weight: .regular, design: .monospaced)
     public static let monoSmall = Font.system(size: 11.5, weight: .regular, design: .monospaced)
 }

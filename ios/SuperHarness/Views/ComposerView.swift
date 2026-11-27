@@ -1628,11 +1628,6 @@ struct SHModelEffortMenu: View, Equatable {
         harness.harnessGroup.map(SHColor.harness) ?? SHColor.accentPrimary
     }
 
-    private var isExtremeActive: Bool {
-        guard let lvl = activeEffortLevel?.lowercased() else { return false }
-        return lvl == "max" || lvl == "ultra"
-    }
-
     var body: some View {
         Button {
             #if canImport(UIKit)
@@ -1679,44 +1674,14 @@ struct SHModelEffortMenu: View, Equatable {
         let listHeight = min(CGFloat(max(1, models.count)) * rowHeight + 10, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
-        let thinkingSectionHeight: CGFloat = efforts.isEmpty ? 0 : (14 + 24 + 10 + 56 + 12 + 1)
+        let thinkingSectionHeight: CGFloat = efforts.isEmpty ? 0 : (14 + 56 + 12 + 1)
         // The model list needs no heading; a little space separates it from the Thinking section.
         let modelHeaderHeight: CGFloat = 6
         let totalHeight = thinkingSectionHeight + modelHeaderHeight + listHeight
 
         return VStack(alignment: .leading, spacing: 0) {
             if !efforts.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "brain")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(SHColor.inkMuted)
-                        Text("Thinking")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(SHColor.inkSecondary)
-                        Spacer()
-                        if let activeEffortLevel {
-                            Text(SHThinkingEffortSlider.displayName(for: activeEffortLevel))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(isExtremeActive ? SHColor.statusWarning : SHColor.inkPrimary)
-                                .lineLimit(1)
-                                .frame(width: 66, height: 22)
-                                .background(
-                                    (isExtremeActive ? SHColor.statusWarning.opacity(0.16) : SHColor.surfaceCode),
-                                    in: Capsule()
-                                )
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(
-                                            isExtremeActive ? SHColor.statusWarning.opacity(0.28) : SHColor.lineHairline,
-                                            lineWidth: 0.75
-                                        )
-                                )
-                                .accessibilityIdentifier("composer.thinking.value")
-                        }
-                    }
-                    .frame(height: 24)
-
+                VStack(alignment: .leading, spacing: 0) {
                     SHThinkingEffortSlider(
                         levels: efforts.map(\.level),
                         selectedLevel: activeEffortLevel,

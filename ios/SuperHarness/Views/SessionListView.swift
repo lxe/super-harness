@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Session Row Subtitle Formatting
 
@@ -465,6 +466,16 @@ public struct SessionListView: View {
                 Section {
                     ForEach(topPinned) { session in
                         sessionRowButton(session, isPinned: true)
+                    }
+                    // Hold a pinned chat and drag it to reorder the pins.
+                    .onMove { offsets, destination in
+                        store.movePinned(fromOffsets: offsets, toOffset: destination)
+                    }
+                    // Drop any other chat here to pin it at that position.
+                    .onInsert(of: [SessionDragItem.type]) { index, providers in
+                        SessionDragItem.loadSessionId(from: providers) { sessionId in
+                            Task { await store.pinSession(sessionId, atVisibleIndex: index) }
+                        }
                     }
                 }
             }
@@ -1378,6 +1389,44 @@ struct SHShimmerText: View {
             .font(font)
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+}
+
+/// What a dragged chat row carries: its session id as text, with a prefix so text dragged in
+/// from elsewhere is not mistaken for a chat.
+enum SessionDragItem {
+    static let type = UTType.plainText
+    static let prefix = "superharness-session:"
+
+    static func provider(for sessionId: String) -> NSItemProvider {
+        NSItemProvider(object: (prefix + sessionId) as NSString)
+    }
+
+    nonisolated static func sessionId(from text: String) -> String? {
+        guard text.hasPrefix(prefix) else { return nil }
+        let id = String(text.dropFirst(prefix.count))
+        return id.isEmpty ? nil : id
+    }
+
+    static func loadSessionId(from providers: [NSItemProvider], completion: @escaping @MainActor (String) -> Void) {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return }
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let text = object as? String, let id = sessionId(from: text) else { return }
+            Task { @MainActor in completion(id) }
+        }
+    }
+}
+
+/// Makes a row draggable when it has a session id to carry.
+private struct SessionDragSource: ViewModifier {
+    let sessionId: String?
+
+    func body(content: Content) -> some View {
+        if let sessionId {
+            content.onDrag { SessionDragItem.provider(for: sessionId) }
+        } else {
+            content
+        }
     }
 }
 

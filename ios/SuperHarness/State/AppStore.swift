@@ -154,6 +154,7 @@ public final class AppStore {
         static let chatTextSize = "sh.chatTextSize"
         static let chatDensity = "sh.chatDensity"
         static let harnessOrder = "sh.harnessOrder"
+        static let pinnedOrder = "sh.pinnedOrder"
         static let pushRelayURL = "sh.pushRelayURL"
     }
 
@@ -338,6 +339,10 @@ public final class AppStore {
     private var mediaCache: [String: Data] = [:]
     private var mediaFailedKeys: Set<String> = []
     private var harnessOrderSyncTask: Task<Void, Never>?
+    private var pinnedOrderSyncTask: Task<Void, Never>?
+    /// Session ids of the pinned chats in display order; shared with the desktop through
+    /// `settings.pinnedOrder`.
+    public private(set) var pinnedOrder: [String] = []
     private let snapshotFileURL: URL?
     private var recentTranscriptOrder: [String] = []
     private var saveSnapshotTask: Task<Void, Never>?
@@ -449,6 +454,7 @@ public final class AppStore {
             self.chatDensity = density
         }
         self.harnessOrder = HarnessOrder.normalized(defaults.stringArray(forKey: StorageKey.harnessOrder))
+        self.pinnedOrder = defaults.stringArray(forKey: StorageKey.pinnedOrder) ?? []
         let savedRelay = defaults.string(forKey: StorageKey.pushRelayURL)
         if savedRelay == "https://super-harness-push.lxe.workers.dev" || savedRelay?.isEmpty == true {
             self.pushRelayURL = PushNotificationCoordinator.defaultRelayURL
@@ -937,6 +943,7 @@ public final class AppStore {
         if let st = payload.state {
             let hostGroupChanged = settings.sidebarGroupBy != st.settings.sidebarGroupBy
             adoptHostHarnessOrder(st.settings)
+            adoptHostPinnedOrder(st.settings)
             if settings != st.settings {
                 settings = st.settings
             }
@@ -1166,6 +1173,7 @@ public final class AppStore {
         case .state(let state):
             let hostGroupChanged = settings.sidebarGroupBy != state.settings.sidebarGroupBy
             adoptHostHarnessOrder(state.settings)
+            adoptHostPinnedOrder(state.settings)
             if settings != state.settings {
                 settings = state.settings
             }
@@ -1517,10 +1525,66 @@ public final class AppStore {
         }
     }
 
+    /// The pinned chats on screen, in the shared pinned order. Pins the order does not list
+    /// follow, most recently updated first.
     public var pinnedToTopSessions: [UnifiedSession] {
-        filteredNonMasterSessions
+        let pinned = filteredNonMasterSessions
             .filter(\.pinnedToTop)
             .sorted { $0.updatedAt > $1.updatedAt }
+        let byId = Dictionary(pinned.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return PinnedOrder.arranged(pinned.map(\.id), by: pinnedOrder).compactMap { byId[$0] }
+    }
+
+    /// Every pinned chat's id in display order, including pins a filter or search hides.
+    private var allPinnedIdsArranged: [String] {
+        let ids = sessions
+            .filter { $0.pinnedToTop && !$0.isMaster }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .map(\.id)
+        return PinnedOrder.arranged(ids, by: pinnedOrder)
+    }
+
+    /// Takes the host's pinned order when it sends one, unless a local change is still on its way there.
+    private func adoptHostPinnedOrder(_ hostSettings: SuperHarnessSettings) {
+        guard pinnedOrderSyncTask == nil, let next = hostSettings.pinnedOrder, next != pinnedOrder else { return }
+        pinnedOrder = next
+        defaults.set(next, forKey: StorageKey.pinnedOrder)
+    }
+
+    /// Saves the order on the phone at once and sends it to the host shortly after the last change.
+    private func commitPinnedOrder(_ next: [String]) {
+        guard next != pinnedOrder else { return }
+        pinnedOrder = next
+        defaults.set(next, forKey: StorageKey.pinnedOrder)
+        settings.pinnedOrder = next
+        pinnedOrderSyncTask?.cancel()
+        pinnedOrderSyncTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, let self else { return }
+            _ = try? await self.client.updateSettings(pinnedOrder: next)
+            if !Task.isCancelled { self.pinnedOrderSyncTask = nil }
+        }
+    }
+
+    /// A pinned row was dragged to a new position among the pinned rows on screen.
+    public func movePinned(fromOffsets: IndexSet, toOffset: Int) {
+        let visible = pinnedToTopSessions.map(\.id)
+        commitPinnedOrder(PinnedOrder.afterMove(full: allPinnedIdsArranged, visible: visible, fromOffsets: fromOffsets, toOffset: toOffset))
+    }
+
+    /// A chat was dropped into the pinned area at `visibleIndex`: pin it if it is not pinned
+    /// yet, and place it there.
+    public func pinSession(_ sessionId: String, atVisibleIndex visibleIndex: Int) async {
+        guard let session = sessions.first(where: { $0.id == sessionId }), !session.isMaster else { return }
+        let visible = pinnedToTopSessions.map(\.id)
+        var full = allPinnedIdsArranged
+        if !full.contains(sessionId) { full.append(sessionId) }
+        let next = PinnedOrder.afterInsert(sessionId, atVisibleIndex: visibleIndex, full: full, visible: visible)
+        // Set the order first so the row appears where it was dropped as soon as it is pinned.
+        commitPinnedOrder(next)
+        if !session.pinnedToTop {
+            await togglePinToTop(session)
+        }
     }
 
     private static func resolvedProjectSectionLabel(for session: UnifiedSession) -> String {

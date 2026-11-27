@@ -1071,4 +1071,48 @@ final class UnifiedModelsTests: XCTestCase {
         let lifts = SHWorkingMark.phaseOffsets.map { SHWorkingMark.state(atPhase: 0.3 + $0).lift }
         XCTAssertEqual(lifts.filter { $0 > 0.9 }.count, 1)
     }
+
+    func testPinnedOrderArrangesMovesAndInserts() {
+        // Listed pins come first in the listed order; unknown ids are ignored; the rest follow.
+        XCTAssertEqual(PinnedOrder.arranged(["a", "b", "c", "d"], by: ["c", "gone", "a"]), ["c", "a", "b", "d"])
+        XCTAssertEqual(PinnedOrder.arranged(["a", "b"], by: []), ["a", "b"])
+
+        // Moving the last visible pin to the top.
+        XCTAssertEqual(PinnedOrder.afterMove(full: ["a", "b", "c"], visible: ["a", "b", "c"], fromOffsets: IndexSet(integer: 2), toOffset: 0), ["c", "a", "b"])
+        // With a filter hiding "b", reordering "a" and "c" leaves "b" in its slot.
+        XCTAssertEqual(PinnedOrder.afterMove(full: ["a", "b", "c"], visible: ["a", "c"], fromOffsets: IndexSet(integer: 1), toOffset: 0), ["c", "b", "a"])
+
+        // Dropping a new chat at the top, in the middle and at the end.
+        XCTAssertEqual(PinnedOrder.afterInsert("x", atVisibleIndex: 0, full: ["a", "b", "x"], visible: ["a", "b"]), ["x", "a", "b"])
+        XCTAssertEqual(PinnedOrder.afterInsert("x", atVisibleIndex: 1, full: ["a", "b", "x"], visible: ["a", "b"]), ["a", "x", "b"])
+        XCTAssertEqual(PinnedOrder.afterInsert("x", atVisibleIndex: 2, full: ["a", "b", "x"], visible: ["a", "b"]), ["a", "b", "x"])
+        XCTAssertEqual(PinnedOrder.afterInsert("x", atVisibleIndex: 0, full: ["x"], visible: []), ["x"])
+
+        XCTAssertEqual(SessionDragItem.sessionId(from: "superharness-session:codex:abc"), "codex:abc")
+        XCTAssertNil(SessionDragItem.sessionId(from: "some other dragged text"))
+    }
+
+    @MainActor func testDraggingPinsReordersThemAndDroppingAChatPinsItThere() async throws {
+        let defaults = UserDefaults(suiteName: "PinnedOrder.\(UUID().uuidString)")!
+        let client = MockSuperHarnessClient()
+        let store = AppStore(client: client, keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+        await store.bootstrap()
+        let pinned = store.pinnedToTopSessions.map(\.id)
+        XCTAssertEqual(pinned.count, 2)
+
+        store.movePinned(fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        XCTAssertEqual(store.pinnedToTopSessions.map(\.id), [pinned[1], pinned[0]])
+        XCTAssertEqual(defaults.stringArray(forKey: "sh.pinnedOrder") ?? [], [pinned[1], pinned[0]])
+
+        let other = try XCTUnwrap(store.sessions.first { !$0.pinnedToTop && !$0.isMaster })
+        await store.pinSession(other.id, atVisibleIndex: 1)
+        XCTAssertEqual(store.pinnedToTopSessions.map(\.id), [pinned[1], other.id, pinned[0]])
+        XCTAssertEqual(store.sessions.first { $0.id == other.id }?.pinnedToTop, true)
+
+        // The order reaches the host shortly after the last change.
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        let hostOrder = try await client.fetchBootstrap().state?.settings.pinnedOrder
+        XCTAssertEqual(hostOrder, [pinned[1], other.id, pinned[0]])
+    }
 }

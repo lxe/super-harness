@@ -1152,6 +1152,9 @@ public struct SuperHarnessSettings: Codable, Sendable, Equatable {
     public var mobileApi: MobileApiSettings?
     /// Order of the harness gauges and of the harness sections in the All view, shared by clients.
     public var harnessOrder: [String]?
+    /// Session ids of the pinned chats in display order, shared by clients. Pinned chats that
+    /// are missing from it follow in their usual order; ids that are no longer pinned are ignored.
+    public var pinnedOrder: [String]?
 
     public init(
         sidebarGroupBy: SidebarGroupBy = .native,
@@ -1178,6 +1181,7 @@ public struct SuperHarnessSettings: Codable, Sendable, Equatable {
         defaultNewSessionCwd = try c.decodeIfPresent(String.self, forKey: .defaultNewSessionCwd) ?? "~"
         mobileApi = try? c.decodeIfPresent(MobileApiSettings.self, forKey: .mobileApi)
         harnessOrder = try? c.decodeIfPresent([String].self, forKey: .harnessOrder)
+        pinnedOrder = try? c.decodeIfPresent([String].self, forKey: .pinnedOrder)
     }
 }
 
@@ -2197,6 +2201,43 @@ public enum ReasoningEffortPolicy {
 }
 
 // MARK: - Harness Order
+
+/// Pure helpers for the order of the pinned chats.
+public enum PinnedOrder {
+    /// `ids` (already in their usual order) rearranged by `order`: the ones `order` lists come
+    /// first in that order, the rest follow as they were.
+    public static func arranged(_ ids: [String], by order: [String]) -> [String] {
+        let present = Set(ids)
+        var seen = Set<String>()
+        var result = order.filter { present.contains($0) && seen.insert($0).inserted }
+        result.append(contentsOf: ids.filter { !seen.contains($0) })
+        return result
+    }
+
+    /// The full order after the rows on screen were reordered. `visible` is the subset on
+    /// screen (a harness filter or search may hide some pins); the hidden pins keep their slots.
+    public static func afterMove(full: [String], visible: [String], fromOffsets: IndexSet, toOffset: Int) -> [String] {
+        var moved = visible
+        moved.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        let visibleSet = Set(visible)
+        var iterator = moved.makeIterator()
+        return full.map { visibleSet.contains($0) ? (iterator.next() ?? $0) : $0 }
+    }
+
+    /// The full order after `id` was dropped at `visibleIndex` among the rows on screen.
+    public static func afterInsert(_ id: String, atVisibleIndex visibleIndex: Int, full: [String], visible: [String]) -> [String] {
+        var next = full.filter { $0 != id }
+        let others = visible.filter { $0 != id }
+        if visibleIndex < others.count, let anchor = next.firstIndex(of: others[max(0, visibleIndex)]) {
+            next.insert(id, at: anchor)
+        } else if let last = others.last, let anchor = next.firstIndex(of: last) {
+            next.insert(id, at: anchor + 1)
+        } else {
+            next.append(id)
+        }
+        return next
+    }
+}
 
 public enum HarnessOrder {
     /// A complete order from a stored or host-sent list: unknown names and repeats are dropped,

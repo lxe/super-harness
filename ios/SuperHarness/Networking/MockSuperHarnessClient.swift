@@ -743,6 +743,16 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
             }
         }
         #endif
+        // Settings a client changed (orders, enabled harnesses) come back in later bootstraps.
+        var bootstrapSettings = SuperHarnessSettings(
+            sidebarGroupBy: .native,
+            showArchived: false,
+            showHidden: false,
+            defaultNewSessionCwd: "/Users/lxe/Developer/super-harness"
+        )
+        bootstrapSettings.harnessOrder = settings.harnessOrder
+        bootstrapSettings.pinnedOrder = settings.pinnedOrder
+        bootstrapSettings.enabledHarnesses = settings.enabledHarnesses
         return BootstrapPayload(
             protocolVersion: 1,
             seq: 1,
@@ -750,12 +760,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
             sessions: sessions,
             activeWorkingSessionIds: currentWorkingSessionIds(),
             state: SuperHarnessState(
-                settings: SuperHarnessSettings(
-                    sidebarGroupBy: .native,
-                    showArchived: false,
-                    showHidden: false,
-                    defaultNewSessionCwd: "/Users/lxe/Developer/super-harness"
-                ),
+                settings: bootstrapSettings,
                 folders: folders,
                 overrides: [:],
                 masterMessages: transcripts["master:root"]?.messages ?? []
@@ -1050,6 +1055,11 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
 
     public func updateSettings(harnessOrder: [String]) async throws -> SuperHarnessSettings? {
         settings.harnessOrder = harnessOrder
+        return settings
+    }
+
+    public func updateSettings(pinnedOrder: [String]) async throws -> SuperHarnessSettings? {
+        settings.pinnedOrder = pinnedOrder
         return settings
     }
 

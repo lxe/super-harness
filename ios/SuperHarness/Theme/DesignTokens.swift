@@ -394,19 +394,19 @@ public extension View {
             .background(
                 shape.fill(
                     fill
-                        .shadow(.inner(color: .white.opacity(0.05), radius: 0, y: 0.75))
-                        .shadow(.drop(color: .black.opacity(0.30), radius: 1.75, y: 1.25))
+                        .shadow(.inner(color: .white.opacity(0.03), radius: 0, y: 0.5))
+                        .shadow(.drop(color: .black.opacity(0.16), radius: 1.25, y: 0.75))
                 )
             )
             .overlay {
                 shape
                     .strokeBorder(
                         LinearGradient(
-                            colors: [.white.opacity(0.10), .white.opacity(0)],
+                            colors: [.white.opacity(0.055), .white.opacity(0)],
                             startPoint: .top,
                             endPoint: .center
                         ),
-                        lineWidth: 0.6
+                        lineWidth: 0.5
                     )
                     .allowsHitTesting(false)
             }

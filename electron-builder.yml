@@ -59,6 +59,11 @@ win:
         - x64
   artifactName: Superharness-${version}-win-${arch}.${ext}
 
+# The portable build needs its own name: with the shared win artifactName it overwrote the
+# NSIS installer, so release v0.1.0 shipped only the portable .exe.
+portable:
+  artifactName: Superharness-${version}-win-${arch}-portable.${ext}
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

@@ -136,5 +136,7 @@ jobs:
             >
             > - **macOS**: After dragging `Superharness.app` to Applications, run `xattr -cr "/Applications/Superharness.app"` if Gatekeeper blocks opening an unsigned build.
             > - **Linux**: Make the `.AppImage` executable (`chmod +x Superharness-*.AppImage`) or install the `.deb` package (`sudo apt install ./Superharness-*.deb`).
-            > - **Windows**: Run the NSIS installer or the portable `.exe`.
+            > - **Windows**: Run `Superharness-*-win-x64.exe` to install, or `Superharness-*-win-x64-portable.exe` to run without installing.
+            >
+            > Maintainers: replace the four macOS files with signed, notarized ones from `scripts/release-mac-signed.sh`, regenerate `SHA256SUMS.txt`, and drop the macOS line above.
           files: dist-artifacts/*

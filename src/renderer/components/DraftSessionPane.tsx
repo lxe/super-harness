@@ -607,11 +607,6 @@ export const DraftSessionPane: React.FC<Props> = ({
                 >
                   <Plus className="w-4 h-4" strokeWidth={1.75} />
                 </IconButton>
-                <DictationButton
-                  textareaRef={textareaRef}
-                  value={draft.prompt}
-                  onChange={(prompt) => onUpdateDraft({ prompt })}
-                />
                 {/* Project Selector Popover */}
                 <div className="relative">
                   <button
@@ -983,19 +978,26 @@ export const DraftSessionPane: React.FC<Props> = ({
                 )}
               </div>
 
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handleLaunch()}
-                title="Start conversation (Enter)"
-                className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
-              >
-                {busy ? (
-                  <WorkingOrb tone="master" size="sm" />
-                ) : (
-                  <ArrowUp className="w-4 h-4" />
-                )}
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <DictationButton
+                  textareaRef={textareaRef}
+                  value={draft.prompt}
+                  onChange={(prompt) => onUpdateDraft({ prompt })}
+                />
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleLaunch()}
+                  title="Start conversation (Enter)"
+                  className="w-7 h-7 rounded-full bg-ink-primary text-surface-rail flex items-center justify-center hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed transition-all cursor-pointer"
+                >
+                  {busy ? (
+                    <WorkingOrb tone="master" size="sm" />
+                  ) : (
+                    <ArrowUp className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

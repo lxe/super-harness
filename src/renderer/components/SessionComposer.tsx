@@ -286,7 +286,6 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
             <IconButton label="Attach files (or paste / drop them)" onClick={onPickImages}>
               <Plus className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
-            <DictationButton textareaRef={textareaRef} value={input} onChange={onInputChange} />
 
             {isMaster && masterConfig && onChangeMasterEngine ? (
               <MasterEngineMenu
@@ -492,6 +491,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            <DictationButton textareaRef={textareaRef} value={input} onChange={onInputChange} />
             {(isStreaming || isAgentBusy) &&
             (isMaster || (!input.trim() && attachments.length === 0)) ? (
               <button

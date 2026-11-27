@@ -364,7 +364,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({ textareaRef, v
           width="auto"
           onClose={() => setPhase({ kind: 'idle' })}
           ignoreRef={triggerRef}
-          className="absolute left-0 bottom-full mb-2 z-50 w-64 p-3 space-y-2.5"
+          className="absolute right-0 bottom-full mb-2 z-50 w-64 p-3 space-y-2.5"
         >
           <p className="text-caption text-ink-secondary leading-snug">
             {notice.message}

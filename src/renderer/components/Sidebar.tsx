@@ -1750,6 +1750,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 const nextHasFullBleedSeparator = Boolean(
                   nextGrp && Boolean(nextGrp.harnessLogo) && !isSingleHarnessFilter(filter)
                 );
+                // A regular (non-harness, non-headless) section header brings its own 8px top
+                // padding (SectionHeader level 1), so the strip's own bottom margin would double it.
+                const nextHeaderHasTopSpace = Boolean(
+                  nextGrp && !nextGrp.headless && !nextGrp.harnessLogo
+                );
                 return (
                   <div
                     key={grp.id}
@@ -1757,7 +1762,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                       nextGrp
                         ? nextHasFullBleedSeparator
                           ? 'py-2'
-                          : '-mx-2.5 px-2.5 py-2 mb-2 border-b border-line-hairline'
+                          : `-mx-2.5 px-2.5 py-2 ${nextHeaderHasTopSpace ? '' : 'mb-2 '}border-b border-line-hairline`
                         : 'py-2'
                     }`}
                   >

@@ -495,13 +495,9 @@ public struct SessionListView: View {
                     .listRowSeparator(.hidden)
                 }
             } else {
-                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                    let showTopRule = index > 0 || !topPinned.isEmpty
+                ForEach(sections) { section in
                     if section.isHeadless {
                         Section {
-                            if showTopRule {
-                                sectionDividerRow
-                            }
                             ForEach(section.sessions) { session in
                                 sessionRowButton(session)
                             }
@@ -509,9 +505,6 @@ public struct SessionListView: View {
                     } else {
                         let isCollapsed = collapsedSectionIds.contains(section.id)
                         Section {
-                            if showTopRule {
-                                sectionDividerRow
-                            }
                             Button {
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     toggleCollapsed(section.id)
@@ -548,6 +541,9 @@ public struct SessionListView: View {
                                         .foregroundStyle(SHColor.inkFaint)
                                         .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                                 }
+                                // The padding is inside the button so the whole band is tappable.
+                                .padding(.top, 9)
+                                .padding(.bottom, 5)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -569,7 +565,7 @@ public struct SessionListView: View {
                                     }
                                 }
                             }
-                            .listRowInsets(EdgeInsets(top: 14, leading: 20, bottom: 4, trailing: 20))
+                            .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 0, trailing: 20))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
 
@@ -600,6 +596,9 @@ public struct SessionListView: View {
             }
         }
         .listStyle(.plain)
+        // Rows size to their content. The default 44 pt minimum made every section header a
+        // tall, mostly empty row, which is where the loose spacing between sections came from.
+        .environment(\.defaultMinListRowHeight, 0)
         .safeAreaInset(edge: .top, spacing: 0) {
             if isSearchActive {
                 inlineSearchField
@@ -618,15 +617,6 @@ public struct SessionListView: View {
         .refreshable {
             await store.refresh()
         }
-    }
-
-    private var sectionDividerRow: some View {
-        Rectangle()
-            .fill(SHColor.lineHairline)
-            .frame(height: 0.5)
-            .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 2, trailing: 20))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
     }
 
     @ViewBuilder

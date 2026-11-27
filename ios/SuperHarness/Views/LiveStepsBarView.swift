@@ -82,6 +82,7 @@ public struct LiveStepsBarView: View {
                             Image(systemName: stepIcon(step.status))
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(stepColor(step.status))
+                                .frame(width: 14)
                             Text(step.title)
                                 .font(SHTypography.caption)
                                 .foregroundStyle(step.status == .done ? SHColor.inkMuted : SHColor.inkSecondary)
@@ -93,6 +94,7 @@ public struct LiveStepsBarView: View {
                             Image(systemName: "apple.terminal")
                                 .font(.system(size: 11))
                                 .foregroundStyle(accentColor)
+                                .frame(width: 14)
                             Text(task.summary.isEmpty ? (task.command ?? "Running task") : task.summary)
                                 .font(SHTypography.caption)
                                 .foregroundStyle(SHColor.inkSecondary)
@@ -100,7 +102,8 @@ public struct LiveStepsBarView: View {
                         }
                     }
                 }
-                .padding(.leading, 21)
+                // No indent: icons and text line up with the row that opens the list.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 4)
             }
         }

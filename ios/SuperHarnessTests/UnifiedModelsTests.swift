@@ -1037,4 +1037,14 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(store.draftAttachments["codex:cx-test-harness"]?.map(\.name), ["note.txt"])
         XCTAssertNil(store.attachmentNotice)
     }
+
+    func testContextPercentIsWithheldWhenUsageExceedsTheReportedWindow() {
+        let normal = SessionStats(contextUsedTokens: 117_000, contextWindowTokens: 1_000_000)
+        XCTAssertEqual(normal.contextUsedPercent ?? 0, 11.7, accuracy: 0.01)
+        // 684k cannot fit in a 200k window: the window is wrong, so no percentage.
+        let impossible = SessionStats(contextUsedTokens: 684_000, contextWindowTokens: 200_000)
+        XCTAssertFalse(impossible.hasPlausibleContextWindow)
+        XCTAssertNil(impossible.contextUsedPercent)
+        XCTAssertNil(SessionStats(contextUsedTokens: 5_000, contextWindowTokens: nil).contextUsedPercent)
+    }
 }

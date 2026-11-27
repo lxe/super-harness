@@ -1179,6 +1179,24 @@ private struct ThreadInfoTopSheet: View {
                 Rectangle()
                     .fill(SHColor.lineHairline)
                     .frame(height: 1)
+            } else if stats.contextUsedTokens > 0 {
+                // The window size is unknown or contradicted by the usage, so show the amount
+                // in context without a percentage or bar.
+                HStack(alignment: .firstTextBaseline) {
+                    Label("Context", systemImage: "square.stack.3d.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(SHColor.inkSecondary)
+                        .labelStyle(.titleAndIcon)
+                    Spacer()
+                    Text("\(UsageMetrics.formatTokens(stats.contextUsedTokens)) in use")
+                        .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(SHColor.inkPrimary)
+                }
+                .accessibilityIdentifier("thread.info.contextUnknownWindow")
+
+                Rectangle()
+                    .fill(SHColor.lineHairline)
+                    .frame(height: 1)
             }
 
             HStack(alignment: .top, spacing: 0) {

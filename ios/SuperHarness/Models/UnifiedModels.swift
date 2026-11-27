@@ -992,8 +992,15 @@ public struct SessionStats: Codable, Sendable, Equatable {
         self.turnCount = turnCount
     }
 
+    /// More tokens in context than the reported window can hold means the window size is
+    /// wrong (the host guessed it from the model name), so no percentage can be trusted.
+    public var hasPlausibleContextWindow: Bool {
+        guard let window = contextWindowTokens, window > 0 else { return false }
+        return contextUsedTokens <= window
+    }
+
     public var contextUsedPercent: Double? {
-        guard let window = contextWindowTokens, window > 0, contextUsedTokens > 0 else { return nil }
+        guard let window = contextWindowTokens, window > 0, contextUsedTokens > 0, hasPlausibleContextWindow else { return nil }
         return min(100, (Double(contextUsedTokens) / Double(window)) * 100.0)
     }
 }

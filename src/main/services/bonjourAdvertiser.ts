@@ -53,8 +53,12 @@ export class BonjourAdvertiser {
       });
       // Records are first built after the async name probe, so this override is in time.
       const original = svc.records.bind(svc) as () => DnsRecord[];
+      // Short TTLs everywhere (the library uses 8 hours for PTR): if the app is killed before it
+      // can send goodbye packets, phones and other mDNS caches forget it within two minutes.
       (svc as unknown as { records: () => DnsRecord[] }).records = () => [
-        ...original().filter((r) => r.type !== 'A' && r.type !== 'AAAA'),
+        ...original()
+          .filter((r) => r.type !== 'A' && r.type !== 'AAAA')
+          .map((r) => ({ ...r, ttl: Math.min(r.ttl, 120) })),
         ...ipv4.map((ip) => ({ name: host, type: 'A', ttl: 120, data: ip })),
       ];
       svc.on('error', (err: unknown) => {

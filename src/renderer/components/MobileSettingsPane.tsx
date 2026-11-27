@@ -7,7 +7,7 @@ import type {
   PairingSession,
   SuperHarnessSettings,
 } from '../../shared/types';
-import { Badge, Button, IconButton, Input, SettingsGroup, SettingsRow, Switch } from '../ui';
+import { Badge, Button, IconButton, Input, Modal, SettingsGroup, SettingsRow, Switch } from '../ui';
 import { formatRelativeTime } from '../utils/format';
 
 interface Props {
@@ -62,6 +62,7 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
   const [panel, setPanel] = useState<PairingPanel>({ kind: 'idle' });
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState<string | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
   const panelRef = useRef(panel);
   const pairAreaRef = useRef<HTMLDivElement | null>(null);
   panelRef.current = panel;
@@ -127,6 +128,24 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
       setPanel({ kind: 'idle' });
     }
   }, [mobile.enabled]);
+
+  // Esc closes only the Revoke confirmation, not Settings behind it.
+  useEffect(() => {
+    if (!revokeTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setRevokeTarget(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [revokeTarget]);
+
+  const confirmRevoke = () => {
+    if (revokeTarget) void window.superHarness.revokePairedDevice(revokeTarget.id);
+    setRevokeTarget(null);
+  };
 
   const startPairing = async () => {
     setPanel({ kind: 'loading' });
@@ -264,7 +283,7 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
                 <Button
                   size="xs"
                   variant="danger"
-                  onClick={() => void window.superHarness.revokePairedDevice(d.id)}
+                  onClick={() => setRevokeTarget({ id: d.id, name: d.name })}
                 >
                   Revoke
                 </Button>
@@ -336,6 +355,28 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
             }
           />
         </SettingsGroup>
+      )}
+
+      {revokeTarget && (
+        <Modal
+          onClose={() => setRevokeTarget(null)}
+          title={`Revoke ${revokeTarget.name}?`}
+          width="sm"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setRevokeTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={confirmRevoke}>
+                Revoke
+              </Button>
+            </>
+          }
+        >
+          <p className="text-body text-ink-secondary">
+            It will need to pair again. The phone is disconnected right away.
+          </p>
+        </Modal>
       )}
     </div>
   );

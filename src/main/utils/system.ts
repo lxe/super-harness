@@ -8,11 +8,47 @@ const execFileAsync = promisify(execFile);
 
 const binCache = new Map<string, string | null>();
 
+/**
+ * macOS/Linux GUI-launched packaged apps often inherit a minimal PATH
+ * (`/usr/bin:/bin`). Append common user & Homebrew bin directories so
+ * bundled adapters can discover claude, codex, agy, muse, pi, tmux, and node.
+ */
+export function ensureRichPath(): void {
+  if (process.platform === 'win32') return;
+  const home = os.homedir();
+  const extras = [
+    path.join(home, '.gemini', 'antigravity', 'bin'),
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.bun', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+    path.join(home, '.local', 'share', 'mise', 'shims'),
+    path.join(home, '.npm-global', 'bin'),
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+  ];
+  const current = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const seen = new Set(current);
+  let changed = false;
+  for (const dir of extras) {
+    if (!seen.has(dir) && fs.existsSync(dir)) {
+      current.push(dir);
+      seen.add(dir);
+      changed = true;
+    }
+  }
+  if (changed) {
+    process.env.PATH = current.join(path.delimiter);
+    binCache.clear();
+  }
+}
+
 export async function whichBinary(name: string): Promise<string | null> {
   if (binCache.has(name)) return binCache.get(name)!;
   try {
-    const { stdout } = await execFileAsync('which', [name], { timeout: 2000 });
-    const p = stdout.trim().split('\n')[0] || null;
+    const cmd = process.platform === 'win32' ? 'where' : 'which';
+    const { stdout } = await execFileAsync(cmd, [name], { timeout: 2000 });
+    const p = stdout.trim().split(/\r?\n/)[0]?.trim() || null;
     binCache.set(name, p);
     return p;
   } catch {

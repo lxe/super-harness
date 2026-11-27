@@ -1,0 +1,71 @@
+appId: co.lxe.super-harness
+productName: Super Harness
+copyright: Copyright © Super Harness Contributors
+asar: false
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - resources/**/*
+  - package.json
+  - "!docs/**"
+  - "!ios/**"
+  - "!tests/**"
+  - "!scripts/**"
+  - "!**/*.map"
+
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.png
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  artifactName: Super-Harness-${version}-mac-${arch}.${ext}
+
+linux:
+  executableName: super-harness
+  category: Development
+  icon: resources/icon.png
+  maintainer: Super Harness <noreply@github.com>
+  syncDesktopName: true
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  artifactName: Super-Harness-${version}-linux-${arch}.${ext}
+
+win:
+  icon: resources/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: Super-Harness-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+publish:
+  provider: github
+  owner: lxe
+  repo: superharness

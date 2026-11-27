@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+release/
 storybook-static/
 
 # Logs & OS files

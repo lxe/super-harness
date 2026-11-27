@@ -42,9 +42,12 @@ import { UsageService } from './services/usageService';
 import { ConfigStore } from './store/configStore';
 import { closeSqlitePool } from './utils/sqlite';
 import { notificationTextFromMarkdown } from './utils/notificationText';
-import { whichBinary } from './utils/system';
+import { ensureRichPath, whichBinary } from './utils/system';
 import { claudeTmuxRecords } from './adapters/claudeTmuxRevival';
 import { ensureLoginAutostart } from './services/loginAutostart';
+
+// Ensure macOS/Linux GUI-launched packaged builds inherit Homebrew & user CLI bins
+ensureRichPath();
 
 // Expose our Electron PID to child agent processes (Codex, Claude, Antigravity, Muse)
 // so running `scripts/launch-electron.mjs` or `npm run restart` from inside a session
@@ -60,6 +63,14 @@ async function scheduleDetachedRestart(opts?: {
   build?: boolean;
 }): Promise<{ ok: boolean; error?: string }> {
   if (restartInProgress) {
+    return { ok: true };
+  }
+  if (app.isPackaged) {
+    restartInProgress = true;
+    setTimeout(() => {
+      app.relaunch();
+      app.quit();
+    }, 150);
     return { ok: true };
   }
   const repoRoot = path.resolve(__dirname, '../../..');

@@ -2,12 +2,27 @@
   "name": "super-harness",
   "version": "0.1.0",
   "description": "Unified desktop super-harness multiplexing Codex, Claude Desktop, Claude tmux/remote-control, and Antigravity sessions under one chrome with a tool-equipped Master Session.",
+  "homepage": "https://github.com/lxe/superharness",
+  "desktopName": "super-harness.desktop",
+  "author": {
+    "name": "Aleksey Smolenchuk",
+    "url": "https://github.com/lxe"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lxe/superharness.git"
+  },
   "main": "dist/main/main/index.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"npm run build:main && node scripts/launch-electron.mjs .\"",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
     "start": "npm run build && node scripts/launch-electron.mjs .",
     "restart": "node scripts/restart-electron.mjs",
     "restart:build": "node scripts/restart-electron.mjs --build",
@@ -39,6 +54,7 @@
     "@vitejs/plugin-react": "^4.5.0",
     "concurrently": "^9.1.2",
     "electron": "^36.3.2",
+    "electron-builder": "^26.18.0",
     "react": "^19.1.4",
     "react-dom": "^19.1.4",
     "storybook": "^8.6.19",

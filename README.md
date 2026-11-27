@@ -45,11 +45,13 @@ Super Harness is **non-destructive** — each harness keeps its own transcripts,
 
 ### Desktop App
 
-Requires Node.js 20+ and at least one supported harness installed locally.
+Download a prebuilt installer for **Linux** (`.AppImage`, `.deb`), **macOS** (Apple Silicon & Intel `.dmg`/`.zip`), or **Windows** (`.exe`) from [GitHub Releases](https://github.com/lxe/superharness/releases) (or Actions artifacts).
+
+Or run from source (requires Node.js 20+ and at least one supported harness installed locally):
 
 ```bash
-git clone https://github.com/lxe/super-harness.git
-cd super-harness
+git clone https://github.com/lxe/superharness.git
+cd superharness
 npm install
 npm start
 ```

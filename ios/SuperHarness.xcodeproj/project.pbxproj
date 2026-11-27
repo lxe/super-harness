@@ -40,6 +40,7 @@
 		C95A2EB7C312F305BED1B4E7 /* SuperHarnessClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F708471A80436ECDA9FC8BC /* SuperHarnessClient.swift */; };
 		CB6F8D052928AE728A3861A3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 891E7CB23D3E07D3693841D2 /* KeychainStore.swift */; };
 		DE0390E7AEB3F44FF52BFD43 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C63CCB0909F06319048D7F /* RootView.swift */; };
+		E0E09072FB1628ED9898A09F /* PairedMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 557B926685F4D2006C9F6A4E /* PairedMachine.swift */; };
 		E5E7026E561804C756830876 /* NewSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C3BE61300B275C4E032407E /* NewSessionSheet.swift */; };
 		EC013561C51D65DB717F976C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E6426621CF77E0D00CE20ED2 /* Assets.xcassets */; };
 		F60D34DD9293CF92FB3CC345 /* DraftChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDDA3BBC15E9D4BDB8FA97EB /* DraftChatView.swift */; };
@@ -78,6 +79,7 @@
 		446F83211E74E0622B22A911 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		4954684A4345EB1DABF8FE2F /* MockSuperHarnessClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSuperHarnessClient.swift; sourceTree = "<group>"; };
 		4CF1A456E5B5974658EE650D /* DesignSystemCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystemCatalogView.swift; sourceTree = "<group>"; };
+		557B926685F4D2006C9F6A4E /* PairedMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedMachine.swift; sourceTree = "<group>"; };
 		58C63CCB0909F06319048D7F /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		5A32645AA11D7250935B9C28 /* SuperHarnessApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperHarnessApp.swift; sourceTree = "<group>"; };
 		5AF23DE67DEC4BC7BCD02FE3 /* UnifiedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedModels.swift; sourceTree = "<group>"; };
@@ -183,6 +185,7 @@
 		5F0D32A7596F1F0EC6A319CF /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				557B926685F4D2006C9F6A4E /* PairedMachine.swift */,
 				5AF23DE67DEC4BC7BCD02FE3 /* UnifiedModels.swift */,
 			);
 			path = Models;
@@ -445,6 +448,7 @@
 				086CA60C4C732151EFB56B8A /* MarkdownRenderer.swift in Sources */,
 				27C20CB57619C8F74E87E04E /* MockSuperHarnessClient.swift in Sources */,
 				E5E7026E561804C756830876 /* NewSessionSheet.swift in Sources */,
+				E0E09072FB1628ED9898A09F /* PairedMachine.swift in Sources */,
 				0B7A6AF0201AEE77D7651B11 /* PairingClient.swift in Sources */,
 				C14594C3E11AF45391F16AFD /* PairingView.swift in Sources */,
 				2BBB383816B03E7A2CCEAEFB /* PerfLogger.swift in Sources */,

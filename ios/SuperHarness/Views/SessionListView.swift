@@ -261,7 +261,14 @@ public struct SessionListView: View {
             // app's status light: it turns into sync arrows while fetching from the host and a
             // warning mark when the host cannot be reached.
             ToolbarItem(placement: .topBarLeading) {
-                ConnectionStatusPill(health: store.connectionHealth, isSyncing: store.isSyncing) {
+                ConnectionStatusPill(
+                    health: store.connectionHealth,
+                    isSyncing: store.isSyncing,
+                    machines: store.machines,
+                    activeMachineId: store.activeMachineId,
+                    onSwitchMachine: { id in Task { await store.switchMachine(to: id) } },
+                    onPairAnother: { store.isAddMachineSheetPresented = true }
+                ) {
                     store.isHostSettingsSheetPresented = true
                 }
             }
@@ -680,10 +687,31 @@ public struct SessionListView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HarnessSwitcherStrip(store: store)
-                .padding(.horizontal, 12)
-                .padding(.top, 6)
-                .padding(.bottom, 6)
+            VStack(spacing: 6) {
+                // The machine's name appears for a moment after switching machines.
+                if let notice = store.machineSwitchNotice {
+                    HStack(spacing: 6) {
+                        Image(systemName: "desktopcomputer")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(notice)
+                            .font(SHTypography.micro.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(SHColor.inkPrimary)
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Now showing \(notice)")
+                    .accessibilityIdentifier("machine.notice")
+                }
+                HarnessSwitcherStrip(store: store)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 6)
+            .animation(.easeOut(duration: 0.2), value: store.machineSwitchNotice)
         }
         .contentMargins(.top, 4, for: .scrollContent)
         .scrollContentBackground(.hidden)
@@ -901,6 +929,25 @@ private struct SHRowTapButtonStyle: ButtonStyle {
     }
 }
 
+/// Decides what a sideways swipe on the dock means.
+enum MachineSwipe {
+    /// 1 for the next machine (swipe left), -1 for the previous (swipe right), 0 for neither.
+    /// The swipe must be mostly horizontal and either travel far enough or be flicked.
+    nonisolated static func direction(translation: CGSize, predicted: CGSize) -> Int {
+        let dx = translation.width
+        guard abs(dx) > abs(translation.height) * 1.5 else { return 0 }
+        let far = abs(dx) >= 56
+        let flicked = abs(dx) >= 24 && abs(predicted.width) >= 140
+        guard far || flicked else { return 0 }
+        return dx < 0 ? 1 : -1
+    }
+
+    /// The dock follows the finger at a third of its travel, up to 36 points.
+    nonisolated static func followOffset(for dx: CGFloat) -> CGFloat {
+        max(-36, min(36, dx * 0.33))
+    }
+}
+
 // MARK: - Harness Switcher (fixed bottom Liquid Glass dock, matches desktop sidebar)
 
 private struct HarnessSwitcherStrip: View {
@@ -918,6 +965,8 @@ private struct HarnessSwitcherStrip: View {
     @State private var ignoreTapsUntil: Date = .distantPast
     /// Set when a gauge was held and released without being dragged: shows its shortcuts.
     @State private var shortcutsHarness: HarnessGroup?
+    /// How far the dock follows a sideways swipe that switches machines.
+    @State private var machineSwipeOffset: CGFloat = 0
 
     private static let cellSpacing: CGFloat = 4
     private static let stripPadding: CGFloat = 6
@@ -934,6 +983,10 @@ private struct HarnessSwitcherStrip: View {
 
     private var needsHorizontalScroll: Bool {
         totalSlots > Self.maxFittedSlots
+    }
+
+    private var canSwipeMachines: Bool {
+        store.machines.count > 1 && !needsHorizontalScroll
     }
 
     private var cellWidth: CGFloat {
@@ -995,6 +1048,29 @@ private struct HarnessSwitcherStrip: View {
         }
         // The same plain Liquid Glass capsule as the top bar's pills, hugging the circular gauges.
         .modifier(SHGlassSurfaceModifier(shape: Capsule()))
+        .offset(x: machineSwipeOffset)
+        // With two or more machines, a sideways swipe on the dock shows the next or previous
+        // machine. The dock follows the finger a little and springs back. A dock that scrolls
+        // sideways (more than six harnesses) keeps the swipe for scrolling.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 18)
+                .onChanged { value in
+                    guard canSwipeMachines, drag == nil else { return }
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    machineSwipeOffset = MachineSwipe.followOffset(for: value.translation.width)
+                }
+                .onEnded { value in
+                    let direction = canSwipeMachines && drag == nil
+                        ? MachineSwipe.direction(translation: value.translation, predicted: value.predictedEndTranslation)
+                        : 0
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { machineSwipeOffset = 0 }
+                    guard direction != 0 else { return }
+                    ignoreTapsUntil = Date().addingTimeInterval(0.4)
+                    triggerSelectionHaptic()
+                    Task { await store.switchMachine(offset: direction) }
+                }
+        )
+        .accessibilityAction(named: "Next Machine") { Task { await store.switchMachine(offset: 1) } }
         .onChange(of: drag) { _, state in
             ignoreTapsUntil = Date().addingTimeInterval(0.5)
             guard let state else { return }

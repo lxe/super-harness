@@ -147,6 +147,8 @@ public final class AppStore {
         static let dictationTokenAccount = "yapyap-dictation-token"
         static let pairedHostName = "sh.pairedHostName"
         static let pairedHostId = "sh.pairedHostId"
+        static let machines = "sh.machines"
+        static let activeMachineId = "sh.activeMachineId"
         static let deviceId = "sh.deviceId"
         static let didLaunch = "sh.didLaunch"
         static let pushEnabled = "sh.pushEnabled"
@@ -188,6 +190,21 @@ public final class AppStore {
     public var pairedHostId: String = ""
     /// One line shown on the pairing screen, for example after the desktop revoked this phone.
     public var pairingNotice: String?
+
+    // MARK: Machines
+
+    /// Every desktop this phone is paired with. One is shown at a time; `hostURLString`,
+    /// `bearerToken`, `pairedHostName` and `pairedHostId` always describe that one.
+    public private(set) var machines: [PairedMachine] = []
+    public private(set) var activeMachineId: String = ""
+    public var activeMachine: PairedMachine? { machines.first { $0.id == activeMachineId } }
+    /// A short line shown above the dock for a moment after the machine changes.
+    public private(set) var machineSwitchNotice: String?
+    /// The pairing screen shown as a sheet, to pair one more machine.
+    public var isAddMachineSheetPresented: Bool = false
+    @ObservationIgnored private var machineNoticeTask: Task<Void, Never>?
+    /// Debug: `SH_MOCK_MACHINES` lists stand-in machines, so switching can be tried in the demo.
+    @ObservationIgnored private var usesMockMachines = false
 
     /// A desktop address and a token are both stored. A store built around an injected client
     /// (tests, previews) counts as paired until it is unpaired.
@@ -389,6 +406,11 @@ public final class AppStore {
             defaults.removeObject(forKey: StorageKey.hostURL)
             defaults.removeObject(forKey: StorageKey.pairedHostName)
             defaults.removeObject(forKey: StorageKey.pairedHostId)
+            for machine in PairedMachines.decode(defaults.data(forKey: StorageKey.machines)) {
+                keychain.deleteToken(for: machine.tokenAccount)
+            }
+            defaults.removeObject(forKey: StorageKey.machines)
+            defaults.removeObject(forKey: StorageKey.activeMachineId)
         }
         #endif
 
@@ -447,8 +469,38 @@ public final class AppStore {
         self.hostURLString = savedHost
         self.bearerToken = savedToken
         self.connectionMode = resolvedMode
-        self.pairedHostName = defaults.string(forKey: StorageKey.pairedHostName) ?? ""
-        self.pairedHostId = defaults.string(forKey: StorageKey.pairedHostId) ?? ""
+        let savedHostName = defaults.string(forKey: StorageKey.pairedHostName) ?? ""
+        let savedHostId = defaults.string(forKey: StorageKey.pairedHostId) ?? ""
+        self.pairedHostName = savedHostName
+        self.pairedHostId = savedHostId
+
+        var loadedMachines = PairedMachines.decode(defaults.data(forKey: StorageKey.machines))
+        var loadedActiveId = defaults.string(forKey: StorageKey.activeMachineId) ?? ""
+        // A pairing made before the phone could hold several machines becomes the first entry.
+        if loadedMachines.isEmpty, client == nil, !savedHost.isEmpty, !savedToken.isEmpty {
+            let machine = PairedMachine(
+                id: savedHostId.isEmpty ? "legacy-\(UUID().uuidString)" : savedHostId,
+                name: savedHostName,
+                urlString: savedHost
+            )
+            loadedMachines = [machine]
+            loadedActiveId = machine.id
+            try? keychain.saveToken(savedToken, for: machine.tokenAccount)
+            defaults.set(PairedMachines.encode(loadedMachines), forKey: StorageKey.machines)
+            defaults.set(loadedActiveId, forKey: StorageKey.activeMachineId)
+        }
+        #if DEBUG
+        if let names = environment["SH_MOCK_MACHINES"], !names.isEmpty {
+            loadedMachines = names.split(separator: ",").enumerated().map { index, name in
+                PairedMachine(id: "mock-\(index)", name: String(name), urlString: "http://100.64.0.\(index + 3):47890")
+            }
+            loadedActiveId = loadedMachines.first?.id ?? ""
+            self.usesMockMachines = true
+            self.pairedHostName = loadedMachines.first?.name ?? ""
+        }
+        #endif
+        self.machines = loadedMachines
+        self.activeMachineId = loadedActiveId
         if defaults.object(forKey: StorageKey.pushEnabled) != nil {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
@@ -2828,6 +2880,23 @@ public final class AppStore {
         defaults.set(grant.hostId, forKey: StorageKey.pairedHostId)
         pairingNotice = nil
         lastError = nil
+
+        // Pairing again with a desktop updates its entry; a new desktop is added and shown.
+        let machine = PairedMachine(
+            id: grant.hostId.isEmpty ? "legacy-\(UUID().uuidString)" : grant.hostId,
+            name: grant.hostName,
+            urlString: grant.baseURL.absoluteString
+        )
+        let isChangingMachine = !activeMachineId.isEmpty && activeMachineId != machine.id
+        machines = PairedMachines.upserting(machine, into: machines)
+        try? keychain.saveToken(grant.token, for: machine.tokenAccount)
+        activeMachineId = machine.id
+        persistMachines()
+        isAddMachineSheetPresented = false
+        if isChangingMachine {
+            resetHostState()
+            showMachineNotice(machine.displayName)
+        }
         await applyConnectionSettings(
             mode: usesMockPairing ? .demo : .live,
             urlString: grant.baseURL.absoluteString,
@@ -2841,6 +2910,10 @@ public final class AppStore {
     /// Unpair chosen by the person: tell the desktop to drop this phone, then forget the
     /// desktop. The phone forgets it even when the desktop cannot be reached.
     public func unpairFromDesktop() async {
+        if activeMachine != nil {
+            await unpairMachine(activeMachineId)
+            return
+        }
         if connectionMode == .live || !bearerToken.isEmpty,
            !bearerToken.isEmpty,
            let url = try? LiveSuperHarnessClient.normalizeBaseURL(hostURLString) {
@@ -2849,23 +2922,28 @@ public final class AppStore {
         unpair()
     }
 
-    /// Forgets the desktop and returns to the pairing screen. `reason` is shown there.
-    public func unpair(reason: String? = nil) {
-        stopEventStream()
-        keychain.deleteToken(for: StorageKey.tokenAccount)
-        defaults.removeObject(forKey: StorageKey.hostURL)
-        defaults.removeObject(forKey: StorageKey.pairedHostName)
-        defaults.removeObject(forKey: StorageKey.pairedHostId)
-        defaults.set(ConnectionMode.live.rawValue, forKey: StorageKey.connectionMode)
-        hostURLString = ""
-        bearerToken = ""
-        hasInjectedClient = false
-        pairedHostName = ""
-        pairedHostId = ""
-        connectionMode = .live
-        connectionHealth = .offline("Not paired")
-        client = MockSuperHarnessClient()
+    // MARK: Machines: switch, unpair
 
+    private func persistMachines() {
+        guard !usesMockMachines else { return }
+        defaults.set(PairedMachines.encode(machines), forKey: StorageKey.machines)
+        defaults.set(activeMachineId, forKey: StorageKey.activeMachineId)
+    }
+
+    private func showMachineNotice(_ text: String) {
+        machineSwitchNotice = text
+        machineNoticeTask?.cancel()
+        machineNoticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.machineSwitchNotice = nil
+        }
+    }
+
+    /// Clears everything that belongs to the machine being left, so its chats are not shown
+    /// under the next machine's name while that one loads.
+    private func resetHostState() {
+        stopEventStream()
         sessions = []
         harnesses = []
         usage = nil
@@ -2882,9 +2960,94 @@ public final class AppStore {
         detailRoute = nil
         hasBootstrapped = false
         lastError = nil
-        isHostSettingsSheetPresented = false
         isUsageSheetPresented = false
         MobileSnapshotDiskStore.remove(at: snapshotFileURL)
+    }
+
+    /// Shows another paired machine: its chats, harnesses and usage replace the current ones.
+    public func switchMachine(to id: String, notice: String? = nil) async {
+        guard id != activeMachineId, let machine = machines.first(where: { $0.id == id }) else { return }
+        let token = usesMockMachines ? "" : (keychain.loadToken(for: machine.tokenAccount) ?? "")
+        guard usesMockMachines || !token.isEmpty else {
+            // Its token is gone, so it cannot be used: drop the entry.
+            machines.removeAll { $0.id == id }
+            persistMachines()
+            return
+        }
+        activeMachineId = id
+        persistMachines()
+        pairedHostName = machine.name
+        pairedHostId = machine.id.hasPrefix("legacy-") ? "" : machine.id
+        defaults.set(pairedHostName, forKey: StorageKey.pairedHostName)
+        defaults.set(pairedHostId, forKey: StorageKey.pairedHostId)
+        hasInjectedClient = false
+        resetHostState()
+        showMachineNotice(notice ?? machine.displayName)
+        // Stand-in machines and stand-in pairing (debug, tests) load sample data, not a host.
+        let usesSampleData = usesMockMachines || usesMockPairing
+        await applyConnectionSettings(mode: usesSampleData ? .demo : .live, urlString: machine.urlString, token: token)
+        if !usesSampleData {
+            Task { [weak self] in await self?.refreshDictationStatus() }
+        }
+    }
+
+    /// Switches to the next (`offset` 1) or previous (`offset` -1) machine, wrapping around.
+    public func switchMachine(offset: Int) async {
+        guard let next = PairedMachines.neighbor(of: activeMachineId, in: machines, offset: offset) else { return }
+        await switchMachine(to: next.id)
+    }
+
+    /// Unpair chosen by the person for one machine: tell that desktop to drop this phone, then
+    /// forget it. The phone forgets it even when the desktop cannot be reached.
+    public func unpairMachine(_ id: String) async {
+        guard let machine = machines.first(where: { $0.id == id }) else { return }
+        if !usesMockMachines,
+           let token = keychain.loadToken(for: machine.tokenAccount), !token.isEmpty,
+           let url = try? LiveSuperHarnessClient.normalizeBaseURL(machine.urlString) {
+            await pairingService.unpair(baseURL: url, token: token)
+        }
+        if id == activeMachineId {
+            unpair()
+        } else {
+            keychain.deleteToken(for: machine.tokenAccount)
+            machines.removeAll { $0.id == id }
+            persistMachines()
+        }
+    }
+
+    /// Forgets the machine being shown. When other machines remain, the first of them is shown
+    /// and `reason` appears above the dock; otherwise the app returns to the pairing screen,
+    /// which shows `reason`.
+    public func unpair(reason: String? = nil) {
+        if let active = activeMachine {
+            keychain.deleteToken(for: active.tokenAccount)
+            machines.removeAll { $0.id == active.id }
+            persistMachines()
+            if let next = machines.first {
+                let notice = reason == nil ? nil : "\(active.displayName) unpaired this phone"
+                Task { [weak self] in await self?.switchMachine(to: next.id, notice: notice) }
+                return
+            }
+        }
+        activeMachineId = ""
+        persistMachines()
+        stopEventStream()
+        keychain.deleteToken(for: StorageKey.tokenAccount)
+        defaults.removeObject(forKey: StorageKey.hostURL)
+        defaults.removeObject(forKey: StorageKey.pairedHostName)
+        defaults.removeObject(forKey: StorageKey.pairedHostId)
+        defaults.set(ConnectionMode.live.rawValue, forKey: StorageKey.connectionMode)
+        hostURLString = ""
+        bearerToken = ""
+        hasInjectedClient = false
+        pairedHostName = ""
+        pairedHostId = ""
+        connectionMode = .live
+        connectionHealth = .offline("Not paired")
+        client = MockSuperHarnessClient()
+        resetHostState()
+        isHostSettingsSheetPresented = false
+        isAddMachineSheetPresented = false
         pairingNotice = reason
     }
 

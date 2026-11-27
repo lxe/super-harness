@@ -256,4 +256,108 @@ final class PairingTests: XCTestCase {
         store.dictationStatus = DictationStatusResponse(ok: true, configured: true, healthy: true)
         XCTAssertNil(store.dictationUnavailableReason)
     }
+
+    // MARK: Several machines
+
+    func testMachineListKeepsOneEntryPerDesktopAndWrapsWhenStepping() {
+        let a = PairedMachine(id: "a", name: "Studio", urlString: "http://studio.local:47890")
+        let b = PairedMachine(id: "b", name: "", urlString: "http://100.64.0.9:47890")
+        var list = PairedMachines.upserting(a, into: [])
+        list = PairedMachines.upserting(b, into: list)
+        // Pairing again with a desktop updates its entry in place.
+        list = PairedMachines.upserting(PairedMachine(id: "a", name: "Studio 2", urlString: "http://studio.local:5000"), into: list)
+        XCTAssertEqual(list.map(\.id), ["a", "b"])
+        XCTAssertEqual(list[0].name, "Studio 2")
+        XCTAssertEqual(b.displayName, "100.64.0.9:47890", "a machine without a name shows its address")
+        XCTAssertEqual(a.address, "studio.local:47890")
+
+        XCTAssertEqual(PairedMachines.neighbor(of: "a", in: list, offset: 1)?.id, "b")
+        XCTAssertEqual(PairedMachines.neighbor(of: "b", in: list, offset: 1)?.id, "a", "stepping past the end wraps")
+        XCTAssertEqual(PairedMachines.neighbor(of: "a", in: list, offset: -1)?.id, "b")
+        XCTAssertNil(PairedMachines.neighbor(of: "a", in: [a], offset: 1), "one machine has nothing to switch to")
+        XCTAssertEqual(PairedMachines.decode(PairedMachines.encode(list)), list)
+
+        // A sideways swipe on the dock: far enough or flicked, and mostly horizontal.
+        XCTAssertEqual(MachineSwipe.direction(translation: CGSize(width: -70, height: 4), predicted: CGSize(width: -80, height: 4)), 1)
+        XCTAssertEqual(MachineSwipe.direction(translation: CGSize(width: 30, height: 2), predicted: CGSize(width: 200, height: 2)), -1)
+        XCTAssertEqual(MachineSwipe.direction(translation: CGSize(width: 30, height: 2), predicted: CGSize(width: 40, height: 2)), 0)
+        XCTAssertEqual(MachineSwipe.direction(translation: CGSize(width: -70, height: 60), predicted: CGSize(width: -200, height: 60)), 0)
+    }
+
+    @MainActor func testAnExistingPairingBecomesTheFirstMachine() {
+        let keychain = InMemoryKeychainStore()
+        let defaults = freshDefaults()
+        try? keychain.saveToken("device-token", for: "desktop-control-server")
+        defaults.set("http://100.64.0.3:47890", forKey: "sh.hostURL")
+        defaults.set("live", forKey: "sh.connectionMode")
+        defaults.set("archlinux", forKey: "sh.pairedHostName")
+        defaults.set("host-1", forKey: "sh.pairedHostId")
+        let store = AppStore(keychain: keychain, defaults: defaults, environment: [:], pairingService: MockPairingService())
+        defer { store.stopEventStream() }
+        XCTAssertEqual(store.machines, [PairedMachine(id: "host-1", name: "archlinux", urlString: "http://100.64.0.3:47890")])
+        XCTAssertEqual(store.activeMachineId, "host-1")
+        XCTAssertEqual(keychain.loadToken(for: "desktop:host-1"), "device-token")
+    }
+
+    @MainActor func testPairingASecondMachineSwitchingAndUnpairing() async throws {
+        let keychain = InMemoryKeychainStore()
+        let defaults = freshDefaults()
+        let service = MockPairingService(hostId: "h1", hostName: "Studio")
+        let store = AppStore(keychain: keychain, defaults: defaults, environment: ["SH_MOCK_PAIRING": "1"], pairingService: service)
+        defer { store.stopEventStream() }
+
+        try await store.pair(candidates: [PairingAddress.baseURL(from: "studio.local")!], expectedHostId: "h1", code: MockPairingService.demoCode)
+        service.hostId = "h2"
+        service.hostName = "Laptop"
+        try await store.pair(candidates: [PairingAddress.baseURL(from: "laptop.local")!], expectedHostId: "h2", code: MockPairingService.demoCode)
+
+        XCTAssertEqual(store.machines.map(\.name), ["Studio", "Laptop"])
+        XCTAssertEqual(store.activeMachineId, "h2", "the machine just paired is shown")
+        XCTAssertEqual(store.hostURLString, "http://laptop.local:47890")
+        XCTAssertNotNil(keychain.loadToken(for: "desktop:h1"))
+        XCTAssertNotNil(keychain.loadToken(for: "desktop:h2"))
+
+        await store.switchMachine(offset: 1)
+        XCTAssertEqual(store.activeMachineId, "h1")
+        XCTAssertEqual(store.pairedHostName, "Studio")
+        XCTAssertEqual(store.hostURLString, "http://studio.local:47890")
+        XCTAssertEqual(store.machineSwitchNotice, "Studio")
+        XCTAssertFalse(store.sessions.isEmpty, "the other machine's chats load")
+
+        // A second store on the same storage comes back on the same machine.
+        let reopened = AppStore(keychain: keychain, defaults: defaults, environment: ["SH_MOCK_PAIRING": "1"], pairingService: service)
+        defer { reopened.stopEventStream() }
+        XCTAssertEqual(reopened.activeMachineId, "h1")
+        XCTAssertEqual(reopened.machines.count, 2)
+
+        // Unpairing a machine that is not shown leaves the current one alone.
+        await store.unpairMachine("h2")
+        XCTAssertEqual(store.machines.map(\.id), ["h1"])
+        XCTAssertEqual(store.activeMachineId, "h1")
+        XCTAssertNil(keychain.loadToken(for: "desktop:h2"))
+        XCTAssertEqual(service.unpairCalls.last?.url.absoluteString, "http://laptop.local:47890")
+
+        // Unpairing the last machine returns to the pairing screen.
+        await store.unpairMachine("h1")
+        XCTAssertTrue(store.machines.isEmpty)
+        XCTAssertTrue(store.needsPairing)
+        XCTAssertNil(keychain.loadToken(for: "desktop:h1"))
+    }
+
+    @MainActor func testUnpairingTheShownMachineMovesToAnotherOne() async throws {
+        let keychain = InMemoryKeychainStore()
+        let service = MockPairingService(hostId: "h1", hostName: "Studio")
+        let store = AppStore(keychain: keychain, defaults: freshDefaults(), environment: ["SH_MOCK_PAIRING": "1"], pairingService: service)
+        defer { store.stopEventStream() }
+        try await store.pair(candidates: [PairingAddress.baseURL(from: "studio.local")!], expectedHostId: "h1", code: MockPairingService.demoCode)
+        service.hostId = "h2"
+        service.hostName = "Laptop"
+        try await store.pair(candidates: [PairingAddress.baseURL(from: "laptop.local")!], expectedHostId: "h2", code: MockPairingService.demoCode)
+
+        await store.unpairMachine("h2")
+        for _ in 0..<50 where store.activeMachineId != "h1" { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(store.activeMachineId, "h1")
+        XCTAssertFalse(store.needsPairing)
+        XCTAssertEqual(store.machines.map(\.id), ["h1"])
+    }
 }

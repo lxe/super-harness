@@ -66,6 +66,11 @@ public struct RootView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $store.isAddMachineSheetPresented) {
+            PairingView(store: store, isAdditional: true)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .environment(\.openURL, OpenURLAction { url in
             if store.openSessionLink(url) {
                 return .handled
@@ -177,11 +182,28 @@ public struct RootView: View {
 public struct ConnectionStatusPill: View {
     public let health: ConnectionHealth
     public var isSyncing: Bool = false
+    /// With two or more machines the button opens a menu: the machines, then Settings.
+    public var machines: [PairedMachine] = []
+    public var activeMachineId: String = ""
+    public var onSwitchMachine: (String) -> Void = { _ in }
+    public var onPairAnother: () -> Void = {}
     public let action: () -> Void
 
-    public init(health: ConnectionHealth, isSyncing: Bool = false, action: @escaping () -> Void) {
+    public init(
+        health: ConnectionHealth,
+        isSyncing: Bool = false,
+        machines: [PairedMachine] = [],
+        activeMachineId: String = "",
+        onSwitchMachine: @escaping (String) -> Void = { _ in },
+        onPairAnother: @escaping () -> Void = {},
+        action: @escaping () -> Void
+    ) {
         self.health = health
         self.isSyncing = isSyncing
+        self.machines = machines
+        self.activeMachineId = activeMachineId
+        self.onSwitchMachine = onSwitchMachine
+        self.onPairAnother = onPairAnother
         self.action = action
     }
 
@@ -221,23 +243,36 @@ public struct ConnectionStatusPill: View {
 
     public var body: some View {
         let glyph = Self.debugForcedGlyph ?? Self.glyph(health: health, isSyncing: isSyncing, offlineConfirmed: offlineConfirmed)
-        Button(action: action) {
-            ZStack {
-                if glyph == .settings {
-                    SHToolbarLogo()
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                } else {
-                    Image(systemName: glyph.symbolName)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(glyph == .problem ? SHColor.statusWarning : SHColor.porcelain)
-                        .contentTransition(.symbolEffect(.replace))
-                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: glyph == .syncing)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+        Group {
+            if machines.count > 1 {
+                Menu {
+                    Section("Machines") {
+                        ForEach(machines) { machine in
+                            Button {
+                                onSwitchMachine(machine.id)
+                            } label: {
+                                if machine.id == activeMachineId {
+                                    Label(machine.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(machine.displayName)
+                                }
+                            }
+                        }
+                    }
+                    Button(action: onPairAnother) {
+                        Label("Pair Another Machine", systemImage: "plus")
+                    }
+                    Button(action: action) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                } label: {
+                    glyphView(glyph)
+                }
+            } else {
+                Button(action: action) {
+                    glyphView(glyph)
                 }
             }
-            .frame(width: 30, height: 30)
-            .contentShape(Circle())
-            .animation(.spring(response: 0.32, dampingFraction: 0.8), value: glyph)
         }
         .accessibilityLabel("Settings · \(accessibilityStatus(glyph))")
         .accessibilityIdentifier("header.status")
@@ -250,6 +285,25 @@ public struct ConnectionStatusPill: View {
             try? await Task.sleep(for: Self.problemGrace)
             if !Task.isCancelled { offlineConfirmed = true }
         }
+    }
+
+    private func glyphView(_ glyph: Glyph) -> some View {
+        ZStack {
+            if glyph == .settings {
+                SHToolbarLogo()
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            } else {
+                Image(systemName: glyph.symbolName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(glyph == .problem ? SHColor.statusWarning : SHColor.porcelain)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.rotate, options: .repeat(.continuous), isActive: glyph == .syncing)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .frame(width: 30, height: 30)
+        .contentShape(Circle())
+        .animation(.spring(response: 0.32, dampingFraction: 0.8), value: glyph)
     }
 
     /// UI checks set `SH_DEBUG_STATUS_GLYPH` to `syncing` or `problem` to show that state.

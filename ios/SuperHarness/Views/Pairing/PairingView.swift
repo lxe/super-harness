@@ -16,8 +16,14 @@ public struct PairingView: View {
     @State private var workingLabel = ""
     @State private var errorMessage: String?
 
-    public init(store: AppStore) {
+    /// True when the screen is shown as a sheet to pair one more machine: it gets a Cancel
+    /// button and leaves out the first-run extras (the demo and the developer options).
+    private let isAdditional: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    public init(store: AppStore, isAdditional: Bool = false) {
         self.store = store
+        self.isAdditional = isAdditional
     }
 
     public var body: some View {
@@ -25,7 +31,7 @@ public struct PairingView: View {
             VStack(spacing: SHSpacing.xl) {
                 header
 
-                if let notice = store.pairingNotice {
+                if !isAdditional, let notice = store.pairingNotice {
                     banner(notice, icon: "info.circle.fill", tint: SHColor.statusWarning)
                         .accessibilityIdentifier("pairing.notice")
                 }
@@ -47,6 +53,7 @@ public struct PairingView: View {
 
                 // A way in without a desktop: sample chats, nothing sent anywhere. Settings →
                 // Developer turns it off again.
+                if !isAdditional {
                 Button {
                     Task { await store.setDemoMode(true) }
                 } label: {
@@ -67,6 +74,7 @@ public struct PairingView: View {
                 .font(SHTypography.micro)
                 .foregroundStyle(SHColor.inkFaint)
                 .accessibilityIdentifier("pairing.developer")
+                }
             }
             .padding(.horizontal, 22)
             .padding(.top, 36)
@@ -75,6 +83,16 @@ public struct PairingView: View {
             .frame(maxWidth: .infinity)
         }
         .background(SHColor.surfaceCanvas.ignoresSafeArea())
+        .overlay(alignment: .topLeading) {
+            if isAdditional {
+                Button("Cancel") { dismiss() }
+                    .font(SHTypography.label)
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+                    .accessibilityIdentifier("pairing.cancel")
+            }
+        }
         .overlay {
             if isWorking {
                 ZStack {
@@ -138,7 +156,7 @@ public struct PairingView: View {
             SHToolbarLogo()
                 .scaleEffect(2.3)
                 .frame(width: 72, height: 72)
-            Text("Pair with your desktop")
+            Text(isAdditional ? "Pair another machine" : "Pair with your desktop")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(SHColor.inkPrimary)
             Text("In Superharness on your desktop, open Settings → Mobile and choose Pair a phone.")

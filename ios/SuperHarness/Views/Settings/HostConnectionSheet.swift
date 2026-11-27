@@ -1,16 +1,19 @@
 import SwiftUI
 
-/// The Settings sheet. It mirrors what the desktop app lets you set: nothing here is a
-/// phone-only switch for something the desktop controls, and host internals are not shown.
+/// The Settings sheet. It lists the machines this phone is paired with and mirrors what the
+/// desktop app lets you set: nothing here is a phone-only switch for something the desktop
+/// controls, and host internals are not shown.
 ///
-/// Every row uses the same icon column, so icons, labels and separators line up across sections.
+/// Layout follows the rest of the app: a quiet section title, then one raised card per section.
+/// Every row uses the same icon column, so icons, labels and dividers line up across cards.
 public struct HostConnectionSheet: View {
     @Bindable var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var isTesting: Bool = false
     @State private var isApplyingDemoMode: Bool = false
-    @State private var isUnpairConfirmationPresented: Bool = false
+    @State private var machinePendingUnpair: PairedMachine?
+    @State private var isPairingSheetPresented: Bool = false
     @State private var testResult: ConnectionTestResult?
     @State private var isSendingTestPush: Bool = false
     @State private var testPushFeedback: String?
@@ -20,29 +23,46 @@ public struct HostConnectionSheet: View {
         self.store = store
     }
 
-    /// Width of the leading icon column and the gap after it. Separators start at the label.
-    private static let iconColumn: CGFloat = 30
+    /// Width of the leading icon column and the gap after it. Dividers start at the label.
+    private static let iconColumn: CGFloat = 28
     private static let iconGap: CGFloat = 12
-    private static var labelInset: CGFloat { iconColumn + iconGap }
+    private static let rowInset: CGFloat = 14
+    private static var labelInset: CGFloat { rowInset + iconColumn + iconGap }
 
     public var body: some View {
         NavigationStack {
-            Form {
-                // Before pairing only the developer options are relevant.
-                if !store.needsPairing {
-                    desktopSection
-                    appearanceSection
-                    harnessSection
-                    reasoningSection
-                    notificationSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    // Before pairing only the developer options are relevant.
+                    if !store.needsPairing {
+                        machinesSection
+                        appearanceSection
+                        harnessSection
+                        reasoningSection
+                        notificationSection
+                    }
+                    developerSection
                 }
-                developerSection
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 32)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
             }
-            .scrollContentBackground(.hidden)
             .background(SHColor.surfaceCanvas)
             .tint(SHColor.inkPrimary)
             .sheet(isPresented: $showDesignCatalog) {
                 DesignSystemCatalogView()
+            }
+            .sheet(isPresented: $isPairingSheetPresented) {
+                PairingView(store: store, isAdditional: true)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            // A finished pairing changes the machine being shown: close the pairing sheet.
+            .onChange(of: store.activeMachineId) { _, _ in
+                isPairingSheetPresented = false
+                testResult = nil
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -54,77 +74,123 @@ public struct HostConnectionSheet: View {
                 }
             }
             .confirmationDialog(
-                "Unpair from \(desktopDisplayName)?",
-                isPresented: $isUnpairConfirmationPresented,
-                titleVisibility: .visible
-            ) {
+                "Unpair from \(machinePendingUnpair?.displayName ?? "this machine")?",
+                isPresented: Binding(get: { machinePendingUnpair != nil }, set: { if !$0 { machinePendingUnpair = nil } }),
+                titleVisibility: .visible,
+                presenting: machinePendingUnpair
+            ) { machine in
                 Button("Unpair", role: .destructive) {
-                    Task { await store.unpairFromDesktop() }
+                    Task { await store.unpairMachine(machine.id) }
                 }
                 Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This phone forgets the desktop. To use it again, pair from the desktop’s Settings → Mobile.")
+            } message: { _ in
+                Text("This phone forgets the machine. To use it again, pair from Settings → Mobile in Superharness on that machine.")
             }
         }
     }
 
-    // MARK: - Desktop
+    // MARK: - Machines
 
-    private var desktopDisplayName: String {
-        store.pairedHostName.isEmpty ? "this desktop" : store.pairedHostName
-    }
-
-    /// The address without the scheme, e.g. "100.64.0.3:47890".
-    private var desktopAddress: String {
-        let raw = store.hostURLString
-        guard let url = URL(string: raw), let host = url.host else { return raw }
-        return url.port.map { "\(host):\($0)" } ?? host
-    }
-
-    private var desktopSection: some View {
-        Section {
-            row(
-                icon: "desktopcomputer",
-                title: store.pairedHostName.isEmpty ? "Desktop" : store.pairedHostName,
-                detail: store.connectionMode == .demo ? "Demo mode is on" : desktopAddress
-            ) {
-                if store.connectionMode == .live {
-                    Text(store.connectionHealth.label)
-                        .font(SHTypography.caption.weight(.medium))
-                        .foregroundStyle(store.connectionHealth == .connected ? SHColor.statusSuccess : SHColor.inkMuted)
-                }
+    private var machinesSection: some View {
+        section("Machines") {
+            if store.machines.isEmpty {
+                // A connection without a machine entry: the demo, or a preview.
+                row(icon: "desktopcomputer", title: store.pairedHostName.isEmpty ? "Desktop" : store.pairedHostName,
+                    detail: store.connectionMode == .demo ? "Demo mode is on" : nil) { EmptyView() }
+                    .accessibilityIdentifier("settings.desktop")
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("settings.desktop")
+            ForEach(Array(store.machines.enumerated()), id: \.element.id) { index, machine in
+                if index > 0 { divider }
+                machineRow(machine)
+            }
+            divider
+            Button {
+                isPairingSheetPresented = true
+            } label: {
+                row(icon: "plus", title: store.machines.isEmpty ? "Pair a Machine" : "Pair Another Machine") { EmptyView() }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings.pairAnother")
+        }
+    }
 
-            if store.isPaired {
-                Button {
-                    Task { await runConnectionTest() }
-                } label: {
-                    row(
-                        icon: "bolt.horizontal",
-                        title: isTesting ? "Testing…" : "Test Connection",
-                        detail: testResult?.message,
-                        detailColor: testResultColor
-                    ) {
-                        if isTesting {
-                            SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
+    private func machineRow(_ machine: PairedMachine) -> some View {
+        let isActive = machine.id == store.activeMachineId
+        let status: String? = {
+            guard isActive else { return nil }
+            if store.connectionMode == .demo { return "Demo" }
+            return store.connectionHealth.label
+        }()
+        let detail: String = {
+            if isActive, isTesting { return "Testing…" }
+            if isActive, let message = testResult?.message { return message }
+            return machine.address
+        }()
+        return HStack(spacing: 4) {
+            Button {
+                guard !isActive else { return }
+                Task { await store.switchMachine(to: machine.id) }
+            } label: {
+                HStack(spacing: 8) {
+                    iconLabel(
+                        icon: "desktopcomputer",
+                        title: machine.displayName,
+                        detail: detail,
+                        tint: SHColor.inkPrimary,
+                        detailColor: isActive && testResult != nil && !isTesting ? testResultColor : SHColor.inkMuted
+                    )
+                    Spacer(minLength: 8)
+                    if let status {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(isActive && store.connectionHealth == .connected && store.connectionMode == .live
+                                      ? SHColor.statusSuccess : SHColor.inkFaint)
+                                .frame(width: 7, height: 7)
+                            Text(status)
+                                .font(SHTypography.caption.weight(.medium))
+                                .foregroundStyle(SHColor.inkSecondary)
                         }
                     }
                 }
-                .disabled(isTesting)
-
-                Button {
-                    isUnpairConfirmationPresented = true
-                } label: {
-                    row(icon: "xmark.circle", title: "Unpair", tint: SHColor.statusDanger) { EmptyView() }
-                }
-                .accessibilityIdentifier("settings.unpair")
+                .frame(minHeight: 40)
+                .contentShape(Rectangle())
             }
-        } header: {
-            sectionHeader("Desktop")
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(isActive ? .isSelected : [])
+            .accessibilityIdentifier(isActive ? "settings.desktop" : "settings.machine.\(machine.id)")
+
+            Menu {
+                if !isActive {
+                    Button {
+                        Task { await store.switchMachine(to: machine.id) }
+                    } label: {
+                        Label("Switch to This Machine", systemImage: "arrow.left.arrow.right")
+                    }
+                } else if store.connectionMode == .live {
+                    Button {
+                        Task { await runConnectionTest() }
+                    } label: {
+                        Label("Test Connection", systemImage: "bolt.horizontal")
+                    }
+                }
+                Button(role: .destructive) {
+                    machinePendingUnpair = machine
+                } label: {
+                    Label("Unpair", systemImage: "xmark.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(SHColor.inkMuted)
+                    .frame(width: 36, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(machine.displayName) options")
+            .accessibilityIdentifier("settings.machineMenu.\(machine.id)")
         }
-        .listRowBackground(SHColor.surfaceSubtle)
+        .padding(.leading, Self.rowInset)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
     }
 
     private var testResultColor: Color {
@@ -135,58 +201,51 @@ public struct HostConnectionSheet: View {
     // MARK: - Chat Appearance
 
     private var appearanceSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Text Size")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(SHColor.inkPrimary)
-                SHChoiceBar(
-                    options: ChatTextSize.allCases.map { ($0, $0 == .extraLarge ? "X-Large" : $0.label) },
-                    selection: $store.chatTextSize
+        section("Chat Appearance") {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Text Size")
+                        .font(SHTypography.label)
+                        .foregroundStyle(SHColor.inkSecondary)
+                    SHChoiceBar(
+                        options: ChatTextSize.allCases.map { ($0, $0 == .extraLarge ? "X-Large" : $0.label) },
+                        selection: $store.chatTextSize
+                    )
+                    .accessibilityIdentifier("settings.chatTextSize")
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Spacing")
+                        .font(SHTypography.label)
+                        .foregroundStyle(SHColor.inkSecondary)
+                    SHChoiceBar(
+                        options: ChatDensity.allCases.map { ($0, $0.label) },
+                        selection: $store.chatDensity
+                    )
+                    .accessibilityIdentifier("settings.chatDensity")
+                }
+                // Live sample drawn with the chosen size and spacing.
+                SHMarkdownView(
+                    text: "The tests pass and the build is ready to install.\n\n- Chat text follows this size.\n- Lines and paragraphs follow this spacing.",
+                    isUserBubble: false
                 )
-                .accessibilityIdentifier("settings.chatTextSize")
+                .environment(\.shChatMetrics, store.chatMetrics)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .shRecessedWell(cornerRadius: SHRadius.md)
+                .accessibilityIdentifier("settings.chatPreview")
             }
-            .padding(.vertical, 2)
-            .listRowSeparator(.hidden)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Spacing")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(SHColor.inkPrimary)
-                SHChoiceBar(
-                    options: ChatDensity.allCases.map { ($0, $0.label) },
-                    selection: $store.chatDensity
-                )
-                .accessibilityIdentifier("settings.chatDensity")
-            }
-            .padding(.vertical, 2)
-            .listRowSeparator(.hidden)
-
-            // Live sample drawn with the chosen size and spacing.
-            SHMarkdownView(
-                text: "The tests pass and the build is ready to install.\n\n- Chat text follows this size.\n- Lines and paragraphs follow this spacing.",
-                isUserBubble: false
-            )
-            .environment(\.shChatMetrics, store.chatMetrics)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(SHColor.surfaceCanvas, in: RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
-            .padding(.vertical, 2)
-            .listRowSeparator(.hidden)
-            .accessibilityIdentifier("settings.chatPreview")
-        } header: {
-            sectionHeader("Chat Appearance")
+            .padding(Self.rowInset)
         }
-        .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Harnesses
 
     /// The desktop's own "Enable <harness>" switches (settings.enabledHarnesses).
     private var harnessSection: some View {
-        Section {
-            ForEach(store.harnessOrder) { group in
+        section("Harnesses") {
+            ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
                 let detection = store.harnesses.first { $0.id == group }
+                if index > 0 { divider }
                 Toggle(isOn: Binding(
                     get: { store.isHarnessEnabled(group) },
                     set: { enabled in Task { await store.setHarnessEnabled(group, enabled: enabled) } }
@@ -201,19 +260,16 @@ public struct HostConnectionSheet: View {
                     }
                 }
                 .tint(SHColor.toggleOn)
-                .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+                .modifier(RowPadding())
                 .accessibilityIdentifier("settings.harness.\(group.rawValue)")
             }
-        } header: {
-            sectionHeader("Harnesses")
         }
-        .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Thinking Effort
 
     private var reasoningSection: some View {
-        Section {
+        section("Thinking Effort") {
             Toggle(isOn: $store.allowExtremeReasoning) {
                 iconLabel(
                     icon: "brain",
@@ -222,18 +278,15 @@ public struct HostConnectionSheet: View {
                 )
             }
             .tint(SHColor.toggleOn)
-            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+            .modifier(RowPadding())
             .accessibilityIdentifier("settings.extremeReasoning")
-        } header: {
-            sectionHeader("Thinking Effort")
         }
-        .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Notifications
 
     private var notificationSection: some View {
-        Section {
+        section("Notifications") {
             Toggle(isOn: Binding(
                 get: { store.pushNotificationsEnabled },
                 set: { store.setPushNotificationsEnabled($0) }
@@ -241,7 +294,9 @@ public struct HostConnectionSheet: View {
                 iconLabel(icon: "bell", title: "Push Alerts", detail: PushNotificationCoordinator.shared.lastRegistrationStatus)
             }
             .tint(SHColor.toggleOn)
-            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+            .modifier(RowPadding())
+
+            divider
 
             Button {
                 Task {
@@ -257,17 +312,16 @@ public struct HostConnectionSheet: View {
                     }
                 }
             }
+            .buttonStyle(.plain)
             .disabled(isSendingTestPush || store.connectionMode != .live)
-        } header: {
-            sectionHeader("Notifications")
+            .opacity(store.connectionMode != .live ? 0.45 : 1)
         }
-        .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Developer
 
     private var developerSection: some View {
-        Section {
+        section("Developer") {
             Toggle(isOn: Binding(
                 get: { store.connectionMode == .demo },
                 set: { enabled in
@@ -282,8 +336,10 @@ public struct HostConnectionSheet: View {
             }
             .tint(SHColor.toggleOn)
             .disabled(isApplyingDemoMode)
-            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
+            .modifier(RowPadding())
             .accessibilityIdentifier("settings.demoMode")
+
+            divider
 
             Button {
                 showDesignCatalog = true
@@ -294,19 +350,43 @@ public struct HostConnectionSheet: View {
                         .foregroundStyle(SHColor.inkFaint)
                 }
             }
-        } header: {
-            sectionHeader("Developer")
+            .buttonStyle(.plain)
         }
-        .listRowBackground(SHColor.surfaceSubtle)
     }
 
-    // MARK: - Row building blocks
+    // MARK: - Building blocks
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(SHColor.inkMuted)
-            .textCase(nil)
+    /// A quiet title above one raised card.
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SHColor.inkMuted)
+                .padding(.leading, 6)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.lg, elevation: .card)
+        }
+    }
+
+    /// A hairline between rows, starting at the label so it lines up in every card.
+    private var divider: some View {
+        Rectangle()
+            .fill(SHColor.lineHairline)
+            .frame(height: 1)
+            .padding(.leading, Self.labelInset)
+    }
+
+    private struct RowPadding: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .frame(minHeight: 40)
+                .padding(.horizontal, HostConnectionSheet.rowInset)
+                .padding(.vertical, 6)
+        }
     }
 
     /// Title with one optional quiet line under it.
@@ -337,8 +417,7 @@ public struct HostConnectionSheet: View {
         }
     }
 
-    /// The one row layout: icon column, label, optional trailing content. Its separator starts
-    /// at the label, the same as every other row.
+    /// The one row layout: icon column, label, optional trailing content.
     private func row<Trailing: View>(
         icon: String,
         title: String,
@@ -352,9 +431,8 @@ public struct HostConnectionSheet: View {
             Spacer(minLength: 8)
             trailing()
         }
-        .frame(minHeight: 36)
+        .modifier(RowPadding())
         .contentShape(Rectangle())
-        .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] + Self.labelInset }
     }
 
     private func runConnectionTest() async {

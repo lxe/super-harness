@@ -1798,7 +1798,7 @@ struct SHModelEffortMenu: View, Equatable {
         let activeEfforts = displayedEfforts
         let activeEffort = displayedEffortLevel
         let rowHeight: CGFloat = 46
-        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight + 10, 330)
+        let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight + 7, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
         let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12)
@@ -1855,7 +1855,8 @@ struct SHModelEffortMenu: View, Equatable {
                                     .frame(height: rowHeight - 2)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(
-                                        RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous)
+                                        // Concentric with the popover: its radius minus the rows' 6pt inset.
+                                        RoundedRectangle(cornerRadius: SHRadius.concentric(SHRadius.systemPopover, inset: 6), style: .continuous)
                                             .fill(isChecked ? Color.white.opacity(0.07) : Color.clear)
                                     )
                                     .contentShape(Rectangle())
@@ -1865,8 +1866,10 @@ struct SHModelEffortMenu: View, Equatable {
                                 .accessibilityIdentifier("model.option.\(item.id)")
                             }
                         }
+                        // The last row sits the same 6pt from the bottom edge as from the sides
+                        // (5pt here plus the row's own 1pt), so its corners follow the popover's.
                         .padding(.horizontal, 6)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 5)
                     }
                     .frame(height: listHeight)
                     .onAppear {

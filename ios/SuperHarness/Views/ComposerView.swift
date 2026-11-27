@@ -1884,7 +1884,7 @@ private struct SHModelEffortPopoverBody: View {
         let listHeight = min(CGFloat(max(1, activeModels.count)) * rowHeight - 2 + SHPopoverRowMetrics.bottomInset, 330)
         // Deterministic height independent of the active effort label so moving the slider
         // never alters preferredContentSize or triggers any popover resize/reflow.
-        let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 12)
+        let thinkingSectionHeight: CGFloat = activeEfforts.isEmpty ? 0 : (14 + 56 + 8)
         // The model list needs no heading; a little space separates it from the Thinking section.
         let modelHeaderHeight: CGFloat = 6
         let totalHeight = thinkingSectionHeight + modelHeaderHeight + listHeight
@@ -1901,9 +1901,9 @@ private struct SHModelEffortPopoverBody: View {
                         }
                     )
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 17)
                 .padding(.top, 14)
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
             }
 
             VStack(alignment: .leading, spacing: 0) {

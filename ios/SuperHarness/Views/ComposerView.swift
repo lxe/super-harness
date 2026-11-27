@@ -536,7 +536,7 @@ public struct ComposerView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: ComposerView.controlSize)
-            .background(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
+            .shRaisedControl(SHColor.surfaceBubble.opacity(0.6), in: Capsule())
         }
     }
 
@@ -554,7 +554,7 @@ public struct ComposerView: View {
                         .font(.system(size: 15.5, weight: .medium))
                         .foregroundStyle(SHColor.inkFaint)
                         .frame(width: Self.controlSize, height: Self.controlSize)
-                        .background(SHColor.surfaceBubble.opacity(0.5), in: Circle())
+                        .shRaisedControl(SHColor.surfaceBubble.opacity(0.5), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Voice dictation unavailable")
@@ -574,7 +574,7 @@ public struct ComposerView: View {
                         .font(.system(size: 15.5, weight: .medium))
                         .foregroundStyle(SHColor.inkMuted)
                         .frame(width: Self.controlSize, height: Self.controlSize)
-                        .background(SHColor.surfaceBubble, in: Circle())
+                        .shRaisedControl(SHColor.surfaceBubble, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Start voice dictation")
@@ -595,7 +595,7 @@ public struct ComposerView: View {
                 }
                 .padding(.horizontal, 13)
                 .frame(height: ComposerView.controlSize)
-                .background(SHColor.statusDanger.opacity(0.16), in: Capsule())
+                .shRaisedControl(SHColor.statusDanger.opacity(0.16), in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop recording and transcribe")
@@ -604,7 +604,7 @@ public struct ComposerView: View {
         case .transcribing:
             SHActivityPulse(tint: SHColor.accentInfo, size: 12)
                 .frame(width: Self.controlSize, height: Self.controlSize)
-                .background(SHColor.surfaceBubble, in: Circle())
+                .shRaisedControl(SHColor.surfaceBubble, in: Circle())
                 .accessibilityLabel("Transcribing voice dictation")
                 .accessibilityIdentifier("composer.mic")
         }
@@ -669,7 +669,7 @@ public struct ComposerView: View {
                     }
                 }
                 .frame(width: Self.controlSize, height: Self.controlSize)
-                .background(SHColor.inkPrimary, in: Circle())
+                .shRaisedControl(SHColor.inkPrimary, in: Circle())
                 .opacity(canSend ? 1.0 : 0.28)
 
                 #if canImport(UIKit)
@@ -1639,7 +1639,7 @@ struct SHModelEffortMenu: View, Equatable {
             }
             .padding(.horizontal, 13)
             .frame(height: ComposerView.controlSize)
-            .background(SHColor.surfaceBubble, in: Capsule())
+            .shRaisedControl(SHColor.surfaceBubble, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityText)

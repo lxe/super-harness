@@ -712,7 +712,7 @@ public struct SHRoundControlLabel: View {
             .font(.system(size: symbolSize, weight: weight))
             .foregroundStyle(isProminent ? SHColor.surfaceRail : SHColor.inkSecondary)
             .frame(width: SHLayout.controlSize, height: SHLayout.controlSize)
-            .background(isProminent ? SHColor.inkPrimary : SHColor.surfaceBubble, in: Circle())
+            .shRaisedControl(isProminent ? SHColor.inkPrimary : SHColor.surfaceBubble, in: Circle())
     }
 }
 

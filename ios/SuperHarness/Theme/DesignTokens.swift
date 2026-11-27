@@ -387,6 +387,31 @@ public extension View {
             )
     }
 
+    /// Background for a small control (round button or chip) sitting on a raised panel: a hair
+    /// of lift, from a soft shadow below and a faint light outline that fades out down the top half.
+    func shRaisedControl<S: InsettableShape>(_ fill: Color, in shape: S) -> some View {
+        self
+            .background(
+                shape.fill(
+                    fill
+                        .shadow(.inner(color: .white.opacity(0.05), radius: 0, y: 0.75))
+                        .shadow(.drop(color: .black.opacity(0.30), radius: 1.75, y: 1.25))
+                )
+            )
+            .overlay {
+                shape
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.10), .white.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .center
+                        ),
+                        lineWidth: 0.6
+                    )
+                    .allowsHitTesting(false)
+            }
+    }
+
     /// Clips the view to a rounded shape and draws a recessed well for terminal, diff,
     /// and tool output.
     func shRecessedWell(_ fill: Color = SHColor.surfaceCode, cornerRadius: CGFloat) -> some View {

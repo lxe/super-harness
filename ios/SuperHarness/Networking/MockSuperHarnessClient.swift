@@ -126,7 +126,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .master,
                 title: "Master Orchestrator",
                 preview: "Coordinating iOS companion MVP, SSE control server, and quota telemetry",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "feat/ios-app",
                 model: "Claude Opus 4.6",
@@ -146,7 +146,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .antigravity,
                 title: "Build native SwiftUI iOS companion",
                 preview: "Streaming SSE parser + obsidian transcript blocks ready for simulator tests",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "feat/ios-app",
                 model: "Gemini 3.1 Pro",
@@ -173,7 +173,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .codex,
                 title: "Add Tailscale bind & /api/bootstrap",
                 preview: "Implemented paired bearer token auth and SSE usage/transcript fanout",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "feat/mobile-api",
                 model: "gpt-5.3-codex",
@@ -190,7 +190,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 dispatchMode: .codexResume,
                 nativeSection: "super-harness",
                 nativeSectionOrder: 0,
-                hostAddress: "lxe@100.64.0.3",
+                hostAddress: "maya@100.64.0.3",
                 hostLabel: "linux-box",
                 lastUserText: "bind to the tailnet address only and ask me before opening the LAN port"
             ),
@@ -201,7 +201,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .claude,
                 title: "Hero-limit usage card & pace indicator",
                 preview: "Added vertical pace tick and 7-day boxless spend chart across harnesses",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "main",
                 model: "claude-sonnet-4-6",
@@ -231,7 +231,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .antigravity,
                 title: "Optimize transcript virtualization",
                 preview: "Reduced layout thrash on 2,000-block transcripts from 240ms to 18ms",
-                cwd: "/Users/lxe/Developer/obsidian-kit",
+                cwd: "/Users/maya/Developer/obsidian-kit",
                 projectName: "obsidian-kit",
                 gitBranch: "perf/virtual-list",
                 model: "Gemini 3.1 Flash",
@@ -255,7 +255,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .codex,
                 title: "Vitest coverage for session organizer",
                 preview: "All 42 unit tests passing including folder migration edge cases",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "chore/tests",
                 model: "gpt-5.3-codex",
@@ -278,7 +278,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .claude,
                 title: "Security review: bearer token & ATS",
                 preview: "Verified NSAllowsLocalNetworking scope and Keychain accessibility flags",
-                cwd: "/Users/lxe/Developer/security-playbooks",
+                cwd: "/Users/maya/Developer/security-playbooks",
                 projectName: "security-playbooks",
                 gitBranch: "audit/ios-local-net",
                 model: "claude-opus-4-6",
@@ -301,7 +301,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .muse,
                 title: "Muse orbital badge & tolerant bootstrap",
                 preview: "Verified future-proof JSON decoding across harnesses, usage, and catalog",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "feat/ios-app",
                 model: "muse-wonder-full-1.0",
@@ -325,7 +325,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 harnessGroup: .pi,
                 title: "Pi adapter spend tracking",
                 preview: "Summed the last 24 hours of API spend for the gauge caption",
-                cwd: "/Users/lxe/Developer/super-harness",
+                cwd: "/Users/maya/Developer/super-harness",
                 projectName: "super-harness",
                 gitBranch: "feat/pi",
                 model: "pi-default",
@@ -363,7 +363,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             .text(text: "Running the session organizer tests first."),
                             .command(
                                 command: "npm test -- sessionOrganizer",
-                                cwd: "/Users/lxe/Developer/super-harness",
+                                cwd: "/Users/maya/Developer/super-harness",
                                 output: "PASS tests/sessionOrganizer.test.ts (42 passed)",
                                 exitCode: 0,
                                 durationMs: 2140,
@@ -372,7 +372,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             .text(text: "Tests pass. The typecheck does not:"),
                             .command(
                                 command: "git log --oneline -1 && (cd frontend && npm run -s build > /tmp/frontend-build.log 2>&1) && npm run typecheck -- --pretty false",
-                                cwd: "/Users/lxe/Developer/super-harness",
+                                cwd: "/Users/maya/Developer/super-harness",
                                 output: "src/main/folders.ts(88,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
                                 exitCode: 2,
                                 durationMs: 6310,
@@ -381,7 +381,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             .text(text: "I fixed the type error and started the watcher."),
                             .command(
                                 command: "cat > tests/folders.test.ts <<'EOF'\nimport { describe, expect, it } from 'vitest';\nimport { migrateFolders } from '../src/main/folders';\n\ndescribe('migrateFolders', () => {\n  it('keeps folder ids stable across a rename', () => {\n    expect(migrateFolders([{ id: 'a', name: 'Old' }])).toEqual([{ id: 'a', name: 'Old' }]);\n  });\n});\nEOF\nnpm run test:watch",
-                                cwd: "/Users/lxe/Developer/super-harness",
+                                cwd: "/Users/maya/Developer/super-harness",
                                 output: nil,
                                 exitCode: nil,
                                 durationMs: nil,
@@ -468,8 +468,8 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             ),
                             .command(
                                 command: "xcodegen generate && xcodebuild -scheme SuperHarness -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build",
-                                cwd: "/Users/lxe/Developer/super-harness/ios",
-                                output: "⚙️  Generating plists...\n⚙️  Writing project...\nCreated project at /Users/lxe/Developer/super-harness/ios/SuperHarness.xcodeproj\n** BUILD SUCCEEDED **",
+                                cwd: "/Users/maya/Developer/super-harness/ios",
+                                output: "⚙️  Generating plists...\n⚙️  Writing project...\nCreated project at /Users/maya/Developer/super-harness/ios/SuperHarness.xcodeproj\n** BUILD SUCCEEDED **",
                                 exitCode: 0,
                                 durationMs: 4820,
                                 status: "done"
@@ -576,7 +576,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                             ),
                             .command(
                                 command: "npm test -- controlServer",
-                                cwd: "/Users/lxe/Developer/super-harness",
+                                cwd: "/Users/maya/Developer/super-harness",
                                 output: "FAIL tests/controlServer.test.ts\n  Expected 401 when Authorization header is omitted\nPASS after adding bearer check on /api/bootstrap (12 passed)",
                                 exitCode: 0,
                                 durationMs: 1290,
@@ -748,7 +748,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
             sidebarGroupBy: .native,
             showArchived: false,
             showHidden: false,
-            defaultNewSessionCwd: "/Users/lxe/Developer/super-harness"
+            defaultNewSessionCwd: "/Users/maya/Developer/super-harness"
         )
         bootstrapSettings.harnessOrder = settings.harnessOrder
         bootstrapSettings.pinnedOrder = settings.pinnedOrder
@@ -1275,7 +1275,7 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
 
         let cmdBlock = UnifiedBlock.command(
             command: "git status --short && swift test --filter Smoke",
-            cwd: "/Users/lxe/Developer/super-harness/ios",
+            cwd: "/Users/maya/Developer/super-harness/ios",
             output: "M SuperHarness/State/AppStore.swift\nTest Suite 'Smoke' passed in 0.14s",
             exitCode: 0,
             durationMs: 310,
@@ -1646,9 +1646,9 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 .muse: "high",
             ],
             projects: [
-                HarnessProjectOption(name: "super-harness", path: "/Users/lxe/Developer/super-harness", harnesses: HarnessGroup.allCases, lastUsedAt: now),
-                HarnessProjectOption(name: "obsidian-kit", path: "/Users/lxe/Developer/obsidian-kit", harnesses: [.antigravity, .claude], lastUsedAt: now - 3_600_000),
-                HarnessProjectOption(name: "security-playbooks", path: "/Users/lxe/Developer/security-playbooks", harnesses: [.claude, .codex], lastUsedAt: now - 86_400_000),
+                HarnessProjectOption(name: "super-harness", path: "/Users/maya/Developer/super-harness", harnesses: HarnessGroup.allCases, lastUsedAt: now),
+                HarnessProjectOption(name: "obsidian-kit", path: "/Users/maya/Developer/obsidian-kit", harnesses: [.antigravity, .claude], lastUsedAt: now - 3_600_000),
+                HarnessProjectOption(name: "security-playbooks", path: "/Users/maya/Developer/security-playbooks", harnesses: [.claude, .codex], lastUsedAt: now - 86_400_000),
             ],
             updatedAt: now
         )

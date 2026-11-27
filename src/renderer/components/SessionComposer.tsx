@@ -12,7 +12,9 @@ import {
 } from 'lucide-react';
 import type {
   HarnessCatalog,
+  HarnessGroup,
   ImageAttachment,
+  MasterEngineConfig,
   UnifiedSession,
 } from '../../shared/types';
 import {
@@ -33,6 +35,7 @@ import {
   resolveSessionModelControls,
 } from '../utils/modelOptions';
 import { HarnessLogo } from './HarnessLogo';
+import { MasterEngineMenu } from './MasterEngineMenu';
 import type { PreviewImageItem } from './ImageLightbox';
 
 export interface SessionComposerProps {
@@ -40,6 +43,9 @@ export interface SessionComposerProps {
   isMaster: boolean;
   catalog?: HarnessCatalog | null;
   onChangeModel?: (patch: { model?: string; reasoningEffort?: string }) => void;
+  /** Master Orchestrator only: its engine settings and how to change them from the chip. */
+  masterConfig?: MasterEngineConfig;
+  onChangeMasterEngine?: (patch: { harness?: HarnessGroup; model?: string }) => void;
   input: string;
   attachments: ImageAttachment[];
   sending: boolean;
@@ -69,6 +75,8 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
     isMaster,
     catalog,
     onChangeModel,
+    masterConfig,
+    onChangeMasterEngine,
     input,
     attachments,
     sending,
@@ -273,7 +281,13 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
               <ImagePlus className="w-3.5 h-3.5" strokeWidth={1.75} />
             </IconButton>
 
-            {canSwitchModel && modelControls ? (
+            {isMaster && masterConfig && onChangeMasterEngine ? (
+              <MasterEngineMenu
+                config={masterConfig}
+                catalog={catalog}
+                onChange={onChangeMasterEngine}
+              />
+            ) : canSwitchModel && modelControls ? (
               <>
                 {/* Model Selector */}
                 <div className="relative flex items-center min-w-0">

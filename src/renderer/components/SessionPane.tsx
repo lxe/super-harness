@@ -3,8 +3,10 @@ import { HARNESS_TITLES } from '../utils/harnessMeta';
 import { ArrowDown, ChevronDown, ChevronRight, FileText, Terminal } from 'lucide-react';
 import type {
   HarnessCatalog,
+  HarnessGroup,
   ImageAttachment,
   LiveActivityState,
+  MasterEngineConfig,
   OrganizeAction,
   QueuedMessageItem,
   SessionFolder,
@@ -136,6 +138,9 @@ interface Props {
   onToggleSplit: () => void;
   onCloseSplit?: () => void;
   onClearMaster: () => void;
+  /** Master Orchestrator engine (harness + model) shown and changed from the composer chip. */
+  masterConfig?: MasterEngineConfig;
+  onChangeMasterEngine?: (patch: { harness?: HarnessGroup; model?: string }) => void;
 }
 
 /**
@@ -165,6 +170,8 @@ export const SessionPane: React.FC<Props> = ({
   onToggleSplit,
   onCloseSplit,
   onClearMaster,
+  masterConfig,
+  onChangeMasterEngine,
 }) => {
   const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -1197,6 +1204,8 @@ export const SessionPane: React.FC<Props> = ({
             session={session}
             isMaster={isMaster}
             catalog={catalog}
+            masterConfig={masterConfig}
+            onChangeMasterEngine={onChangeMasterEngine}
             onChangeModel={(patch) => {
               onOrganize([
                 {

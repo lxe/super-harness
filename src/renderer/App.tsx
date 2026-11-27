@@ -595,6 +595,14 @@ export const App: React.FC = () => {
     [handleUpdateSettings]
   );
 
+  const handleChangeMasterEngine = useCallback(
+    (patch: { harness?: HarnessGroup; model?: string }) => {
+      if (!state) return;
+      void handleUpdateSettings({ master: { ...state.settings.master, ...patch } });
+    },
+    [state, handleUpdateSettings]
+  );
+
   const handleClearMaster = useCallback(async () => {
     const next = await window.superHarness.clearMasterHistory();
     setState(next);
@@ -1045,6 +1053,8 @@ export const App: React.FC = () => {
             onOpenSessionLink={handleOpenSessionLinkPrimary}
             onToggleSplit={handleToggleSplitPrimary}
             onClearMaster={handleClearMaster}
+            masterConfig={state?.settings.master}
+            onChangeMasterEngine={handleChangeMasterEngine}
           />
         )}
 
@@ -1070,6 +1080,8 @@ export const App: React.FC = () => {
             onToggleSplit={handleCloseSplit}
             onCloseSplit={handleCloseSplit}
             onClearMaster={handleClearMaster}
+            masterConfig={state?.settings.master}
+            onChangeMasterEngine={handleChangeMasterEngine}
           />
         )}
 

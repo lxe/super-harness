@@ -293,7 +293,7 @@ private struct CompactTraceRowView: View {
                             .padding(.top, 3.5)
                     }
                     .padding(.vertical, 5)
-                    .padding(.horizontal, 6)
+                    // No side inset: expanded rows line up with the row that opens them.
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -343,7 +343,7 @@ private struct CompactTraceRowView: View {
                         }
                     }
                     .padding(.vertical, 5)
-                    .padding(.horizontal, 6)
+                    // No side inset: expanded rows line up with the row that opens them.
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -387,7 +387,7 @@ private struct CompactTraceRowView: View {
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 5)
-            .padding(.horizontal, 6)
+            // No side inset: expanded rows line up with the row that opens them.
 
         default:
             UnifiedBlockView(

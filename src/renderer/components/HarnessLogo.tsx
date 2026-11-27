@@ -149,8 +149,7 @@ export const HarnessLogo: React.FC<Props> = ({ harness, size = 15, className = '
     );
   }
 
-  // Master Orchestrator: crisp violet/indigo four-point star
-  const masterGrad = `master-grad-${uid}`;
+  // Master Orchestrator: crisp monochrome four-point star
   return (
     <svg
       width={size}
@@ -160,15 +159,9 @@ export const HarnessLogo: React.FC<Props> = ({ harness, size = 15, className = '
       className={`shrink-0 ${className}`}
       aria-label="Master Orchestrator"
     >
-      <defs>
-        <linearGradient id={masterGrad} x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#C084FC" />
-          <stop offset="100%" stopColor="#818CF8" />
-        </linearGradient>
-      </defs>
       <path
         d="M12 2.2C12.8 7.5 16.5 11.2 21.8 12C16.5 12.8 12.8 16.5 12 21.8C11.2 16.5 7.5 12.8 2.2 12C7.5 11.2 11.2 7.5 12 2.2Z"
-        fill={`url(#${masterGrad})`}
+        fill="currentColor"
       />
     </svg>
   );

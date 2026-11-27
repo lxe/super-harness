@@ -1027,18 +1027,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
       style={{ width }}
       className="relative z-20 shrink-0 h-full flex flex-col border-r border-line-hairline bg-surface-rail select-none"
     >
-      {/* Top Bar (draggable window region) */}
+      {/* Top Bar (draggable window region): Logo (Settings) | Master, Search, Filter, New */}
       <div className="sh-drag-region h-12 px-3 flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <div className="w-8 h-8 flex items-center justify-center shrink-0" title="Super Harness">
-            <Layers className="w-4 h-4 text-ink-secondary" />
-          </div>
-          <IconButton
-            label="New Conversation"
-            onClick={() => onNewSession(filter)}
-          >
-            <SquarePen className="w-4 h-4" strokeWidth={1.75} />
-          </IconButton>
+        <IconButton label="Settings" onClick={onOpenSettings}>
+          <Layers className="w-4 h-4" strokeWidth={1.75} />
+        </IconButton>
+        <div className="flex items-center gap-0.5 relative">
           {masterSession && (
             <IconButton
               label="Master Orchestrator"
@@ -1054,8 +1048,6 @@ export const Sidebar: React.FC<Props> = React.memo(({
               <HarnessLogo harness="master" size={16} />
             </IconButton>
           )}
-        </div>
-        <div className="flex items-center gap-0.5 relative">
           <IconButton
             label="Search (Ctrl+K)"
             active={showSearch || Boolean(query)}
@@ -1075,6 +1067,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
               <SlidersHorizontal className="w-4 h-4" strokeWidth={1.75} />
             </IconButton>
           </span>
+          <IconButton
+            label="New Conversation"
+            onClick={() => onNewSession(filter)}
+          >
+            <SquarePen className="w-4 h-4" strokeWidth={1.75} />
+          </IconButton>
 
           {showFilterMenu && (
             <PopoverSurface

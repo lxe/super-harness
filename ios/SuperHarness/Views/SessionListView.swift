@@ -287,7 +287,7 @@ public struct SessionListView: View {
                     }
                 } label: {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(isSearchActive ? SHColor.brandMaster : SHColor.inkSecondary)
+                        .foregroundStyle(isSearchActive ? SHColor.inkPrimary : SHColor.inkSecondary)
                 }
                 .accessibilityLabel("Search sessions")
                 .accessibilityIdentifier("header.search")
@@ -379,7 +379,7 @@ public struct SessionListView: View {
             TextField("Search sessions, messages, projects", text: $store.searchQuery)
                 .font(SHTypography.body)
                 .foregroundStyle(SHColor.inkPrimary)
-                .tint(SHColor.brandMaster)
+                .tint(SHColor.inkPrimary)
                 .focused($isSearchFieldFocused)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
@@ -647,7 +647,7 @@ public struct SessionListView: View {
             } label: {
                 Label(session.pinned ? "Unpin" : "Pin", systemImage: session.pinned ? "pin.slash" : "pin")
             }
-            .tint(SHColor.brandMaster)
+            .tint(SHColor.surfaceRaised)
 
             Button {
                 Task { await store.togglePinToTop(session) }
@@ -1049,7 +1049,7 @@ private struct SessionListRow: View {
                             .fixedSize()
                         if session.isUnread {
                             Circle()
-                                .fill(SHColor.brandMaster)
+                                .fill(SHColor.inkPrimary)
                                 .frame(width: 7, height: 7)
                                 .accessibilityLabel("Unread")
                                 .accessibilityIdentifier("row.unread")

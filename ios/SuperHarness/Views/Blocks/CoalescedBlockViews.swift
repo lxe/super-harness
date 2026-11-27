@@ -883,7 +883,7 @@ private struct ThinkingBlockView: View, Equatable {
                 HStack(spacing: 8) {
                     Image(systemName: "brain.head.profile")
                         .font(.system(size: 12))
-                        .foregroundStyle(SHColor.brandMaster)
+                        .foregroundStyle(SHColor.inkMuted)
                     Text(summary ?? "Thinking")
                         .font(SHTypography.caption.weight(.medium))
                         .foregroundStyle(SHColor.inkSecondary)
@@ -1567,7 +1567,7 @@ struct InjectedMessageView: View {
             SHInlineDisclosureRow(
                 icon: info.icon,
                 title: info.label,
-                tint: info.kind == .agent ? SHColor.brandMaster : SHColor.inkMuted,
+                tint: info.kind == .agent ? SHColor.inkSecondary : SHColor.inkMuted,
                 isExpanded: isExpanded
             ) {
                 withAnimation(.easeInOut(duration: 0.14)) { isExpanded.toggle() }

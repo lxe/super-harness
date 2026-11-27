@@ -28,7 +28,11 @@ public enum SHColor {
     public static let brandMaster = Color(hex: 0x818CF8)
 
     // Semantic accents
-    public static let accentPrimary = Color(hex: 0x818CF8)
+    /// The app's accent for text buttons, links in chrome and progress marks. It is a
+    /// neutral near-white: the purple is reserved for the orchestrator's own brand mark.
+    public static let accentPrimary = Color(hex: 0xE4E6EC)
+    /// The "on" colour of every switch.
+    public static let toggleOn = Color(hex: 0x34C38F)
     public static let statusSuccess = Color(hex: 0x34D399)
     public static let statusWarning = Color(hex: 0xFBBF24)
     public static let statusDanger = Color(hex: 0xFB7185)
@@ -408,5 +412,110 @@ public extension View {
                     )
                     .allowsHitTesting(false)
             }
+    }
+}
+
+// MARK: - Chat Text Size and Density
+
+/// How large chat text is drawn. The scale multiplies every chat font size.
+public enum ChatTextSize: String, CaseIterable, Identifiable, Sendable {
+    case small, standard, large, extraLarge
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .small: return "Small"
+        case .standard: return "Default"
+        case .large: return "Large"
+        case .extraLarge: return "Extra Large"
+        }
+    }
+
+    public var scale: CGFloat {
+        switch self {
+        case .small: return 0.92
+        case .standard: return 1.0
+        case .large: return 1.1
+        case .extraLarge: return 1.22
+        }
+    }
+}
+
+/// How much room chat content gets: space between lines, between blocks inside a message,
+/// and between messages.
+public enum ChatDensity: String, CaseIterable, Identifiable, Sendable {
+    case compact, comfortable, spacious
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .compact: return "Compact"
+        case .comfortable: return "Comfortable"
+        case .spacious: return "Spacious"
+        }
+    }
+
+    var extraLineSpacing: CGFloat {
+        switch self {
+        case .compact: return 0
+        case .comfortable: return 2
+        case .spacious: return 4
+        }
+    }
+
+    var blockGap: CGFloat {
+        switch self {
+        case .compact: return 8
+        case .comfortable: return 11
+        case .spacious: return 15
+        }
+    }
+
+    var messageGap: CGFloat {
+        switch self {
+        case .compact: return 16
+        case .comfortable: return 22
+        case .spacious: return 30
+        }
+    }
+}
+
+/// The resolved chat measurements, passed down through the environment.
+public struct SHChatMetrics: Equatable, Sendable {
+    public var textSize: ChatTextSize = .standard
+    public var density: ChatDensity = .comfortable
+
+    public init(textSize: ChatTextSize = .standard, density: ChatDensity = .comfortable) {
+        self.textSize = textSize
+        self.density = density
+    }
+
+    public var scale: CGFloat { textSize.scale }
+    public var blockGap: CGFloat { density.blockGap }
+    public var messageGap: CGFloat { density.messageGap }
+
+    /// Line spacing for running text; `base` is the spacing at the compact density.
+    public func lineSpacing(_ base: CGFloat) -> CGFloat {
+        (base + density.extraLineSpacing) * scale
+    }
+
+    public func font(_ size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
+        .system(size: size * scale, weight: weight, design: design)
+    }
+
+    public var body: Font { font(15) }
+    public var mono: Font { font(12.5, design: .monospaced) }
+}
+
+private struct SHChatMetricsKey: EnvironmentKey {
+    static let defaultValue = SHChatMetrics()
+}
+
+public extension EnvironmentValues {
+    var shChatMetrics: SHChatMetrics {
+        get { self[SHChatMetricsKey.self] }
+        set { self[SHChatMetricsKey.self] = newValue }
     }
 }

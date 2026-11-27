@@ -36,34 +36,31 @@ public struct HostConnectionSheet: View {
     public var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Toggle(isOn: $isDemoMode) {
-                        rowLabel("Demo Mode", detail: "Offline sample sessions")
-                    }
-                    .tint(SHColor.brandMaster)
-                }
-                .listRowBackground(SHColor.surfaceSubtle)
-
                 hostSection
+                appearanceSection
                 dictationSection
                 harnessSection
                 reasoningSection
                 notificationSection
 
-                Section("Developer") {
+                Section {
                     Button {
                         showDesignCatalog = true
                     } label: {
-                        Label("Design System Catalog", systemImage: "square.grid.2x2")
-                            .font(SHTypography.label)
+                        actionLabel("Design System Catalog", icon: "square.grid.2x2")
                     }
+                } header: {
+                    sectionHeader("Developer", icon: "hammer")
                 }
                 .listRowBackground(SHColor.surfaceSubtle)
             }
+            .scrollContentBackground(.hidden)
+            .background(SHColor.surfaceCanvas)
+            .tint(SHColor.inkPrimary)
             .sheet(isPresented: $showDesignCatalog) {
                 DesignSystemCatalogView()
             }
-            .navigationTitle("Host Connection")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -74,7 +71,7 @@ public struct HostConnectionSheet: View {
                         Task { await saveAndClose() }
                     } label: {
                         if isSaving {
-                            SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
+                            SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
                         } else {
                             Text("Save")
                                 .fontWeight(.semibold)
@@ -95,26 +92,31 @@ public struct HostConnectionSheet: View {
 
     private var hostSection: some View {
         Section {
-            labeledField("URL") {
-                TextField("http://100.64.0.10:47890", text: $hostURL)
-                    .keyboardType(.URL)
+            Toggle(isOn: $isDemoMode) {
+                rowLabel("Demo Mode", detail: "Offline sample sessions")
             }
+            .tint(SHColor.toggleOn)
 
-            secretField("Token", placeholder: "Host control token", text: $token, isRevealed: $revealToken)
+            Group {
+                labeledField("URL") {
+                    TextField("http://100.64.0.10:47890", text: $hostURL)
+                        .keyboardType(.URL)
+                }
+
+                secretField("Token", placeholder: "Host control token", text: $token, isRevealed: $revealToken)
+            }
+            .opacity(isDemoMode ? 0.5 : 1.0)
 
             Button {
                 Task { await runConnectionTest() }
             } label: {
-                HStack {
+                HStack(spacing: 10) {
+                    actionLabel(isTesting ? "Testing…" : "Test Connection", icon: "bolt.horizontal")
+                    Spacer()
                     if isTesting {
-                        SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
-                    } else {
-                        Image(systemName: "bolt.horizontal.circle")
+                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
                     }
-                    Text(isTesting ? "Testing…" : "Test Connection")
                 }
-                .font(SHTypography.label)
-                .foregroundStyle(SHColor.brandAntigravity)
             }
             .disabled(isTesting || hostURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
@@ -128,19 +130,68 @@ public struct HostConnectionSheet: View {
                 }
             }
         } header: {
-            Text("Host")
+            sectionHeader("Connection", icon: "network")
         } footer: {
             Text("Tailscale or LAN address. The token is stored in Keychain.")
                 .foregroundStyle(SHColor.inkFaint)
         }
         .listRowBackground(SHColor.surfaceSubtle)
-        .opacity(isDemoMode ? 0.55 : 1.0)
+    }
+
+    // MARK: - Chat Appearance
+
+    private var appearanceSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                rowLabel("Text Size", detail: nil)
+                Picker("Text Size", selection: $store.chatTextSize) {
+                    ForEach(ChatTextSize.allCases) { size in
+                        Text(size == .extraLarge ? "XL" : size.label).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("settings.chatTextSize")
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                rowLabel("Spacing", detail: nil)
+                Picker("Spacing", selection: $store.chatDensity) {
+                    ForEach(ChatDensity.allCases) { density in
+                        Text(density.label).tag(density)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("settings.chatDensity")
+            }
+            .padding(.vertical, 4)
+
+            // Live sample drawn with the chosen size and spacing.
+            VStack(alignment: .leading, spacing: store.chatMetrics.blockGap) {
+                Text("Preview")
+                    .font(SHTypography.micro)
+                    .foregroundStyle(SHColor.inkMuted)
+                SHMarkdownView(
+                    text: "The tests pass and the build is ready to install.\n\n- Chat text follows this size.\n- Lines and messages follow this spacing.",
+                    isUserBubble: false
+                )
+                .environment(\.shChatMetrics, store.chatMetrics)
+            }
+            .padding(.vertical, 4)
+            .accessibilityIdentifier("settings.chatPreview")
+        } header: {
+            sectionHeader("Chat Appearance", icon: "textformat.size")
+        } footer: {
+            Text("Applies to messages in every chat on this device.")
+                .foregroundStyle(SHColor.inkFaint)
+        }
+        .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Dictation
 
     private var dictationSection: some View {
-        Section("Dictation") {
+        Section {
             HStack(spacing: 10) {
                 Circle()
                     .fill(dictationDotColor)
@@ -156,7 +207,7 @@ public struct HostConnectionSheet: View {
                     }
                 } label: {
                     if store.isCheckingDictation {
-                        SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
+                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
                     } else {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 13, weight: .medium))
@@ -202,6 +253,8 @@ public struct HostConnectionSheet: View {
                     .font(SHTypography.micro)
                     .foregroundStyle(SHColor.inkFaint)
             }
+        } header: {
+            sectionHeader("Dictation", icon: "mic")
         }
         .listRowBackground(SHColor.surfaceSubtle)
     }
@@ -233,7 +286,7 @@ public struct HostConnectionSheet: View {
     // MARK: - Harnesses
 
     private var harnessSection: some View {
-        Section("Harnesses") {
+        Section {
             if store.harnesses.isEmpty {
                 Text("No harnesses detected yet.")
                     .font(SHTypography.caption)
@@ -243,7 +296,7 @@ public struct HostConnectionSheet: View {
                     HStack(spacing: 12) {
                         HarnessLogoView(group: h.id, size: 18)
                             .frame(width: 32, height: 32)
-                            .background(SHColor.harness(h.id).opacity(0.10))
+                            .background(Color.white.opacity(0.06))
                             .clipShape(RoundedRectangle(cornerRadius: SHRadius.md, style: .continuous))
 
                         rowLabel(h.id.title, detail: "\(h.activeSessionCount) active · \(h.totalSessionCount) total")
@@ -267,7 +320,7 @@ public struct HostConnectionSheet: View {
                             )
                         )
                         .labelsHidden()
-                        .tint(SHColor.harness(h.id))
+                        .tint(SHColor.toggleOn)
                         .disabled(!h.capabilities.canControlDaemon)
                     }
                     .padding(.vertical, 2)
@@ -287,6 +340,11 @@ public struct HostConnectionSheet: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader("Harnesses", icon: "square.stack.3d.up")
+        } footer: {
+            Text("The switch turns a harness's remote control on or off.")
+                .foregroundStyle(SHColor.inkFaint)
         }
         .listRowBackground(SHColor.surfaceSubtle)
     }
@@ -309,11 +367,12 @@ public struct HostConnectionSheet: View {
             Toggle(isOn: $store.allowExtremeReasoning) {
                 rowLabel("Max and Ultra Effort", detail: store.allowExtremeReasoning ? "Offered in the effort menu" : "Hidden; nothing starts at Max or Ultra")
             }
-            .tint(SHColor.accentPrimary)
+            .tint(SHColor.toggleOn)
             .accessibilityIdentifier("settings.extremeReasoning")
         } header: {
-            Text("Thinking Effort")
+            sectionHeader("Thinking Effort", icon: "brain")
         }
+        .listRowBackground(SHColor.surfaceSubtle)
     }
 
     // MARK: - Notifications
@@ -326,7 +385,7 @@ public struct HostConnectionSheet: View {
             )) {
                 rowLabel("Push Alerts", detail: PushNotificationCoordinator.shared.lastRegistrationStatus)
             }
-            .tint(SHColor.accentPrimary)
+            .tint(SHColor.toggleOn)
 
             Button {
                 Task {
@@ -337,11 +396,10 @@ public struct HostConnectionSheet: View {
                 }
             } label: {
                 HStack {
-                    Label("Send Test", systemImage: "bell.badge")
-                        .font(SHTypography.label)
+                    actionLabel("Send Test Alert", icon: "bell.badge")
                     Spacer()
                     if isSendingTestPush {
-                        SHActivityPulse(tint: SHColor.accentPrimary, size: 16)
+                        SHActivityPulse(tint: SHColor.inkSecondary, size: 16)
                     }
                 }
             }
@@ -353,7 +411,7 @@ public struct HostConnectionSheet: View {
                     .foregroundStyle(SHColor.inkMuted)
             }
         } header: {
-            Text("Notifications")
+            sectionHeader("Notifications", icon: "bell")
         } footer: {
             Text("Alerts when an agent finishes or asks for input, plus background session refresh.")
                 .foregroundStyle(SHColor.inkFaint)
@@ -362,6 +420,31 @@ public struct HostConnectionSheet: View {
     }
 
     // MARK: - Row building blocks
+
+    /// Section title with a small icon; every section uses this so the page reads as one list.
+    private func sectionHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(SHColor.inkMuted)
+        .textCase(nil)
+    }
+
+    /// A tappable row: neutral icon, primary-coloured title.
+    private func actionLabel(_ title: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(SHColor.inkSecondary)
+                .frame(width: 22)
+            Text(title)
+                .font(SHTypography.label)
+                .foregroundStyle(SHColor.inkPrimary)
+        }
+    }
 
     /// Primary line plus one optional quiet secondary line, each kept to a single line.
     private func rowLabel(_ title: String, detail: String?) -> some View {
@@ -427,7 +510,7 @@ public struct HostConnectionSheet: View {
             }
             .buttonStyle(.borderless)
             .font(SHTypography.micro.weight(.medium))
-            .foregroundStyle(SHColor.accentPrimary)
+            .foregroundStyle(SHColor.inkSecondary)
         } field: {
             if isRevealed.wrappedValue {
                 TextField(placeholder, text: text)

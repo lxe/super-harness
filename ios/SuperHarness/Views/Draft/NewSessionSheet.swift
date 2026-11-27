@@ -158,7 +158,7 @@ public struct NewSessionSheet: View {
                 // Remote Control / tmux
                 Section("Session Options") {
                     Toggle("Enable Remote Control", isOn: $remoteControl)
-                        .tint(SHColor.accentPrimary)
+                        .tint(SHColor.toggleOn)
 
                     if selectedHarness == .claudeTmux {
                         TextField("tmux session name (e.g. claude-work)", text: $tmuxSessionName)

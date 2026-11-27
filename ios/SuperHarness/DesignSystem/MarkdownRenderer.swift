@@ -480,8 +480,9 @@ public enum SHMarkdownCache {
         return parsed
     }
 
-    public static func inlineAttributedString(for raw: String, isUserBubble: Bool) -> AttributedString {
-        let cacheKey = "\(isUserBubble ? "u" : "a")|\(raw)" as NSString
+    public static func inlineAttributedString(for raw: String, isUserBubble: Bool, scale: CGFloat = 1) -> AttributedString {
+        // The inline-code font size is baked into the styled string, so the scale is part of the key.
+        let cacheKey = "\(isUserBubble ? "u" : "a")\(Int((scale * 100).rounded()))|\(raw)" as NSString
         if let hit = inlineCache.object(forKey: cacheKey) { return hit.value }
 
         let opts = AttributedString.MarkdownParsingOptions(
@@ -499,7 +500,7 @@ public enum SHMarkdownCache {
             let range = run.range
             if let intent = run.inlinePresentationIntent {
                 if intent.contains(.code) {
-                    attr[range].font = Font.system(size: 13.5, weight: .regular, design: .monospaced)
+                    attr[range].font = Font.system(size: 13.5 * scale, weight: .regular, design: .monospaced)
                     attr[range].foregroundColor = Color(hex: 0x93C5FD)
                     attr[range].backgroundColor = SHColor.surfaceBubble.opacity(0.92)
                 }
@@ -604,9 +605,10 @@ public struct SHMarkdownView: View, Equatable {
 private struct SHMarkdownBlockListView: View {
     let blocks: [SHMarkdownBlock]
     let isUserBubble: Bool
+    @Environment(\.shChatMetrics) private var metrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SHLayout.blockGap) {
+        VStack(alignment: .leading, spacing: metrics.blockGap) {
             ForEach(blocks) { block in
                 renderBlock(block)
             }
@@ -625,9 +627,9 @@ private struct SHMarkdownBlockListView: View {
 
         case .paragraph(_, let content):
             inlineText(content)
-                .font(SHTypography.body)
+                .font(metrics.body)
                 .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                .lineSpacing(3)
+                .lineSpacing(metrics.lineSpacing(3))
                 .fixedSize(horizontal: false, vertical: true)
 
         case .codeBlock(_, let language, let code):
@@ -645,24 +647,24 @@ private struct SHMarkdownBlockListView: View {
                 }
 
         case .unorderedList(_, let items):
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 5 + metrics.density.extraLineSpacing) {
                 ForEach(items) { item in
                     HStack(alignment: .top, spacing: 7) {
                         if let checked = item.taskChecked {
                             Image(systemName: checked ? "checkmark.square.fill" : "square")
-                                .font(.system(size: 13.5, weight: .medium))
+                                .font(metrics.font(13.5, weight: .medium))
                                 .foregroundStyle(checked ? SHColor.statusSuccess : SHColor.inkMuted)
                                 .padding(.top, 2)
                         } else {
                             Text(item.indentLevel % 2 == 0 ? "•" : "◦")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(metrics.font(15, weight: .semibold))
                                 .foregroundStyle(SHColor.inkMuted)
                                 .frame(width: 10, alignment: .center)
                         }
                         inlineText(item.text)
-                            .font(SHTypography.body)
+                            .font(metrics.body)
                             .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                            .lineSpacing(2.5)
+                            .lineSpacing(metrics.lineSpacing(2.5))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.indentLevel) * 16)
@@ -670,17 +672,17 @@ private struct SHMarkdownBlockListView: View {
             }
 
         case .orderedList(_, let items):
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 5 + metrics.density.extraLineSpacing) {
                 ForEach(items) { item in
                     HStack(alignment: .top, spacing: 6) {
                         Text("\(item.ordinal ?? 1).")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(metrics.font(14, weight: .medium, design: .monospaced))
                             .foregroundStyle(SHColor.inkMuted)
-                            .frame(minWidth: 20, alignment: .trailing)
+                            .frame(minWidth: 20 * metrics.scale, alignment: .trailing)
                         inlineText(item.text)
-                            .font(SHTypography.body)
+                            .font(metrics.body)
                             .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                            .lineSpacing(2.5)
+                            .lineSpacing(metrics.lineSpacing(2.5))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.indentLevel) * 16)
@@ -700,7 +702,7 @@ private struct SHMarkdownBlockListView: View {
 
     @ViewBuilder
     private func inlineText(_ raw: String) -> some View {
-        let attr = SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble)
+        let attr = SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble, scale: metrics.scale)
         let hasLinks = attr.runs.contains { $0.link != nil }
         if hasLinks {
             Text(attr)
@@ -712,11 +714,11 @@ private struct SHMarkdownBlockListView: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .system(size: 18, weight: .bold)
-        case 2: return .system(size: 16.5, weight: .semibold)
-        case 3: return .system(size: 15, weight: .semibold)
-        case 4: return .system(size: 14.5, weight: .semibold)
-        default: return .system(size: 14, weight: .medium)
+        case 1: return metrics.font(18, weight: .bold)
+        case 2: return metrics.font(16.5, weight: .semibold)
+        case 3: return metrics.font(15, weight: .semibold)
+        case 4: return metrics.font(14.5, weight: .semibold)
+        default: return metrics.font(14, weight: .medium)
         }
     }
 }
@@ -725,6 +727,7 @@ private struct SHMarkdownTableView: View {
     let headers: [String]
     let alignments: [SHMarkdownAlignment]
     let rows: [[String]]
+    @Environment(\.shChatMetrics) private var metrics
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -733,8 +736,8 @@ private struct SHMarkdownTableView: View {
                 GridRow {
                     ForEach(Array(headers.enumerated()), id: \.offset) { colIdx, header in
                         let align = colIdx < alignments.count ? alignments[colIdx] : .leading
-                        Text(SHMarkdownCache.inlineAttributedString(for: header, isUserBubble: false))
-                            .font(.system(size: 12.5, weight: .semibold))
+                        Text(SHMarkdownCache.inlineAttributedString(for: header, isUserBubble: false, scale: metrics.scale))
+                            .font(metrics.font(12.5, weight: .semibold))
                             .foregroundStyle(SHColor.inkPrimary)
                             .multilineTextAlignment(align.textAlignment)
                             .padding(.horizontal, 10)
@@ -750,8 +753,8 @@ private struct SHMarkdownTableView: View {
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { colIdx, cell in
                             let align = colIdx < alignments.count ? alignments[colIdx] : .leading
-                            Text(SHMarkdownCache.inlineAttributedString(for: cell, isUserBubble: false))
-                                .font(.system(size: 13))
+                            Text(SHMarkdownCache.inlineAttributedString(for: cell, isUserBubble: false, scale: metrics.scale))
+                                .font(metrics.font(13))
                                 .foregroundStyle(SHColor.inkSecondary)
                                 .multilineTextAlignment(align.textAlignment)
                                 .padding(.horizontal, 10)
@@ -780,6 +783,7 @@ public struct SHCodeFenceCard: View {
     public let language: String
     public let code: String
     @State private var copied = false
+    @Environment(\.shChatMetrics) private var metrics
 
     public init(language: String, code: String) {
         self.language = language
@@ -817,7 +821,7 @@ public struct SHCodeFenceCard: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
-                    .font(SHTypography.mono)
+                    .font(metrics.mono)
                     .foregroundStyle(SHColor.inkPrimary)
                     .textSelection(.enabled)
                     .padding(12)

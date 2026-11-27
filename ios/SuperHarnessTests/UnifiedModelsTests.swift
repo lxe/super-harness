@@ -961,4 +961,26 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(rows.flatMap { $0 }.map(\.id), sessions.map(\.id))
         XCTAssertTrue(SessionRowFormatting.pillRows(of: [], perRow: 4).isEmpty)
     }
+
+    @MainActor func testChatTextSizeAndDensityPersistAndDriveTheMetrics() {
+        let defaults = UserDefaults(suiteName: "ChatAppearance.\(UUID().uuidString)")!
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { store.stopEventStream() }
+        XCTAssertEqual(store.chatTextSize, .standard)
+        XCTAssertEqual(store.chatDensity, .comfortable)
+        XCTAssertEqual(store.chatMetrics.scale, 1.0)
+
+        store.chatTextSize = .extraLarge
+        store.chatDensity = .compact
+        XCTAssertEqual(store.chatMetrics.scale, 1.22)
+        XCTAssertEqual(store.chatMetrics.blockGap, 8)
+        XCTAssertEqual(store.chatMetrics.messageGap, 16)
+        XCTAssertEqual(store.chatMetrics.lineSpacing(3), 3 * 1.22, accuracy: 0.001)
+
+        let reopened = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: defaults, environment: [:])
+        defer { reopened.stopEventStream() }
+        XCTAssertEqual(reopened.chatTextSize, .extraLarge)
+        XCTAssertEqual(reopened.chatDensity, .compact)
+        XCTAssertGreaterThan(ChatDensity.spacious.messageGap, ChatDensity.comfortable.messageGap)
+    }
 }

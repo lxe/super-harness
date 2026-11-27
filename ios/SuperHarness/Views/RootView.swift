@@ -199,7 +199,7 @@ public struct ConnectionStatusPill: View {
 
     private var dotColor: Color {
         switch health {
-        case .demo: return SHColor.brandMaster
+        case .demo: return SHColor.inkMuted
         case .connecting: return SHColor.statusWarning
         case .connected: return SHColor.statusSuccess
         case .offline: return SHColor.statusDanger

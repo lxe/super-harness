@@ -94,7 +94,7 @@ public struct SessionDetailView: View {
                         .background(SHColor.surfaceCanvas)
                     } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: SHLayout.messageGap) {
+                        VStack(alignment: .leading, spacing: store.chatMetrics.messageGap) {
                             Color.clear.frame(height: 8)
 
                             if transcript?.hasMore == true {
@@ -137,7 +137,7 @@ public struct SessionDetailView: View {
                                     activity: activity,
                                     accentColor: SHColor.harness(currentSession.harness)
                                 )
-                                .padding(.top, messages.last?.role == .assistant ? -(SHLayout.messageGap - SHLayout.blockGap) : 0)
+                                .padding(.top, messages.last?.role == .assistant ? -(store.chatMetrics.messageGap - store.chatMetrics.blockGap) : 0)
                             }
 
                             // Manually queued tray inside transcript (never native steering echoes).
@@ -382,6 +382,7 @@ public struct SessionDetailView: View {
             }
         }
         .background(SHColor.surfaceCanvas)
+        .environment(\.shChatMetrics, store.chatMetrics)
         .overlay(alignment: .top) {
             // Before iOS 26 the card drops in below the bar. On iOS 26 it is a Liquid Glass
             // popover that grows out of the title pill (see the toolbar below).
@@ -673,6 +674,7 @@ public struct SessionDetailView: View {
 // MARK: - Single Message Renderer with Trace & Thumbnail Coalescing
 
 private struct MessageBubbleView: View, Equatable {
+    @Environment(\.shChatMetrics) private var metrics
     let message: UnifiedMessage
     let sessionId: String
     let harness: HarnessKind
@@ -782,7 +784,7 @@ private struct MessageBubbleView: View, Equatable {
             if case .traceGroup = segments[idx] { return true }
             return false
         }
-        return VStack(alignment: .leading, spacing: SHLayout.blockGap) {
+        return VStack(alignment: .leading, spacing: metrics.blockGap) {
             ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
                 switch segment {
                 case .single(let block):
@@ -857,6 +859,7 @@ private struct SHClearTopScrollEdgeModifier: ViewModifier {
 /// Renders a user/steering bubble cleanly, collapsing very long messages to 6 lines with
 /// a crisp "Show more" / "Show less" toggle so massive prompts don't hijack the screen.
 private struct ExpandableUserBubbleContent: View {
+    @Environment(\.shChatMetrics) private var metrics
     let blocks: [UnifiedBlock]
     let onAnswerQuestion: (String) -> Void
     let onTapImage: (LightboxPayload) -> Void
@@ -911,12 +914,12 @@ private struct ExpandableUserBubbleContent: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 9, weight: .semibold))
                     }
-                    .foregroundStyle(SHColor.accentPrimary)
+                    .foregroundStyle(SHColor.inkSecondary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("message.expand")
             } else {
-                VStack(alignment: .trailing, spacing: SHLayout.blockGap) {
+                VStack(alignment: .trailing, spacing: metrics.blockGap) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                         UnifiedBlockView(
                             block: block,

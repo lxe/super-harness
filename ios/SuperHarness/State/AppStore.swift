@@ -142,6 +142,8 @@ public final class AppStore {
         static let dictationTokenAccount = "yapyap-dictation-token"
         static let pushEnabled = "sh.pushEnabled"
         static let allowExtremeReasoning = "sh.allowExtremeReasoning"
+        static let chatTextSize = "sh.chatTextSize"
+        static let chatDensity = "sh.chatDensity"
         static let harnessOrder = "sh.harnessOrder"
         static let pushRelayURL = "sh.pushRelayURL"
     }
@@ -176,6 +178,17 @@ public final class AppStore {
     public private(set) var harnessOrder: [HarnessGroup] = HarnessGroup.allCases
 
     /// Off by default: "max" and "ultra" thinking effort are offered only after the person enables them.
+    /// Chat text size and spacing, chosen in Settings and kept on this device.
+    public var chatTextSize: ChatTextSize = .standard {
+        didSet { defaults.set(chatTextSize.rawValue, forKey: StorageKey.chatTextSize) }
+    }
+    public var chatDensity: ChatDensity = .comfortable {
+        didSet { defaults.set(chatDensity.rawValue, forKey: StorageKey.chatDensity) }
+    }
+    public var chatMetrics: SHChatMetrics {
+        SHChatMetrics(textSize: chatTextSize, density: chatDensity)
+    }
+
     public var allowExtremeReasoning: Bool = false {
         didSet { defaults.set(allowExtremeReasoning, forKey: StorageKey.allowExtremeReasoning) }
     }
@@ -349,6 +362,12 @@ public final class AppStore {
             self.pushNotificationsEnabled = defaults.bool(forKey: StorageKey.pushEnabled)
         }
         self.allowExtremeReasoning = defaults.bool(forKey: StorageKey.allowExtremeReasoning)
+        if let raw = defaults.string(forKey: StorageKey.chatTextSize), let size = ChatTextSize(rawValue: raw) {
+            self.chatTextSize = size
+        }
+        if let raw = defaults.string(forKey: StorageKey.chatDensity), let density = ChatDensity(rawValue: raw) {
+            self.chatDensity = density
+        }
         self.harnessOrder = HarnessOrder.normalized(defaults.stringArray(forKey: StorageKey.harnessOrder))
         let savedRelay = defaults.string(forKey: StorageKey.pushRelayURL)
         if savedRelay == "https://super-harness-push.lxe.workers.dev" || savedRelay?.isEmpty == true {

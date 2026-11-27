@@ -79,9 +79,10 @@ describe('Component-level UI & Electron overlay contract audit', () => {
     ).toContain('canControlDaemon');
   });
 
-  it('uses appearance-none with an inset Lucide ChevronDown on Select primitives', () => {
+  it('renders Select as a custom popover with a Lucide ChevronDown, not a native <select>', () => {
+    // a226550 replaced the native <select> (which needed appearance-none) with a popover dropdown.
     const src = readRel('src/renderer/ui/Input.tsx');
-    expect(src).toContain('appearance-none');
     expect(src).toContain('ChevronDown');
+    expect(src).not.toContain('<select');
   });
 });

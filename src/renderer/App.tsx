@@ -35,6 +35,81 @@ const EMPTY_DRAFT: ComposerDraft = { text: '', attachments: [] };
 const EMPTY_QUEUE: QueuedMessageItem[] = [];
 const ACTIVE_SESSION_STORAGE_KEY = 'sh:activeSessionId';
 const SPLIT_SESSION_STORAGE_KEY = 'sh:splitSessionId';
+const COMPOSER_DRAFTS_STORAGE_KEY = 'sh:composerDrafts:v1';
+const DRAFT_CONVERSATIONS_STORAGE_KEY = 'sh:draftConversations:v1';
+
+function loadStoredDrafts(): Record<string, ComposerDraft> {
+  try {
+    const raw = localStorage.getItem(COMPOSER_DRAFTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, ComposerDraft>;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, ComposerDraft> = {};
+    for (const [sid, d] of Object.entries(parsed)) {
+      if (!d || typeof d !== 'object') continue;
+      const text = typeof d.text === 'string' ? d.text : '';
+      const attachments = Array.isArray(d.attachments) ? d.attachments : [];
+      if (text || attachments.length > 0) {
+        out[sid] = { text, attachments };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredDrafts(drafts: Record<string, ComposerDraft>): void {
+  try {
+    const compact: Record<string, ComposerDraft> = {};
+    for (const [sid, d] of Object.entries(drafts)) {
+      if (!d) continue;
+      const text = d.text || '';
+      const attachments = (d.attachments || []).map(({ previewDataUrl: _drop, ...rest }) => rest);
+      if (text || attachments.length > 0) {
+        compact[sid] = { text, attachments };
+      }
+    }
+    if (Object.keys(compact).length === 0) {
+      localStorage.removeItem(COMPOSER_DRAFTS_STORAGE_KEY);
+    } else {
+      localStorage.setItem(COMPOSER_DRAFTS_STORAGE_KEY, JSON.stringify(compact));
+    }
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function loadStoredDraftConversations(): DraftConversation[] {
+  try {
+    const raw = localStorage.getItem(DRAFT_CONVERSATIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (d): d is DraftConversation =>
+        Boolean(d && typeof d === 'object' && typeof d.id === 'string' && typeof d.prompt === 'string')
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredDraftConversations(items: DraftConversation[]): void {
+  try {
+    if (items.length === 0) {
+      localStorage.removeItem(DRAFT_CONVERSATIONS_STORAGE_KEY);
+      return;
+    }
+    const compact = items.map((d) => ({
+      ...d,
+      attachments: (d.attachments ?? []).map(({ previewDataUrl: _drop, ...rest }) => rest),
+    }));
+    localStorage.setItem(DRAFT_CONVERSATIONS_STORAGE_KEY, JSON.stringify(compact));
+  } catch {
+    // ignore
+  }
+}
 
 function readStoredSessionId(key: string): string | null {
   try {
@@ -85,7 +160,7 @@ export const App: React.FC = () => {
       // ignore
     }
   }, [splitSessionId]);
-  const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
+  const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>(() => loadStoredDrafts());
   const [queuedBySession, setQueuedBySession] = useState<Record<string, QueuedMessageItem[]>>(
     () => loadStoredQueues()
   );
@@ -94,7 +169,18 @@ export const App: React.FC = () => {
   const [queueDrainTick, setQueueDrainTick] = useState(0);
   const drainingQueuesRef = useRef<Set<string>>(new Set());
   const queueTimersRef = useRef<Map<string, number>>(new Map());
-  const [draftConversations, setDraftConversations] = useState<DraftConversation[]>([]);
+  const [draftConversations, setDraftConversations] = useState<DraftConversation[]>(() =>
+    loadStoredDraftConversations()
+  );
+
+  // Crash-proof synchronous persistence for every session's composer text & pasted attachments
+  useEffect(() => {
+    saveStoredDrafts(drafts);
+  }, [drafts]);
+
+  useEffect(() => {
+    saveStoredDraftConversations(draftConversations);
+  }, [draftConversations]);
   const [pendingSessions, setPendingSessions] = useState<Record<string, UnifiedSession>>({});
   const [toast, setToast] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);

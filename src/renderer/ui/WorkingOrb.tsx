@@ -200,7 +200,7 @@ export const WorkingIndicator: React.FC<WorkingIndicatorProps> = ({
         className
       )}
     >
-      <WorkingOrb tone={tone} size={size} />
+      <WorkingOrb tone={tone} size={size} className="-translate-y-[1px]" />
       <span className="inline-flex items-baseline gap-2">
         <span className="sh-working-shimmer">{focus || label || 'Working'}</span>
         {showTimer && (

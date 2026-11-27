@@ -501,11 +501,11 @@ export const Sidebar: React.FC<Props> = React.memo(({
     });
   }, [workerSessions, orderTick]);
 
-  // Global Super Harness top-pinned chats across ALL harnesses (always shown below Master Orchestrator)
-  const globalPinnedSessions = useMemo(
-    () => getGlobalPinnedSessions(stabilizedWorkerSessions),
-    [stabilizedWorkerSessions]
-  );
+  // Global Super Harness top-pinned chats across ALL harnesses (filtered by search query when active)
+  const globalPinnedSessions = useMemo(() => {
+    const pinned = getGlobalPinnedSessions(stabilizedWorkerSessions);
+    return query.trim() ? filterSidebarSessions(pinned, 'all', query) : pinned;
+  }, [stabilizedWorkerSessions, query]);
 
   const filtered = useMemo(
     () => filterSidebarSessions(stabilizedWorkerSessions, filter, query),

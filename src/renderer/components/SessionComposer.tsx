@@ -229,7 +229,7 @@ export const SessionComposer: React.FC<SessionComposerProps> = React.memo(
                   className="w-full h-full block cursor-pointer"
                 >
                   <img
-                    src={att.previewDataUrl}
+                    src={att.previewDataUrl || mediaUrlForPath(att.path)}
                     alt={att.name}
                     className="w-full h-full object-cover hover:brightness-110 transition-all"
                   />

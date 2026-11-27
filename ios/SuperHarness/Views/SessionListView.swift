@@ -90,6 +90,25 @@ public enum SessionRowFormatting {
         return cleanPreview(for: session).map(normalizeWhitespace)
     }
 
+    public struct FormattedSubtitle: Equatable, Sendable {
+        public let isDone: Bool
+        public let text: String
+    }
+
+    /// Splits a leading `Done:` marker from a host summary so rows can render a small checkmark
+    /// icon instead of repeating "Done:" on every finished thread.
+    public static func formattedSubtitle(for session: UnifiedSession) -> FormattedSubtitle? {
+        guard let raw = subtitle(for: session) else { return nil }
+        if let summary = session.summary, !normalizeWhitespace(summary).isEmpty,
+           raw.lowercased().hasPrefix("done:") {
+            let rest = raw.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty {
+                return FormattedSubtitle(isDone: true, text: rest)
+            }
+        }
+        return FormattedSubtitle(isDone: false, text: raw)
+    }
+
     /// True when every word of the query appears in the session's title, summary, last message,
     /// preview, project, working directory, branch or tags.
     public static func matches(_ session: UnifiedSession, query: String) -> Bool {
@@ -1189,7 +1208,7 @@ private struct SessionListRow: View {
 
     var body: some View {
         let hostBadge = SessionRowFormatting.hostBadgeLabel(session.hostAddress)
-        let subtitle = SessionRowFormatting.subtitle(for: session)
+        let subtitle = SessionRowFormatting.formattedSubtitle(for: session)
 
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .center, spacing: 7) {
@@ -1268,11 +1287,19 @@ private struct SessionListRow: View {
                             .accessibilityLabel(SessionRowFormatting.hostAccessibilityLabel(address: address, label: session.hostLabel))
                     }
                     if let subtitle {
-                        Text(subtitle)
-                            .font(SHTypography.micro)
-                            .foregroundStyle(SHColor.inkMuted)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        HStack(alignment: .center, spacing: 4) {
+                            if subtitle.isDone {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundStyle(SHColor.inkFaint)
+                                    .accessibilityLabel("Done")
+                            }
+                            Text(subtitle.text)
+                                .font(SHTypography.micro)
+                                .foregroundStyle(SHColor.inkMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

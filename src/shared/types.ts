@@ -535,6 +535,31 @@ export interface SummarySettings {
   model: string;
 }
 
+export interface SummarizerRunRecord {
+  at: number;
+  model: string;
+  threads: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+export interface SummarizerUsageStats {
+  totalRuns: number;
+  totalThreads: number;
+  totalInputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  last24hRuns: number;
+  last24hTokens: number;
+  last24hCostUsd: number;
+  lastRun?: SummarizerRunRecord;
+}
+
 /**
  * One stint of the Master Orchestrator on one harness. Every orchestrator turn resumes
  * `nativeId`; switching harness ends the segment (after compacting into the memory file)
@@ -743,7 +768,16 @@ export interface SuperHarnessApi {
   ) => Promise<SuperHarnessState>;
   clearMasterHistory: () => Promise<SuperHarnessState>;
   /** Summarize every recently changed thread now (Settings → Thread summaries). */
-  refreshSummaries: () => Promise<{ ok: boolean; summarized: number; pending: number; costUsd?: number; error?: string }>;
+  refreshSummaries: () => Promise<{
+    ok: boolean;
+    summarized: number;
+    pending: number;
+    costUsd?: number;
+    tokens?: number;
+    error?: string;
+  }>;
+  getSummaryStats: () => Promise<SummarizerUsageStats>;
+  resetSummaryStats: () => Promise<SummarizerUsageStats>;
   pickDirectory: () => Promise<string | null>;
   getSystemApps: () => Promise<DetectedSystemApps>;
   readFilePreview: (

@@ -219,7 +219,13 @@ const SessionRow = React.memo(function SessionRow({
       icon={leadingIcon}
       unread={Boolean(s.unread)}
       title={s.title}
-      tooltip={s.summary ? `${s.title}\n${s.summary}` : s.lastUserText ? `${s.title}\n${s.lastUserText}` : s.title}
+      tooltip={
+        s.summary
+          ? `${s.title}\n${s.summary.replace(/^Done:\s*/i, '✓ ')}`
+          : s.lastUserText
+            ? `${s.title}\n${s.lastUserText}`
+            : s.title
+      }
       titleBadge={titleBadge}
       active={isPrimary}
       secondaryActive={isSplit}

@@ -155,4 +155,62 @@ describe('SessionSummarizer', () => {
     expect(isInternalSummarizerCwd('/home/lxe/super-harness')).toBe(false);
     expect(isInternalSummarizerCwd(undefined)).toBe(false);
   });
+
+  it('tracks and persists token usage & spend and skips unchanged conversation digests', async () => {
+    const now = 5_000_000;
+    const filePath = tmpFile();
+    let modelCalls = 0;
+    const makeSummarizer = () =>
+      new SessionSummarizer({
+        filePath,
+        now: () => now,
+        getWorkingIds: () => [],
+        getConfig: () => ({ enabled: true, model: 'claude-haiku-5-5' }),
+        onUpdated: () => {},
+        loadTranscript: async () => ({
+          messages: [
+            msg('user', 'Fix the push notification crash', 100),
+            msg('assistant', 'Replaced async UNUserNotificationCenterDelegate with completion-handler proxy', 200),
+          ],
+        }),
+        callModel: async () => {
+          modelCalls++;
+          return {
+            text: '{"items":[{"n":1,"s":"Done: fixed iOS notification tap crash"}]}',
+            costUsd: 0.00015,
+            usage: { inputTokens: 12, cacheCreationTokens: 640, cacheReadTokens: 0, outputTokens: 32 },
+          };
+        },
+      });
+
+    const s1 = makeSummarizer();
+    s1.noteSessions([session('c:a', now - 60_000)]);
+    s1.dispose();
+    const r1 = await s1.refresh();
+    expect(r1).toMatchObject({ ok: true, summarized: 1, tokens: 684, costUsd: 0.00015 });
+    expect(modelCalls).toBe(1);
+
+    // Metadata bump with identical conversation digest -> skips model call (0 tokens!)
+    s1.noteSessions([session('c:a', now - 25_000)]);
+    s1.dispose();
+    const r2 = await s1.refresh();
+    expect(r2).toMatchObject({ ok: true, summarized: 0 });
+    expect(modelCalls).toBe(1);
+
+    // Persisted stats survive reload and can be reset
+    const s2 = makeSummarizer();
+    const stats = s2.getUsageStats();
+    expect(stats.totalRuns).toBe(1);
+    expect(stats.totalThreads).toBe(1);
+    expect(stats.totalInputTokens).toBe(12);
+    expect(stats.totalCacheCreationTokens).toBe(640);
+    expect(stats.totalOutputTokens).toBe(32);
+    expect(stats.totalCostUsd).toBeCloseTo(0.00015, 6);
+    expect(stats.last24hTokens).toBe(684);
+
+    const cleared = s2.resetUsageStats();
+    expect(cleared.totalRuns).toBe(0);
+    expect(cleared.last24hTokens).toBe(0);
+    expect(cleared.totalCostUsd).toBe(0);
+  });
 });

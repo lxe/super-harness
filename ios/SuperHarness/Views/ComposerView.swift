@@ -131,14 +131,24 @@ public struct ComposerView: View {
         return nil
     }
 
-    private static func cleanBaseDisplayLabel(_ label: String) -> String {
+    nonisolated static func cleanBaseDisplayLabel(_ label: String) -> String {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        for tag in [" (Low)", " (Medium)", " (High)", " (XHigh)", " (Max)"] {
-            if trimmed.hasSuffix(tag) {
-                return String(trimmed.dropLast(tag.count))
-            }
+        let effortTags = [
+            " (none)",
+            " (minimal)",
+            " (low)",
+            " (medium)",
+            " (high)",
+            " (xhigh)",
+            " (extra high)",
+            " (max)",
+            " (ultra)",
+        ]
+        let lowered = trimmed.lowercased()
+        for tag in effortTags where lowered.hasSuffix(tag) {
+            return String(trimmed.dropLast(tag.count))
         }
-        return shortModelName(trimmed)
+        return trimmed
     }
 
     /// Deduplicates sibling effort-suffixed slugs (e.g. Antigravity `gemini-4-neon-high` / `-medium`)

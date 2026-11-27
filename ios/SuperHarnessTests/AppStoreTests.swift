@@ -1090,4 +1090,58 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(presentedOptions, [.banner, .sound, .badge])
     }
     #endif
+
+    func testDoneSummaryFormattingAndOrchestratorModelLabels() {
+        let now = Date().timeIntervalSince1970 * 1000
+        let doneSession = UnifiedSession(
+            id: "claude:done",
+            harness: .claudeCli,
+            harnessGroup: .claude,
+            title: "Build",
+            status: .idle,
+            createdAt: now,
+            updatedAt: now,
+            summary: "Done: fixed notification tap crash"
+        )
+        let formattedDone = SessionRowFormatting.formattedSubtitle(for: doneSession)
+        XCTAssertEqual(formattedDone, .init(isDone: true, text: "fixed notification tap crash"))
+
+        let waitingSession = UnifiedSession(
+            id: "claude:wait",
+            harness: .claudeCli,
+            harnessGroup: .claude,
+            title: "Review",
+            status: .idle,
+            createdAt: now,
+            updatedAt: now,
+            summary: "Waiting: approval to deploy"
+        )
+        XCTAssertEqual(
+            SessionRowFormatting.formattedSubtitle(for: waitingSession),
+            .init(isDone: false, text: "Waiting: approval to deploy")
+        )
+
+        // Plain user text starting with "Done:" should not be misclassified as a summarizer completion badge
+        let plainUserSession = UnifiedSession(
+            id: "claude:user",
+            harness: .claudeCli,
+            harnessGroup: .claude,
+            title: "Chat",
+            status: .idle,
+            createdAt: now,
+            updatedAt: now,
+            lastUserText: "Done: please check this"
+        )
+        XCTAssertEqual(
+            SessionRowFormatting.formattedSubtitle(for: plainUserSession),
+            .init(isDone: false, text: "Done: please check this")
+        )
+
+        // Antigravity Orchestrator variant names stay distinct while effort suffixes are stripped
+        XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("Orchestrator (Neon)"), "Orchestrator (Neon)")
+        XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("Orchestrator (Carbon)"), "Orchestrator (Carbon)")
+        XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("Orchestrator (Argon)"), "Orchestrator (Argon)")
+        XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("Gemini 4 Neon (High)"), "Gemini 4 Neon")
+        XCTAssertEqual(ComposerView.cleanBaseDisplayLabel("GPT-OSS 120B (Medium)"), "GPT-OSS 120B")
+    }
 }

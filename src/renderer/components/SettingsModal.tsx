@@ -26,6 +26,7 @@ import type {
   HarnessGroup,
   OrganizeAction,
   SidebarGroupBy,
+  SummarizerUsageStats,
   SuperHarnessSettings,
   SuperHarnessState,
 } from '../../shared/types';
@@ -173,6 +174,7 @@ export const SettingsModal: React.FC<Props> = ({
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [summaryRefreshNote, setSummaryRefreshNote] = useState<string | null>(null);
+  const [summaryStats, setSummaryStats] = useState<SummarizerUsageStats | null>(null);
   const [busyHarness, setBusyHarness] = useState<string | null>(null);
   const updates = useHarnessUpdateJobs();
   const [updateErrors, setUpdateErrors] = useState<Partial<Record<HarnessGroup, string>>>({});
@@ -199,6 +201,9 @@ export const SettingsModal: React.FC<Props> = ({
   useEffect(() => {
     if (typeof window !== 'undefined' && window.superHarness?.getSystemApps) {
       void window.superHarness.getSystemApps().then(setSystemApps);
+    }
+    if (typeof window !== 'undefined' && window.superHarness?.getSummaryStats) {
+      void window.superHarness.getSummaryStats().then(setSummaryStats).catch(() => {});
     }
   }, []);
 
@@ -594,15 +599,24 @@ export const SettingsModal: React.FC<Props> = ({
                           setSummaryRefreshNote(null);
                           window.superHarness
                             .refreshSummaries()
-                            .then((r) =>
+                            .then((r) => {
+                              const tokStr =
+                                typeof r.tokens === 'number' && r.tokens > 0
+                                  ? ` · ${r.tokens >= 1000 ? `${(r.tokens / 1000).toFixed(1)}k` : r.tokens} tokens`
+                                  : '';
+                              const costStr =
+                                typeof r.costUsd === 'number'
+                                  ? ` · $${r.costUsd < 0.01 ? r.costUsd.toFixed(4) : r.costUsd.toFixed(3)}`
+                                  : '';
                               setSummaryRefreshNote(
                                 r.ok
-                                  ? `Updated ${r.summarized} thread${r.summarized === 1 ? '' : 's'}${
-                                      typeof r.costUsd === 'number' ? ` · $${r.costUsd.toFixed(3)}` : ''
-                                    }`
+                                  ? `Updated ${r.summarized} thread${r.summarized === 1 ? '' : 's'}${tokStr}${costStr}`
                                   : r.error || 'Refresh failed'
-                              )
-                            )
+                              );
+                              if (window.superHarness?.getSummaryStats) {
+                                void window.superHarness.getSummaryStats().then(setSummaryStats).catch(() => {});
+                              }
+                            })
                             .catch((err: unknown) =>
                               setSummaryRefreshNote(err instanceof Error ? err.message : String(err))
                             )
@@ -611,6 +625,51 @@ export const SettingsModal: React.FC<Props> = ({
                       >
                         {summaryRefreshing ? 'Summarizing…' : 'Refresh'}
                       </Button>
+                    }
+                  />
+                  <SettingsRow
+                    label="Token use & spend"
+                    description={(() => {
+                      if (!summaryStats || summaryStats.totalRuns === 0) {
+                        return 'No summarizer runs recorded yet';
+                      }
+                      const fmtTok = (n: number) =>
+                        n >= 1_000_000
+                          ? `${(n / 1_000_000).toFixed(2)}M`
+                          : n >= 1000
+                            ? `${(n / 1000).toFixed(1)}k`
+                            : `${n}`;
+                      const fmtUsd = (n: number) =>
+                        n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`;
+                      const totalTok =
+                        summaryStats.totalInputTokens +
+                        summaryStats.totalCacheReadTokens +
+                        summaryStats.totalCacheCreationTokens +
+                        summaryStats.totalOutputTokens;
+                      return (
+                        <span className="tabular-nums">
+                          24h: {fmtTok(summaryStats.last24hTokens)} tok · {fmtUsd(summaryStats.last24hCostUsd)}
+                          {' · '}
+                          All time: {fmtTok(totalTok)} tok · {fmtUsd(summaryStats.totalCostUsd)} (
+                          {summaryStats.totalRuns} {summaryStats.totalRuns === 1 ? 'run' : 'runs'},{' '}
+                          {summaryStats.totalThreads} {summaryStats.totalThreads === 1 ? 'thread' : 'threads'})
+                        </span>
+                      );
+                    })()}
+                    control={
+                      summaryStats && summaryStats.totalRuns > 0 ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            if (window.superHarness?.resetSummaryStats) {
+                              void window.superHarness.resetSummaryStats().then(setSummaryStats);
+                            }
+                          }}
+                        >
+                          Reset
+                        </Button>
+                      ) : null
                     }
                   />
                 </SettingsGroup>

@@ -1,8 +1,14 @@
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { UnifiedMessage, UnifiedSession } from '../../shared/types';
+import type {
+  SummarizerRunRecord,
+  SummarizerUsageStats,
+  UnifiedMessage,
+  UnifiedSession,
+} from '../../shared/types';
 import { cleanUserPreview, isInjectedText } from '../utils/lastUserText';
 import { whichBinary } from '../utils/system';
 
@@ -25,6 +31,15 @@ export interface SummaryEntry {
   updatedAt: number;
   /** When the summary was written. */
   at: number;
+  /** Compact hash of title + conversation digest so metadata-only bumps skip model calls. */
+  digestHash?: string;
+}
+
+export interface SummarizerModelUsage {
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
 }
 
 export interface SummaryRefreshResult {
@@ -32,6 +47,7 @@ export interface SummaryRefreshResult {
   summarized: number;
   pending: number;
   costUsd?: number;
+  tokens?: number;
   error?: string;
 }
 
@@ -41,8 +57,12 @@ export interface SummarizerOptions {
   getConfig: () => { enabled: boolean; model: string };
   onUpdated: () => void;
   /** Injectable model call (tests). Receives the prompt, returns raw JSON text of `{items:[{n,s}]}`. */
-  callModel?: (prompt: string, model: string) => Promise<{ text: string; costUsd?: number }>;
+  callModel?: (
+    prompt: string,
+    model: string
+  ) => Promise<{ text: string; costUsd?: number; usage?: Partial<SummarizerModelUsage> }>;
   filePath?: string;
+  usageFilePath?: string;
   now?: () => number;
 }
 
@@ -68,11 +88,51 @@ const MIN_GAP_MS = 90_000;
 const STALE_RUNNING_MS = 15 * 60_000;
 /** Sessions never summarized are only picked up if they changed this recently (no mass backfill). */
 const FIRST_SEEN_WINDOW_MS = 3 * 24 * 60 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+const USAGE_HISTORY_RETENTION_MS = 14 * DAY_MS;
+const MAX_USAGE_RUNS = 500;
 const BATCH = 12;
-const PER_MSG_USER = 300;
-const PER_MSG_ASSISTANT = 500;
-const PER_THREAD = 1600;
+const PER_MSG_USER = 240;
+const PER_MSG_ASSISTANT = 360;
+const PER_THREAD = 1000;
 const MAX_SUMMARY = 110;
+
+interface PersistedUsageFile {
+  totalRuns: number;
+  totalThreads: number;
+  totalInputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  runs: SummarizerRunRecord[];
+}
+
+function emptyPersistedUsage(): PersistedUsageFile {
+  return {
+    totalRuns: 0,
+    totalThreads: 0,
+    totalInputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCacheCreationTokens: 0,
+    totalOutputTokens: 0,
+    totalCostUsd: 0,
+    runs: [],
+  };
+}
+
+function digestHashFor(title: string, digest: string): string {
+  return crypto.createHash('sha1').update(`${oneLine(title)}\n${digest}`).digest('hex').slice(0, 12);
+}
+
+function totalTokensOf(r: {
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+}): number {
+  return r.inputTokens + r.cacheReadTokens + r.cacheCreationTokens + r.outputTokens;
+}
 
 export const SUMMARY_SYSTEM_PROMPT = [
   'You label chat threads in a session list. Each thread is a person working with a coding agent.',
@@ -84,21 +144,6 @@ export const SUMMARY_SYSTEM_PROMPT = [
   'A previous summary is context only; replace it when the new text shows a change.',
   'Return JSON only: {"items":[{"n":<thread number>,"s":"<summary>"}]} covering every thread.',
 ].join(' ');
-
-const SCHEMA = JSON.stringify({
-  type: 'object',
-  properties: {
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { n: { type: 'integer' }, s: { type: 'string' } },
-        required: ['n', 's'],
-      },
-    },
-  },
-  required: ['items'],
-});
 
 const clip = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 const oneLine = (t: string): string => t.replace(/\s+/g, ' ').trim();
@@ -168,11 +213,18 @@ export function parseSummaryReply(raw: string): Map<number, string> {
   return out;
 }
 
-async function callClaude(prompt: string, model: string): Promise<{ text: string; costUsd?: number }> {
+async function callClaude(
+  prompt: string,
+  model: string
+): Promise<{ text: string; costUsd?: number; usage?: SummarizerModelUsage }> {
   const bin = await whichBinary('claude');
   if (!bin) throw new Error('claude binary not found');
   const cwd = path.join(os.tmpdir(), SUMMARIZER_CWD_BASENAME);
   fs.mkdirSync(cwd, { recursive: true });
+  // Intentionally omit `--json-schema`: Claude Code implements schema mode by injecting a
+  // StructuredOutput tool + extra turn + thinking tokens (~2.3x cost and ~2x tokens).
+  // Plain JSON via SUMMARY_SYSTEM_PROMPT runs in a single turn with 0 thinking tokens and
+  // is parsed cleanly by parseSummaryReply().
   const args = [
     '-p',
     '--model',
@@ -181,8 +233,6 @@ async function callClaude(prompt: string, model: string): Promise<{ text: string
     'json',
     '--system-prompt',
     SUMMARY_SYSTEM_PROMPT,
-    '--json-schema',
-    SCHEMA,
     '--tools',
     '',
     '--strict-mcp-config',
@@ -223,10 +273,25 @@ async function callClaude(prompt: string, model: string): Promise<{ text: string
           structured_output?: unknown;
           total_cost_usd?: number;
           is_error?: boolean;
+          usage?: {
+            input_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+            output_tokens?: number;
+          };
         };
         if (env.is_error) throw new Error(env.result || 'model error');
         const text = env.structured_output ? JSON.stringify(env.structured_output) : env.result ?? '';
-        resolve({ text, costUsd: env.total_cost_usd });
+        const u = env.usage;
+        const usage: SummarizerModelUsage | undefined = u
+          ? {
+              inputTokens: Math.max(0, Number(u.input_tokens || 0)),
+              cacheReadTokens: Math.max(0, Number(u.cache_read_input_tokens || 0)),
+              cacheCreationTokens: Math.max(0, Number(u.cache_creation_input_tokens || 0)),
+              outputTokens: Math.max(0, Number(u.output_tokens || 0)),
+            }
+          : undefined;
+        resolve({ text, costUsd: env.total_cost_usd, usage });
       } catch (e) {
         reject(new Error(`summary call failed (exit ${code}): ${(stderr || stdout || String(e)).slice(0, 300)}`));
       }
@@ -237,22 +302,109 @@ async function callClaude(prompt: string, model: string): Promise<{ text: string
 
 export class SessionSummarizer {
   private entries: Record<string, SummaryEntry> = {};
+  private usageData: PersistedUsageFile = emptyPersistedUsage();
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<SummaryRefreshResult> | null = null;
   private lastRunAt = 0;
   private failures = 0;
   private latest: UnifiedSession[] = [];
   private readonly filePath: string;
+  private readonly usageFilePath: string;
   private readonly now: () => number;
 
   constructor(private readonly opts: SummarizerOptions) {
     this.filePath = opts.filePath ?? FILE;
+    this.usageFilePath =
+      opts.usageFilePath ??
+      (this.filePath.endsWith('.json')
+        ? `${this.filePath.slice(0, -5)}-usage.json`
+        : `${this.filePath}.usage.json`);
     this.now = opts.now ?? Date.now;
     try {
       this.entries = JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as Record<string, SummaryEntry>;
     } catch {
       this.entries = {};
     }
+    this.loadUsage();
+  }
+
+  private loadUsage(): void {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.usageFilePath, 'utf8')) as Partial<PersistedUsageFile>;
+      this.usageData = {
+        totalRuns: Math.max(0, Number(raw.totalRuns || 0)),
+        totalThreads: Math.max(0, Number(raw.totalThreads || 0)),
+        totalInputTokens: Math.max(0, Number(raw.totalInputTokens || 0)),
+        totalCacheReadTokens: Math.max(0, Number(raw.totalCacheReadTokens || 0)),
+        totalCacheCreationTokens: Math.max(0, Number(raw.totalCacheCreationTokens || 0)),
+        totalOutputTokens: Math.max(0, Number(raw.totalOutputTokens || 0)),
+        totalCostUsd: Math.max(0, Number(raw.totalCostUsd || 0)),
+        runs: Array.isArray(raw.runs) ? raw.runs : [],
+      };
+    } catch {
+      this.usageData = emptyPersistedUsage();
+    }
+  }
+
+  private saveUsage(): void {
+    try {
+      fs.mkdirSync(path.dirname(this.usageFilePath), { recursive: true });
+      const tmp = `${this.usageFilePath}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.usageData));
+      fs.renameSync(tmp, this.usageFilePath);
+    } catch {
+      // best effort
+    }
+  }
+
+  private recordUsageRun(record: SummarizerRunRecord): void {
+    const cutoff = record.at - USAGE_HISTORY_RETENTION_MS;
+    const pruned = this.usageData.runs.filter((r) => r.at >= cutoff);
+    pruned.push(record);
+    this.usageData = {
+      totalRuns: this.usageData.totalRuns + 1,
+      totalThreads: this.usageData.totalThreads + record.threads,
+      totalInputTokens: this.usageData.totalInputTokens + record.inputTokens,
+      totalCacheReadTokens: this.usageData.totalCacheReadTokens + record.cacheReadTokens,
+      totalCacheCreationTokens: this.usageData.totalCacheCreationTokens + record.cacheCreationTokens,
+      totalOutputTokens: this.usageData.totalOutputTokens + record.outputTokens,
+      totalCostUsd: this.usageData.totalCostUsd + record.costUsd,
+      runs: pruned.length > MAX_USAGE_RUNS ? pruned.slice(pruned.length - MAX_USAGE_RUNS) : pruned,
+    };
+    this.saveUsage();
+  }
+
+  getUsageStats(): SummarizerUsageStats {
+    const cutoff24h = this.now() - DAY_MS;
+    let last24hRuns = 0;
+    let last24hTokens = 0;
+    let last24hCostUsd = 0;
+    for (const r of this.usageData.runs) {
+      if (r.at >= cutoff24h) {
+        last24hRuns += 1;
+        last24hTokens += totalTokensOf(r);
+        last24hCostUsd += r.costUsd;
+      }
+    }
+    return {
+      totalRuns: this.usageData.totalRuns,
+      totalThreads: this.usageData.totalThreads,
+      totalInputTokens: this.usageData.totalInputTokens,
+      totalCacheReadTokens: this.usageData.totalCacheReadTokens,
+      totalCacheCreationTokens: this.usageData.totalCacheCreationTokens,
+      totalOutputTokens: this.usageData.totalOutputTokens,
+      totalCostUsd: this.usageData.totalCostUsd,
+      last24hRuns,
+      last24hTokens,
+      last24hCostUsd,
+      lastRun: this.usageData.runs[this.usageData.runs.length - 1],
+    };
+  }
+
+  resetUsageStats(): SummarizerUsageStats {
+    this.usageData = emptyPersistedUsage();
+    this.saveUsage();
+    return this.getUsageStats();
   }
 
   get(sessionId: string): string | undefined {
@@ -325,7 +477,16 @@ export class SessionSummarizer {
     const batch = pending.slice(0, BATCH);
     if (batch.length === 0) return { ok: true, summarized: 0, pending: 0 };
 
-    const threads: Array<{ n: number; session: UnifiedSession; title: string; project: string; previous?: string; digest: string }> = [];
+    const threads: Array<{
+      n: number;
+      session: UnifiedSession;
+      title: string;
+      project: string;
+      previous?: string;
+      digest: string;
+      digestHash: string;
+    }> = [];
+    let skippedUnchanged = 0;
     for (const s of batch) {
       const prev = this.entries[s.id];
       let digest = '';
@@ -336,6 +497,14 @@ export class SessionSummarizer {
         digest = '';
       }
       if (!digest && s.lastUserText) digest = `P: ${s.lastUserText}`;
+      const digestHash = digestHashFor(s.title, digest);
+      // Skip calling the model when conversation text has not changed since the last summary
+      // (e.g. metadata/mtime flush without a new user or assistant message).
+      if (!opts.force && prev?.digestHash && prev.digestHash === digestHash) {
+        this.entries[s.id] = { ...prev, updatedAt: s.updatedAt };
+        skippedUnchanged++;
+        continue;
+      }
       threads.push({
         n: threads.length + 1,
         session: s,
@@ -343,10 +512,15 @@ export class SessionSummarizer {
         project: s.projectName || path.basename(s.cwd || '') || s.harness,
         previous: prev?.text,
         digest,
+        digestHash,
       });
     }
+    if (threads.length === 0) {
+      if (skippedUnchanged > 0) this.save();
+      return { ok: true, summarized: 0, pending: Math.max(0, pending.length - batch.length) };
+    }
 
-    let reply: { text: string; costUsd?: number };
+    let reply: { text: string; costUsd?: number; usage?: Partial<SummarizerModelUsage> };
     try {
       reply = await (this.opts.callModel ?? callClaude)(buildPrompt(threads), cfg.model);
     } catch (e) {
@@ -354,18 +528,42 @@ export class SessionSummarizer {
     }
     const parsed = parseSummaryReply(reply.text);
     const at = this.now();
+    const runRecord: SummarizerRunRecord = {
+      at,
+      model: cfg.model,
+      threads: threads.length,
+      inputTokens: Math.max(0, Number(reply.usage?.inputTokens || 0)),
+      cacheReadTokens: Math.max(0, Number(reply.usage?.cacheReadTokens || 0)),
+      cacheCreationTokens: Math.max(0, Number(reply.usage?.cacheCreationTokens || 0)),
+      outputTokens: Math.max(0, Number(reply.usage?.outputTokens || 0)),
+      costUsd: Math.max(0, Number(reply.costUsd || 0)),
+    };
+    this.recordUsageRun(runRecord);
+    const runTokens = totalTokensOf(runRecord);
+
     let summarized = 0;
     for (const t of threads) {
       const s = parsed.get(t.n);
       if (!s) continue;
-      this.entries[t.session.id] = { text: s, updatedAt: t.session.updatedAt, at };
+      this.entries[t.session.id] = {
+        text: s,
+        updatedAt: t.session.updatedAt,
+        at,
+        digestHash: t.digestHash,
+      };
       summarized++;
     }
-    if (summarized > 0) {
+    if (summarized > 0 || skippedUnchanged > 0) {
       this.save();
-      this.opts.onUpdated();
+      if (summarized > 0) this.opts.onUpdated();
     }
-    return { ok: summarized > 0, summarized, pending: pending.length - summarized, costUsd: reply.costUsd };
+    return {
+      ok: summarized > 0,
+      summarized,
+      pending: Math.max(0, pending.length - summarized - skippedUnchanged),
+      costUsd: reply.costUsd,
+      tokens: runTokens > 0 ? runTokens : undefined,
+    };
   }
 
   private save(): void {

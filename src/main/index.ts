@@ -1152,6 +1152,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('sh:refresh-summaries', async () => sessionSummarizer.refresh({ force: true }));
+  ipcMain.handle('sh:get-summary-stats', async () => sessionSummarizer.getUsageStats());
+  ipcMain.handle('sh:reset-summary-stats', async () => sessionSummarizer.resetUsageStats());
 
   ipcMain.handle('sh:dictation-status', async (_ev, draft?: DictationSettings) =>
     checkDictationServer(draft ?? store.getState().settings.dictation)

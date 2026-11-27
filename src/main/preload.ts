@@ -59,6 +59,8 @@ const api: SuperHarnessApi = {
     ipcRenderer.invoke('sh:update-settings', patch),
   clearMasterHistory: () => ipcRenderer.invoke('sh:clear-master'),
   refreshSummaries: () => ipcRenderer.invoke('sh:refresh-summaries'),
+  getSummaryStats: () => ipcRenderer.invoke('sh:get-summary-stats'),
+  resetSummaryStats: () => ipcRenderer.invoke('sh:reset-summary-stats'),
   pickDirectory: () => ipcRenderer.invoke('sh:pick-directory'),
   getSystemApps: () => ipcRenderer.invoke('sh:system-apps'),
   readFilePreview: (filePath: string, startLine?: number, endLine?: number) =>

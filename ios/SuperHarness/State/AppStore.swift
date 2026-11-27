@@ -77,10 +77,15 @@ public struct StreamTurnBaseline: Sendable, Equatable {
 public struct VisibleStreamingOverlay: Sendable, Equatable {
     public let showBlocks: [UnifiedBlock]
     public let showText: String
+    /// True when nothing of the running turn is saved yet, so the whole stream is shown. The
+    /// stream is then drawn from its own blocks, which keep text and steps in the order they
+    /// arrived, instead of from `showBlocks` followed by `showText`.
+    public let showsWholeTurn: Bool
 
-    public init(showBlocks: [UnifiedBlock], showText: String) {
+    public init(showBlocks: [UnifiedBlock], showText: String, showsWholeTurn: Bool = false) {
         self.showBlocks = showBlocks
         self.showText = showText
+        self.showsWholeTurn = showsWholeTurn
     }
 }
 
@@ -1411,6 +1416,12 @@ public final class AppStore {
         streamingTextBySessionId.removeValue(forKey: sessionId)
     }
 
+    /// Ends the current paragraph of streamed text, if there is one and it is not ended yet.
+    nonisolated public static func endingStreamParagraph(_ text: String) -> String {
+        guard !text.isEmpty, !text.hasSuffix("\n\n") else { return text }
+        return text + "\n\n"
+    }
+
     public static func captureStreamTurnBaseline(messages: [UnifiedMessage]) -> StreamTurnBaseline {
         var lastAssistantId: String? = nil
         var lastAssistantBlockCount = 0
@@ -1443,7 +1454,8 @@ public final class AppStore {
         if !persistedActiveAssistant || lastMsg == nil {
             return VisibleStreamingOverlay(
                 showBlocks: streamingBlocks,
-                showText: streamingText.trimmingCharacters(in: .whitespacesAndNewlines)
+                showText: streamingText.trimmingCharacters(in: .whitespacesAndNewlines),
+                showsWholeTurn: true
             )
         }
 
@@ -1521,6 +1533,10 @@ public final class AppStore {
                 var blocks = streamingBlocksBySessionId[ev.sessionId] ?? []
                 blocks.append(block)
                 streamingBlocksBySessionId[ev.sessionId] = blocks
+                // A step ends the text before it. Mark that in the running text, or the next
+                // text's first words would be glued to this one's last ("…yet.ADU EAP is…")
+                // and the two could no longer be matched against the saved transcript.
+                streamingTextBySessionId[ev.sessionId] = Self.endingStreamParagraph(streamingTextBySessionId[ev.sessionId] ?? "")
             }
             if var msg = streamingMessagesBySessionId[ev.sessionId] {
                 msg.blocks.append(block)
@@ -2155,9 +2171,19 @@ public final class AppStore {
                 streamingBlocks: streamingBlocksBySessionId[sessionId] ?? [],
                 streamingText: streamingTextBySessionId[sessionId] ?? ""
             )
-            var visibleBlocks = overlay.showBlocks
-            if !overlay.showText.isEmpty {
-                visibleBlocks.append(.text(text: overlay.showText))
+            var visibleBlocks: [UnifiedBlock]
+            if overlay.showsWholeTurn {
+                // Nothing of this turn is saved yet: show the stream as it arrived, text and
+                // steps interleaved, each text its own paragraph.
+                visibleBlocks = streaming.blocks.filter { block in
+                    if case .text(let text) = block { return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    return true
+                }
+            } else {
+                visibleBlocks = overlay.showBlocks
+                if !overlay.showText.isEmpty {
+                    visibleBlocks.append(.text(text: overlay.showText))
+                }
             }
             if !visibleBlocks.isEmpty {
                 var visibleStream = streaming

@@ -858,4 +858,47 @@ final class AppStoreTests: XCTestCase {
         XCTAssertFalse(store.folders.contains(where: { $0.id == created.id }))
         XCTAssertNil(store.sessions.first(where: { $0.id == targetSessionId })?.folderId)
     }
+
+    /// lxe's Codex turn: text, commands, text, commands, text. The phone glued the texts into
+    /// one paragraph ("…yet.ADU EAP is…") and showed the last one twice.
+    func testTextBetweenStepsStaysSeparateParagraphsAndIsNotShownTwice() async {
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: UserDefaults(suiteName: "sh.tests.stream.\(UUID().uuidString)")!, environment: [:])
+        defer { store.stopEventStream() }
+        let sid = "codex:periodic-check"
+        let user = UnifiedMessage(id: "u-1", role: .user, timestamp: 1000, blocks: [.text(text: "update the pi host")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: sid, messages: [user], totalCount: 1, hasMore: false, liveActivity: LiveActivityState(isWorking: true)))
+
+        func cmd(_ c: String) -> UnifiedBlock { .command(command: c, cwd: nil, output: nil, exitCode: 0, durationMs: 5, status: "completed") }
+        let t1 = "I haven't started the gateway update yet."
+        let t2 = "ADU EAP is back on 1.5.6 and reachable."
+        let t3 = "All six devices are Connected again."
+
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .start))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .delta, text: t1))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd("ping eap")))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .delta, text: t2))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd("check devices")))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .delta, text: t3))
+
+        // Before anything is saved: the stream shows text and steps in the order they arrived.
+        let streamed = store.messages(for: sid).last
+        XCTAssertEqual(streamed?.id, "stream-r-1")
+        XCTAssertEqual(streamed?.blocks, [.text(text: t1), cmd("ping eap"), .text(text: t2), cmd("check devices"), .text(text: t3)])
+
+        // The host saves the turn while the stream is still open: nothing is shown twice.
+        let saved = UnifiedMessage(id: "a-1", role: .assistant, timestamp: 2000, blocks: [.text(text: t1), cmd("ping eap"), .text(text: t2), cmd("check devices"), .text(text: t3)])
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: sid, messages: [user, saved], totalCount: 2, hasMore: false, liveActivity: LiveActivityState(isWorking: true)))
+        let afterSave = store.messages(for: sid)
+        XCTAssertEqual(afterSave.map(\.id), ["u-1", "a-1"], "the saved turn replaces the stream; no merged paragraph beside it")
+
+        // A text the host has not saved yet still shows, once, as its own paragraph.
+        let t4 = "Next I will restart the gateway."
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .block, block: cmd("uptime")))
+        store.applyStreamEvent(StreamEvent(sessionId: sid, runId: "r-1", kind: .delta, text: t4))
+        XCTAssertEqual(store.messages(for: sid).last?.blocks, [.text(text: t4)])
+
+        XCTAssertEqual(AppStore.endingStreamParagraph("abc"), "abc\n\n")
+        XCTAssertEqual(AppStore.endingStreamParagraph("abc\n\n"), "abc\n\n")
+        XCTAssertEqual(AppStore.endingStreamParagraph(""), "")
+    }
 }

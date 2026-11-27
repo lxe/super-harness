@@ -30,6 +30,12 @@ export class HarnessRegistry {
   });
 
   private summaryLookup: (sessionId: string) => string | undefined = () => undefined;
+  private livePickPending: (sessionId: string) => boolean = () => false;
+
+  /** Tells the registry which sessions have a model/effort pick waiting to be applied. */
+  setLivePickPendingLookup(fn: (sessionId: string) => boolean): void {
+    this.livePickPending = fn;
+  }
 
   constructor(private readonly store: ConfigStore, drivers: HarnessDriver[] = createDefaultDrivers()) {
     this.drivers = drivers;
@@ -140,13 +146,21 @@ export class HarnessRegistry {
         const s = canonModel !== withText.model ? { ...withText, model: canonModel } : withText;
         const ov = state.overrides[s.id];
         if (!ov) return s;
+        // A live terminal Claude runs what it was launched with. A stored pick only counts
+        // while it is waiting to be applied; otherwise it may be stale.
+        const trustRunning = s.harness === 'claude-tmux' && s.isLive && !this.livePickPending(s.id);
+        const runningModel = trustRunning ? s.runningModel : undefined;
+        const runningEffort = trustRunning ? s.runningReasoningEffort : undefined;
         return {
           ...s,
           customTitle: ov.customTitle ?? s.customTitle,
           title: ov.customTitle || s.title,
-          model:
-            s.harnessGroup === 'claude' && ov.model ? canonicalClaudeModelId(ov.model) : ov.model || s.model,
-          reasoningEffort: ov.reasoningEffort || s.reasoningEffort,
+          model: runningModel
+            ? s.model
+            : s.harnessGroup === 'claude' && ov.model
+              ? canonicalClaudeModelId(ov.model)
+              : ov.model || s.model,
+          reasoningEffort: runningEffort || ov.reasoningEffort || s.reasoningEffort,
           permissionMode: ov.permissionMode || s.permissionMode,
           folderId: ov.folderId !== undefined ? ov.folderId : s.folderId,
           nativeSection:

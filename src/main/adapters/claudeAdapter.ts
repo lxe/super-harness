@@ -843,6 +843,7 @@ export async function detectClaude(
                 activity.mtimeMs
               );
 
+        const launchFlags = claudeLaunchFlagsForPid(Number(data.pid));
         liveTmuxSessions.push({
           // Canonical ID across all Claude variants so resuming/exiting a CLI process never changes session.id
           id: `claude:${data.sessionId}`,
@@ -861,7 +862,10 @@ export async function detectClaude(
           nativeMetaPath: desktopMatch?.file,
           permissionMode: desktopMatch?.data.permissionMode,
           gitBranch: branch,
-          model: desktopMatch?.data.model || headMeta.model,
+          model: launchFlags.model || desktopMatch?.data.model || headMeta.model,
+          reasoningEffort: launchFlags.effort,
+          runningModel: launchFlags.model,
+          runningReasoningEffort: launchFlags.effort,
           status: isRunning ? 'running' : 'idle',
           isLive: true,
           isRemote: Boolean(data.bridgeSessionId),
@@ -2223,6 +2227,29 @@ export async function cycleClaudeTuiMode(
 }
 
 /** Wait until Claude registers `nativeId` under a new pid in ~/.claude/sessions. */
+/** `--model` and `--effort` from a Claude command line (argv). */
+export function parseClaudeLaunchFlags(argv: readonly string[]): { model?: string; effort?: string } {
+  const out: { model?: string; effort?: string } = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--model' && argv[i + 1]) out.model = argv[i + 1];
+    else if (a.startsWith('--model=')) out.model = a.slice('--model='.length) || undefined;
+    else if (a === '--effort' && argv[i + 1]) out.effort = argv[i + 1];
+    else if (a.startsWith('--effort=')) out.effort = a.slice('--effort='.length) || undefined;
+  }
+  return out;
+}
+
+/** The flags a running Claude process was launched with (Linux /proc; empty elsewhere). */
+function claudeLaunchFlagsForPid(pid: number): { model?: string; effort?: string } {
+  if (!Number.isFinite(pid) || pid <= 0) return {};
+  try {
+    return parseClaudeLaunchFlags(fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'));
+  } catch {
+    return {};
+  }
+}
+
 /** The line Claude Code records in place of a user message when a turn is interrupted. */
 export function isClaudeInterruptMarker(text: string): boolean {
   return /^\[Request interrupted by user(?: for tool use)?\]$/.test(text.trim());

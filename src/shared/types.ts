@@ -156,6 +156,12 @@ export interface UnifiedSession {
   nativeMetaPath?: string;
   /** Native Claude permission mode (e.g. 'bypassPermissions', 'acceptEdits', 'plan') */
   permissionMode?: string;
+  /**
+   * Model and effort a live terminal process was launched with (its --model / --effort flags).
+   * This is what the process actually runs, which a stored override can lag behind.
+   */
+  runningModel?: string;
+  runningReasoningEffort?: string;
 }
 
 export interface ImageAttachment {

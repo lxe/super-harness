@@ -666,6 +666,8 @@ const liveModelApplier = new LiveModelApplier({
   apply: (id, change) => dispatcher.updateSessionConfig(id, change),
 });
 
+registry.setLivePickPendingLookup((id) => liveModelApplier.hasPending(id));
+
 const controlServer = new ControlServer(
   store,
   registry,

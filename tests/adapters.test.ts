@@ -1245,3 +1245,14 @@ describe('Claude interrupt marker', () => {
     expect(isClaudeInterruptMarker('I said [Request interrupted by user] earlier')).toBe(false);
   });
 });
+
+describe('Claude launch flags', () => {
+  it('reads --model and --effort from a Claude command line', async () => {
+    const { parseClaudeLaunchFlags } = await import('../src/main/adapters/claudeAdapter');
+    expect(
+      parseClaudeLaunchFlags(['claude', '--resume', 'abc', '--remote-control', '--model', 'claude-fable-5-2[1m]', '--effort', 'medium'])
+    ).toEqual({ model: 'claude-fable-5-2[1m]', effort: 'medium' });
+    expect(parseClaudeLaunchFlags(['claude', '--model=opus', '--effort=high'])).toEqual({ model: 'opus', effort: 'high' });
+    expect(parseClaudeLaunchFlags(['claude', '--resume', 'abc'])).toEqual({});
+  });
+});

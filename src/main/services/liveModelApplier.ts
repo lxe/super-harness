@@ -53,6 +53,10 @@ export class LiveModelApplier {
     }
   }
 
+  hasPending(id: string): boolean {
+    return this.pending.has(id);
+  }
+
   pendingSessionIds(): string[] {
     return [...this.pending.keys()];
   }

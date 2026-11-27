@@ -230,6 +230,7 @@ export class ConfigStore {
         ...(patch.apps ?? {}),
       },
       mobileApi: {
+        ...(this.state.settings.mobileApi ?? {}),
         enabled: this.state.settings.mobileApi?.enabled ?? false,
         bindHost: this.state.settings.mobileApi?.bindHost ?? '0.0.0.0',
         port: this.state.settings.mobileApi?.port ?? 47890,

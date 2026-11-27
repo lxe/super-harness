@@ -311,3 +311,44 @@ describe('push relay keys for paired devices', () => {
     }
   });
 });
+
+describe('ConfigStore pairing persistence across settings updates and restarts', () => {
+  it('preserves pairedDevices, hostId, and hostName when unrelated settings are updated and across reload', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-pair-persist-'));
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      vi.resetModules();
+      const { ConfigStore } = await import('../src/main/store/configStore');
+      const store1 = new ConfigStore();
+      const pairing1 = new PairingService(store1);
+      const { code } = pairing1.open();
+      const paired = pairing1.attempt({ code, deviceName: 'iPhone', deviceId: 'dev-persist-1' }, '10.0.0.5');
+      expect(paired.status).toBe(200);
+      if (paired.status !== 200) throw new Error('expected 200');
+      const { token, hostId } = paired.body;
+
+      // Updating unrelated settings must never drop pairedDevices, hostId, or hostName
+      store1.updateSettings({ mobileApi: { ...store1.getState().settings.mobileApi!, hostName: 'Workstation' } });
+      store1.updateSettings({ sidebarGroupBy: 'folders' });
+      store1.updateSettings({ pinnedOrder: ['claude:abc'] });
+
+      const afterUpdates = store1.getState().settings.mobileApi!;
+      expect(afterUpdates.hostId).toBe(hostId);
+      expect(afterUpdates.hostName).toBe('Workstation');
+      expect(afterUpdates.pairedDevices).toHaveLength(1);
+      expect(afterUpdates.pairedDevices?.[0].id).toBe('dev-persist-1');
+      expect(afterUpdates.pairedDevices?.[0].tokenHash).toBe(hashToken(token));
+
+      // Simulated restart: fresh ConfigStore + PairingService reading from state.json
+      const store2 = new ConfigStore();
+      const pairing2 = new PairingService(store2);
+      expect(pairing2.hostId()).toBe(hostId);
+      expect(pairing2.hostName).toBe('Workstation');
+      expect(pairing2.authenticate(token)).toEqual({ kind: 'device', deviceId: 'dev-persist-1' });
+    } finally {
+      process.env.HOME = prevHome;
+      vi.resetModules();
+    }
+  });
+});

@@ -53,8 +53,10 @@ export const MobileSettingsPane: React.FC<Props> = ({ settings, onUpdateSettings
     port: 47890,
     token: '',
   };
-  const updateMobile = (patch: Partial<MobileApiSettings>) =>
-    onUpdateSettings({ mobileApi: { ...mobile, ...patch } });
+  const updateMobile = (patch: Partial<MobileApiSettings>) => {
+    const { pairedDevices: _pd, hostId: _hid, ...editableMobile } = mobile;
+    onUpdateSettings({ mobileApi: { ...editableMobile, ...patch } });
+  };
 
   const [info, setInfo] = useState<MobileAccessInfo | null>(null);
   const [portDraft, setPortDraft] = useState(String(mobile.port ?? 47890));

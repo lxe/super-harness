@@ -1091,10 +1091,10 @@ private struct SessionListRow: View {
     let isBusy: Bool
     var isPinned: Bool = false
     var showsHarnessLogo: Bool = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Height of the right slot in every state (time, working mark, question mark).
+    private static let trailingSlotHeight: CGFloat = 18
 
     var body: some View {
-        let vis = HarnessVisual.forKind(session.harness)
         let hostBadge = SessionRowFormatting.hostBadgeLabel(session.hostAddress)
         let subtitle = SessionRowFormatting.subtitle(for: session)
 
@@ -1119,17 +1119,15 @@ private struct SessionListRow: View {
 
                 Spacer(minLength: 8)
 
-                // A working thread is shown by its shimmering title, so the right slot keeps the time.
-                // With Reduce Motion on, the shimmer is still, so a small dot marks the thread instead.
-                if isBusy && reduceMotion {
-                    Circle()
-                        .fill(vis.color)
-                        .frame(width: 7, height: 7)
-                        .accessibilityLabel("Working")
-                } else if session.status == .waitingInput && !isBusy {
+                // The right slot. A working thread shows the animated mark in place of the time,
+                // alongside its shimmering title. The time stays in the layout, invisible, so the
+                // slot keeps its width and the title truncates the same whether the thread is
+                // working or idle; the fixed height keeps the row from changing height.
+                if session.status == .waitingInput && !isBusy {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(SHColor.statusWarning)
+                        .frame(height: Self.trailingSlotHeight)
                         .accessibilityLabel("Question pending")
                 } else {
                     HStack(spacing: 6) {
@@ -1137,6 +1135,14 @@ private struct SessionListRow: View {
                             .font(SHTypography.micro.monospacedDigit())
                             .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)
                             .fixedSize()
+                            .opacity(isBusy ? 0 : 1)
+                            .accessibilityHidden(isBusy)
+                            .overlay(alignment: .trailing) {
+                                if isBusy {
+                                    SHWorkingMark(tint: SHColor.porcelain, size: 15)
+                                        .accessibilityIdentifier("row.working")
+                                }
+                            }
                         if session.isUnread {
                             Circle()
                                 .fill(SHColor.inkPrimary)
@@ -1145,6 +1151,7 @@ private struct SessionListRow: View {
                                 .accessibilityIdentifier("row.unread")
                         }
                     }
+                    .frame(height: Self.trailingSlotHeight)
                 }
             }
 

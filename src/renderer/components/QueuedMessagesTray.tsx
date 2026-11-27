@@ -46,9 +46,11 @@ export const QueuedMessagesTray: React.FC<Props> = ({
           <span className="text-caption font-semibold text-ink-secondary leading-[1.35] pt-[1px]">
             Queued Messages
           </span>
-          <Badge tone="neutral" mono>
-            {items.length}
-          </Badge>
+          {collapsed && (
+            <Badge tone="neutral" mono>
+              {items.length}
+            </Badge>
+          )}
           {subtitle && (
             <span className="text-micro text-ink-faint leading-[1.35] pt-[1px] truncate">
               {subtitle}
@@ -101,7 +103,7 @@ export const QueuedMessagesTray: React.FC<Props> = ({
                   </p>
                 </div>
 
-                {item.source === 'super-harness' ? (
+                {item.source === 'super-harness' && (
                   <div className="flex items-center gap-0.5 shrink-0">
                     <IconButton
                       size="xs"
@@ -126,10 +128,6 @@ export const QueuedMessagesTray: React.FC<Props> = ({
                       <Trash2 className="w-3.5 h-3.5" />
                     </IconButton>
                   </div>
-                ) : (
-                  <Badge tone="neutral">
-                    {harnessLabel ? `${harnessLabel} queue` : 'Harness queue'}
-                  </Badge>
                 )}
               </div>
             );

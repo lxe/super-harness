@@ -256,6 +256,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const filterTriggerRef = useRef<HTMLSpanElement | null>(null);
   const asideRef = useRef<HTMLElement | null>(null);
   const didRevealInitialRef = useRef(false);
+  const overlayThumbRef = useRef<HTMLDivElement | null>(null);
+  const overlayScrollTimerRef = useRef<number | null>(null);
+  const [sidebarScrolling, setSidebarScrolling] = useState(false);
 
   const scheduleHoverPrefetch = (sessionId: string) => {
     if (prefetchTimerRef.current !== null) {
@@ -279,8 +282,55 @@ export const Sidebar: React.FC<Props> = React.memo(({
       if (prefetchTimerRef.current !== null) {
         window.clearTimeout(prefetchTimerRef.current);
       }
+      if (overlayScrollTimerRef.current !== null) {
+        window.clearTimeout(overlayScrollTimerRef.current);
+      }
     };
   }, []);
+
+  // Sync floating overlay scrollbar thumb directly via DOM (zero re-renders on scroll)
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const syncThumb = () => {
+      const thumb = overlayThumbRef.current;
+      if (!thumb) return;
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      const overflow = scrollHeight - clientHeight;
+      if (overflow <= 2) {
+        thumb.style.display = 'none';
+        return;
+      }
+      thumb.style.display = 'block';
+      const trackPad = 4;
+      const trackH = Math.max(0, clientHeight - trackPad * 2);
+      const thumbH = Math.max(28, (clientHeight / scrollHeight) * trackH);
+      const maxTop = Math.max(0, trackH - thumbH);
+      const thumbTop = trackPad + (scrollTop / overflow) * maxTop;
+      thumb.style.height = `${thumbH}px`;
+      thumb.style.transform = `translateY(${thumbTop}px)`;
+    };
+    const onScroll = () => {
+      syncThumb();
+      setSidebarScrolling(true);
+      if (overlayScrollTimerRef.current !== null) {
+        window.clearTimeout(overlayScrollTimerRef.current);
+      }
+      overlayScrollTimerRef.current = window.setTimeout(() => {
+        overlayScrollTimerRef.current = null;
+        setSidebarScrolling(false);
+      }, 700);
+    };
+    syncThumb();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(syncThumb);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
+  }, [sessions.length, collapsed, filter, groupBy, query]);
 
   const openUsageHover = (
     target: HarnessGroup | 'all',
@@ -1159,7 +1209,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
 
       {/* Global Top-Pinned Chats (all harnesses, flat below Top Bar) */}
       {globalPinnedSessions.length > 0 && (
-        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-line-hairline/60">
+        <div className="px-2.5 pb-2 space-y-0.5 max-h-[32vh] overflow-y-auto sh-scroll-hidden border-b border-[#232632]">
           {globalPinnedSessions.map((s) =>
             renderSessionRow(s, { showLogo: true, showPin: false })
           )}
@@ -1267,11 +1317,12 @@ export const Sidebar: React.FC<Props> = React.memo(({
         </div>
       )}
 
-      {/* Structured Conversation Tree with Sticky Two-Tier Headers */}
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto sh-scroll-hidden px-2.5 pb-4"
-      >
+      {/* Structured Conversation Tree with Sticky Two-Tier Headers + Floating Overlay Scrollbar */}
+      <div className="group/sb relative flex-1 min-h-0 flex flex-col">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto sh-scroll-hidden px-2.5 pb-4"
+        >
         {/* Inline unsent draft conversations (? when harness undecided, or harness logo when chosen) */}
         {draftConversations.length > 0 && (
           <div className="pt-2 pb-1 space-y-0.5 border-b border-line-hairline mb-2">
@@ -1323,7 +1374,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
                   <div
                     key={grp.id}
                     className={`space-y-0.5 ${grpIdx === 0 ? 'pt-1.5' : ''} ${
-                      grpIdx < topGroups.length - 1 ? 'pb-1.5 border-b border-line-hairline/60' : ''
+                      grpIdx < topGroups.length - 1 ? '-mx-2.5 px-2.5 pb-1.5 border-b border-[#232632]' : ''
                     }`}
                   >
                     {(grp.items ?? []).map((s) =>
@@ -1333,7 +1384,13 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 );
               }
 
-              const isTopClosed = Boolean(collapsed[grp.id]);
+              const prevGrp = grpIdx > 0 ? topGroups[grpIdx - 1] : null;
+              const collapseTopBorder = Boolean(
+                prevGrp && (prevGrp.headless || Boolean(collapsed[prevGrp.id]))
+              );
+
+              const isFilteredHarnessGroup = isSingleHarnessFilter(filter) && Boolean(grp.harnessLogo);
+              const isTopClosed = isFilteredHarnessGroup ? false : Boolean(collapsed[grp.id]);
               const groupHasWorking =
                 (grp.pinnedItems ?? []).some((i) => i.status === 'running') ||
                 (grp.sections
@@ -1371,7 +1428,9 @@ export const Sidebar: React.FC<Props> = React.memo(({
                 <div
                   key={grp.id}
                   data-drop-section-id={isTopDroppable ? grp.id : undefined}
-                  className={`relative rounded-lg transition-opacity ${
+                  className={`relative transition-opacity ${
+                    collapseTopBorder ? '-mt-px' : ''
+                  } ${
                     isOtherHarnessWhileDragging ? 'opacity-40' : ''
                   } ${
                     isTopDragOver
@@ -1379,35 +1438,37 @@ export const Sidebar: React.FC<Props> = React.memo(({
                       : ''
                   }`}
                 >
-                  <SectionHeader
-                    level={1}
-                    variant={isHarnessDivider ? 'separator' : 'tree'}
-                    accent={grp.harnessLogo || grp.harnessGroup}
-                    collapsed={isTopClosed}
-                    dropTarget={isTopDragOver}
-                    onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openSectionMenu(grp.label, allGroupSessions, e.clientX, e.clientY);
-                    }}
-                    onAdd={
-                      grp.harnessLogo
-                        ? () => onNewSession(grp.harnessLogo!)
-                        : () =>
-                            onNewSession(filter, {
-                              cwd: resolveGroupCwd(grp.items ?? [], Boolean(grp.isUngrouped)),
-                            })
-                    }
-                    addLabel={
-                      grp.harnessLogo
-                        ? `New ${grp.label} conversation`
-                        : `New conversation in ${grp.label}`
-                    }
-                    icon={topIcon}
-                    label={grp.label}
-                    working={groupHasWorking}
-                  />
+                  {!isFilteredHarnessGroup && (
+                    <SectionHeader
+                      level={1}
+                      variant={isHarnessDivider ? 'separator' : 'tree'}
+                      accent={grp.harnessLogo || grp.harnessGroup}
+                      collapsed={isTopClosed}
+                      dropTarget={isTopDragOver}
+                      onToggle={() => setCollapsed((p) => ({ ...p, [grp.id]: !p[grp.id] }))}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openSectionMenu(grp.label, allGroupSessions, e.clientX, e.clientY);
+                      }}
+                      onAdd={
+                        grp.harnessLogo
+                          ? () => onNewSession(grp.harnessLogo!)
+                          : () =>
+                              onNewSession(filter, {
+                                cwd: resolveGroupCwd(grp.items ?? [], Boolean(grp.isUngrouped)),
+                              })
+                      }
+                      addLabel={
+                        grp.harnessLogo
+                          ? `New ${grp.label} conversation`
+                          : `New conversation in ${grp.label}`
+                      }
+                      icon={topIcon}
+                      label={grp.label}
+                      working={groupHasWorking}
+                    />
+                  )}
 
                   {!isTopClosed && (
                     <div className="py-1.5 space-y-1.5">
@@ -1494,6 +1555,18 @@ export const Sidebar: React.FC<Props> = React.memo(({
             })}
           </div>
         )}
+        </div>
+        {/* Floating overlay scrollbar thumb (floats above full-bleed section headers without stealing width) */}
+        <div
+          ref={overlayThumbRef}
+          aria-hidden="true"
+          style={{ display: 'none' }}
+          className={`pointer-events-none absolute right-[2px] top-0 z-30 w-[4px] rounded-full transition-opacity duration-200 ${
+            sidebarScrolling
+              ? 'opacity-100 bg-white/[0.24]'
+              : 'opacity-0 group-hover/sb:opacity-100 bg-white/[0.15]'
+          }`}
+        />
       </div>
 
       {/* Bottom Harness Switcher Bar (Antigravity | Codex | Claude | Muse | Pi) with toggle-to-deselect */}

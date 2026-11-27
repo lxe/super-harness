@@ -202,6 +202,8 @@ public struct SHInlineDisclosureRow: View {
     public var trailingMeta: String? = nil
     public var tint: Color = SHColor.inkMuted
     public var isSpinning: Bool = false
+    /// The title shimmers, as a working chat's title does, while the icon stays put.
+    public var isShimmering: Bool = false
     public var isExpanded: Bool = false
     public let action: () -> Void
 
@@ -212,6 +214,7 @@ public struct SHInlineDisclosureRow: View {
         trailingMeta: String? = nil,
         tint: Color = SHColor.inkMuted,
         isSpinning: Bool = false,
+        isShimmering: Bool = false,
         isExpanded: Bool = false,
         action: @escaping () -> Void
     ) {
@@ -221,6 +224,7 @@ public struct SHInlineDisclosureRow: View {
         self.trailingMeta = trailingMeta
         self.tint = tint
         self.isSpinning = isSpinning
+        self.isShimmering = isShimmering
         self.isExpanded = isExpanded
         self.action = action
     }
@@ -238,10 +242,15 @@ public struct SHInlineDisclosureRow: View {
                         .frame(width: 14)
                 }
 
-                Text(title)
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(SHColor.inkSecondary)
-                    .lineLimit(1)
+                if isShimmering {
+                    SHShimmerText(text: title, font: .system(size: 13.5, weight: .medium), isActive: true)
+                        .lineLimit(1)
+                } else {
+                    Text(title)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(SHColor.inkSecondary)
+                        .lineLimit(1)
+                }
 
                 if let trailingBadge, !trailingBadge.isEmpty {
                     Text(trailingBadge)

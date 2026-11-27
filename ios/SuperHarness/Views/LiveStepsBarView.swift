@@ -38,11 +38,13 @@ public struct LiveStepsBarView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: SHLayout.itemGap) {
             SHInlineDisclosureRow(
-                icon: "terminal",
+                // Matches the desktop's running line: a terminal glyph in the harness colour
+                // and a shimmering title while the thread works.
+                icon: "apple.terminal",
                 title: titleText,
                 trailingBadge: progressBadge,
                 tint: activity.isWorking ? accentColor : SHColor.inkMuted,
-                isSpinning: activity.isWorking,
+                isShimmering: activity.isWorking,
                 isExpanded: isExpanded
             ) {
                 isExpanded.toggle()
@@ -63,7 +65,7 @@ public struct LiveStepsBarView: View {
                     }
                     ForEach(runningTasks) { task in
                         HStack(spacing: 7) {
-                            Image(systemName: "terminal")
+                            Image(systemName: "apple.terminal")
                                 .font(.system(size: 11))
                                 .foregroundStyle(accentColor)
                             Text(task.summary.isEmpty ? (task.command ?? "Running task") : task.summary)

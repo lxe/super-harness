@@ -22,6 +22,7 @@
 		333CD61BC2E508702C671EBF /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96979DF16520EDF4CA5B1E3 /* DesignTokens.swift */; };
 		3BC8DEBECAACCE35901CB4F4 /* SessionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C86DC35E20AE64E921325ED /* SessionDetailView.swift */; };
 		589B5CBA382148223528629F /* MarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2FD73070D3FD8CCBF7ADC3 /* MarkdownRendererTests.swift */; };
+		641F180A4937B2B8F8D6A4B9 /* HarnessUpdateRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B83B932E07A08BFBF624EC /* HarnessUpdateRow.swift */; };
 		6DB4EC6056EC873D7153805C /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A6445834AB007663A5F452 /* ComposerView.swift */; };
 		731B0B67DDDDF97186403635 /* AppStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B60F55D8D64CF5E989B757 /* AppStoreTests.swift */; };
 		8279818A71534B9EF4C250E6 /* QueuedMessagesTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E8B696CC1E4841C38F0508 /* QueuedMessagesTrayView.swift */; };
@@ -92,6 +93,7 @@
 		82BC4E00E96DE4B2A7EA4643 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		891E7CB23D3E07D3693841D2 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		9382D72BC4B46BF9F35F9BD5 /* PushManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushManager.swift; sourceTree = "<group>"; };
+		97B83B932E07A08BFBF624EC /* HarnessUpdateRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessUpdateRow.swift; sourceTree = "<group>"; };
 		A0E8B696CC1E4841C38F0508 /* QueuedMessagesTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessagesTrayView.swift; sourceTree = "<group>"; };
 		A1095336CFF8AE462BB2B21A /* LiveE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveE2ETests.swift; sourceTree = "<group>"; };
 		A3DE0C6E1D01399F9CA20900 /* CoalescedBlockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoalescedBlockViews.swift; sourceTree = "<group>"; };
@@ -202,6 +204,7 @@
 		7B2D4F48C635D12AA73FDEBD /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				97B83B932E07A08BFBF624EC /* HarnessUpdateRow.swift */,
 				EC81BA786656690D2B549EC6 /* HostConnectionSheet.swift */,
 			);
 			path = Settings;
@@ -442,6 +445,7 @@
 				AADC6F8FE5E48F5FAF0F0861 /* DesktopBrowser.swift in Sources */,
 				ACA3E568707B33B147D52947 /* DictationController.swift in Sources */,
 				F60D34DD9293CF92FB3CC345 /* DraftChatView.swift in Sources */,
+				641F180A4937B2B8F8D6A4B9 /* HarnessUpdateRow.swift in Sources */,
 				154216268A94F2F14EC538F1 /* HostConnectionSheet.swift in Sources */,
 				CB6F8D052928AE728A3861A3 /* KeychainStore.swift in Sources */,
 				973FC65A7B4087A199B7920E /* LiveStepsBarView.swift in Sources */,

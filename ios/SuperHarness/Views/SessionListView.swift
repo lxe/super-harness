@@ -1130,6 +1130,16 @@ private struct HarnessSwitcherStrip: View {
             }
         }
         .contentShape(Rectangle())
+        // A small dot marks a harness with an update waiting or running.
+        .overlay(alignment: .topTrailing) {
+            if store.needsUpdateAttention(group) {
+                Circle()
+                    .fill(SHColor.statusWarning)
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(SHColor.surfaceRail, lineWidth: 1.5))
+                    .offset(x: -7, y: 7)
+            }
+        }
         .onTapGesture {
             guard Date() >= ignoreTapsUntil else { return }
             withAnimation(.easeInOut(duration: 0.16)) {
@@ -1138,7 +1148,7 @@ private struct HarnessSwitcherStrip: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(group.title)
+        .accessibilityLabel(store.needsUpdateAttention(group) ? "\(group.title), update available" : group.title)
         .accessibilityValue(gaugeAccessibilityValue(percent: barPct, working: working))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

@@ -114,7 +114,8 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
                 activeSessionCount: 0,
                 totalSessionCount: 1,
                 capabilities: HarnessCapabilities(canStartNew: true, canResume: true, canTmuxMirror: false, canControlDaemon: false),
-                notes: "Local pi RPC runner"
+                notes: "Local pi RPC runner",
+                update: HarnessUpdateInfo(current: "1.4.0", latest: "1.6.1", updateAvailable: true, method: "command")
             ),
         ]
 
@@ -1194,6 +1195,30 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
 
     public func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool { true }
     public func sendTestPush() async throws -> Bool { true }
+
+    /// The demo updater: waits, updates, restarts, then reports the new version as installed.
+    public func startHarnessUpdate(harness: HarnessGroup) async throws -> HarnessUpdateStartResponse {
+        let info = harnesses.first { $0.id == harness }?.update
+        let job = HarnessUpdateJob(id: "demo-\(harness.rawValue)", harness: harness, phase: .waiting, from: info?.current, to: info?.latest)
+        Task { [weak self] in
+            for phase in [HarnessUpdatePhase.updating, .restarting, .done] {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                var next = job
+                next.phase = phase
+                await self?.finishDemoUpdateStep(next)
+            }
+        }
+        return HarnessUpdateStartResponse(ok: true, job: job, error: nil)
+    }
+
+    private func finishDemoUpdateStep(_ job: HarnessUpdateJob) {
+        if job.phase == .done, let index = harnesses.firstIndex(where: { $0.id == job.harness }) {
+            harnesses[index].version = job.to
+            harnesses[index].update = HarnessUpdateInfo(current: job.to, latest: job.to, updateAvailable: false)
+            broadcastSessionsAndActivity()
+        }
+        broadcast(.harnessUpdate(job))
+    }
 
     public func testConnection() async throws -> ConnectionTestResult {
         ConnectionTestResult(ok: true, latencyMs: 4, harnessCount: harnesses.count, message: "Demo Mode active (offline fixtures)")

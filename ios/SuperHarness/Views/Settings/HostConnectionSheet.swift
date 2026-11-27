@@ -262,6 +262,13 @@ public struct HostConnectionSheet: View {
                 .tint(SHColor.toggleOn)
                 .modifier(RowPadding())
                 .accessibilityIdentifier("settings.harness.\(group.rawValue)")
+                // The harness's update, if it has one: version change, Update button, progress.
+                if HarnessUpdateRow.content(info: detection?.update, job: store.harnessUpdateJobs[group]) != .none {
+                    HarnessUpdateRow(store: store, group: group)
+                        .padding(.leading, Self.labelInset)
+                        .padding(.trailing, Self.rowInset)
+                        .padding(.bottom, 10)
+                }
             }
         }
     }

@@ -133,8 +133,16 @@ public struct UsageSheetView: View {
         let pace = hero.flatMap { UsageMetrics.computeWindowPace($0) }
         let resetStr = hero.flatMap { UsageMetrics.formatResetLabel($0.resetsAt) }
         let brand = SHColor.harness(info.harness)
+        let updateInfo = store.harnesses.first { $0.id == info.harness }?.update
 
         VStack(alignment: .leading, spacing: SHSpacing.md) {
+            // The harness's update, if it has one, in place: no separate screen.
+            if HarnessUpdateRow.content(info: updateInfo, job: store.harnessUpdateJobs[info.harness]) != .none {
+                HarnessUpdateRow(store: store, group: info.harness)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .shRaisedSurface(SHColor.surfaceSubtle, cornerRadius: SHRadius.md, elevation: .tile)
+            }
             // Header
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: SHSpacing.sm) {

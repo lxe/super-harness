@@ -1155,4 +1155,31 @@ final class UnifiedModelsTests: XCTestCase {
         XCTAssertEqual(ConnectionStatusPill.glyph(health: .offline("x"), isSyncing: true, offlineConfirmed: true), .problem)
         XCTAssertEqual(ConnectionStatusPill.glyph(health: .connected, isSyncing: false, offlineConfirmed: false), .settings)
     }
+
+    func testHarnessUpdateDecodingAndRowContent() throws {
+        let json = #"{"id":"pi","name":"Pi","installed":true,"update":{"current":"1.4.0","latest":"1.6.1","updateAvailable":true,"checkedAt":1,"method":"command","command":"npm i -g pi","staleProcesses":2}}"#
+        let detection = try JSONDecoder().decode(HarnessDetection.self, from: Data(json.utf8))
+        XCTAssertEqual(detection.update?.versionChange, "1.4.0 → 1.6.1")
+        XCTAssertEqual(detection.update?.canRunUpdater, true)
+        // A host that sends no update field, or an odd one, still decodes.
+        let plain = try JSONDecoder().decode(HarnessDetection.self, from: Data(#"{"id":"codex","installed":true,"update":"soon"}"#.utf8))
+        XCTAssertNil(plain.update)
+
+        let job = try JSONDecoder().decode(HarnessUpdateJob.self, from: Data(#"{"id":"j1","harness":"pi","phase":"waiting","startedAt":1,"from":"1.4.0","to":"1.6.1","log":[],"waitingFor":2}"#.utf8))
+        XCTAssertEqual(job.statusLine, "Waiting for 2 working sessions…")
+
+        let info = detection.update
+        XCTAssertEqual(HarnessUpdateRow.content(info: info, job: nil), .available(change: "1.4.0 → 1.6.1", canRun: true, hint: nil))
+        XCTAssertEqual(HarnessUpdateRow.content(info: info, job: job), .running(line: "Waiting for 2 working sessions…", canCancel: true))
+        var failed = job
+        failed.phase = .failed
+        failed.message = "npm exited with code 1"
+        XCTAssertEqual(HarnessUpdateRow.content(info: info, job: failed), .finished(line: "npm exited with code 1", failed: true, canRetry: true))
+        var cancelled = job
+        cancelled.phase = .cancelled
+        XCTAssertEqual(HarnessUpdateRow.content(info: info, job: cancelled), .available(change: "1.4.0 → 1.6.1", canRun: true, hint: nil), "a cancelled run offers the update again")
+        XCTAssertEqual(HarnessUpdateRow.content(info: HarnessUpdateInfo(current: "1.6.1", latest: "1.6.1"), job: nil), .none)
+        let manual = HarnessUpdateInfo(current: "1", latest: "2", updateAvailable: true, method: "manual", manualHint: "Update from the app's own menu.")
+        XCTAssertEqual(HarnessUpdateRow.content(info: manual, job: nil), .available(change: "1 → 2", canRun: false, hint: "Update from the app's own menu."))
+    }
 }

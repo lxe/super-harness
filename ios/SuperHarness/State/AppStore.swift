@@ -1228,6 +1228,8 @@ public final class AppStore {
             if usage != snapshot {
                 usage = snapshot
             }
+        case .harnessUpdate(let job):
+            harnessUpdateJobs[job.harness] = job
         case .state(let state):
             let hostGroupChanged = settings.sidebarGroupBy != state.settings.sidebarGroupBy
             adoptHostHarnessOrder(state.settings)
@@ -2922,6 +2924,48 @@ public final class AppStore {
         unpair()
     }
 
+    // MARK: Harness updates
+
+    /// The newest update run the host reported for each harness. A finished run stays until
+    /// the harness no longer has an update pending, so its result remains visible.
+    public private(set) var harnessUpdateJobs: [HarnessGroup: HarnessUpdateJob] = [:]
+
+    /// The host's version information for a harness that has an update to offer.
+    public func pendingUpdate(for group: HarnessGroup) -> HarnessUpdateInfo? {
+        guard let info = harnesses.first(where: { $0.id == group })?.update, info.updateAvailable else { return nil }
+        return info
+    }
+
+    /// True when the harness has an update waiting or one running: its dock gauge gets a dot.
+    public func needsUpdateAttention(_ group: HarnessGroup) -> Bool {
+        if harnessUpdateJobs[group]?.phase.isRunning == true { return true }
+        return pendingUpdate(for: group) != nil
+    }
+
+    /// Asks the host to update a harness. The host waits for that harness's working sessions,
+    /// runs the updater and restarts what needs restarting; each step arrives as an event.
+    public func startHarnessUpdate(_ group: HarnessGroup) async {
+        guard harnessUpdateJobs[group]?.phase.isRunning != true else { return }
+        let info = pendingUpdate(for: group)
+        harnessUpdateJobs[group] = HarnessUpdateJob(id: "local", harness: group, phase: .waiting, from: info?.current, to: info?.latest)
+        do {
+            let reply = try await client.startHarnessUpdate(harness: group)
+            if let job = reply.job {
+                // An event may already have moved this job on; keep the newer state.
+                if harnessUpdateJobs[group]?.id == "local" { harnessUpdateJobs[group] = job }
+            } else if !reply.ok {
+                harnessUpdateJobs[group] = HarnessUpdateJob(id: "local", harness: group, phase: .failed, message: reply.error ?? "The update could not be started")
+            }
+        } catch {
+            if handleAuthFailure(error) { return }
+            harnessUpdateJobs[group] = HarnessUpdateJob(id: "local", harness: group, phase: .failed, message: SHErrorPresentation.friendlyMessage(for: error.localizedDescription))
+        }
+    }
+
+    public func cancelHarnessUpdate(_ group: HarnessGroup) async {
+        try? await client.cancelHarnessUpdate(harness: group)
+    }
+
     // MARK: Machines: switch, unpair
 
     private func persistMachines() {
@@ -2949,6 +2993,7 @@ public final class AppStore {
         usage = nil
         catalog = nil
         dictationStatus = nil
+        harnessUpdateJobs = [:]
         transcriptsBySessionId.removeAll()
         transcriptLimitsBySessionId.removeAll()
         streamingMessagesBySessionId.removeAll()

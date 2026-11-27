@@ -12,6 +12,7 @@ public enum SuperHarnessServerEvent: Sendable {
     case activity([String])
     case usage(UsageSnapshot)
     case state(SuperHarnessState)
+    case harnessUpdate(HarnessUpdateJob)
 }
 
 public struct ConnectionTestResult: Sendable, Equatable {
@@ -74,6 +75,9 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse
     func setSessionUnread(sessionId: String, unread: Bool) async throws
     func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse
+    /// Asks the host to run a harness's own updater. Progress arrives as `.harnessUpdate` events.
+    func startHarnessUpdate(harness: HarnessGroup) async throws -> HarnessUpdateStartResponse
+    func cancelHarnessUpdate(harness: HarnessGroup) async throws
     func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment
     func uploadAttachmentData(_ data: Data, mimeType: String, filename: String?) async throws -> ImageAttachment
     func registerPushDevice(rid: String, relayUrl: String, enabled: Bool) async -> Bool
@@ -105,6 +109,10 @@ public extension SuperHarnessClientProtocol {
     func updateSettings(harnessOrder: [String]) async throws -> SuperHarnessSettings? { nil }
     func updateSettings(pinnedOrder: [String]) async throws -> SuperHarnessSettings? { nil }
     func updateSettings(enabledHarnesses: [String: Bool]) async throws -> SuperHarnessSettings? { nil }
+    func startHarnessUpdate(harness: HarnessGroup) async throws -> HarnessUpdateStartResponse {
+        HarnessUpdateStartResponse(ok: false, job: nil, error: "Updates are not available here.")
+    }
+    func cancelHarnessUpdate(harness: HarnessGroup) async throws {}
 }
 
 private final class LockedEventIdBox: @unchecked Sendable {
@@ -540,6 +548,17 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
         return try await request(path: "/api/control-harness", method: "POST", body: ControlBody(harness: harness, action: action))
     }
 
+    public func startHarnessUpdate(harness: HarnessGroup) async throws -> HarnessUpdateStartResponse {
+        struct Empty: Encodable {}
+        return try await request(path: "/api/harnesses/\(harness.rawValue)/update", method: "POST", body: Empty())
+    }
+
+    public func cancelHarnessUpdate(harness: HarnessGroup) async throws {
+        struct Empty: Encodable {}
+        struct Reply: Decodable { let ok: Bool }
+        let _: Reply = try await request(path: "/api/harnesses/\(harness.rawValue)/update/cancel", method: "POST", body: Empty())
+    }
+
     public func uploadAttachment(dataUrl: String, filename: String?) async throws -> ImageAttachment {
         struct AttachmentBody: Encodable { let dataUrl: String; let filename: String? }
         do {
@@ -717,6 +736,10 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
                     case "state":
                         if let state = try? jsonDecoder.decode(SuperHarnessState.self, from: data) {
                             continuation.yield(.state(state))
+                        }
+                    case "harness_update":
+                        if let job = try? jsonDecoder.decode(HarnessUpdateJob.self, from: data) {
+                            continuation.yield(.harnessUpdate(job))
                         }
                     default:
                         break

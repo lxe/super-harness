@@ -286,6 +286,8 @@ public struct HarnessDetection: Codable, Identifiable, Sendable, Equatable {
     public var totalSessionCount: Int
     public var capabilities: HarnessCapabilities
     public var notes: String?
+    /// Installed and latest versions, and how to update. Absent on hosts that do not check.
+    public var update: HarnessUpdateInfo?
 
     public init(
         id: HarnessGroup,
@@ -300,11 +302,13 @@ public struct HarnessDetection: Codable, Identifiable, Sendable, Equatable {
         activeSessionCount: Int = 0,
         totalSessionCount: Int = 0,
         capabilities: HarnessCapabilities = HarnessCapabilities(),
-        notes: String? = nil
+        notes: String? = nil,
+        update: HarnessUpdateInfo? = nil
     ) {
         self.id = id
         self.name = name
         self.installed = installed
+        self.update = update
         self.binaryPath = binaryPath
         self.version = version
         self.runningProcesses = runningProcesses
@@ -332,7 +336,101 @@ public struct HarnessDetection: Codable, Identifiable, Sendable, Equatable {
         totalSessionCount = try c.decodeIfPresent(Int.self, forKey: .totalSessionCount) ?? 0
         capabilities = try c.decodeIfPresent(HarnessCapabilities.self, forKey: .capabilities) ?? HarnessCapabilities()
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        update = try? c.decodeIfPresent(HarnessUpdateInfo.self, forKey: .update)
     }
+}
+
+// MARK: - Harness updates
+
+/// What the host knows about a harness's version: what is installed, what is newest, and
+/// whether the host can run the updater itself.
+public struct HarnessUpdateInfo: Codable, Sendable, Equatable {
+    public var current: String?
+    public var latest: String?
+    public var updateAvailable: Bool
+    /// "command": the host can run the updater. "manual": it shows `manualHint` instead.
+    public var method: String
+    public var manualHint: String?
+    public var checkError: String?
+
+    public init(current: String? = nil, latest: String? = nil, updateAvailable: Bool = false, method: String = "command", manualHint: String? = nil, checkError: String? = nil) {
+        self.current = current
+        self.latest = latest
+        self.updateAvailable = updateAvailable
+        self.method = method
+        self.manualHint = manualHint
+        self.checkError = checkError
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        current = try c.decodeIfPresent(String.self, forKey: .current)
+        latest = try c.decodeIfPresent(String.self, forKey: .latest)
+        updateAvailable = try c.decodeIfPresent(Bool.self, forKey: .updateAvailable) ?? false
+        method = try c.decodeIfPresent(String.self, forKey: .method) ?? "manual"
+        manualHint = try c.decodeIfPresent(String.self, forKey: .manualHint)
+        checkError = try c.decodeIfPresent(String.self, forKey: .checkError)
+    }
+
+    public var canRunUpdater: Bool { method == "command" }
+
+    /// "1.4.0 → 1.6.1", or just the newest version when the installed one is unknown.
+    public var versionChange: String {
+        switch (current, latest) {
+        case let (from?, to?): return "\(from) → \(to)"
+        case let (nil, to?): return to
+        default: return ""
+        }
+    }
+}
+
+public enum HarnessUpdatePhase: String, Codable, Sendable {
+    case waiting, updating, restarting, done, failed, cancelled
+
+    public var isRunning: Bool { self == .waiting || self == .updating || self == .restarting }
+}
+
+/// One run of a harness's updater on the host. Progress arrives as `harness_update` events.
+public struct HarnessUpdateJob: Codable, Sendable, Equatable {
+    public var id: String
+    public var harness: HarnessGroup
+    public var phase: HarnessUpdatePhase
+    public var from: String?
+    public var to: String?
+    public var step: String?
+    public var waitingFor: Int?
+    public var message: String?
+
+    public init(id: String, harness: HarnessGroup, phase: HarnessUpdatePhase, from: String? = nil, to: String? = nil, step: String? = nil, waitingFor: Int? = nil, message: String? = nil) {
+        self.id = id
+        self.harness = harness
+        self.phase = phase
+        self.from = from
+        self.to = to
+        self.step = step
+        self.waitingFor = waitingFor
+        self.message = message
+    }
+
+    /// One line for the row, e.g. "Updating to 1.6.1…".
+    public var statusLine: String {
+        switch phase {
+        case .waiting:
+            let count = waitingFor ?? 0
+            return count > 0 ? "Waiting for \(count) working \(count == 1 ? "session" : "sessions")…" : "Waiting to start…"
+        case .updating: return to.map { "Updating to \($0)…" } ?? "Updating…"
+        case .restarting: return "Restarting…"
+        case .done: return message ?? (to.map { "Updated to \($0)" } ?? "Updated")
+        case .failed: return message ?? "The update failed"
+        case .cancelled: return "Update cancelled"
+        }
+    }
+}
+
+public struct HarnessUpdateStartResponse: Codable, Sendable {
+    public var ok: Bool
+    public var job: HarnessUpdateJob?
+    public var error: String?
 }
 
 // MARK: - UnifiedSession (tolerant decoding for both full bootstrap and subset /api/sessions)

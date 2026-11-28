@@ -333,10 +333,11 @@ final class UnifiedModelsTests: XCTestCase {
     }
 
     func testShimmerBandSweepsAcrossTheTextOncePerPeriod() {
-        XCTAssertEqual(SHShimmerText.bandCenter(at: 0, period: 2.6), -0.6, accuracy: 0.0001, "starts left of the text")
-        XCTAssertEqual(SHShimmerText.bandCenter(at: 1.3, period: 2.6), 0.5, accuracy: 0.0001, "mid-sweep is the middle of the text")
-        XCTAssertEqual(SHShimmerText.bandCenter(at: 2.599, period: 2.6), 1.6, accuracy: 0.01, "ends right of the text")
-        XCTAssertEqual(SHShimmerText.bandCenter(at: 2.6 * 7 + 1.3, period: 2.6), 0.5, accuracy: 0.0001, "repeats")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 0, period: 2.2), -0.35, accuracy: 0.0001, "starts just left of the text")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 1.1, period: 2.2), 0.5, accuracy: 0.0001, "mid-sweep is the middle of the text")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 2.199, period: 2.2), 1.35, accuracy: 0.01, "ends just right of the text")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 0.55, period: 2.2), 0.075, accuracy: 0.0001, "moves at a steady pace")
+        XCTAssertEqual(SHShimmerText.bandCenter(at: 2.2 * 7 + 1.1, period: 2.2), 0.5, accuracy: 0.0001, "repeats")
     }
 
     func testHarnessOrderNormalizesAndMoves() throws {

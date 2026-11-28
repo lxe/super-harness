@@ -648,7 +648,7 @@ struct SHShimmerText: View {
     let text: String
     let font: Font
     let isActive: Bool
-    var period: Double = 2.6
+    var period: Double = 2.2
     /// The text colour while nothing is working.
     var idleColor: Color = SHColor.inkPrimary
 
@@ -656,37 +656,54 @@ struct SHShimmerText: View {
 
     private static let dim = Color(red: 161 / 255, green: 166 / 255, blue: 179 / 255).opacity(0.72)
     private static let bright = Color.white
-    /// The band: resting grey at both ends and a tight white core, so the highlight reads as
-    /// a clear glint crossing the text while the resting colour stays as it was.
+    /// The band: resting grey at both ends and a white core with soft shoulders, so the
+    /// highlight reads as a clear glint crossing the text while the resting colour stays put.
     private static let band = Gradient(stops: [
         .init(color: dim, location: 0),
-        .init(color: dim, location: 0.22),
-        .init(color: bright, location: 0.44),
-        .init(color: bright, location: 0.56),
-        .init(color: dim, location: 0.78),
+        .init(color: dim, location: 0.12),
+        .init(color: bright, location: 0.42),
+        .init(color: bright, location: 0.58),
+        .init(color: dim, location: 0.88),
         .init(color: dim, location: 1),
     ])
+    /// The glow: white only under the band's core. Drawn blurred and added on top of the
+    /// text, it gives the white letters a soft halo, which reads as brighter than white.
+    private static let glow = Gradient(stops: [
+        .init(color: .clear, location: 0),
+        .init(color: .clear, location: 0.3),
+        .init(color: .white, location: 0.5),
+        .init(color: .clear, location: 0.7),
+        .init(color: .clear, location: 1),
+    ])
+    /// Half the band's width, in units of the text width.
+    private static let bandHalfWidth = 0.6
 
-    /// Centre of the bright band at `time`, in units of the text width. It travels from just
-    /// left of the text to just right of it, eased in and out, then starts again.
+    /// Centre of the bright band at `time`, in units of the text width. It crosses the text
+    /// at a steady pace and starts again as soon as its light has left the right edge, so
+    /// some part of the text is lit for nearly the whole period.
     nonisolated static func bandCenter(at time: Double, period: Double) -> Double {
         let linear = (time / period).truncatingRemainder(dividingBy: 1)
         let progress = linear < 0 ? linear + 1 : linear
-        let eased = 0.5 - 0.5 * cos(progress * .pi)
-        return -0.6 + eased * 2.2
+        return -0.35 + progress * 1.7
     }
 
     var body: some View {
         if isActive && !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
                 let center = Self.bandCenter(at: context.date.timeIntervalSinceReferenceDate, period: period)
-                label.foregroundStyle(
-                    LinearGradient(
-                        gradient: Self.band,
-                        startPoint: UnitPoint(x: center - 0.6, y: 0.5),
-                        endPoint: UnitPoint(x: center + 0.6, y: 0.5)
-                    )
-                )
+                let start = UnitPoint(x: center - Self.bandHalfWidth, y: 0.5)
+                let end = UnitPoint(x: center + Self.bandHalfWidth, y: 0.5)
+                label
+                    .foregroundStyle(LinearGradient(gradient: Self.band, startPoint: start, endPoint: end))
+                    .overlay {
+                        label
+                            .foregroundStyle(LinearGradient(gradient: Self.glow, startPoint: start, endPoint: end))
+                            .blur(radius: 3.5)
+                            .opacity(0.6)
+                            .blendMode(.plusLighter)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
             }
             .accessibilityLabel("\(text), working")
         } else {

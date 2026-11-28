@@ -903,6 +903,22 @@ describe('Codex SQLite paginated loading & fingerprinting', () => {
     ]);
   });
 
+  it('extracts [Attached video: ...] lines (mobile sends) into video blocks', () => {
+    const res = extractAttachedImagesFromText(
+      'Opened this session and it was empty.\n\n[Attached video: /home/u/.config/super-harness/attachments/123-video-1.mp4]'
+    );
+    expect(res.text).toBe('Opened this session and it was empty.');
+    expect(res.images).toEqual([]);
+    expect(res.videos).toEqual([
+      {
+        type: 'video',
+        path: '/home/u/.config/super-harness/attachments/123-video-1.mp4',
+        name: '123-video-1.mp4',
+        mimeType: 'video/mp4',
+      },
+    ]);
+  });
+
   it('renders Codex user [Attached image], localImage, assistant imageView (deduped), and imageGeneration blocks', () => {
     const rows = [
       {

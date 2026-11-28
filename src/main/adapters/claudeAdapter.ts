@@ -1343,7 +1343,7 @@ export function parseClaudeJsonlLines(
         consumeQueuedText(prompt);
         if (!isInternalClaudeQueueContent(prompt)) {
           const extracted = extractAttachedImagesFromText(stripPastedContentWrappers(prompt));
-          const blocks: UnifiedBlock[] = [...extracted.images];
+          const blocks: UnifiedBlock[] = [...extracted.images, ...extracted.videos];
           if (extracted.text.trim()) blocks.push({ type: 'text', text: extracted.text });
           if (blocks.length > 0) {
             currentAssistant = null;
@@ -1441,7 +1441,7 @@ export function parseClaudeJsonlLines(
         }
 
         const trimmed = extracted.text.trim();
-        if (!trimmed && allImages.length === 0) return;
+        if (!trimmed && allImages.length === 0 && extracted.videos.length === 0) return;
 
         // Hide Claude Code's internal local-command-caveat and image coordinate-scaling meta notes
         if (
@@ -1513,7 +1513,7 @@ export function parseClaudeJsonlLines(
           return;
         }
 
-        const userBlocks: UnifiedBlock[] = [...allImages];
+        const userBlocks: UnifiedBlock[] = [...allImages, ...extracted.videos];
         if (trimmed) {
           userBlocks.push({ type: 'text', text: extracted.text });
         }
@@ -1751,7 +1751,7 @@ export function parseClaudeJsonlLines(
   for (const entry of rawNativeQueue) {
     if (entry.isInternal) continue;
     const extracted = extractAttachedImagesFromText(stripPastedContentWrappers(entry.item.text));
-    const blocks: UnifiedBlock[] = [...extracted.images];
+    const blocks: UnifiedBlock[] = [...extracted.images, ...extracted.videos];
     if (extracted.text.trim()) blocks.push({ type: 'text', text: extracted.text });
     if (blocks.length === 0) continue;
     messages.push({

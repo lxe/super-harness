@@ -256,33 +256,50 @@ export function moveFileAttachmentsIntoPrompt(
   };
 }
 
+const ATTACHED_VIDEO_MIME_BY_EXT: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+};
+
 /**
- * Extracts `[Attached image: /abs/path/to/file.png]` lines emitted by
- * `formatPromptWithImagePaths` into structured `image` blocks and returns
- * the remaining clean prompt text.
+ * Extracts `[Attached image: /abs/path.png]` and `[Attached video: /abs/path.mp4]` lines (written
+ * by `formatPromptWithImagePaths` and by the mobile send endpoint) into structured `image` and
+ * `video` blocks, and returns the remaining prompt text.
  */
 export function extractAttachedImagesFromText(rawText: string): {
   text: string;
   images: Array<Extract<UnifiedBlock, { type: 'image' }>>;
+  videos: Array<Extract<UnifiedBlock, { type: 'video' }>>;
 } {
-  if (!rawText || !rawText.includes('[Attached image:')) {
-    return { text: rawText, images: [] };
+  if (!rawText || !/\[Attached (image|video):/i.test(rawText)) {
+    return { text: rawText, images: [], videos: [] };
   }
   const images: Array<Extract<UnifiedBlock, { type: 'image' }>> = [];
+  const videos: Array<Extract<UnifiedBlock, { type: 'video' }>> = [];
   const seen = new Set<string>();
   const keptLines: string[] = [];
 
   for (const line of rawText.split('\n')) {
-    const m = line.match(/^\s*\[Attached image:\s*(.+?)\]\s*$/i);
+    const m = line.match(/^\s*\[Attached (image|video):\s*(.+?)\]\s*$/i);
     if (m) {
-      const imgPath = m[1].trim();
-      if (imgPath && !seen.has(imgPath)) {
-        seen.add(imgPath);
-        images.push({
-          type: 'image',
-          path: imgPath,
-          name: path.basename(imgPath),
-        });
+      const kind = m[1].toLowerCase();
+      const mediaPath = m[2].trim();
+      if (mediaPath && !seen.has(mediaPath)) {
+        seen.add(mediaPath);
+        if (kind === 'video') {
+          videos.push({
+            type: 'video',
+            path: mediaPath,
+            name: path.basename(mediaPath),
+            mimeType: ATTACHED_VIDEO_MIME_BY_EXT[path.extname(mediaPath).toLowerCase()],
+          });
+        } else {
+          images.push({ type: 'image', path: mediaPath, name: path.basename(mediaPath) });
+        }
       }
       continue;
     }
@@ -292,6 +309,7 @@ export function extractAttachedImagesFromText(rawText: string): {
   return {
     text: keptLines.join('\n').trim(),
     images,
+    videos,
   };
 }
 

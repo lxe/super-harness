@@ -37,6 +37,7 @@ import {
 import {
   computeFileFingerprint,
   createUniqueIdGenerator,
+  extractAttachedImagesFromText,
   type DaemonControlAction,
   type DispatchContext,
   type HarnessDriver,
@@ -653,7 +654,17 @@ export function parseAntigravityJsonlLines(
           });
         }
       }
-      if (content) userBlocks.push({ type: 'text', text: content });
+      // Mobile sends carry videos and images as `[Attached video: /path]` lines in the text.
+      const extracted = extractAttachedImagesFromText(content);
+      const mediaPaths = new Set(
+        userBlocks.map((b) => (b.type === 'image' || b.type === 'video' ? b.path : ''))
+      );
+      for (const b of [...extracted.images, ...extracted.videos]) {
+        if (mediaPaths.has(b.path)) continue;
+        mediaPaths.add(b.path);
+        userBlocks.push(b);
+      }
+      if (extracted.text) userBlocks.push({ type: 'text', text: extracted.text });
       if (userBlocks.length === 0) continue;
 
       currentAssistant = null;

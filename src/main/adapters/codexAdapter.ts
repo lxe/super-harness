@@ -506,7 +506,7 @@ function extractCodexContentBlocks(content: unknown, fallbackText?: string): Uni
       .trim();
   }
 
-  const blocks: UnifiedBlock[] = [...images];
+  const blocks: UnifiedBlock[] = [...images, ...extracted.videos];
   if (cleanText.trim()) {
     blocks.push({ type: 'text', text: cleanText });
   }

@@ -286,6 +286,60 @@ export class ControlServer {
    * Compresses raster images (PNG/JPEG/etc.) into cached lossy WebP for fast mobile delivery.
    * Returns cached WebP file path, or null to fall back to the original file.
    */
+  /**
+   * One JPEG frame from a video, at most `maxWidth` wide, cached next to the WebP thumbnails.
+   * Grabs a frame half a second in (the first frame is often black) and falls back to the first
+   * frame for clips shorter than that.
+   */
+  private async videoPosterToCachedJpeg(
+    filePath: string,
+    stat: fs.Stats,
+    maxWidth: number
+  ): Promise<string | null> {
+    const key = crypto
+      .createHash('sha256')
+      .update(`${filePath}|${stat.mtimeMs}|${stat.size}|poster|w${maxWidth}`)
+      .digest('hex');
+    const cachePath = path.join(WEBP_CACHE_DIR, `${key}.jpg`);
+    if (fs.existsSync(cachePath)) return cachePath;
+    const existing = this.webpInFlight.get(key);
+    if (existing) return existing;
+
+    const job = (async (): Promise<string | null> => {
+      try {
+        fs.mkdirSync(WEBP_CACHE_DIR, { recursive: true });
+        const tmpPath = `${cachePath}.${process.pid}.${Date.now()}.tmp.jpg`;
+        for (const seek of [['-ss', '0.5'], []]) {
+          try {
+            await execFileAsync(
+              'ffmpeg',
+              [
+                '-loglevel', 'error', '-y', ...seek, '-i', filePath, '-frames:v', '1',
+                '-vf', `scale='min(${maxWidth},iw)':-2`, '-q:v', '4', tmpPath,
+              ],
+              { timeout: 12_000 }
+            );
+          } catch {
+            continue;
+          }
+          if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 0) {
+            fs.renameSync(tmpPath, cachePath);
+            return cachePath;
+          }
+        }
+        fs.rmSync(tmpPath, { force: true });
+        return null;
+      } catch {
+        return null;
+      } finally {
+        this.webpInFlight.delete(key);
+      }
+    })();
+
+    this.webpInFlight.set(key, job);
+    return job;
+  }
+
   private async transcodeToCachedWebp(
     filePath: string,
     stat: fs.Stats,
@@ -767,6 +821,26 @@ export class ControlServer {
             !rawRequested &&
             TRANSCODABLE_IMAGE_EXTS.has(ext) &&
             (ext === '.png' || hasExplicitWidth || stat.size > 45_000);
+
+          // A video asked for at a width (`w`) gets a poster frame, so lists can show a thumbnail
+          // without downloading the clip. `raw=1` or no width still streams the video itself.
+          if (!rawRequested && hasExplicitWidth && contentType.startsWith('video/')) {
+            const maxW = Math.max(64, Math.min(1600, Math.round(widthParam)));
+            const poster = await this.videoPosterToCachedJpeg(filePath, stat, maxW);
+            if (poster && fs.existsSync(poster)) {
+              const posterStat = fs.statSync(poster);
+              res.writeHead(200, {
+                'Content-Type': 'image/jpeg',
+                'Content-Length': String(posterStat.size),
+                'Cache-Control': 'private, max-age=3600',
+              });
+              fs.createReadStream(poster).pipe(res);
+              return;
+            }
+            res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+            res.end(JSON.stringify({ error: 'No poster frame for this video' }));
+            return;
+          }
 
           if (shouldCompressWebp) {
             const maxW = hasExplicitWidth ? Math.max(64, Math.min(2400, Math.round(widthParam))) : 1600;

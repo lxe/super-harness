@@ -3394,9 +3394,16 @@ public final class AppStore {
         settings.enabledHarnesses?[harness.rawValue] ?? true
     }
 
+    /// The harnesses the bottom dock shows: the saved order without the disabled ones.
+    public var dockHarnesses: [HarnessGroup] {
+        harnessOrder.filter { isHarnessEnabled($0) }
+    }
+
     /// Changes the desktop's own setting (settings.enabledHarnesses), sending the full map so
     /// the host never sees a partial one.
     public func setHarnessEnabled(_ harness: HarnessGroup, enabled: Bool) async {
+        // A disabled harness leaves the dock, so the list must not stay filtered to it.
+        if !enabled, selectedHarnessFilter == harness { selectedHarnessFilter = nil }
         var map: [String: Bool] = [:]
         for group in HarnessGroup.allCases { map[group.rawValue] = isHarnessEnabled(group) }
         for (key, value) in settings.enabledHarnesses ?? [:] where map[key] == nil { map[key] = value }

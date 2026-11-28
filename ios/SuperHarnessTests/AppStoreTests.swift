@@ -16,6 +16,18 @@ final class AppStoreTests: XCTestCase {
         return store
     }
 
+    func testDisablingHarnessRemovesItFromDockAndClearsItsFilter() async throws {
+        let store = await makeStore()
+        XCTAssertTrue(store.dockHarnesses.contains(.pi))
+        store.selectedHarnessFilter = .pi
+
+        await store.setHarnessEnabled(.pi, enabled: false)
+
+        XCTAssertFalse(store.dockHarnesses.contains(.pi))
+        XCTAssertEqual(store.dockHarnesses, store.harnessOrder.filter { $0 != .pi })
+        XCTAssertNil(store.selectedHarnessFilter)
+    }
+
     func testDraftsSurviveRelaunchUntilSentOrDeleted() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("AppStoreTests-drafts-\(UUID().uuidString)", isDirectory: true)

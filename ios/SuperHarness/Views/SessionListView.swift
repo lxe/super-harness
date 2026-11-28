@@ -1015,7 +1015,7 @@ private struct HarnessSwitcherStrip: View {
     private static let stripSpace = "harnessStrip"
 
     private var totalSlots: Int {
-        max(1, store.harnessOrder.count)
+        max(1, store.dockHarnesses.count)
     }
 
     private var needsHorizontalScroll: Bool {
@@ -1037,7 +1037,7 @@ private struct HarnessSwitcherStrip: View {
 
     private var chipsRow: some View {
         HStack(spacing: Self.cellSpacing) {
-            ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
+            ForEach(Array(store.dockHarnesses.enumerated()), id: \.element) { index, group in
                 let isDragged = drag?.harness == group
                 harnessChip(group)
                     // The shortcuts are attached to the gauge itself, so their arrow points at
@@ -1072,7 +1072,7 @@ private struct HarnessSwitcherStrip: View {
                     )
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: store.harnessOrder)
+        .animation(.easeInOut(duration: 0.18), value: store.dockHarnesses)
         .animation(.easeOut(duration: 0.15), value: drag?.harness)
     }
 
@@ -1128,11 +1128,20 @@ private struct HarnessSwitcherStrip: View {
             guard let state else { return }
             // The harness slot under the finger takes the dragged gauge.
             let raw = Int(((state.x - Self.stripPadding) / (cellWidth + Self.cellSpacing)).rounded(.down))
-            let targetIndex = min(max(raw, 0), store.harnessOrder.count - 1)
-            let target = store.harnessOrder[targetIndex]
+            let docked = store.dockHarnesses
+            guard !docked.isEmpty else { return }
+            let targetIndex = min(max(raw, 0), docked.count - 1)
+            let target = docked[targetIndex]
             if target != state.harness {
                 store.moveHarness(state.harness, onto: target)
                 triggerSelectionHaptic()
+            }
+        }
+        // A harness disabled elsewhere (the desktop, or Settings on this phone) leaves the dock;
+        // clear the list filter if it pointed at that harness.
+        .onChange(of: store.dockHarnesses) { _, docked in
+            if let filter = store.selectedHarnessFilter, !docked.contains(filter) {
+                store.selectedHarnessFilter = nil
             }
         }
         .onChange(of: drag?.harness) { old, new in

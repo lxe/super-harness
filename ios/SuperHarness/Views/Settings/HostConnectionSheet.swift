@@ -37,6 +37,7 @@ public struct HostConnectionSheet: View {
                     if !store.needsPairing {
                         machinesSection
                         appearanceSection
+                        listAppearanceSection
                         harnessSection
                         reasoningSection
                         notificationSection
@@ -233,6 +234,45 @@ public struct HostConnectionSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .shRecessedWell(cornerRadius: SHRadius.md)
                 .accessibilityIdentifier("settings.chatPreview")
+            }
+            .padding(Self.rowInset)
+        }
+    }
+
+    // MARK: - List Appearance
+
+    private static let listSampleSession = UnifiedSession(
+        id: "settings-list-sample",
+        harness: .claudeCli,
+        title: "Refactor the session store",
+        preview: "Done: the list reads from one source",
+        cwd: "/",
+        status: .idle,
+        updatedAt: (Date().timeIntervalSince1970 - 540) * 1000,
+        summary: "Done: the list reads from one source",
+        unread: false
+    )
+
+    private var listAppearanceSection: some View {
+        section("List Appearance") {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Text Size")
+                        .font(SHTypography.label)
+                        .foregroundStyle(SHColor.inkSecondary)
+                    SHChoiceBar(
+                        options: ChatTextSize.allCases.map { ($0, $0 == .extraLarge ? "X-Large" : $0.label) },
+                        selection: $store.listTextSize
+                    )
+                    .accessibilityIdentifier("settings.listTextSize")
+                }
+                // Live sample row drawn at the chosen size.
+                SessionListRow(session: Self.listSampleSession, isBusy: false, isPinned: true)
+                    .environment(\.shListTextScale, store.listTextSize.scale)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .shRecessedWell(cornerRadius: SHRadius.md)
+                    .accessibilityIdentifier("settings.listPreview")
             }
             .padding(Self.rowInset)
         }

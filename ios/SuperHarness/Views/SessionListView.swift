@@ -630,7 +630,7 @@ public struct SessionListView: View {
                                     // the same sign a working row gives.
                                     SHShimmerText(
                                         text: preserveCase ? section.title : section.title.uppercased(),
-                                        font: SHTypography.micro.weight(.semibold),
+                                        font: .system(size: 12.5 * store.listTextSize.scale, weight: .semibold),
                                         isActive: store.isAnyWorking(in: section),
                                         idleColor: SHColor.inkMuted
                                     )
@@ -772,6 +772,7 @@ public struct SessionListView: View {
                 // With one harness selected every row is that harness, so the logo adds nothing.
                 showsHarnessLogo: store.selectedHarnessFilter == nil
             )
+            .environment(\.shListTextScale, store.listTextSize.scale)
             .padding(.horizontal, 8)
             .padding(.vertical, 9)
             .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
@@ -1217,8 +1218,9 @@ struct SessionListRow: View {
     let isBusy: Bool
     var isPinned: Bool = false
     var showsHarnessLogo: Bool = true
-    /// Height of the right slot in every state (time, working mark, question mark).
-    private static let trailingSlotHeight: CGFloat = 18
+    @Environment(\.shListTextScale) private var scale
+    /// Height of the right slot in every state (time, question mark).
+    private var trailingSlotHeight: CGFloat { 18 * scale }
 
     var body: some View {
         let hostBadge = SessionRowFormatting.hostBadgeLabel(session.hostAddress)
@@ -1227,19 +1229,19 @@ struct SessionListRow: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .center, spacing: 7) {
                 if showsHarnessLogo {
-                    HarnessLogoView(harness: session.harness, size: 15)
-                        .frame(width: 16, height: 16)
+                    HarnessLogoView(harness: session.harness, size: 15 * scale)
+                        .frame(width: 16 * scale, height: 16 * scale)
                 }
 
                 if isPinned {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 10 * scale, weight: .medium))
                         .foregroundStyle(SHColor.inkSecondary)
                 }
 
                 SHShimmerText(
                     text: session.displayTitle,
-                    font: SHTypography.label.weight(.medium),
+                    font: .system(size: 14.5 * scale, weight: .medium),
                     isActive: isBusy
                 )
 
@@ -1249,14 +1251,14 @@ struct SessionListRow: View {
                 // the only sign that it is working. The fixed height keeps rows the same height.
                 if session.status == .waitingInput && !isBusy {
                     Image(systemName: "questionmark.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16 * scale, weight: .semibold))
                         .foregroundStyle(SHColor.statusWarning)
-                        .frame(height: Self.trailingSlotHeight)
+                        .frame(height: trailingSlotHeight)
                         .accessibilityLabel("Question pending")
                 } else {
                     HStack(spacing: 6) {
                         Text(UsageMetrics.formatUpdatedAgo(session.updatedAt))
-                            .font(SHTypography.micro.monospacedDigit())
+                            .font(.system(size: 12.5 * scale).monospacedDigit())
                             .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)
                             .fixedSize()
                         if session.isUnread {
@@ -1267,7 +1269,7 @@ struct SessionListRow: View {
                                 .accessibilityIdentifier("row.unread")
                         }
                     }
-                    .frame(height: Self.trailingSlotHeight)
+                    .frame(height: trailingSlotHeight)
                 }
             }
 
@@ -1275,7 +1277,7 @@ struct SessionListRow: View {
                 HStack(alignment: .center, spacing: 6) {
                     if let hostBadge, let address = session.hostAddress {
                         Text(hostBadge)
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 10 * scale, weight: .semibold, design: .monospaced))
                             .foregroundStyle(SHColor.inkSecondary)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -1294,12 +1296,12 @@ struct SessionListRow: View {
                         HStack(alignment: .center, spacing: 4) {
                             if subtitle.isDone {
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .font(.system(size: 9.5 * scale, weight: .semibold))
                                     .foregroundStyle(SHColor.inkFaint)
                                     .accessibilityLabel("Done")
                             }
                             Text(subtitle.text)
-                                .font(SHTypography.micro)
+                                .font(.system(size: 12.5 * scale))
                                 .foregroundStyle(SHColor.inkMuted)
                                 .lineLimit(1)
                                 .truncationMode(.tail)

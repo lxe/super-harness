@@ -577,6 +577,19 @@ public struct SHChatMetrics: Equatable, Sendable {
     public var mono: Font { font(12.5, design: .monospaced) }
 }
 
+private struct SHListTextScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+public extension EnvironmentValues {
+    /// Multiplies the session list's text and glyph sizes. Chosen in Settings, apart from
+    /// the chat text size.
+    var shListTextScale: CGFloat {
+        get { self[SHListTextScaleKey.self] }
+        set { self[SHListTextScaleKey.self] = newValue }
+    }
+}
+
 private struct SHChatMetricsKey: EnvironmentKey {
     static let defaultValue = SHChatMetrics()
 }

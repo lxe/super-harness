@@ -169,6 +169,7 @@ public final class AppStore {
         static let appIconBadgeEnabled = "sh.appIconBadgeEnabled"
         static let allowExtremeReasoning = "sh.allowExtremeReasoning"
         static let chatTextSize = "sh.chatTextSize"
+        static let listTextSize = "sh.listTextSize"
         static let chatDensity = "sh.chatDensity"
         static let harnessOrder = "sh.harnessOrder"
         static let pinnedOrder = "sh.pinnedOrder"
@@ -290,6 +291,10 @@ public final class AppStore {
     /// Chat text size and spacing, chosen in Settings and kept on this device.
     public var chatTextSize: ChatTextSize = .standard {
         didSet { defaults.set(chatTextSize.rawValue, forKey: StorageKey.chatTextSize) }
+    }
+    /// Text size of the session list, chosen in Settings and kept on this device.
+    public var listTextSize: ChatTextSize = .standard {
+        didSet { defaults.set(listTextSize.rawValue, forKey: StorageKey.listTextSize) }
     }
     public var chatDensity: ChatDensity = .comfortable {
         didSet { defaults.set(chatDensity.rawValue, forKey: StorageKey.chatDensity) }
@@ -555,6 +560,9 @@ public final class AppStore {
         self.allowExtremeReasoning = defaults.bool(forKey: StorageKey.allowExtremeReasoning)
         if let raw = defaults.string(forKey: StorageKey.chatTextSize), let size = ChatTextSize(rawValue: raw) {
             self.chatTextSize = size
+        }
+        if let raw = defaults.string(forKey: StorageKey.listTextSize), let size = ChatTextSize(rawValue: raw) {
+            self.listTextSize = size
         }
         if let raw = defaults.string(forKey: StorageKey.chatDensity), let density = ChatDensity(rawValue: raw) {
             self.chatDensity = density

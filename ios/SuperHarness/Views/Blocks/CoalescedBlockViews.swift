@@ -693,12 +693,12 @@ public struct ImageLightboxView: View {
     public let payload: LightboxPayload
     public let onLoadMedia: ((String) async -> Data?)?
     @Environment(\.dismiss) private var dismiss
-    @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
     #if canImport(UIKit)
     @State private var remoteImage: UIImage?
     #endif
     @State private var isLoadingRemote = false
+    @State private var showChrome = true
+    @State private var dismissDragProgress: CGFloat = 0
 
     public init(payload: LightboxPayload, onLoadMedia: ((String) async -> Data?)? = nil) {
         self.payload = payload
@@ -708,30 +708,28 @@ public struct ImageLightboxView: View {
     public var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.black
+                    .opacity(Double(max(0.15, 1.0 - dismissDragProgress * 0.85)))
+                    .ignoresSafeArea()
                 #if canImport(UIKit)
                 // Always prefer the full-resolution remote image once loaded; show any inline
                 // preview thumbnail only as an instant placeholder while full-res fetches.
                 if let uiImage = remoteImage ?? DataURLImageDecoder.decode(payload.dataUrl) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .scaleEffect(scale)
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    scale = min(max(lastScale * value, 1.0), 4.0)
-                                }
-                                .onEnded { _ in
-                                    lastScale = scale
-                                }
-                        )
-                        .onTapGesture(count: 2) {
-                            withAnimation(.spring(duration: 0.25)) {
-                                scale = scale > 1.1 ? 1.0 : 2.2
-                                lastScale = scale
+                    SHZoomableImageView(
+                        image: uiImage,
+                        onSingleTap: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showChrome.toggle()
                             }
+                        },
+                        onDragProgress: { progress in
+                            dismissDragProgress = progress
+                        },
+                        onDismiss: {
+                            dismiss()
                         }
+                    )
+                    .ignoresSafeArea()
                 } else if isLoadingRemote {
                     SHActivityPulse(tint: SHColor.inkPrimary, size: 22)
                 } else {
@@ -748,9 +746,21 @@ public struct ImageLightboxView: View {
                 }
                 #endif
             }
-            .navigationTitle(payload.title)
+            .navigationTitle(showChrome ? payload.title : "")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(showChrome ? .visible : .hidden, for: .navigationBar)
             .toolbar {
+                #if canImport(UIKit)
+                if let uiImage = remoteImage ?? DataURLImageDecoder.decode(payload.dataUrl) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        let previewImg = Image(uiImage: uiImage)
+                        ShareLink(item: previewImg, preview: SharePreview(payload.title, image: previewImg)) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(SHColor.inkPrimary)
+                        }
+                    }
+                }
+                #endif
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .foregroundStyle(SHColor.inkPrimary)
@@ -771,8 +781,252 @@ public struct ImageLightboxView: View {
                 #endif
             }
         }
+        .presentationBackground(.clear)
     }
 }
+
+#if canImport(UIKit)
+/// Idiomatic iOS `UIScrollView`-backed image viewer matching Apple Photos physics:
+/// smooth pinch-to-zoom around the focal point, momentum panning, rubber-band edge bounce,
+/// double-tap to zoom in/out at the tapped point, single-tap chrome toggle, and optional
+/// swipe-down-to-dismiss at 1x zoom.
+public struct SHZoomableImageView: UIViewRepresentable {
+    public let image: UIImage
+    public var onSingleTap: (() -> Void)? = nil
+    public var onDragProgress: ((CGFloat) -> Void)? = nil
+    public var onDismiss: (() -> Void)? = nil
+
+    public init(
+        image: UIImage,
+        onSingleTap: (() -> Void)? = nil,
+        onDragProgress: ((CGFloat) -> Void)? = nil,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        self.image = image
+        self.onSingleTap = onSingleTap
+        self.onDragProgress = onDragProgress
+        self.onDismiss = onDismiss
+    }
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(onSingleTap: onSingleTap, onDragProgress: onDragProgress, onDismiss: onDismiss)
+    }
+
+    public func makeUIView(context: Context) -> SHZoomScrollView {
+        let scrollView = SHZoomScrollView()
+        scrollView.delegate = context.coordinator
+        scrollView.backgroundColor = .clear
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.bouncesZoom = true
+        scrollView.decelerationRate = .fast
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 6.0
+
+        scrollView.setImage(image)
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+
+        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSingleTap(_:)))
+        singleTap.numberOfTapsRequired = 1
+        singleTap.require(toFail: doubleTap)
+        scrollView.addGestureRecognizer(singleTap)
+
+        if onDismiss != nil {
+            let dismissPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDismissPan(_:)))
+            dismissPan.delegate = context.coordinator
+            scrollView.addGestureRecognizer(dismissPan)
+            context.coordinator.dismissPan = dismissPan
+        }
+
+        context.coordinator.scrollView = scrollView
+        return scrollView
+    }
+
+    public func updateUIView(_ uiView: SHZoomScrollView, context: Context) {
+        context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onDragProgress = onDragProgress
+        context.coordinator.onDismiss = onDismiss
+        uiView.setImage(image)
+    }
+
+    public final class SHZoomScrollView: UIScrollView {
+        let imageView: UIImageView = {
+            let iv = UIImageView()
+            iv.contentMode = .scaleAspectFit
+            iv.isUserInteractionEnabled = true
+            return iv
+        }()
+
+        private var lastLayoutSize: CGSize = .zero
+        private var currentImageIdentity: ObjectIdentifier?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            addSubview(imageView)
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        func setImage(_ image: UIImage) {
+            let identity = ObjectIdentifier(image)
+            guard currentImageIdentity != identity else { return }
+            currentImageIdentity = identity
+            let prevSize = imageView.image?.size
+            imageView.image = image
+            // If swapping a full-res image over a same-aspect thumbnail, preserve zoom & offset.
+            if let prev = prevSize, prev.width > 0, prev.height > 0,
+               image.size.width > 0, image.size.height > 0,
+               abs((prev.width / prev.height) - (image.size.width / image.size.height)) < 0.03,
+               lastLayoutSize != .zero {
+                updateMaxZoomScale(for: image)
+                return
+            }
+            lastLayoutSize = .zero
+            setNeedsLayout()
+        }
+
+        public override func layoutSubviews() {
+            super.layoutSubviews()
+            let viewSize = bounds.size
+            guard viewSize.width > 1, viewSize.height > 1, let img = imageView.image,
+                  img.size.width > 0, img.size.height > 0 else { return }
+
+            if lastLayoutSize != viewSize {
+                lastLayoutSize = viewSize
+                zoomScale = 1.0
+                let scale = min(viewSize.width / img.size.width, viewSize.height / img.size.height)
+                let fitted = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+                imageView.transform = .identity
+                imageView.frame = CGRect(origin: .zero, size: fitted)
+                contentSize = fitted
+                updateMaxZoomScale(for: img)
+                centerImageView()
+            } else {
+                centerImageView()
+            }
+        }
+
+        private func updateMaxZoomScale(for img: UIImage) {
+            let viewSize = bounds.size
+            guard viewSize.width > 1, viewSize.height > 1 else { return }
+            let screenScale = window?.screen.scale ?? 3.0
+            let fittedScale = min(viewSize.width / img.size.width, viewSize.height / img.size.height)
+            let native1to1 = (img.scale / screenScale) / max(fittedScale, 0.001)
+            maximumZoomScale = min(max(6.0, native1to1 * 1.5), 16.0)
+        }
+
+        func centerImageView() {
+            let boundsSize = bounds.size
+            let content = contentSize
+            let offsetX = max((boundsSize.width - content.width) * 0.5, 0)
+            let offsetY = max((boundsSize.height - content.height) * 0.5, 0)
+            imageView.center = CGPoint(
+                x: content.width * 0.5 + offsetX,
+                y: content.height * 0.5 + offsetY
+            )
+        }
+    }
+
+    public final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+        weak var scrollView: SHZoomScrollView?
+        weak var dismissPan: UIPanGestureRecognizer?
+        var onSingleTap: (() -> Void)?
+        var onDragProgress: ((CGFloat) -> Void)?
+        var onDismiss: (() -> Void)?
+
+        init(
+            onSingleTap: (() -> Void)?,
+            onDragProgress: ((CGFloat) -> Void)?,
+            onDismiss: (() -> Void)?
+        ) {
+            self.onSingleTap = onSingleTap
+            self.onDragProgress = onDragProgress
+            self.onDismiss = onDismiss
+        }
+
+        public func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            (scrollView as? SHZoomScrollView)?.imageView
+        }
+
+        public func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            (scrollView as? SHZoomScrollView)?.centerImageView()
+        }
+
+        @objc func handleSingleTap(_ gesture: UITapGestureRecognizer) {
+            onSingleTap?()
+        }
+
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let sv = scrollView else { return }
+            if sv.zoomScale > sv.minimumZoomScale + 0.05 {
+                sv.setZoomScale(sv.minimumZoomScale, animated: true)
+            } else {
+                let targetScale = min(max(2.5, sv.maximumZoomScale * 0.4), sv.maximumZoomScale)
+                let point = gesture.location(in: sv.imageView)
+                let width = sv.bounds.width / targetScale
+                let height = sv.bounds.height / targetScale
+                let zoomRect = CGRect(
+                    x: point.x - width * 0.5,
+                    y: point.y - height * 0.5,
+                    width: width,
+                    height: height
+                )
+                sv.zoom(to: zoomRect, animated: true)
+            }
+        }
+
+        public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === dismissPan,
+                  let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                  let sv = scrollView else {
+                return true
+            }
+            // Only engage swipe-down-to-dismiss when resting at 1x zoom and dragging downward.
+            guard sv.zoomScale <= sv.minimumZoomScale + 0.01 else { return false }
+            let vel = pan.velocity(in: sv)
+            return vel.y > 0 && abs(vel.y) > abs(vel.x) * 1.2
+        }
+
+        @objc func handleDismissPan(_ pan: UIPanGestureRecognizer) {
+            guard let sv = scrollView else { return }
+            let translation = pan.translation(in: sv.superview)
+            let velocity = pan.velocity(in: sv.superview)
+            let dy = max(0, translation.y)
+            let progress = min(1, dy / 240.0)
+
+            switch pan.state {
+            case .began, .changed:
+                let scale = max(0.85, 1.0 - progress * 0.15)
+                sv.transform = CGAffineTransform(translationX: translation.x * 0.35, y: dy)
+                    .scaledBy(x: scale, y: scale)
+                onDragProgress?(progress)
+            case .ended, .cancelled, .failed:
+                if pan.state == .ended && (dy > 110 || velocity.y > 700) {
+                    onDismiss?()
+                } else {
+                    UIView.animate(
+                        withDuration: 0.28,
+                        delay: 0,
+                        usingSpringWithDamping: 0.85,
+                        initialSpringVelocity: 0
+                    ) {
+                        sv.transform = .identity
+                    }
+                    onDragProgress?(0)
+                }
+            default:
+                break
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - 2b. Video Media Card Block
 

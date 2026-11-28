@@ -669,13 +669,9 @@ private struct FilePreviewSheet: View {
     @ViewBuilder
     private var imagePreviewView: some View {
         if let imageData, let uiImage = UIImage(data: imageData) {
-            ScrollView([.vertical, .horizontal]) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .padding(16)
-            }
+            SHZoomableImageView(image: uiImage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
         } else {
             VStack(spacing: 10) {
                 ProgressView()

@@ -37,6 +37,7 @@ import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';
 import { PushNotifier } from './services/pushNotifier';
+import { removeControlEndpoint, writeControlEndpoint } from '../mcp/controlEndpoint';
 import {
   detectSystemApps,
   openPathWithApp,
@@ -1400,6 +1401,11 @@ app.whenReady().then(async () => {
   });
 
   await controlServer.start();
+  try {
+    writeControlEndpoint({ url: `http://127.0.0.1:${controlServer.port}`, token: controlServer.token });
+  } catch (err) {
+    console.error('[control] could not write the CLI endpoint file', err);
+  }
   await controlServer.syncMobileListener(store.getState().settings.mobileApi);
   void syncBonjour();
   registerIpcHandlers();
@@ -1441,6 +1447,7 @@ app.on('window-all-closed', () => {
   dispatcher.shutdown();
   bonjourAdvertiser.stop();
   controlServer.close();
+  removeControlEndpoint(controlServer.token);
   closeSqlitePool();
   if (process.platform !== 'darwin') {
     app.quit();

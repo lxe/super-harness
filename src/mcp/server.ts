@@ -1,16 +1,17 @@
+#!/usr/bin/env node
 /**
  * Standalone zero-dependency MCP stdio server (`super-harness-mcp`).
  * Spawned by Claude CLI (`--mcp-config`), Codex CLI (`-c mcp_servers...`), or
- * Antigravity CLI when running the Superharness Master Session.
+ * Antigravity CLI when running the Superharness Master Session, and usable from any
+ * harness on this machine while the app runs.
  *
  * Bridges MCP `tools/list` and `tools/call` to the Electron main process
- * loopback Control HTTP API (`SUPER_HARNESS_URL` + `SUPER_HARNESS_TOKEN`).
+ * loopback Control HTTP API (`SUPER_HARNESS_URL` + `SUPER_HARNESS_TOKEN`, or the
+ * endpoint file the running app writes; see controlEndpoint.ts).
  */
 
 import readline from 'node:readline';
-
-const BASE_URL = process.env.SUPER_HARNESS_URL || '';
-const TOKEN = process.env.SUPER_HARNESS_TOKEN || '';
+import { CONTROL_ENDPOINT_FILE, resolveControlEndpoint } from './controlEndpoint';
 
 const TOOLS = [
   {
@@ -225,13 +226,17 @@ const TOOLS = [
 ];
 
 async function apiRequest(method: string, pathAndQuery: string, body?: unknown): Promise<unknown> {
-  if (!BASE_URL || !TOKEN) {
-    throw new Error('SUPER_HARNESS_URL / SUPER_HARNESS_TOKEN not configured');
+  // Resolved per call, so a standalone server keeps working after the app restarts.
+  const endpoint = resolveControlEndpoint();
+  if (!endpoint) {
+    throw new Error(
+      `Superharness is not reachable: set SUPER_HARNESS_URL / SUPER_HARNESS_TOKEN or start the app (it writes ${CONTROL_ENDPOINT_FILE})`
+    );
   }
-  const res = await fetch(`${BASE_URL}${pathAndQuery}`, {
+  const res = await fetch(`${endpoint.url}${pathAndQuery}`, {
     method,
     headers: {
-      Authorization: `Bearer ${TOKEN}`,
+      Authorization: `Bearer ${endpoint.token}`,
       'Content-Type': 'application/json',
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,

@@ -700,6 +700,24 @@ export class ControlServer {
           const limit = body.limit ? Number(body.limit) : 80;
           this.watchedSessionByClient.set(clientId, sessionId);
           await this.hooks.watchSession(`mobile:${clientId}`, sessionId, limit);
+          if (sessionId) {
+            // Persist the read mark immediately on open rather than waiting for the next
+            // background discover() poll, so brief opens or quick back-navigations never
+            // snap the session back to unread.
+            const watched =
+              typeof this.registry.getSession === 'function'
+                ? this.registry.getSession(sessionId)
+                : this.registry.getCached?.().sessions.find((s) => s.id === sessionId);
+            const wasUnread = Boolean(watched?.unread);
+            const readAt = Math.max(Date.now(), watched?.updatedAt ?? 0);
+            const changed = Boolean(this.store.markRead?.([{ sessionId, updatedAt: readAt }]));
+            if (watched && wasUnread) {
+              watched.unread = false;
+            }
+            if (changed || wasUnread) {
+              void this.triggerRefresh();
+            }
+          }
           res.end(JSON.stringify({ ok: true, paneId: `mobile:${clientId}`, sessionId }));
           return;
         }

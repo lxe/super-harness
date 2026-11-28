@@ -94,7 +94,7 @@ public struct SessionDetailView: View {
                         .background(SHColor.surfaceCanvas)
                     } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: store.chatMetrics.messageGap) {
+                        LazyVStack(alignment: .leading, spacing: store.chatMetrics.messageGap) {
                             Color.clear.frame(height: 8)
 
                             if transcript?.hasMore == true {
@@ -807,6 +807,7 @@ private struct MessageBubbleView: View, Equatable {
         }
     }
 
+    @ViewBuilder
     private var assistantMessageView: some View {
         let segments = CoalescedSegment.coalesce(message.blocks)
         let timestampLabel: String? = message.timestamp > 0 ? UsageMetrics.formatUpdatedAgo(message.timestamp) : nil
@@ -814,8 +815,24 @@ private struct MessageBubbleView: View, Equatable {
             if case .traceGroup = segments[idx] { return true }
             return false
         }
-        return VStack(alignment: .leading, spacing: metrics.blockGap) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
+        if segments.count > 12 {
+            LazyVStack(alignment: .leading, spacing: metrics.blockGap) {
+                assistantSegmentsContent(segments: segments, timestampLabel: timestampLabel, lastTraceIndex: lastTraceIndex)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: metrics.blockGap) {
+                assistantSegmentsContent(segments: segments, timestampLabel: timestampLabel, lastTraceIndex: lastTraceIndex)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func assistantSegmentsContent(
+        segments: [CoalescedSegment],
+        timestampLabel: String?,
+        lastTraceIndex: Int?
+    ) -> some View {
+        ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
                 switch segment {
                 case .single(let block):
                     UnifiedBlockView(
@@ -861,7 +878,6 @@ private struct MessageBubbleView: View, Equatable {
             }
         }
     }
-}
 
 /// A problem with one session, shown inside its thread: what went wrong in a sentence, the raw
 /// error behind a chevron, and Dismiss. It uses the look of the failed-send line.

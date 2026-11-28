@@ -325,6 +325,8 @@ public final class AppStore {
     public var transcriptsBySessionId: [String: SessionTranscriptResult] = [:]
     public var transcriptLimitsBySessionId: [String: Int] = [:]
     public var loadingTranscriptSessionIds: Set<String> = []
+    @ObservationIgnored
+    private var inFlightTranscriptTasks: [String: (limit: Int, task: Task<Void, Never>)] = [:]
     public var streamingMessagesBySessionId: [String: UnifiedMessage] = [:]
     private var streamBaselineBySessionId: [String: StreamTurnBaseline] = [:]
     private var streamingBlocksBySessionId: [String: [UnifiedBlock]] = [:]
@@ -2060,9 +2062,13 @@ public final class AppStore {
         }
         let activeClient = client
         let activeLimit = sessionId.map { transcriptLimit(for: $0) } ?? Self.initialTranscriptLimit
+        // Start watch and transcript fetch concurrently so opening a thread does not pay an
+        // extra round-trip waiting for POST /api/watch before GET /api/transcript begins.
         Task {
             await activeClient.watchSession(sessionId: sessionId, limit: activeLimit)
-            if let sessionId {
+        }
+        if let sessionId {
+            Task {
                 await loadTranscript(for: sessionId)
             }
         }
@@ -2355,15 +2361,29 @@ public final class AppStore {
     public func loadTranscript(for sessionId: String, limit: Int? = nil) async {
         let resolvedLimit = limit ?? transcriptLimit(for: sessionId)
         transcriptLimitsBySessionId[sessionId] = resolvedLimit
-        loadingTranscriptSessionIds.insert(sessionId)
-        defer { loadingTranscriptSessionIds.remove(sessionId) }
-        do {
-            let result = try await client.fetchTranscript(sessionId: sessionId, limit: resolvedLimit)
-            _ = applyTranscriptUpdate(result)
-        } catch {
-            if handleAuthFailure(error) { return }
-            reportSessionError(error, sessionId: sessionId)
+        if let existing = inFlightTranscriptTasks[sessionId], existing.limit >= resolvedLimit {
+            await existing.task.value
+            return
         }
+        let activeClient = client
+        let fetchTask = Task { @MainActor in
+            self.loadingTranscriptSessionIds.insert(sessionId)
+            defer {
+                if self.inFlightTranscriptTasks[sessionId]?.limit == resolvedLimit {
+                    self.inFlightTranscriptTasks.removeValue(forKey: sessionId)
+                    self.loadingTranscriptSessionIds.remove(sessionId)
+                }
+            }
+            do {
+                let result = try await activeClient.fetchTranscript(sessionId: sessionId, limit: resolvedLimit)
+                _ = self.applyTranscriptUpdate(result)
+            } catch {
+                if self.handleAuthFailure(error) { return }
+                self.reportSessionError(error, sessionId: sessionId)
+            }
+        }
+        inFlightTranscriptTasks[sessionId] = (limit: resolvedLimit, task: fetchTask)
+        await fetchTask.value
     }
 
     public func loadEarlierMessages(for sessionId: String) async {

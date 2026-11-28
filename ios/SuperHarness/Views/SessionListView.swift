@@ -1240,10 +1240,8 @@ struct SessionListRow: View {
 
                 Spacer(minLength: 8)
 
-                // The right slot. A working thread shows the animated mark in place of the time,
-                // alongside its shimmering title. The time stays in the layout, invisible, so the
-                // slot keeps its width and the title truncates the same whether the thread is
-                // working or idle; the fixed height keeps the row from changing height.
+                // The right slot. A working thread keeps its time here; its shimmering title is
+                // the only sign that it is working. The fixed height keeps rows the same height.
                 if session.status == .waitingInput && !isBusy {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 16, weight: .semibold))
@@ -1256,14 +1254,6 @@ struct SessionListRow: View {
                             .font(SHTypography.micro.monospacedDigit())
                             .foregroundStyle(session.isUnread ? SHColor.inkSecondary : SHColor.inkFaint)
                             .fixedSize()
-                            .opacity(isBusy ? 0 : 1)
-                            .accessibilityHidden(isBusy)
-                            .overlay(alignment: .trailing) {
-                                if isBusy {
-                                    SHWorkingMark(tint: SHColor.porcelain, size: 15)
-                                        .accessibilityIdentifier("row.working")
-                                }
-                            }
                         if session.isUnread {
                             Circle()
                                 .fill(SHColor.inkPrimary)

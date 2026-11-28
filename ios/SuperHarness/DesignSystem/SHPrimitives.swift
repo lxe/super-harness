@@ -267,30 +267,12 @@ private struct SHAttachmentThumbTile: View {
                 Button {
                     onRemove(item.id)
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                SHColor.surfaceBubble
-                                    .shadow(.inner(color: .white.opacity(0.16), radius: 0.5, y: 0.75))
-                            )
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(
-                                        LinearGradient(
-                                            colors: [.white.opacity(0.24), .white.opacity(0.06)],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        ),
-                                        lineWidth: 0.75
-                                    )
-                            )
-                            .shadow(color: Color.black.opacity(0.55), radius: 3.5, x: 0, y: 1.5)
-                            .frame(width: 20, height: 20)
-
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9.5, weight: .bold))
-                            .foregroundStyle(SHColor.inkPrimary)
-                    }
+                    // Same relief as the composer's round controls below it.
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .frame(width: 20, height: 20)
+                        .shRaisedControl(SHColor.surfaceBubble, in: Circle())
                     .frame(width: 28, height: 28)
                     .contentShape(Circle())
                 }
@@ -671,7 +653,17 @@ struct SHShimmerText: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let dim = Color(red: 161 / 255, green: 166 / 255, blue: 179 / 255).opacity(0.72)
-    private static let bright = Color(red: 244 / 255, green: 245 / 255, blue: 247 / 255).opacity(0.96)
+    private static let bright = Color.white
+    /// The band: resting grey at both ends and a tight white core, so the highlight reads as
+    /// a clear glint crossing the text while the resting colour stays as it was.
+    private static let band = Gradient(stops: [
+        .init(color: dim, location: 0),
+        .init(color: dim, location: 0.22),
+        .init(color: bright, location: 0.44),
+        .init(color: bright, location: 0.56),
+        .init(color: dim, location: 0.78),
+        .init(color: dim, location: 1),
+    ])
 
     /// Centre of the bright band at `time`, in units of the text width. It travels from just
     /// left of the text to just right of it, eased in and out, then starts again.
@@ -688,7 +680,7 @@ struct SHShimmerText: View {
                 let center = Self.bandCenter(at: context.date.timeIntervalSinceReferenceDate, period: period)
                 label.foregroundStyle(
                     LinearGradient(
-                        colors: [Self.dim, Self.bright, Self.dim],
+                        gradient: Self.band,
                         startPoint: UnitPoint(x: center - 0.6, y: 0.5),
                         endPoint: UnitPoint(x: center + 0.6, y: 0.5)
                     )

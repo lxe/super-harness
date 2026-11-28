@@ -619,18 +619,25 @@ private struct SHMarkdownBlockListView: View {
     private func renderBlock(_ block: SHMarkdownBlock) -> some View {
         switch block {
         case .heading(_, let level, let content):
-            inlineText(content)
-                .font(headingFont(level))
-                .foregroundStyle(SHColor.inkPrimary)
-                .padding(.top, level <= 2 ? 6 : 3)
-                .fixedSize(horizontal: false, vertical: true)
+            inlineText(
+                content,
+                fontSize: headingPointSize(level) * metrics.scale,
+                fontWeight: headingUIWeight(level),
+                color: SHColor.inkPrimary,
+                lineSpacing: 2
+            )
+            .padding(.top, level <= 2 ? 6 : 3)
+            .fixedSize(horizontal: false, vertical: true)
 
         case .paragraph(_, let content):
-            inlineText(content)
-                .font(metrics.body)
-                .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                .lineSpacing(metrics.lineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
+            inlineText(
+                content,
+                fontSize: 15 * metrics.scale,
+                fontWeight: .regular,
+                color: isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary,
+                lineSpacing: metrics.lineSpacing
+            )
+            .fixedSize(horizontal: false, vertical: true)
 
         case .codeBlock(_, let language, let code):
             SHCodeFenceCard(language: language, code: code)
@@ -661,11 +668,14 @@ private struct SHMarkdownBlockListView: View {
                                 .foregroundStyle(SHColor.inkMuted)
                                 .frame(width: 10, alignment: .center)
                         }
-                        inlineText(item.text)
-                            .font(metrics.body)
-                            .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                            .lineSpacing(metrics.lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
+                        inlineText(
+                            item.text,
+                            fontSize: 15 * metrics.scale,
+                            fontWeight: .regular,
+                            color: isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary,
+                            lineSpacing: metrics.lineSpacing
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.indentLevel) * 16)
                 }
@@ -679,11 +689,14 @@ private struct SHMarkdownBlockListView: View {
                             .font(metrics.font(14, weight: .medium, design: .monospaced))
                             .foregroundStyle(SHColor.inkMuted)
                             .frame(minWidth: 20 * metrics.scale, alignment: .trailing)
-                        inlineText(item.text)
-                            .font(metrics.body)
-                            .foregroundStyle(isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary)
-                            .lineSpacing(metrics.lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
+                        inlineText(
+                            item.text,
+                            fontSize: 15 * metrics.scale,
+                            fontWeight: .regular,
+                            color: isUserBubble ? SHColor.inkPrimary : SHColor.inkSecondary,
+                            lineSpacing: metrics.lineSpacing
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(item.indentLevel) * 16)
                 }
@@ -701,27 +714,227 @@ private struct SHMarkdownBlockListView: View {
     }
 
     @ViewBuilder
-    private func inlineText(_ raw: String) -> some View {
+    private func inlineText(
+        _ raw: String,
+        fontSize: CGFloat,
+        fontWeight: SHPlatformFontWeight,
+        color: Color,
+        lineSpacing: CGFloat
+    ) -> some View {
+        #if canImport(UIKit)
+        SHSelectableMarkdownText(
+            raw: raw,
+            isUserBubble: isUserBubble,
+            fontSize: fontSize,
+            fontWeight: fontWeight,
+            baseColor: color,
+            lineSpacing: lineSpacing,
+            scale: metrics.scale
+        )
+        #else
         let attr = SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble, scale: metrics.scale)
-        let hasLinks = attr.runs.contains { $0.link != nil }
-        if hasLinks {
-            Text(attr)
-        } else {
-            Text(attr)
-                .textSelection(.enabled)
+        Text(attr)
+            .font(.system(size: fontSize))
+            .foregroundStyle(color)
+            .lineSpacing(lineSpacing)
+            .textSelection(.enabled)
+        #endif
+    }
+
+    private func headingPointSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return 18
+        case 2: return 16.5
+        case 3: return 15
+        case 4: return 14.5
+        default: return 14
         }
     }
 
-    private func headingFont(_ level: Int) -> Font {
+    private func headingUIWeight(_ level: Int) -> SHPlatformFontWeight {
         switch level {
-        case 1: return metrics.font(18, weight: .bold)
-        case 2: return metrics.font(16.5, weight: .semibold)
-        case 3: return metrics.font(15, weight: .semibold)
-        case 4: return metrics.font(14.5, weight: .semibold)
-        default: return metrics.font(14, weight: .medium)
+        case 1: return .bold
+        case 2, 3, 4: return .semibold
+        default: return .medium
         }
     }
 }
+
+#if canImport(UIKit)
+private typealias SHPlatformFontWeight = UIFont.Weight
+
+/// Read-only non-scrolling UITextView that provides native iOS draggable text selection handles
+/// and native long-press link menus ("Open in Browser" / "Copy Link") inside SwiftUI transcripts.
+private struct SHSelectableMarkdownText: UIViewRepresentable {
+    let raw: String
+    let isUserBubble: Bool
+    let fontSize: CGFloat
+    let fontWeight: UIFont.Weight
+    let baseColor: Color
+    let lineSpacing: CGFloat
+    let scale: CGFloat
+
+    @Environment(\.lineLimit) private var lineLimit
+    @Environment(\.openURL) private var openURL
+
+    private var renderKey: String {
+        "\(isUserBubble ? 1 : 0)|\(Int((fontSize * 10).rounded()))|\(fontWeight.rawValue)|\(Int((lineSpacing * 10).rounded()))|\(Int((scale * 100).rounded()))|\(lineLimit ?? 0)|\(raw)"
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(openURL: openURL)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.delegate = context.coordinator
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.textContainer.lineBreakMode = .byTruncatingTail
+        tv.adjustsFontForContentSizeCategory = false
+        tv.tintColor = UIColor(SHColor.accentInfo)
+        tv.linkTextAttributes = [
+            .foregroundColor: UIColor(SHColor.brandAntigravity),
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.setContentHuggingPriority(.required, for: .vertical)
+        applyContent(to: tv, coordinator: context.coordinator)
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.openURL = openURL
+        applyContent(to: uiView, coordinator: context.coordinator)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let maxW = proposal.width ?? uiView.bounds.width
+        guard maxW > 1 else { return nil }
+        let fitting = uiView.sizeThatFits(CGSize(width: maxW, height: .greatestFiniteMagnitude))
+        let w = isUserBubble ? min(maxW, ceil(fitting.width)) : maxW
+        return CGSize(width: max(1, w), height: max(1, ceil(fitting.height)))
+    }
+
+    private func applyContent(to tv: UITextView, coordinator: Coordinator) {
+        let key = renderKey
+        guard coordinator.lastRenderKey != key else { return }
+        coordinator.lastRenderKey = key
+        tv.textContainer.maximumNumberOfLines = lineLimit ?? 0
+        tv.attributedText = buildNSAttributedString()
+        tv.invalidateIntrinsicContentSize()
+    }
+
+    private func buildNSAttributedString() -> NSAttributedString {
+        let attr = SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble, scale: scale)
+        let baseFont = UIFont.systemFont(ofSize: fontSize, weight: fontWeight)
+        let baseUIColor = UIColor(baseColor)
+        let codeFont = UIFont.monospacedSystemFont(ofSize: 13.5 * scale, weight: .regular)
+        let codeColor = UIColor(Color(hex: 0x93C5FD))
+        let codeBg = UIColor(SHColor.surfaceBubble.opacity(0.92))
+        let primaryColor = UIColor(SHColor.inkPrimary)
+        let mutedColor = UIColor(SHColor.inkMuted)
+        let linkColor = UIColor(SHColor.brandAntigravity)
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let out = NSMutableAttributedString()
+        for run in attr.runs {
+            let chunk = String(attr[run.range].characters)
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: baseFont,
+                .foregroundColor: baseUIColor,
+                .paragraphStyle: paragraph,
+            ]
+            if let intent = run.inlinePresentationIntent {
+                if intent.contains(.code) {
+                    attrs[.font] = codeFont
+                    attrs[.foregroundColor] = codeColor
+                    attrs[.backgroundColor] = codeBg
+                } else {
+                    var traits: UIFontDescriptor.SymbolicTraits = []
+                    if intent.contains(.stronglyEmphasized) {
+                        traits.insert(.traitBold)
+                        attrs[.foregroundColor] = primaryColor
+                    }
+                    if intent.contains(.emphasized) {
+                        traits.insert(.traitItalic)
+                    }
+                    if !traits.isEmpty, let desc = baseFont.fontDescriptor.withSymbolicTraits(traits) {
+                        attrs[.font] = UIFont(descriptor: desc, size: fontSize)
+                    }
+                    if intent.contains(.strikethrough) {
+                        attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                        attrs[.foregroundColor] = mutedColor
+                    }
+                }
+            }
+            if let url = run.link {
+                attrs[.link] = url
+                attrs[.foregroundColor] = linkColor
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            out.append(NSAttributedString(string: chunk, attributes: attrs))
+        }
+        return out
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var openURL: OpenURLAction
+        var lastRenderKey: String = ""
+
+        init(openURL: OpenURLAction) {
+            self.openURL = openURL
+        }
+
+        func textView(
+            _ textView: UITextView,
+            primaryActionFor textItem: UITextItem,
+            defaultAction: UIAction
+        ) -> UIAction? {
+            if case .link(let url) = textItem.content {
+                return UIAction { [weak self] _ in
+                    self?.openURL(url)
+                }
+            }
+            return defaultAction
+        }
+
+        func textView(
+            _ textView: UITextView,
+            menuConfigurationFor textItem: UITextItem,
+            defaultMenu: UIMenu
+        ) -> UITextItem.MenuConfiguration? {
+            guard case .link(let url) = textItem.content else {
+                return nil
+            }
+            let isSessionLink = url.scheme?.lowercased() == "session"
+            let openAction = UIAction(
+                title: isSessionLink ? "Open Session" : "Open in Browser",
+                image: UIImage(systemName: isSessionLink ? "arrow.right.circle" : "safari")
+            ) { [weak self] _ in
+                self?.openURL(url)
+            }
+            let copyAction = UIAction(
+                title: "Copy Link",
+                image: UIImage(systemName: "doc.on.doc")
+            ) { _ in
+                UIPasteboard.general.string = url.absoluteString
+            }
+            let menu = UIMenu(title: url.absoluteString, children: [openAction, copyAction])
+            return UITextItem.MenuConfiguration(menu: menu)
+        }
+    }
+}
+#else
+private typealias SHPlatformFontWeight = Font.Weight
+#endif
 
 private struct SHMarkdownTableView: View {
     let headers: [String]

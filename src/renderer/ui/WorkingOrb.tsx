@@ -50,6 +50,12 @@ const ORB_PALETTES: Record<WorkingOrbTone, OrbPalette> = {
     mid: '#22d3ee',
     deep: '#127f91',
   },
+  acp: {
+    glint: '#ecfccb',
+    highlight: '#bef264',
+    mid: '#a3e635',
+    deep: '#4d7c0f',
+  },
   master: {
     glint: '#afb7ff',
     highlight: '#8e99ff',

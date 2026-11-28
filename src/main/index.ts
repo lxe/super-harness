@@ -7,6 +7,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import type {
+  AcpAgentDefinition,
   DictationResult,
   DictationSettings,
   HarnessGroup,
@@ -51,6 +52,7 @@ import { closeSqlitePool } from './utils/sqlite';
 import { notificationTextFromMarkdown } from './utils/notificationText';
 import { ensureRichPath, whichBinary } from './utils/system';
 import { claudeTmuxRecords } from './adapters/claudeTmuxRevival';
+import { ACP_AGENTS_PATH, loadAcpAgents, resolveAcpCommand, saveAcpAgents, testAcpAgent } from './adapters/acpAdapter';
 import { ensureLoginAutostart } from './services/loginAutostart';
 import { staleWorkingIds, WorkingCompletionTracker } from './utils/workingSet';
 
@@ -980,6 +982,35 @@ function registerIpcHandlers(): void {
     }
     return catalogService.getCatalog(sessions, Boolean(force));
   });
+
+  ipcMain.handle('sh:acp-agents', async () => {
+    const { sessions } = await registry.discover();
+    const acp = sessions.filter((sess) => sess.harness === 'acp');
+    return {
+      configPath: ACP_AGENTS_PATH,
+      agents: loadAcpAgents().map((a) => {
+        const mine = acp.filter((sess) => sess.tags?.[0] === a.id);
+        return {
+          ...a,
+          resolvedPath: resolveAcpCommand(a.command),
+          liveSessions: mine.filter((sess) => sess.isLive).length,
+          totalSessions: mine.length,
+        };
+      }),
+    };
+  });
+
+  ipcMain.handle('sh:acp-agents-save', async (_ev, agents: AcpAgentDefinition[]) => {
+    const res = saveAcpAgents(agents);
+    if (res.ok) {
+      // The new-session picker reads the agent list from the catalog.
+      catalogService.invalidate();
+      void refreshAndBroadcast();
+    }
+    return res;
+  });
+
+  ipcMain.handle('sh:acp-agent-test', async (_ev, agent: AcpAgentDefinition) => testAcpAgent(agent));
 
   ipcMain.handle('sh:create-project', async (_ev, parentDir: string, name: string) => {
     const res = createProjectDirectory(parentDir, name);

@@ -30,6 +30,7 @@ export function createDefaultState(): SuperHarnessState {
         antigravity: true,
         muse: true,
         pi: true,
+        acp: true,
       },
       master: {
         harness: 'claude',
@@ -199,7 +200,7 @@ export class ConfigStore {
 
   updateSettings(patch: Partial<SuperHarnessSettings>): SuperHarnessState {
     if (patch.harnessOrder !== undefined) {
-      const known = new Set(['antigravity', 'codex', 'claude', 'muse', 'pi']);
+      const known = new Set(['antigravity', 'codex', 'claude', 'muse', 'pi', 'acp']);
       const order = Array.isArray(patch.harnessOrder)
         ? patch.harnessOrder.filter((h, i, a) => known.has(h) && a.indexOf(h) === i)
         : [];

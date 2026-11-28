@@ -67,9 +67,10 @@ const SESSION_LINK_SCHEMES: Record<string, HarnessGroup | undefined> = {
   claude: 'claude',
   muse: 'muse',
   pi: 'pi',
+  acp: 'acp',
 };
 
-const KNOWN_HARNESS_PREFIXES = new Set<HarnessGroup>(['antigravity', 'codex', 'claude', 'muse', 'pi']);
+const KNOWN_HARNESS_PREFIXES = new Set<HarnessGroup>(['antigravity', 'codex', 'claude', 'muse', 'pi', 'acp']);
 
 /**
  * Parses deep links to sessions/conversations across all supported harnesses
@@ -281,6 +282,8 @@ export function getHarnessVisual(harness: HarnessKind): HarnessVisual {
       return { label: 'Muse', glyph: 'μ', subtleColor: 'text-zinc-400' };
     case 'pi':
       return { label: 'Pi', glyph: 'π', subtleColor: 'text-zinc-400' };
+    case 'acp':
+      return { label: 'ACP', glyph: '⇄', subtleColor: 'text-zinc-400' };
   }
 }
 

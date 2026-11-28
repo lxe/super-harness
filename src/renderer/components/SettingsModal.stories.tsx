@@ -58,7 +58,7 @@ const INITIAL_STATE: SuperHarnessState = {
     sidebarGroupBy: 'native',
     showArchived: false,
     showHidden: false,
-    enabledHarnesses: { codex: true, claude: true, antigravity: true, muse: true, pi: true },
+    enabledHarnesses: { codex: true, claude: true, antigravity: true, muse: true, pi: true, acp: true },
     master: { harness: 'claude', model: '', cwd: '~/projects/super-harness', autoApplyActions: true },
     defaultNewSessionCwd: '~',
     apps: {

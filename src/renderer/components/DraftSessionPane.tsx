@@ -38,6 +38,8 @@ import { getComposerDraft, setComposerDraft, useComposerDraft } from '../utils/c
 export interface DraftConversation {
   id: string;
   harness: StartSessionRequest['harness'] | null;
+  /** For `acp`: the configured agent ID. */
+  agent?: string;
   cwd: string;
   model: string;
   reasoningEffort?: string;
@@ -75,6 +77,7 @@ function groupForDraftHarness(h: StartSessionRequest['harness'] | null): Harness
   if (h === 'codex') return 'codex';
   if (h === 'muse') return 'muse';
   if (h === 'pi') return 'pi';
+  if (h === 'acp') return 'acp';
   return 'claude';
 }
 
@@ -148,6 +151,17 @@ export const DraftSessionPane: React.FC<Props> = ({
   }, [draft.id]);
 
   const selectedGroup = groupForDraftHarness(draft.harness);
+  const acpAgents = catalog?.acpAgents ?? [];
+  const selectedAcpAgent = draft.harness === 'acp' ? acpAgents.find((a) => a.id === draft.agent) : undefined;
+
+  // ACP agents each report their own models, so the picker shows the chosen agent's list.
+  const modelCatalog = useMemo(
+    () =>
+      catalog && selectedGroup === 'acp'
+        ? { ...catalog, models: { ...catalog.models, acp: selectedAcpAgent?.models ?? [] } }
+        : catalog,
+    [catalog, selectedGroup, selectedAcpAgent]
+  );
 
   const draftModelControls = useMemo(() => {
     if (!selectedGroup) return null;
@@ -155,10 +169,10 @@ export const DraftSessionPane: React.FC<Props> = ({
       selectedGroup,
       draft.model || undefined,
       draft.reasoningEffort,
-      catalog,
+      modelCatalog,
       selectedGroup
     );
-  }, [selectedGroup, draft.model, draft.reasoningEffort, catalog]);
+  }, [selectedGroup, draft.model, draft.reasoningEffort, modelCatalog]);
 
   const availableModels = useMemo<HarnessModelOption[]>(
     () => draftModelControls?.models ?? [],
@@ -241,11 +255,13 @@ export const DraftSessionPane: React.FC<Props> = ({
     return parts[parts.length - 1] || draft.cwd || '~';
   }, [catalog?.projects, draft.cwd]);
 
-  const handleSelectHarness = (nextHarness: StartSessionRequest['harness']) => {
+  const handleSelectHarness = (nextHarness: StartSessionRequest['harness'], agent?: string) => {
     const nextGroup = groupForDraftHarness(nextHarness);
-    const switchingGroup = nextGroup !== selectedGroup;
+    // Different ACP agents have different models, so switching agent resets the model too.
+    const switchingGroup = nextGroup !== selectedGroup || agent !== draft.agent;
     onUpdateDraft({
       harness: nextHarness,
+      agent,
       // Reset model & thinking selection when switching between different harnesses
       ...(switchingGroup ? { model: '', reasoningEffort: '' } : {}),
     });
@@ -343,6 +359,10 @@ export const DraftSessionPane: React.FC<Props> = ({
       setTimeout(() => setHighlightPicker(false), 1200);
       return;
     }
+    if (draft.harness === 'acp' && !acpAgents.some((a) => a.id === draft.agent)) {
+      setError('Pick one of your ACP agents above.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -354,6 +374,7 @@ export const DraftSessionPane: React.FC<Props> = ({
         prompt: getComposerDraft(draft.id).text.trim() || undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         remoteControl: draft.remoteControl,
+        agent: draft.harness === 'acp' ? draft.agent : undefined,
       });
       if (!res.ok) {
         setError(res.error || 'Failed to launch conversation');
@@ -374,6 +395,8 @@ export const DraftSessionPane: React.FC<Props> = ({
           ? 'Muse'
           : selectedGroup === 'pi'
             ? 'Pi'
+            : selectedGroup === 'acp'
+            ? (selectedAcpAgent?.name ?? 'ACP agent')
             : selectedGroup === 'claude'
             ? 'Claude'
             : null;
@@ -520,6 +543,29 @@ export const DraftSessionPane: React.FC<Props> = ({
                 tmux + remote control
               </div>
             </button>
+
+            {/* One card per ACP agent from acp-agents.json */}
+            {acpAgents.map((agent) => {
+              const selected = draft.harness === 'acp' && draft.agent === agent.id;
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => handleSelectHarness('acp', agent.id)}
+                  className={`text-left p-3.5 rounded-2xl transition-all cursor-pointer ${
+                    selected
+                      ? 'bg-[#23262f] text-ink-primary shadow-[0_6px_18px_-6px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.09)]'
+                      : 'bg-[#181a20] text-ink-muted hover:text-ink-primary hover:bg-[#1e2027] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 text-label font-semibold">
+                    <HarnessLogo harness="acp" size={16} />
+                    <span className="truncate">{agent.name}</span>
+                  </div>
+                  <div className="text-caption text-ink-faint mt-1 leading-snug">ACP agent</div>
+                </button>
+              );
+            })}
           </div>
 
           {error && (

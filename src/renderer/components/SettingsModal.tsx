@@ -47,6 +47,7 @@ import { ShortcutRecorder } from './ShortcutRecorder';
 import { MobileSettingsPane } from './MobileSettingsPane';
 import { DEFAULT_DICTATION_SHORTCUT } from '../utils/shortcut';
 import { HarnessLogo } from './HarnessLogo';
+import { AcpAgentsEditor } from './AcpAgentsEditor';
 import { SuperHarnessMark } from './SuperHarnessMark';
 import { HarnessUpdateAction, HarnessUpdateDetails, HarnessUpdateStatus } from './HarnessUpdateControls';
 import { useHarnessUpdateJobs } from '../utils/harnessUpdates';
@@ -139,6 +140,7 @@ function formatScannedAgo(ts: number): string {
 }
 
 const HARNESS_DISPLAY_NAMES: Record<HarnessGroup, string> = {
+  acp: 'ACP agents (Gemini CLI, OpenCode, …)',
   codex: 'OpenAI Codex',
   claude: 'Claude',
   antigravity: 'Google Antigravity',
@@ -861,7 +863,8 @@ export const SettingsModal: React.FC<Props> = ({
                   const isExpanded = Boolean(expandedHarness[h.id]);
                   const shortVer = formatHarnessVersion(h.version);
                   const displayName = HARNESS_DISPLAY_NAMES[h.id] || h.name;
-                  const runtimeBits = [
+                  // ACP is a group of agents, not one binary, so it has no version or runtime to show.
+                  const runtimeBits = h.id === 'acp' ? '' : [
                     shortVer,
                     h.desktopAppRunning
                       ? h.id === 'claude'
@@ -874,7 +877,13 @@ export const SettingsModal: React.FC<Props> = ({
                     .filter(Boolean)
                     .join(' · ');
 
-                  const summaryLine = !h.installed
+                  // ACP agents are configured here, so their row opens even with none set up yet.
+                  const expandable = h.installed || h.id === 'acp';
+                  const summaryLine = h.id === 'acp'
+                    ? h.installed
+                      ? `${h.notes} · ${h.activeSessionCount} active · ${h.totalSessionCount} threads`
+                      : 'None configured · click to add'
+                    : !h.installed
                     ? 'Not found on PATH'
                     : `${h.activeSessionCount} active · ${h.totalSessionCount} threads`;
 
@@ -888,11 +897,11 @@ export const SettingsModal: React.FC<Props> = ({
                         <button
                           type="button"
                           onClick={() =>
-                            h.installed &&
+                            expandable &&
                             setExpandedHarness((prev) => ({ ...prev, [h.id]: !prev[h.id] }))
                           }
                           className={`flex items-center gap-4 min-w-0 flex-1 text-left focus:outline-none focus-visible:shadow-none ${
-                            h.installed ? 'cursor-pointer group' : 'cursor-default'
+                            expandable ? 'cursor-pointer group' : 'cursor-default'
                           }`}
                         >
                           <div className="w-9 h-9 rounded-lg bg-surface-subtle border border-line-hairline flex items-center justify-center shrink-0">
@@ -908,7 +917,7 @@ export const SettingsModal: React.FC<Props> = ({
                                   {runtimeBits}
                                 </span>
                               )}
-                              {h.installed &&
+                              {expandable &&
                                 (isExpanded ? (
                                   <ChevronDown className="w-3.5 h-3.5 text-ink-faint self-center shrink-0" />
                                 ) : (
@@ -1005,7 +1014,8 @@ export const SettingsModal: React.FC<Props> = ({
                       )}
 
                       {/* Progressive disclosure: clean key-value details aligned under title */}
-                      {h.installed && isExpanded && (
+                      {h.id === 'acp' && isExpanded && <AcpAgentsEditor onChanged={onRefresh} />}
+                      {h.installed && h.id !== 'acp' && isExpanded && (
                         <div className="pl-[52px] pb-4 pt-0.5 space-y-2 text-caption">
                           {h.notes && (
                             <div className="grid grid-cols-[96px_1fr] gap-3 items-baseline">

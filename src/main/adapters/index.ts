@@ -1,3 +1,4 @@
+import { createAcpDriver } from './acpAdapter';
 import { createAntigravityDriver } from './antigravityAdapter';
 import { createClaudeDriver } from './claudeAdapter';
 import { createCodexDriver } from './codexAdapter';
@@ -18,5 +19,6 @@ export function createDefaultDrivers(): HarnessDriver[] {
     createAntigravityDriver(),
     createMuseDriver(),
     createPiDriver(),
+    createAcpDriver(),
   ];
 }

@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import type {
+  BuiltinHarnessGroup,
   HarnessDetection,
   HarnessGroup,
   OrganizeAction,
@@ -471,7 +472,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
   const onOrganizeRef = useRef(onOrganize);
   onOrganizeRef.current = onOrganize;
   const [hoveredUsage, setHoveredUsage] = useState<{
-    target: HarnessGroup | 'all';
+    target: BuiltinHarnessGroup | 'all';
     rect: { left: number; top: number; bottom: number; width: number };
   } | null>(null);
   const hoverCloseTimerRef = useRef<number | null>(null);
@@ -663,6 +664,8 @@ export const Sidebar: React.FC<Props> = React.memo(({
       window.clearTimeout(hoverCloseTimerRef.current);
       hoverCloseTimerRef.current = null;
     }
+    // ACP agents have no usage gauge.
+    if (target === 'acp') return;
     const r = el.getBoundingClientRect();
     setHoveredUsage({
       target,
@@ -722,6 +725,7 @@ export const Sidebar: React.FC<Props> = React.memo(({
       claude: false,
       muse: false,
       pi: false,
+      acp: false,
     };
     for (const s of sessions) {
       if (s.harnessGroup !== 'master' && s.status === 'running') {

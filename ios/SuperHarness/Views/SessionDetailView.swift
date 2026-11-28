@@ -94,7 +94,11 @@ public struct SessionDetailView: View {
                         .background(SHColor.surfaceCanvas)
                     } else {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: store.chatMetrics.messageGap) {
+                        // Use eager VStack (not LazyVStack): initial transcripts are tail-capped (15 messages),
+                        // and LazyVStack + .defaultScrollAnchor(.bottom) on variable-height messages/collapsed
+                        // cards can overshoot contentOffset.y past contentSize.height, leaving the viewport blank
+                        // until the user drags down to clamp UIScrollView back into bounds.
+                        VStack(alignment: .leading, spacing: store.chatMetrics.messageGap) {
                             Color.clear.frame(height: 8)
 
                             if transcript?.hasMore == true {
@@ -173,13 +177,28 @@ public struct SessionDetailView: View {
                     .onScrollPhaseChange { _, newPhase in
                         userIsDragging = (newPhase == .interacting || newPhase == .decelerating)
                     }
-                    .onScrollGeometryChange(for: CGFloat.self) { geo in
-                        max(0, geo.contentSize.height - geo.visibleRect.maxY)
-                    } action: { oldDistance, newDistance in
-                        distanceFromBottom = newDistance
-                        if newDistance <= 80 {
+                    .onScrollGeometryChange(for: ScrollBottomMetrics.self) { geo in
+                        Self.scrollBottomMetrics(
+                            contentHeight: geo.contentSize.height,
+                            containerHeight: geo.containerSize.height,
+                            contentOffsetY: geo.contentOffset.y,
+                            visibleMaxY: geo.visibleRect.maxY,
+                            topInset: geo.contentInsets.top,
+                            bottomInset: geo.contentInsets.bottom
+                        )
+                    } action: { _, metrics in
+                        distanceFromBottom = metrics.distanceFromBottom
+                        if !userIsDragging && metrics.overshootPastBottom > 2 {
+                            // Self-heal if contentSize ever shrinks beneath the current bottom offset
+                            // (e.g. collapsed card or async text/media sizing), preventing blank void below content.
+                            isPinnedToBottom = true
+                            distanceFromBottom = 0
+                            snapToBottomWithoutAnimation()
+                            return
+                        }
+                        if metrics.distanceFromBottom <= 80 {
                             if !isPinnedToBottom { isPinnedToBottom = true }
-                        } else if newDistance > 180 && userIsDragging && Date() >= suppressUnpinUntil {
+                        } else if metrics.distanceFromBottom > 180 && userIsDragging && Date() >= suppressUnpinUntil {
                             if isPinnedToBottom { isPinnedToBottom = false }
                         }
                     }
@@ -609,6 +628,31 @@ public struct SessionDetailView: View {
 
     // MARK: - Bottom Anchor Helpers
 
+    struct ScrollBottomMetrics: Equatable, Sendable {
+        let distanceFromBottom: CGFloat
+        let overshootPastBottom: CGFloat
+    }
+
+    /// Computes both how far the viewport is above the bottom of the transcript and whether
+    /// `contentOffsetY` has overshot past the maximum valid scroll offset (leaving blank space
+    /// below the last message).
+    nonisolated static func scrollBottomMetrics(
+        contentHeight: CGFloat,
+        containerHeight: CGFloat,
+        contentOffsetY: CGFloat,
+        visibleMaxY: CGFloat,
+        topInset: CGFloat,
+        bottomInset: CGFloat
+    ) -> ScrollBottomMetrics {
+        let distance = max(0, contentHeight - visibleMaxY)
+        guard containerHeight > 0, contentHeight > 0 else {
+            return ScrollBottomMetrics(distanceFromBottom: distance, overshootPastBottom: 0)
+        }
+        let maxOffsetY = max(-topInset, contentHeight + bottomInset - containerHeight)
+        let overshoot = max(0, contentOffsetY - maxOffsetY)
+        return ScrollBottomMetrics(distanceFromBottom: distance, overshootPastBottom: overshoot)
+    }
+
     private func anchorBottomIfNeeded(sessionId: String, hasMessages: Bool) {
         guard hasMessages, anchoredSessionId != sessionId else { return }
         anchoredSessionId = sessionId
@@ -833,14 +877,8 @@ private struct MessageBubbleView: View, Equatable {
             if case .traceGroup = segments[idx] { return true }
             return false
         }
-        if segments.count > 12 {
-            LazyVStack(alignment: .leading, spacing: metrics.blockGap) {
-                assistantSegmentsContent(segments: segments, timestampLabel: timestampLabel, lastTraceIndex: lastTraceIndex)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: metrics.blockGap) {
-                assistantSegmentsContent(segments: segments, timestampLabel: timestampLabel, lastTraceIndex: lastTraceIndex)
-            }
+        VStack(alignment: .leading, spacing: metrics.blockGap) {
+            assistantSegmentsContent(segments: segments, timestampLabel: timestampLabel, lastTraceIndex: lastTraceIndex)
         }
     }
 

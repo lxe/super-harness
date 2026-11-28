@@ -1555,4 +1555,53 @@ final class AppStoreTests: XCTestCase {
         XCTAssertNil(store.pendingArchivedSessionIds[target.id])
         XCTAssertTrue(store.sessions.isEmpty)
     }
+
+    func testScrollBottomMetricsDetectsOvershootPastBottom() {
+        // Normal resting at bottom: content 2000pt in 800pt viewport -> maxOffsetY = 1200
+        let normal = SessionDetailView.scrollBottomMetrics(
+            contentHeight: 2000,
+            containerHeight: 800,
+            contentOffsetY: 1200,
+            visibleMaxY: 2000,
+            topInset: 0,
+            bottomInset: 0
+        )
+        XCTAssertEqual(normal.distanceFromBottom, 0, accuracy: 0.01)
+        XCTAssertEqual(normal.overshootPastBottom, 0, accuracy: 0.01)
+
+        // Scrolled up reading older messages
+        let scrolledUp = SessionDetailView.scrollBottomMetrics(
+            contentHeight: 2000,
+            containerHeight: 800,
+            contentOffsetY: 600,
+            visibleMaxY: 1400,
+            topInset: 0,
+            bottomInset: 0
+        )
+        XCTAssertEqual(scrolledUp.distanceFromBottom, 600, accuracy: 0.01)
+        XCTAssertEqual(scrolledUp.overshootPastBottom, 0, accuracy: 0.01)
+
+        // Overshoot past bottom (viewport stranded in empty void below contentSize.height)
+        let overshot = SessionDetailView.scrollBottomMetrics(
+            contentHeight: 2000,
+            containerHeight: 800,
+            contentOffsetY: 2100,
+            visibleMaxY: 2900,
+            topInset: 0,
+            bottomInset: 0
+        )
+        XCTAssertEqual(overshot.distanceFromBottom, 0, accuracy: 0.01)
+        XCTAssertEqual(overshot.overshootPastBottom, 900, accuracy: 0.01)
+
+        // Short transcript (content shorter than viewport, topInset 100): maxOffsetY = -100
+        let shortOvershot = SessionDetailView.scrollBottomMetrics(
+            contentHeight: 400,
+            containerHeight: 800,
+            contentOffsetY: 300,
+            visibleMaxY: 1100,
+            topInset: 100,
+            bottomInset: 0
+        )
+        XCTAssertEqual(shortOvershot.overshootPastBottom, 400, accuracy: 0.01)
+    }
 }

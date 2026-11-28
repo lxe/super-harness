@@ -25,9 +25,10 @@ public struct SessionDetailView: View {
     @State private var newFolderDraft: String = ""
     @State private var isThreadInfoExpanded: Bool = false
     /// Adaptive block budget for the initial eager VStack render window so opening heavy
-    /// multi-hundred-block coding threads mounts only the newest screenfuls immediately.
-    private static let initialRenderBlockBudget: Int = 60
-    private static let minRenderedMessages: Int = 2
+    /// multi-hundred-block coding threads stays fast while always keeping a full screen of
+    /// recent history visible (at least 6 messages).
+    private static let initialRenderBlockBudget: Int = 140
+    private static let minRenderedMessages: Int = 6
     @State private var visibleBlockBudget: Int = SessionDetailView.initialRenderBlockBudget
     private static var usesGlassPopover: Bool {
         if #available(iOS 26.0, *) { return true }
@@ -113,7 +114,10 @@ public struct SessionDetailView: View {
                             Color.clear.frame(height: 8)
 
                             if hasBufferedEarlier || transcript?.hasMore == true {
-                                loadEarlierButton(hasBufferedEarlier: hasBufferedEarlier)
+                                loadEarlierButton(
+                                    hasBufferedEarlier: hasBufferedEarlier,
+                                    topAnchorId: visibleMessages.first?.id
+                                )
                             }
 
                             if visibleMessages.isEmpty {
@@ -176,12 +180,13 @@ public struct SessionDetailView: View {
                                 .id("transcript-bottom")
                         }
                         .padding(.horizontal, SHLayout.screenPad)
+                        .scrollTargetLayout()
                         .transaction { $0.animation = nil }
                     }
                     .accessibilityIdentifier("transcript.scroll")
                     .scrollPosition($scrollPosition)
                     .defaultScrollAnchor(.bottom, for: .initialOffset)
-                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                    .defaultScrollAnchor(isPinnedToBottom ? .bottom : nil, for: .sizeChanges)
                     .scrollDismissesKeyboard(.never)
                     .modifier(SHClearTopScrollEdgeModifier())
                     .background(SHColor.surfaceCanvas)
@@ -715,14 +720,26 @@ public struct SessionDetailView: View {
         return Array(messages.suffix(keepCount))
     }
 
-    private func loadEarlierButton(hasBufferedEarlier: Bool) -> some View {
+    private func loadEarlierButton(hasBufferedEarlier: Bool, topAnchorId: String?) -> some View {
         HStack {
             Spacer()
             Button {
                 guard !isLoadingEarlier else { return }
+                // Unpin from bottom so prepending earlier messages above does not yank the
+                // viewport down; lock scroll to the current top visible message instead.
+                isPinnedToBottom = false
                 if hasBufferedEarlier {
-                    // Reveal already-fetched earlier messages immediately with zero network RTT.
-                    visibleBlockBudget = visibleBlockBudget >= 400 ? Int.max : visibleBlockBudget + 200
+                    visibleBlockBudget = visibleBlockBudget >= 500 ? Int.max : visibleBlockBudget + 250
+                    if let anchorId = topAnchorId {
+                        Task { @MainActor in
+                            await Task.yield()
+                            var t = Transaction()
+                            t.disablesAnimations = true
+                            withTransaction(t) {
+                                scrollPosition.scrollTo(id: anchorId, anchor: .top)
+                            }
+                        }
+                    }
                     return
                 }
                 Task {
@@ -730,6 +747,14 @@ public struct SessionDetailView: View {
                     defer { isLoadingEarlier = false }
                     visibleBlockBudget = Int.max
                     await store.loadEarlierMessages(for: session.id)
+                    if let anchorId = topAnchorId {
+                        await Task.yield()
+                        var t = Transaction()
+                        t.disablesAnimations = true
+                        withTransaction(t) {
+                            scrollPosition.scrollTo(id: anchorId, anchor: .top)
+                        }
+                    }
                 }
             } label: {
                 HStack(spacing: 6) {

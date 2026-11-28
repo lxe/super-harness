@@ -2378,3 +2378,121 @@ public enum HarnessOrder {
         return next
     }
 }
+
+// MARK: - Host File Preview Models
+
+public struct FilePreviewTarget: Identifiable, Sendable, Equatable, Hashable {
+    public let path: String
+    public let startLine: Int?
+    public let endLine: Int?
+
+    public var id: String {
+        "\(path)#\(startLine ?? 0)-\(endLine ?? 0)"
+    }
+
+    public var fileName: String {
+        let base = (path as NSString).lastPathComponent
+        return base.isEmpty ? path : base
+    }
+
+    public init(path: String, startLine: Int? = nil, endLine: Int? = nil) {
+        self.path = path
+        self.startLine = startLine
+        self.endLine = endLine
+    }
+
+    /// Parses a `file://` URL (supporting `#L123`, `#L123-L145`, `#123-145`, and `:123` suffixes).
+    public static func parse(from url: URL) -> FilePreviewTarget? {
+        guard url.scheme?.lowercased() == "file" else { return nil }
+        var rawPath = url.path
+        if rawPath.isEmpty { return nil }
+
+        var startLine: Int? = nil
+        var endLine: Int? = nil
+
+        if let fragment = url.fragment, !fragment.isEmpty {
+            let cleaned = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rangeParts = cleaned.split(separator: "-", maxSplits: 1)
+            func parseLineToken(_ s: Substring) -> Int? {
+                let digits = s.hasPrefix("L") || s.hasPrefix("l") ? s.dropFirst() : s
+                guard let n = Int(digits), n > 0 else { return nil }
+                return n
+            }
+            if let first = rangeParts.first, let s = parseLineToken(first) {
+                startLine = s
+                if rangeParts.count == 2, let e = parseLineToken(rangeParts[1]), e >= s {
+                    endLine = e
+                }
+            }
+        }
+
+        // Also support trailing `:123` or `:123:45` in path if no fragment line was given.
+        if startLine == nil, let colonIdx = rawPath.lastIndex(of: ":") {
+            let suffix = rawPath[rawPath.index(after: colonIdx)...]
+            if let n = Int(suffix), n > 0 {
+                let prefix = String(rawPath[..<colonIdx])
+                if !prefix.isEmpty {
+                    rawPath = prefix
+                    startLine = n
+                }
+            }
+        }
+
+        return FilePreviewTarget(path: rawPath, startLine: startLine, endLine: endLine)
+    }
+}
+
+public struct FilePreviewDirectoryEntry: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { path }
+    public let name: String
+    public let path: String
+    public let isDirectory: Bool
+    public let sizeBytes: Int?
+
+    public init(name: String, path: String, isDirectory: Bool, sizeBytes: Int? = nil) {
+        self.name = name
+        self.path = path
+        self.isDirectory = isDirectory
+        self.sizeBytes = sizeBytes
+    }
+}
+
+public struct FilePreviewData: Codable, Sendable, Equatable {
+    public let path: String
+    public let name: String
+    public let isDirectory: Bool
+    public let kind: String
+    public let content: String?
+    public let sizeBytes: Int
+    public let lineCount: Int?
+    public let startLine: Int?
+    public let endLine: Int?
+    public let entries: [FilePreviewDirectoryEntry]?
+    public let error: String?
+
+    public init(
+        path: String,
+        name: String,
+        isDirectory: Bool = false,
+        kind: String = "code",
+        content: String? = nil,
+        sizeBytes: Int = 0,
+        lineCount: Int? = nil,
+        startLine: Int? = nil,
+        endLine: Int? = nil,
+        entries: [FilePreviewDirectoryEntry]? = nil,
+        error: String? = nil
+    ) {
+        self.path = path
+        self.name = name
+        self.isDirectory = isDirectory
+        self.kind = kind
+        self.content = content
+        self.sizeBytes = sizeBytes
+        self.lineCount = lineCount
+        self.startLine = startLine
+        self.endLine = endLine
+        self.entries = entries
+        self.error = error
+    }
+}

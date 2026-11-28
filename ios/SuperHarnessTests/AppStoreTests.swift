@@ -1604,4 +1604,34 @@ final class AppStoreTests: XCTestCase {
         )
         XCTAssertEqual(shortOvershot.overshootPastBottom, 400, accuracy: 0.01)
     }
+
+    func testFilePreviewTargetParsingAndOpenFileLink() async throws {
+        let plain = try XCTUnwrap(FilePreviewTarget.parse(from: URL(string: "file:///tmp/demo/SessionDetailView.swift")!))
+        XCTAssertEqual(plain.path, "/tmp/demo/SessionDetailView.swift")
+        XCTAssertEqual(plain.fileName, "SessionDetailView.swift")
+        XCTAssertNil(plain.startLine)
+        XCTAssertNil(plain.endLine)
+
+        let singleLine = try XCTUnwrap(FilePreviewTarget.parse(from: URL(string: "file:///tmp/demo/SessionDetailView.swift#L42")!))
+        XCTAssertEqual(singleLine.path, "/tmp/demo/SessionDetailView.swift")
+        XCTAssertEqual(singleLine.startLine, 42)
+        XCTAssertNil(singleLine.endLine)
+
+        let rangeLine = try XCTUnwrap(FilePreviewTarget.parse(from: URL(string: "file:///tmp/demo/SessionDetailView.swift#L42-L88")!))
+        XCTAssertEqual(rangeLine.startLine, 42)
+        XCTAssertEqual(rangeLine.endLine, 88)
+
+        XCTAssertNil(FilePreviewTarget.parse(from: URL(string: "https://example.com/file.swift")!))
+
+        let store = AppStore(client: MockSuperHarnessClient())
+        XCTAssertTrue(store.openFileLink(URL(string: "file:///tmp/demo/README.md#L10-L20")!))
+        XCTAssertEqual(store.filePreviewTarget?.path, "/tmp/demo/README.md")
+        XCTAssertEqual(store.filePreviewTarget?.startLine, 10)
+        XCTAssertEqual(store.filePreviewTarget?.endLine, 20)
+
+        let preview = try await store.fetchFilePreview(path: "/tmp/demo/README.md", startLine: 10, endLine: 20)
+        XCTAssertEqual(preview.kind, "markdown")
+        XCTAssertEqual(preview.startLine, 10)
+        XCTAssertEqual(preview.endLine, 20)
+    }
 }

@@ -784,7 +784,7 @@ public enum SHMarkdownCache {
     }
 
     private static let bareURLRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"(?i)\b(?:https?|conversation|session|sh|super-harness|antigravity|agy|codex|claude|muse|pi)://[^\s<>"'\[\]]+"#
+        pattern: #"(?i)\b(?:https?|file|conversation|session|sh|super-harness|antigravity|agy|codex|claude|muse|pi)://[^\s<>"'\[\]]+"#
     )
 
     private static func autolinkBareURLs(in attr: inout AttributedString) {
@@ -1254,7 +1254,31 @@ private struct SHSelectableMarkdownText: UIViewRepresentable {
             guard case .link(let url) = textItem.content else {
                 return nil
             }
-            let isSessionLink = url.scheme?.lowercased() == "session"
+            let scheme = url.scheme?.lowercased()
+            if scheme == "file" {
+                let target = FilePreviewTarget.parse(from: url)
+                let previewAction = UIAction(
+                    title: "Preview File",
+                    image: UIImage(systemName: "doc.text.magnifyingglass")
+                ) { [weak self] _ in
+                    self?.openURL(url)
+                }
+                let copyPathAction = UIAction(
+                    title: "Copy Path",
+                    image: UIImage(systemName: "doc.on.doc")
+                ) { _ in
+                    UIPasteboard.general.string = target?.path ?? url.path
+                }
+                let copyLinkAction = UIAction(
+                    title: "Copy Link",
+                    image: UIImage(systemName: "link")
+                ) { _ in
+                    UIPasteboard.general.string = url.absoluteString
+                }
+                let menu = UIMenu(title: target?.path ?? url.path, children: [previewAction, copyPathAction, copyLinkAction])
+                return UITextItem.MenuConfiguration(menu: menu)
+            }
+            let isSessionLink = scheme == "session"
             let openAction = UIAction(
                 title: isSessionLink ? "Open Session" : "Open in Browser",
                 image: UIImage(systemName: isSessionLink ? "arrow.right.circle" : "safari")

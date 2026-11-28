@@ -367,6 +367,7 @@ public final class AppStore {
     public var usageSheetTarget: HarnessGroup? = nil
     public var isHostSettingsSheetPresented: Bool = false
     public var lightboxPayload: LightboxPayload? = nil
+    public var filePreviewTarget: FilePreviewTarget? = nil
 
     // MARK: - Dependencies
     private let keychain: KeychainStoreProtocol
@@ -2160,8 +2161,25 @@ public final class AppStore {
         isUsageSheetPresented = false
         isHostSettingsSheetPresented = false
         lightboxPayload = nil
+        filePreviewTarget = nil
         selectSession(target.id)
         return true
+    }
+
+    /// Opens a `file://` link from a transcript in the native mobile file previewer.
+    public func openFileLink(_ url: URL) -> Bool {
+        guard let target = FilePreviewTarget.parse(from: url) else {
+            return false
+        }
+        isUsageSheetPresented = false
+        isHostSettingsSheetPresented = false
+        lightboxPayload = nil
+        filePreviewTarget = target
+        return true
+    }
+
+    public func fetchFilePreview(path: String, startLine: Int? = nil, endLine: Int? = nil) async throws -> FilePreviewData {
+        try await client.fetchFilePreview(path: path, startLine: startLine, endLine: endLine)
     }
 
     /// Where the system player streams a host video from, with the auth header it needs.

@@ -89,10 +89,20 @@ public protocol SuperHarnessClientProtocol: Sendable {
     /// URL and headers for streaming a host file (a video) straight into a player, which fetches
     /// byte ranges itself. Nil when the client has no host to stream from.
     func mediaStreamRequest(path: String) -> (url: URL, headers: [String: String])?
+    /// Reads a host file or directory preview (`GET /api/files/preview`).
+    func fetchFilePreview(path: String, startLine: Int?, endLine: Int?) async throws -> FilePreviewData
 }
 
 public extension SuperHarnessClientProtocol {
     func mediaStreamRequest(path: String) -> (url: URL, headers: [String: String])? { nil }
+    func fetchFilePreview(path: String, startLine: Int?, endLine: Int?) async throws -> FilePreviewData {
+        FilePreviewData(
+            path: path,
+            name: (path as NSString).lastPathComponent,
+            kind: "binary",
+            error: "File preview is unavailable on this connection."
+        )
+    }
     func fetchMedia(path: String, maxWidth: Int?) async throws -> Data {
         try await fetchMedia(path: path)
     }
@@ -555,6 +565,13 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             method: "POST",
             body: ReadBody(sessionId: sessionId, unread: unread ? true : nil)
         )
+    }
+
+    public func fetchFilePreview(path: String, startLine: Int?, endLine: Int?) async throws -> FilePreviewData {
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let startLine { items.append(URLQueryItem(name: "startLine", value: "\(startLine)")) }
+        if let endLine { items.append(URLQueryItem(name: "endLine", value: "\(endLine)")) }
+        return try await request(path: "/api/files/preview", method: "GET", queryItems: items)
     }
 
     public func controlHarness(harness: HarnessGroup, action: HarnessControlAction) async throws -> ControlHarnessResponse {

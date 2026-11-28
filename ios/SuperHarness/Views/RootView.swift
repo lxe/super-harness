@@ -73,11 +73,16 @@ public struct RootView: View {
                 .presentationDragIndicator(.visible)
         }
         .environment(\.openURL, OpenURLAction { url in
-            if store.openSessionLink(url) {
+            if store.openSessionLink(url) || store.openFileLink(url) {
                 return .handled
             }
             return .systemAction
         })
+        .sheet(item: $store.filePreviewTarget) { target in
+            FilePreviewSheet(store: store, initialTarget: target)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .fullScreenCover(item: Binding(
             get: { store.lightboxPayload.flatMap { $0.isVideo ? nil : $0 } },
             set: { store.lightboxPayload = $0 }
@@ -361,5 +366,361 @@ enum SHVideoPlayerPresenter {
         var top = window?.rootViewController
         while let next = top?.presentedViewController { top = next }
         return top
+    }
+}
+
+// MARK: - Mobile Host File Preview Sheet
+
+private struct FilePreviewSheet: View {
+    let store: AppStore
+    let initialTarget: FilePreviewTarget
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var navStack: [FilePreviewTarget] = []
+    @State private var preview: FilePreviewData? = nil
+    @State private var imageData: Data? = nil
+    @State private var isLoading: Bool = true
+    @State private var loadError: String? = nil
+    @State private var showRawMarkdown: Bool = false
+    @State private var wrapLines: Bool = false
+    @State private var copiedFeedback: String? = nil
+
+    private var activeTarget: FilePreviewTarget {
+        navStack.last ?? initialTarget
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                pathBreadcrumbBar
+                Divider().overlay(SHColor.lineSubtle)
+                contentBody
+            }
+            .background(SHColor.surfaceCanvas)
+            .navigationTitle(activeTarget.fileName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if navStack.count > 1 {
+                        Button {
+                            navStack.removeLast()
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "chevron.left")
+                                Text("Back")
+                            }
+                        }
+                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if preview?.kind == "markdown" {
+                        Button {
+                            showRawMarkdown.toggle()
+                        } label: {
+                            Image(systemName: showRawMarkdown ? "doc.richtext" : "chevron.left.forwardslash.chevron.right")
+                        }
+                        .accessibilityLabel(showRawMarkdown ? "Rendered Markdown" : "Raw Source")
+                    } else if preview?.kind == "code" {
+                        Button {
+                            wrapLines.toggle()
+                        } label: {
+                            Image(systemName: wrapLines ? "text.alignleft" : "arrow.left.and.right.text.vertical")
+                        }
+                        .accessibilityLabel(wrapLines ? "Disable Line Wrap" : "Wrap Lines")
+                    }
+
+                    Menu {
+                        Button {
+                            copyWithFeedback(activeTarget.path, label: "Path copied")
+                        } label: {
+                            Label("Copy Path", systemImage: "doc.on.doc")
+                        }
+                        if let content = preview?.content, !content.isEmpty {
+                            Button {
+                                copyWithFeedback(content, label: "Contents copied")
+                            } label: {
+                                Label("Copy File Contents", systemImage: "doc.plaintext")
+                            }
+                        }
+                        let parentPath = (activeTarget.path as NSString).deletingLastPathComponent
+                        if !parentPath.isEmpty && parentPath != activeTarget.path {
+                            Button {
+                                navigateTo(FilePreviewTarget(path: parentPath))
+                            } label: {
+                                Label("Open Parent Folder", systemImage: "folder")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .onAppear {
+            if navStack.isEmpty {
+                navStack = [initialTarget]
+            }
+        }
+        .task(id: activeTarget.id) {
+            await loadActiveTarget()
+        }
+    }
+
+    private var pathBreadcrumbBar: some View {
+        Button {
+            copyWithFeedback(activeTarget.path, label: "Path copied")
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: preview?.isDirectory == true ? "folder.fill" : "doc.text")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(SHColor.inkMuted)
+                Text(activeTarget.path)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(SHColor.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                Spacer(minLength: 6)
+                if let copiedFeedback {
+                    Text(copiedFeedback)
+                        .font(SHTypography.micro.weight(.semibold))
+                        .foregroundStyle(SHColor.statusSuccess)
+                } else if let meta = metadataPill {
+                    Text(meta)
+                        .font(SHTypography.micro.monospacedDigit())
+                        .foregroundStyle(SHColor.inkFaint)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(SHColor.surfaceBubble.opacity(0.65))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var metadataPill: String? {
+        if let s = activeTarget.startLine {
+            if let e = activeTarget.endLine, e > s {
+                return "L\(s)–L\(e)"
+            }
+            return "L\(s)"
+        }
+        guard let preview else { return nil }
+        if preview.isDirectory {
+            return "\(preview.entries?.count ?? 0) items"
+        }
+        var parts: [String] = []
+        if let lc = preview.lineCount, lc > 0 {
+            parts.append("\(lc) lines")
+        }
+        if preview.sizeBytes > 0 {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(preview.sizeBytes), countStyle: .file))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var contentBody: some View {
+        if isLoading {
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("Loading \(activeTarget.fileName)…")
+                    .font(SHTypography.caption)
+                    .foregroundStyle(SHColor.inkMuted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let errorText = loadError ?? preview?.error {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundStyle(SHColor.statusWarning)
+                Text("Couldn't preview file")
+                    .font(SHTypography.label.weight(.semibold))
+                    .foregroundStyle(SHColor.inkPrimary)
+                Text(errorText)
+                    .font(SHTypography.caption)
+                    .foregroundStyle(SHColor.inkMuted)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let preview {
+            switch preview.kind {
+            case "directory":
+                directoryView(preview.entries ?? [])
+            case "image":
+                imagePreviewView
+            case "markdown" where !showRawMarkdown:
+                ScrollView {
+                    SHMarkdownView(text: preview.content ?? "", isUserBubble: false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, SHLayout.screenPad)
+                        .padding(.vertical, 14)
+                }
+            case "code", "markdown":
+                codePreviewView(
+                    content: preview.content ?? "",
+                    highlightStart: activeTarget.startLine ?? preview.startLine,
+                    highlightEnd: activeTarget.endLine ?? preview.endLine
+                )
+            default:
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(SHColor.inkMuted)
+                    Text(preview.name)
+                        .font(SHTypography.label.weight(.semibold))
+                        .foregroundStyle(SHColor.inkPrimary)
+                    Text("Binary file (\(ByteCountFormatter.string(fromByteCount: Int64(preview.sizeBytes), countStyle: .file)))")
+                        .font(SHTypography.caption)
+                        .foregroundStyle(SHColor.inkMuted)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func codePreviewView(content: String, highlightStart: Int?, highlightEnd: Int?) -> some View {
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let gutterWidth = CGFloat(max(3, String(lines.count).count)) * 8.5 + 14
+        let effectiveEnd = highlightEnd ?? highlightStart
+
+        return ScrollViewReader { proxy in
+            ScrollView(wrapLines ? [.vertical] : [.vertical, .horizontal]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
+                        let lineNum = idx + 1
+                        let isHighlighted: Bool = {
+                            guard let s = highlightStart, let e = effectiveEnd else { return false }
+                            return lineNum >= s && lineNum <= e
+                        }()
+                        HStack(alignment: .top, spacing: 0) {
+                            Text("\(lineNum)")
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(isHighlighted ? SHColor.brandAntigravity : SHColor.inkFaint)
+                                .frame(width: gutterWidth, alignment: .trailing)
+                                .padding(.trailing, 10)
+                                .padding(.vertical, 1.5)
+                            Text(line.isEmpty ? " " : line)
+                                .font(.system(size: 12.5, design: .monospaced))
+                                .foregroundStyle(SHColor.inkPrimary)
+                                .fixedSize(horizontal: !wrapLines, vertical: true)
+                                .padding(.trailing, 16)
+                                .padding(.vertical, 1.5)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(isHighlighted ? SHColor.brandAntigravity.opacity(0.16) : Color.clear)
+                        .overlay(alignment: .leading) {
+                            if isHighlighted {
+                                Rectangle()
+                                    .fill(SHColor.brandAntigravity)
+                                    .frame(width: 2.5)
+                            }
+                        }
+                        .id(lineNum)
+                    }
+                }
+                .padding(.vertical, 10)
+            }
+            .onAppear {
+                if let targetLine = highlightStart, targetLine > 1, targetLine <= lines.count {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(targetLine, anchor: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    private func directoryView(_ entries: [FilePreviewDirectoryEntry]) -> some View {
+        List(entries) { entry in
+            Button {
+                navigateTo(FilePreviewTarget(path: entry.path))
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
+                        .font(.system(size: 15))
+                        .foregroundStyle(entry.isDirectory ? SHColor.brandAntigravity : SHColor.inkMuted)
+                        .frame(width: 22)
+                    Text(entry.name)
+                        .font(SHTypography.body)
+                        .foregroundStyle(SHColor.inkPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    if let size = entry.sizeBytes, !entry.isDirectory {
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                            .font(SHTypography.micro.monospacedDigit())
+                            .foregroundStyle(SHColor.inkFaint)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SHColor.inkFaint)
+                }
+            }
+            .listRowBackground(SHColor.surfaceCanvas)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder
+    private var imagePreviewView: some View {
+        if let imageData, let uiImage = UIImage(data: imageData) {
+            ScrollView([.vertical, .horizontal]) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .padding(16)
+            }
+        } else {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Loading image…")
+                    .font(SHTypography.caption)
+                    .foregroundStyle(SHColor.inkMuted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func navigateTo(_ target: FilePreviewTarget) {
+        showRawMarkdown = false
+        navStack.append(target)
+    }
+
+    private func loadActiveTarget() async {
+        isLoading = true
+        loadError = nil
+        preview = nil
+        imageData = nil
+        let target = activeTarget
+        do {
+            let result = try await store.fetchFilePreview(
+                path: target.path,
+                startLine: target.startLine,
+                endLine: target.endLine
+            )
+            preview = result
+            isLoading = false
+            if result.kind == "image" {
+                imageData = await store.loadMediaData(path: result.path)
+            }
+        } catch {
+            loadError = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    private func copyWithFeedback(_ value: String, label: String) {
+        UIPasteboard.general.string = value
+        copiedFeedback = label
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            if copiedFeedback == label { copiedFeedback = nil }
+        }
     }
 }

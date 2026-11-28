@@ -1149,6 +1149,29 @@ public actor MockSuperHarnessClient: SuperHarnessClientProtocol {
         }
     }
 
+    public func fetchFilePreview(path: String, startLine: Int?, endLine: Int?) async throws -> FilePreviewData {
+        let name = (path as NSString).lastPathComponent
+        let sample = """
+        // Demo preview for \(name)
+        import SwiftUI
+
+        struct DemoPreview {
+            let path = "\(path)"
+        }
+        """
+        return FilePreviewData(
+            path: path,
+            name: name.isEmpty ? path : name,
+            isDirectory: false,
+            kind: name.lowercased().hasSuffix(".md") ? "markdown" : "code",
+            content: sample,
+            sizeBytes: sample.utf8.count,
+            lineCount: sample.split(separator: "\n", omittingEmptySubsequences: false).count,
+            startLine: startLine,
+            endLine: endLine
+        )
+    }
+
     public func archiveSession(sessionId: String, killTmux: Bool) async throws -> ArchiveResponse {
         if let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
             sessions[idx].status = .archived

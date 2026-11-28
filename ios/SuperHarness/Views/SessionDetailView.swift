@@ -728,20 +728,36 @@ private struct MessageBubbleView: View, Equatable {
     }
 
     private var userMessageView: some View {
+        // Photos and videos the user attached show as one thumbnail strip above the bubble.
         let imageItems: [SHAttachmentThumbItem] = message.blocks.enumerated().compactMap { idx, block in
-            guard case .image(let path, let name, let dataUrl) = block else { return nil }
-            let title = name ?? ((path as NSString).lastPathComponent.isEmpty ? "Image" : (path as NSString).lastPathComponent)
-            return SHAttachmentThumbItem(
-                id: "\(message.id)-img-\(idx)",
-                name: title,
-                path: path,
-                mimeType: "image/jpeg",
-                dataUrl: dataUrl
-            )
+            switch block {
+            case .image(let path, let name, let dataUrl):
+                let title = name ?? ((path as NSString).lastPathComponent.isEmpty ? "Image" : (path as NSString).lastPathComponent)
+                return SHAttachmentThumbItem(
+                    id: "\(message.id)-img-\(idx)",
+                    name: title,
+                    path: path,
+                    mimeType: "image/jpeg",
+                    dataUrl: dataUrl
+                )
+            case .video(let path, let name, let mimeType) where !path.isEmpty:
+                let title = name ?? ((path as NSString).lastPathComponent.isEmpty ? "Video" : (path as NSString).lastPathComponent)
+                return SHAttachmentThumbItem(
+                    id: "\(message.id)-vid-\(idx)",
+                    name: title,
+                    path: path,
+                    mimeType: (mimeType?.isEmpty == false) ? mimeType! : "video/mp4"
+                )
+            default:
+                return nil
+            }
         }
         let nonImageBlocks = message.blocks.filter {
-            if case .image = $0 { return false }
-            return true
+            switch $0 {
+            case .image: return false
+            case .video(let path, _, _): return path.isEmpty
+            default: return true
+            }
         }
 
         return HStack {
@@ -754,6 +770,8 @@ private struct MessageBubbleView: View, Equatable {
                             items: imageItems,
                             thumbSize: SHLayout.thumbSize,
                             onTap: { item in
+                                // The lightbox shows still images only; a video tile has nothing to open yet.
+                                guard !item.isVideo else { return }
                                 onTapImage(LightboxPayload(title: item.name, dataUrl: item.dataUrl, path: item.path))
                             },
                             onLoadMedia: onLoadMedia

@@ -302,7 +302,9 @@ private struct SHAttachmentThumbTile: View {
         }
         .task(id: item.path) {
             #if canImport(UIKit)
-            guard item.isImage,
+            // A video's path loads as a poster frame: the host answers a sized request for a
+            // video with one JPEG frame.
+            guard item.isImage || item.isVideo,
                   DataURLImageDecoder.decode(item.dataUrl) == nil,
                   remoteImage == nil,
                   !item.path.isEmpty,

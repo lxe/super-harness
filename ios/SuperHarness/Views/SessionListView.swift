@@ -626,10 +626,14 @@ public struct SessionListView: View {
                                             .foregroundStyle(SHColor.inkMuted)
                                     }
                                     let preserveCase = section.isProjectOrSectionGroup || section.folderId != nil
-                                    Text(preserveCase ? section.title : section.title.uppercased())
-                                        .font(SHTypography.micro.weight(.semibold))
-                                        .foregroundStyle(SHColor.inkMuted)
-                                        .lineLimit(1)
+                                    // A section with a working thread shimmers its title,
+                                    // the same sign a working row gives.
+                                    SHShimmerText(
+                                        text: preserveCase ? section.title : section.title.uppercased(),
+                                        font: SHTypography.micro.weight(.semibold),
+                                        isActive: store.isAnyWorking(in: section),
+                                        idleColor: SHColor.inkMuted
+                                    )
                                     if section.folderId != nil {
                                         Text("\(section.sessions.count)")
                                             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
@@ -640,9 +644,6 @@ public struct SessionListView: View {
                                         .font(.system(size: 9.5, weight: .semibold))
                                         .foregroundStyle(SHColor.inkFaint)
                                         .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                                    if store.isAnyWorking(in: section) {
-                                        SHActivityPulse(tint: section.harnessGroup.map(SHColor.harness) ?? SHColor.inkSecondary, size: 11)
-                                    }
                                     Spacer(minLength: 0)
                                 }
                                 // The padding is inside the button so the whole band is tappable.

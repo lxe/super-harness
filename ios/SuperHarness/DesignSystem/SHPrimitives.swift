@@ -649,6 +649,8 @@ struct SHShimmerText: View {
     let font: Font
     let isActive: Bool
     var period: Double = 2.6
+    /// The text colour while nothing is working.
+    var idleColor: Color = SHColor.inkPrimary
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -688,7 +690,7 @@ struct SHShimmerText: View {
             }
             .accessibilityLabel("\(text), working")
         } else {
-            label.foregroundStyle(SHColor.inkPrimary)
+            label.foregroundStyle(idleColor)
         }
     }
 

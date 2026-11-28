@@ -51,6 +51,7 @@ import { closeSqlitePool } from './utils/sqlite';
 import { notificationTextFromMarkdown } from './utils/notificationText';
 import { ensureRichPath, whichBinary } from './utils/system';
 import { claudeTmuxRecords } from './adapters/claudeTmuxRevival';
+import { WebServer, type WebHandler } from './services/webServer';
 import { ensureLoginAutostart } from './services/loginAutostart';
 import { staleWorkingIds, WorkingCompletionTracker } from './utils/workingSet';
 
@@ -244,12 +245,55 @@ html, body {
   return `${headInjection}\n${html}`;
 }
 
+/** `SUPER_HARNESS_HEADLESS=1` runs without a window (pair it with `SUPER_HARNESS_WEB_PORT`). */
+const HEADLESS = process.env.SUPER_HARNESS_HEADLESS === '1';
+let webServer: WebServer | null = null;
+
+/**
+ * Web mode, on when `SUPER_HARNESS_WEB_PORT` is set: the full UI in a browser. Binds
+ * `SUPER_HARNESS_WEB_HOST` (default 127.0.0.1; put HTTPS in front for remote use). The token
+ * comes from `SUPER_HARNESS_WEB_TOKEN` or is kept in ~/.config/super-harness/web.json.
+ */
+async function startWebServer(): Promise<void> {
+  const port = Number(process.env.SUPER_HARNESS_WEB_PORT || '');
+  if (!Number.isInteger(port) || port <= 0) return;
+  const host = process.env.SUPER_HARNESS_WEB_HOST || '127.0.0.1';
+  const file = path.join(os.homedir(), '.config', 'super-harness', 'web.json');
+  let token = process.env.SUPER_HARNESS_WEB_TOKEN || '';
+  if (!token) {
+    try {
+      token = String((JSON.parse(fs.readFileSync(file, 'utf8')) as { token?: unknown }).token ?? '');
+    } catch {
+      // first run
+    }
+  }
+  if (!token) token = crypto.randomBytes(24).toString('hex');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({ url: `http://${host}:${port}/?token=${token}`, token }, null, 2)}\n`, { mode: 0o600 });
+  const server = new WebServer({
+    host,
+    port,
+    token,
+    rendererDir: path.resolve(__dirname, '../../../dist/renderer'),
+    handlers: webHandlers,
+    media: serveLocalMedia,
+  });
+  try {
+    await server.start();
+    webServer = server;
+    console.log(`[web] UI at http://${host}:${port}/ (sign-in link in ${file})`);
+  } catch (err) {
+    console.error('[web] could not start', err);
+  }
+}
+
 const store = new ConfigStore();
 const registry = new HarnessRegistry(store);
 const usageService = new UsageService();
 const catalogService = new HarnessCatalogService();
 
 function broadcastToRenderer(channel: string, payload: unknown): void {
+  webServer?.broadcast(channel, payload);
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const wc = mainWindow.webContents;
   if (!wc || wc.isDestroyed() || wc.isCrashed()) return;
@@ -960,8 +1004,16 @@ function createWindow(): void {
   });
 }
 
+/** IPC handlers by channel, so web mode can call the same code. */
+const webHandlers = new Map<string, WebHandler>();
+
+function handle(channel: string, fn: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown): void {
+  ipcMain.handle(channel, fn);
+  webHandlers.set(channel, (...args) => fn({} as Electron.IpcMainInvokeEvent, ...args));
+}
+
 function registerIpcHandlers(): void {
-  ipcMain.handle('sh:bootstrap', async () => {
+  handle('sh:bootstrap', async () => {
     const { harnesses, sessions } = await registry.discover();
     // Warm model/project catalog in the background so New Conversation opens instantaneously
     void catalogService.getCatalog(sessions);
@@ -973,7 +1025,7 @@ function registerIpcHandlers(): void {
     };
   });
 
-  ipcMain.handle('sh:catalog', async (_ev, force?: boolean) => {
+  handle('sh:catalog', async (_ev, force?: boolean) => {
     let { sessions } = registry.getCached();
     if (sessions.length === 0) {
       sessions = (await registry.discover()).sessions;
@@ -981,36 +1033,36 @@ function registerIpcHandlers(): void {
     return catalogService.getCatalog(sessions, Boolean(force));
   });
 
-  ipcMain.handle('sh:create-project', async (_ev, parentDir: string, name: string) => {
+  handle('sh:create-project', async (_ev, parentDir: string, name: string) => {
     const res = createProjectDirectory(parentDir, name);
     if (res.ok) catalogService.invalidate();
     return res;
   });
 
-  ipcMain.handle('sh:refresh', async () => {
+  handle('sh:refresh', async () => {
     return refreshAndBroadcast();
   });
 
-  ipcMain.handle('sh:harness-updates-check', async () => {
+  handle('sh:harness-updates-check', async () => {
     await harnessUpdates.checkAll(true);
     return (await refreshAndBroadcast()).harnesses;
   });
 
-  ipcMain.handle('sh:harness-update-start', async (_ev, harness: HarnessGroup) =>
+  handle('sh:harness-update-start', async (_ev, harness: HarnessGroup) =>
     harnessUpdates.startUpdate(harness)
   );
 
-  ipcMain.handle('sh:harness-update-cancel', async (_ev, harness: HarnessGroup) =>
+  handle('sh:harness-update-cancel', async (_ev, harness: HarnessGroup) =>
     harnessUpdates.cancel(harness)
   );
 
-  ipcMain.handle('sh:harness-update-jobs', async () => harnessUpdates.jobs());
+  handle('sh:harness-update-jobs', async () => harnessUpdates.jobs());
 
-  ipcMain.handle('sh:transcript', async (_ev, sessionId: string, limit?: number) => {
+  handle('sh:transcript', async (_ev, sessionId: string, limit?: number) => {
     return registry.getTranscript(sessionId, limit ?? 120);
   });
 
-  ipcMain.handle(
+  handle(
     'sh:watch-session',
     async (_ev, paneId: string, sessionId: string | null, limit?: number) => {
       await liveSync.watchPane(paneId, sessionId, limit ?? 60);
@@ -1018,18 +1070,18 @@ function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle('sh:capture-tmux', async (_ev, target: string) => {
+  handle('sh:capture-tmux', async (_ev, target: string) => {
     return registry.captureTmux(target);
   });
 
-  ipcMain.handle(
+  handle(
     'sh:save-attachment',
     async (_ev, dataUrl: string, filename?: string): Promise<ImageAttachment> => {
       return saveDataUrlAttachment(dataUrl, filename);
     }
   );
 
-  ipcMain.handle('sh:read-clipboard-image', async (): Promise<ImageAttachment | null> => {
+  handle('sh:read-clipboard-image', async (): Promise<ImageAttachment | null> => {
     try {
       const img = clipboard.readImage();
       if (!img.isEmpty()) {
@@ -1047,7 +1099,7 @@ function registerIpcHandlers(): void {
 
   // Attach any file. Images get an inline preview; other files are referenced by their path
   // (never copied or read here), and the dispatcher hands agents the path.
-  ipcMain.handle('sh:pick-attachment-files', async (): Promise<ImageAttachment[]> => {
+  handle('sh:pick-attachment-files', async (): Promise<ImageAttachment[]> => {
     if (!mainWindow) return [];
     const res = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections'],
@@ -1074,7 +1126,7 @@ function registerIpcHandlers(): void {
     return out;
   });
 
-  ipcMain.handle(
+  handle(
     'sh:send',
     async (
       _ev,
@@ -1090,14 +1142,14 @@ function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle(
+  handle(
     'sh:queue-message',
     async (_ev, sessionId: string, prompt: string, attachments?: ImageAttachment[]) => {
       return dispatcher.queueToSession(sessionId, prompt, attachments);
     }
   );
 
-  ipcMain.handle('sh:abort', async (_ev, sessionId: string) => {
+  handle('sh:abort', async (_ev, sessionId: string) => {
     console.log(`[abort] session=${sessionId} from=desktop-window`);
     if (sessionId === 'master:root') {
       return { ok: masterEngine.abort() };
@@ -1105,7 +1157,7 @@ function registerIpcHandlers(): void {
     return { ok: dispatcher.abort(sessionId) };
   });
 
-  ipcMain.handle('sh:start-session', async (_ev, req: StartSessionRequest) => {
+  handle('sh:start-session', async (_ev, req: StartSessionRequest) => {
     const res = await dispatcher.startNewSession(req);
     if (res.ok) {
       await refreshAndBroadcast();
@@ -1113,7 +1165,7 @@ function registerIpcHandlers(): void {
     return res;
   });
 
-  ipcMain.handle(
+  handle(
     'sh:control-harness',
     async (
       _ev,
@@ -1126,7 +1178,7 @@ function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle('sh:organize', async (_ev, actions: OrganizeAction[]) => {
+  handle('sh:organize', async (_ev, actions: OrganizeAction[]) => {
     const next = store.applyOrganize(actions);
     liveModelApplier.note(actions);
     // Propagate native section moves upstream to drivers that support it (e.g. Codex app-server)
@@ -1145,7 +1197,7 @@ function registerIpcHandlers(): void {
     return next;
   });
 
-  ipcMain.handle(
+  handle(
     'sh:archive-session',
     async (_ev, sessionId: string, opts?: { killTmux?: boolean }) => {
       const res = await dispatcher.archiveSession(sessionId, opts);
@@ -1154,7 +1206,7 @@ function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle('sh:promote-tmux', async (_ev, sessionId: string) => {
+  handle('sh:promote-tmux', async (_ev, sessionId: string) => {
     const res = await dispatcher.promoteToTmux(sessionId);
     if (res.ok) {
       setTimeout(() => void refreshAndBroadcast(), 1500);
@@ -1162,21 +1214,21 @@ function registerIpcHandlers(): void {
     return res;
   });
 
-  ipcMain.handle('sh:update-settings', async (_ev, patch: Partial<SuperHarnessSettings>) => {
+  handle('sh:update-settings', async (_ev, patch: Partial<SuperHarnessSettings>) => {
     const next = store.updateSettings(patch);
     void refreshAndBroadcast();
     return next;
   });
 
-  ipcMain.handle('sh:refresh-summaries', async () => sessionSummarizer.refresh({ force: true }));
-  ipcMain.handle('sh:get-summary-stats', async () => sessionSummarizer.getUsageStats());
-  ipcMain.handle('sh:reset-summary-stats', async () => sessionSummarizer.resetUsageStats());
+  handle('sh:refresh-summaries', async () => sessionSummarizer.refresh({ force: true }));
+  handle('sh:get-summary-stats', async () => sessionSummarizer.getUsageStats());
+  handle('sh:reset-summary-stats', async () => sessionSummarizer.resetUsageStats());
 
-  ipcMain.handle('sh:dictation-status', async (_ev, draft?: DictationSettings) =>
+  handle('sh:dictation-status', async (_ev, draft?: DictationSettings) =>
     checkDictationServer(draft ?? store.getState().settings.dictation)
   );
 
-  ipcMain.handle(
+  handle(
     'sh:dictate',
     async (_ev, audio: Uint8Array, mimeType: string): Promise<DictationResult> => {
       try {
@@ -1190,7 +1242,7 @@ function registerIpcHandlers(): void {
   );
 
   // Pairing codes go to the renderer only (shown in Settings → Mobile); never logged.
-  ipcMain.handle('sh:mobile-info', async (): Promise<MobileAccessInfo> => ({
+  handle('sh:mobile-info', async (): Promise<MobileAccessInfo> => ({
     hostId: pairingService.hostId(),
     hostName: pairingService.hostName,
     defaultHostName,
@@ -1198,7 +1250,7 @@ function registerIpcHandlers(): void {
     addresses: await getMobileAddressesCached(true),
     bonjour: bonjourAdvertiser.active,
   }));
-  ipcMain.handle('sh:pairing-open', async (): Promise<PairingSession | { error: string }> => {
+  handle('sh:pairing-open', async (): Promise<PairingSession | { error: string }> => {
     const port = controlServer.mobilePort;
     if (!port) return { error: 'Turn on “Allow phones to connect” first.' };
     const hosts = (await getMobileAddressesCached()).map((a) => a.address);
@@ -1207,14 +1259,14 @@ function registerIpcHandlers(): void {
     const qrDataUrl = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 360 });
     return { code, expiresAt, url, qrDataUrl, hosts };
   });
-  ipcMain.handle('sh:pairing-close', async () => pairingService.close('cancelled'));
-  ipcMain.handle('sh:revoke-device', async (_ev, deviceId: string) => pairingService.revoke(deviceId));
+  handle('sh:pairing-close', async () => pairingService.close('cancelled'));
+  handle('sh:revoke-device', async (_ev, deviceId: string) => pairingService.revoke(deviceId));
 
-  ipcMain.handle('sh:clear-master', async () => {
+  handle('sh:clear-master', async () => {
     return store.clearMasterMessages();
   });
 
-  ipcMain.handle('sh:pick-directory', async () => {
+  handle('sh:pick-directory', async () => {
     if (!mainWindow) return null;
     const res = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory'],
@@ -1222,18 +1274,18 @@ function registerIpcHandlers(): void {
     return res.canceled ? null : res.filePaths[0] ?? null;
   });
 
-  ipcMain.handle('sh:system-apps', async () => {
+  handle('sh:system-apps', async () => {
     return detectSystemApps();
   });
 
-  ipcMain.handle(
+  handle(
     'sh:read-file-preview',
     async (_ev, filePath: string, startLine?: number, endLine?: number) => {
       return readFilePreview(filePath, startLine, endLine);
     }
   );
 
-  ipcMain.handle(
+  handle(
     'sh:open-path',
     async (
       _ev,
@@ -1245,7 +1297,7 @@ function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle('sh:open-external', async (_ev, url: string) => {
+  handle('sh:open-external', async (_ev, url: string) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       await shell.openExternal(url);
       return { ok: true };
@@ -1253,19 +1305,19 @@ function registerIpcHandlers(): void {
     return { ok: false };
   });
 
-  ipcMain.handle('sh:open-in-harness', async (_ev, sessionId: string) => {
+  handle('sh:open-in-harness', async (_ev, sessionId: string) => {
     const session = registry.getCached().sessions.find((s) => s.id === sessionId);
     if (!session) return { ok: false, error: 'Session not found' };
     return openSessionInHarness(session, store.getState().settings.apps);
   });
 
-  ipcMain.handle('sh:get-usage', async (_ev, force?: boolean) => {
+  handle('sh:get-usage', async (_ev, force?: boolean) => {
     const snap = await usageService.getUsage(Boolean(force));
     broadcastToRenderer('sh:usage-updated', snap);
     return snap;
   });
 
-  ipcMain.handle('sh:restart-app', async (_ev, opts?: { build?: boolean }) => {
+  handle('sh:restart-app', async (_ev, opts?: { build?: boolean }) => {
     return scheduleDetachedRestart(opts);
   });
 }
@@ -1307,7 +1359,7 @@ if (!gotSingleInstanceLock) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
-    } else {
+    } else if (!HEADLESS) {
       createWindow();
     }
   });
@@ -1327,83 +1379,87 @@ function resolveLocalMediaPath(rawPath: string): string | null {
   return null;
 }
 
-app.whenReady().then(async () => {
-  if (!gotSingleInstanceLock) return;
-  protocol.handle('sh-media', (request) => {
-    try {
-      const u = new URL(request.url);
-      const rawPath = decodeURIComponent(u.searchParams.get('path') || '');
-      const filePath = resolveLocalMediaPath(rawPath);
-      if (!filePath) {
-        return new Response('Not found', { status: 404 });
-      }
-      const ext = path.extname(filePath).toLowerCase();
-      if (u.searchParams.get('embed') === '1' && (ext === '.html' || ext === '.htm')) {
-        const rawHtml = fs.readFileSync(filePath, 'utf8');
-        const token = u.searchParams.get('token') || '';
-        const html = injectEmbedPreviewRuntime(rawHtml, token);
-        return new Response(html, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-store',
-          },
-        });
-      }
-      const videoMime: Record<string, string> = {
-        '.mp4': 'video/mp4',
-        '.m4v': 'video/mp4',
-        '.webm': 'video/webm',
-        '.mov': 'video/quicktime',
-        '.mkv': 'video/x-matroska',
-        '.avi': 'video/x-msvideo',
-      };
-      const contentType = videoMime[ext];
-      if (contentType) {
-        const stat = fs.statSync(filePath);
-        const fileSize = stat.size;
-        const rangeHeader = request.headers.get('range');
-        if (rangeHeader) {
-          const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
-          if (match) {
-            const start = match[1] ? Number(match[1]) : 0;
-            const end = match[2] ? Math.min(Number(match[2]), fileSize - 1) : fileSize - 1;
-            if (start < fileSize && start <= end) {
-              const chunkSize = end - start + 1;
-              const stream = fs.createReadStream(filePath, { start, end });
-              return new Response(Readable.toWeb(stream) as never, {
-                status: 206,
-                headers: {
-                  'Content-Type': contentType,
-                  'Content-Length': String(chunkSize),
-                  'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                  'Accept-Ranges': 'bytes',
-                },
-              });
-            }
+/** Serves `sh-media://local?path=…` (and `media?path=…` in web mode). */
+function serveLocalMedia(request: Request): Response | Promise<Response> {
+  try {
+    const u = new URL(request.url);
+    const rawPath = decodeURIComponent(u.searchParams.get('path') || '');
+    const filePath = resolveLocalMediaPath(rawPath);
+    if (!filePath) {
+      return new Response('Not found', { status: 404 });
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    if (u.searchParams.get('embed') === '1' && (ext === '.html' || ext === '.htm')) {
+      const rawHtml = fs.readFileSync(filePath, 'utf8');
+      const token = u.searchParams.get('token') || '';
+      const html = injectEmbedPreviewRuntime(rawHtml, token);
+      return new Response(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+    const videoMime: Record<string, string> = {
+      '.mp4': 'video/mp4',
+      '.m4v': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
+      '.mkv': 'video/x-matroska',
+      '.avi': 'video/x-msvideo',
+    };
+    const contentType = videoMime[ext];
+    if (contentType) {
+      const stat = fs.statSync(filePath);
+      const fileSize = stat.size;
+      const rangeHeader = request.headers.get('range');
+      if (rangeHeader) {
+        const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+        if (match) {
+          const start = match[1] ? Number(match[1]) : 0;
+          const end = match[2] ? Math.min(Number(match[2]), fileSize - 1) : fileSize - 1;
+          if (start < fileSize && start <= end) {
+            const chunkSize = end - start + 1;
+            const stream = fs.createReadStream(filePath, { start, end });
+            return new Response(Readable.toWeb(stream) as never, {
+              status: 206,
+              headers: {
+                'Content-Type': contentType,
+                'Content-Length': String(chunkSize),
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Accept-Ranges': 'bytes',
+              },
+            });
           }
         }
-        const stream = fs.createReadStream(filePath);
-        return new Response(Readable.toWeb(stream) as never, {
-          status: 200,
-          headers: {
-            'Content-Type': contentType,
-            'Content-Length': String(fileSize),
-            'Accept-Ranges': 'bytes',
-          },
-        });
       }
-      return net.fetch(pathToFileURL(filePath).toString());
-    } catch {
-      return new Response('Bad request', { status: 400 });
+      const stream = fs.createReadStream(filePath);
+      return new Response(Readable.toWeb(stream) as never, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(fileSize),
+          'Accept-Ranges': 'bytes',
+        },
+      });
     }
-  });
+    return net.fetch(pathToFileURL(filePath).toString());
+  } catch {
+    return new Response('Bad request', { status: 400 });
+  }
+}
+
+app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
+  protocol.handle('sh-media', serveLocalMedia);
 
   await controlServer.start();
   await controlServer.syncMobileListener(store.getState().settings.mobileApi);
   void syncBonjour();
   registerIpcHandlers();
-  createWindow();
+  if (!HEADLESS) createWindow();
+  await startWebServer();
   liveSync.start();
   harnessUpdates.start();
   schedulePolling(store.getState().settings.pollIntervalMs);
@@ -1441,6 +1497,7 @@ app.on('window-all-closed', () => {
   dispatcher.shutdown();
   bonjourAdvertiser.stop();
   controlServer.close();
+  webServer?.close();
   closeSqlitePool();
   if (process.platform !== 'darwin') {
     app.quit();

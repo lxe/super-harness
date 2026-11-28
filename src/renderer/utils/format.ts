@@ -45,8 +45,12 @@ export function renderMarkdownHtml(md: string): string {
   }
 }
 
+/** Web mode (see webServer.ts) serves local files at `media?…` instead of the `sh-media:` protocol. */
+const MEDIA_BASE =
+  typeof window !== 'undefined' && (window as { __SH_WEB__?: boolean }).__SH_WEB__ ? 'media' : 'sh-media://local';
+
 export function mediaUrlForPath(filePath: string): string {
-  return `sh-media://local?path=${encodeURIComponent(filePath)}`;
+  return `${MEDIA_BASE}?path=${encodeURIComponent(filePath)}`;
 }
 
 export interface ParsedSessionLink {
@@ -173,7 +177,7 @@ export function resolveSessionLink(
 }
 
 export function embedUrlForPath(filePath: string, token: string): string {
-  return `sh-media://local?path=${encodeURIComponent(filePath)}&embed=1&token=${encodeURIComponent(token)}`;
+  return `${MEDIA_BASE}?path=${encodeURIComponent(filePath)}&embed=1&token=${encodeURIComponent(token)}`;
 }
 
 export type TextEmbedSegment =

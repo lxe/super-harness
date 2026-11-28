@@ -827,6 +827,8 @@ export interface SuperHarnessApi {
   onTranscriptUpdated: (cb: (result: SessionTranscriptResult) => void) => () => void;
   onStateChanged: (cb: (state: SuperHarnessState) => void) => () => void;
   onUsageUpdated: (cb: (usage: UsageSnapshot) => void) => () => void;
+  /** Main asks the window to show a session (e.g. after a desktop notification was clicked). */
+  onOpenSession: (cb: (sessionId: string) => void) => () => void;
   onSessionsUpdated: (
     cb: (payload: {
       harnesses: HarnessDetection[];

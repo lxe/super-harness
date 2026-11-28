@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, net, protocol, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, Notification, protocol, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -36,7 +36,7 @@ delete process.env.TMUX_PANE;
 import { HarnessDispatcher } from './services/dispatcher';
 import { LiveSyncService } from './services/liveSync';
 import { MasterEngine } from './services/masterEngine';
-import { PushNotifier } from './services/pushNotifier';
+import { PushNotifier, type PushSendPayload } from './services/pushNotifier';
 import {
   detectSystemApps,
   openPathWithApp,
@@ -337,6 +337,34 @@ function saveDataUrlAttachment(dataUrl: string, filename?: string): ImageAttachm
 }
 
 const pushNotifier = new PushNotifier(() => store.getState().settings.mobileApi?.token ?? '');
+
+/**
+ * Shows a session event as an OS notification while the desktop window is not focused (phones get
+ * the same event as a push). Clicking the notification brings the window up on that session.
+ */
+const openNotifications = new Set<Notification>();
+
+function showDesktopNotification(payload: Pick<PushSendPayload, 'title' | 'body' | 'sessionId'>): void {
+  const focused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
+  if (focused || !Notification.isSupported()) return;
+  const n = new Notification({ title: payload.title, body: payload.body });
+  // Electron drops a notification's events once the object is garbage-collected, so hold it
+  // until it is clicked or closed.
+  openNotifications.add(n);
+  n.on('close', () => openNotifications.delete(n));
+  n.on('click', () => {
+    openNotifications.delete(n);
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+    else {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    if (payload.sessionId) broadcastToRenderer('sh:open-session', payload.sessionId);
+  });
+  n.show();
+}
+
 let defaultHostName = os.hostname().replace(/\.local$/, '') || 'Desktop';
 void defaultDesktopName().then((name) => {
   defaultHostName = name;
@@ -469,6 +497,7 @@ async function notifyTaskCompleted(
   }
   lastNotifiedCompletionBySession.set(sessionId, nextSig);
 
+  showDesktopNotification({ title: sess?.title || 'Task completed', body, sessionId });
   const res = await pushNotifier.notify({
     kind: 'task_completed',
     sessionId,
@@ -792,6 +821,7 @@ const liveSync = new LiveSyncService(
         qBlock && qBlock.type === 'question' && qBlock.questions?.[0]?.question
           ? qBlock.questions[0].question.slice(0, 160)
           : 'Waiting for your response';
+      showDesktopNotification({ title: `${sess?.title || 'Agent'} needs input`, body: qText, sessionId: transcript.sessionId });
       void pushNotifier.notify({
         kind: 'input_needed',
         sessionId: transcript.sessionId,

@@ -1039,6 +1039,21 @@ private struct HarnessSwitcherStrip: View {
             ForEach(Array(store.harnessOrder.enumerated()), id: \.element) { index, group in
                 let isDragged = drag?.harness == group
                 harnessChip(group)
+                    // The shortcuts are attached to the gauge itself, so their arrow points at
+                    // the gauge that was held and not at the middle of the dock.
+                    .confirmationDialog(
+                        group.title,
+                        isPresented: Binding(
+                            get: { shortcutsHarness == group },
+                            set: { if !$0, shortcutsHarness == group { shortcutsHarness = nil } }
+                        ),
+                        titleVisibility: .visible
+                    ) {
+                        Button("New \(group.title) Session") { store.openDraftChat(for: group) }
+                        Button("\(group.title) Usage") { store.openUsageSheet(for: group) }
+                    } message: {
+                        Text("Hold and drag a gauge to reorder the harnesses.")
+                    }
                     .scaleEffect(isDragged ? 1.14 : 1)
                     .shadow(color: .black.opacity(isDragged ? 0.45 : 0), radius: 8, y: 3)
                     .offset(x: isDragged ? (drag?.x ?? 0) - cellCenter(slot: index) : 0)
@@ -1121,17 +1136,6 @@ private struct HarnessSwitcherStrip: View {
         }
         .onChange(of: drag?.harness) { old, new in
             if old == nil, new != nil { triggerSelectionHaptic() }
-        }
-        .confirmationDialog(
-            shortcutsHarness?.title ?? "",
-            isPresented: Binding(get: { shortcutsHarness != nil }, set: { if !$0 { shortcutsHarness = nil } }),
-            titleVisibility: .visible,
-            presenting: shortcutsHarness
-        ) { group in
-            Button("New \(group.title) Session") { store.openDraftChat(for: group) }
-            Button("\(group.title) Usage") { store.openUsageSheet(for: group) }
-        } message: { _ in
-            Text("Hold and drag a gauge to reorder the harnesses.")
         }
     }
 

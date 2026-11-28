@@ -259,6 +259,7 @@ export const App: React.FC = () => {
       setSessions((prev) => reconcileById(prev, payload.sessions));
       setLiveWorkingMap((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     });
+    const offOpenSession = window.superHarness.onOpenSession((id) => setActiveSessionId(id));
     const offState = window.superHarness.onStateChanged((next) => {
       setState(next);
     });
@@ -302,6 +303,7 @@ export const App: React.FC = () => {
       mounted = false;
       offSessions();
       offState();
+      offOpenSession();
       offUsage();
       offStream();
       offTranscript();

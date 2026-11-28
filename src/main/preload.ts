@@ -133,6 +133,12 @@ const api: SuperHarnessApi = {
     return () => ipcRenderer.removeListener('sh:usage-updated', listener);
   },
 
+  onOpenSession: (cb: (sessionId: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, sessionId: string) => cb(sessionId);
+    ipcRenderer.on('sh:open-session', listener);
+    return () => ipcRenderer.removeListener('sh:open-session', listener);
+  },
+
   onSessionsUpdated: (
     cb: (payload: { harnesses: HarnessDetection[]; sessions: UnifiedSession[] }) => void
   ) => {

@@ -31,7 +31,7 @@ jobs:
       matrix:
         include:
           - label: Linux
-            os: ubuntu-latest
+            os: orble-4
             dist_cmd: npm run dist:linux
           - label: macOS
             os: macos-latest

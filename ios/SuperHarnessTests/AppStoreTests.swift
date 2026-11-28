@@ -810,6 +810,34 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.messages(for: sid).map(\.id), ["agy-u-1"])
     }
 
+    @MainActor
+    func testAwaitingReplyCoversTheGapAfterSending() {
+        let sid = "codex:test-awaiting-reply"
+        let store = AppStore(client: MockSuperHarnessClient(), keychain: InMemoryKeychainStore(), defaults: .init(suiteName: UUID().uuidString)!)
+        let now = Date().timeIntervalSince1970 * 1000.0
+        let reply = UnifiedMessage(id: "a-1", role: .assistant, timestamp: now, blocks: [.text(text: "Done.")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(sessionId: sid, messages: [reply], totalCount: 1, hasMore: false))
+        XCTAssertFalse(store.isAwaitingReply(sid), "An idle thread shows no working row")
+
+        XCTAssertNotNil(store.submitMessage(for: sid, text: "Thinking level?", attachments: []))
+        XCTAssertTrue(store.isAwaitingReply(sid), "The working row shows as soon as the message is sent")
+
+        // The host saves the user message and reports the turn; the transcript's own activity takes over.
+        let user = UnifiedMessage(id: "u-1", role: .user, timestamp: now, blocks: [.text(text: "Thinking level?")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid, messages: [reply, user], totalCount: 2, hasMore: false,
+            liveActivity: LiveActivityState(isWorking: true)
+        ))
+        XCTAssertTrue(store.isAwaitingReply(sid))
+
+        let answer = UnifiedMessage(id: "a-2", role: .assistant, timestamp: now, blocks: [.text(text: "Medium.")])
+        store.applyTranscriptUpdate(SessionTranscriptResult(
+            sessionId: sid, messages: [reply, user, answer], totalCount: 3, hasMore: false,
+            liveActivity: LiveActivityState(isWorking: false)
+        ))
+        XCTAssertFalse(store.isAwaitingReply(sid), "The row goes away once the reply has arrived")
+    }
+
     func testColdLaunchHydratesSynchronouslyFromDiskSnapshot() async throws {
         let suite = "sh.test.snapshot.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

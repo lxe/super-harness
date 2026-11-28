@@ -2557,6 +2557,18 @@ public final class AppStore {
         return false
     }
 
+    /// True from the moment a message is sent until the host's transcript shows the turn:
+    /// the thread shows its working row during that gap, so a sent message is never followed
+    /// by blank space. A message that failed to send does not count.
+    public func isAwaitingReply(_ sessionId: String) -> Bool {
+        if pendingOutgoingBySessionId[sessionId]?.contains(where: { $0.state == .sending || $0.state == .sent }) == true {
+            return true
+        }
+        // The host has the message and reports the session busy, but has not yet sent activity.
+        return isSessionBusy(sessionId)
+            && transcriptsBySessionId[sessionId]?.messages.last?.role == .user
+    }
+
     /// When each session's transcript last arrived saying it is working.
     private var lastWorkingTranscriptAt: [String: Date] = [:]
     /// How long a working transcript for the open chat outranks the host's working list.

@@ -52,6 +52,20 @@ public struct SessionDetailView: View {
         let hasBufferedEarlier = visibleMessages.count < messages.count
         let isLoadingInitialTranscript = (transcript == nil && messages.isEmpty)
         let liveActivity = transcript?.liveActivity
+        // The working row appears as soon as a message is sent, before the host reports activity.
+        let shownActivity: LiveActivityState? = {
+            let awaitingReply = store.isAwaitingReply(session.id)
+            guard var activity = liveActivity else {
+                return awaitingReply ? LiveActivityState(isWorking: true) : nil
+            }
+            if awaitingReply {
+                if !activity.isWorking { activity.focus = nil }
+                activity.isWorking = true
+                return activity
+            }
+            let hasDetails = !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true)
+            return activity.isWorking || hasDetails ? activity : nil
+        }()
         let isBusy = store.isSessionBusy(session.id)
         let isStreaming = store.streamingMessagesBySessionId[session.id] != nil
         let availableModels: [HarnessModelOption] = {
@@ -153,8 +167,7 @@ public struct SessionDetailView: View {
                             }
 
                             // Scrollable inline activity row — equalized 8pt rhythm below assistant blocks.
-                            if let activity = liveActivity,
-                               activity.isWorking || !(activity.steps?.isEmpty ?? true) || !(activity.runningTasks?.isEmpty ?? true) {
+                            if let activity = shownActivity {
                                 LiveStepsBarView(
                                     activity: activity,
                                     accentColor: SHColor.harness(currentSession.harness)

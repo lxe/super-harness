@@ -24,6 +24,11 @@ public struct SessionDetailView: View {
     @State private var isNewFolderAlertPresented: Bool = false
     @State private var newFolderDraft: String = ""
     @State private var isThreadInfoExpanded: Bool = false
+    /// Adaptive block budget for the initial eager VStack render window so opening heavy
+    /// multi-hundred-block coding threads mounts only the newest screenfuls immediately.
+    private static let initialRenderBlockBudget: Int = 60
+    private static let minRenderedMessages: Int = 2
+    @State private var visibleBlockBudget: Int = SessionDetailView.initialRenderBlockBudget
     private static var usesGlassPopover: Bool {
         if #available(iOS 26.0, *) { return true }
         return false
@@ -38,6 +43,12 @@ public struct SessionDetailView: View {
         let currentSession = store.sessions.first(where: { $0.id == session.id }) ?? session
         let transcript = store.transcriptsBySessionId[session.id]
         let messages = store.messages(for: session.id)
+        let visibleMessages = Self.tailWindow(
+            messages,
+            maxBlocks: visibleBlockBudget,
+            minMessages: Self.minRenderedMessages
+        )
+        let hasBufferedEarlier = visibleMessages.count < messages.count
         let isLoadingInitialTranscript = (transcript == nil && messages.isEmpty)
         let liveActivity = transcript?.liveActivity
         let isBusy = store.isSessionBusy(session.id)
@@ -101,14 +112,14 @@ public struct SessionDetailView: View {
                         VStack(alignment: .leading, spacing: store.chatMetrics.messageGap) {
                             Color.clear.frame(height: 8)
 
-                            if transcript?.hasMore == true {
-                                loadEarlierButton
+                            if hasBufferedEarlier || transcript?.hasMore == true {
+                                loadEarlierButton(hasBufferedEarlier: hasBufferedEarlier)
                             }
 
-                            if messages.isEmpty {
+                            if visibleMessages.isEmpty {
                                 emptyTranscriptView(for: currentSession)
                             } else {
-                                ForEach(messages) { message in
+                                ForEach(visibleMessages) { message in
                                     let pendingState = store.pendingDeliveryState(for: session.id, messageId: message.id)
                                     MessageBubbleView(
                                         message: message,
@@ -211,6 +222,7 @@ public struct SessionDetailView: View {
                         distanceFromBottom = 0
                         userIsDragging = false
                         stableQueuedMessages = []
+                        visibleBlockBudget = Self.initialRenderBlockBudget
                         anchorBottomIfNeeded(sessionId: newId, hasMessages: !messages.isEmpty)
                     }
                     .onChange(of: messages.isEmpty) { _, isEmpty in
@@ -681,14 +693,42 @@ public struct SessionDetailView: View {
         #endif
     }
 
-    private var loadEarlierButton: some View {
+    /// Keeps the newest messages fitting within `maxBlocks` (always at least `minMessages`),
+    /// avoiding eager layout of huge historical turns scrolled far above the viewport on open.
+    private static func tailWindow(
+        _ messages: [UnifiedMessage],
+        maxBlocks: Int,
+        minMessages: Int
+    ) -> [UnifiedMessage] {
+        guard maxBlocks < Int.max, messages.count > minMessages else { return messages }
+        var blockSum = 0
+        var keepCount = 0
+        for msg in messages.reversed() {
+            let cost = max(1, msg.blocks.count)
+            if keepCount >= minMessages && blockSum + cost > maxBlocks {
+                break
+            }
+            blockSum += cost
+            keepCount += 1
+        }
+        if keepCount >= messages.count { return messages }
+        return Array(messages.suffix(keepCount))
+    }
+
+    private func loadEarlierButton(hasBufferedEarlier: Bool) -> some View {
         HStack {
             Spacer()
             Button {
                 guard !isLoadingEarlier else { return }
+                if hasBufferedEarlier {
+                    // Reveal already-fetched earlier messages immediately with zero network RTT.
+                    visibleBlockBudget = visibleBlockBudget >= 400 ? Int.max : visibleBlockBudget + 200
+                    return
+                }
                 Task {
                     isLoadingEarlier = true
                     defer { isLoadingEarlier = false }
+                    visibleBlockBudget = Int.max
                     await store.loadEarlierMessages(for: session.id)
                 }
             } label: {

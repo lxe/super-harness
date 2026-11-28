@@ -472,6 +472,254 @@ public enum SHMarkdownCache {
         return c
     }()
 
+    private static let markdownSpecialChars = CharacterSet(charactersIn: "*_`[~\\:")
+
+    #if canImport(UIKit)
+    private static let nsAttrCache: NSCache<NSString, NSAttributedString> = {
+        let c = NSCache<NSString, NSAttributedString>()
+        c.countLimit = 600
+        return c
+    }()
+
+    private static let sizeCache: NSCache<NSString, NSValue> = {
+        let c = NSCache<NSString, NSValue>()
+        c.countLimit = 1200
+        return c
+    }()
+
+    private static let uiCodeColor = UIColor(Color(hex: 0x93C5FD))
+    private static let uiCodeBg = UIColor(SHColor.surfaceBubble.opacity(0.92))
+    private static let uiPrimaryColor = UIColor(SHColor.inkPrimary)
+    private static let uiSecondaryColor = UIColor(SHColor.inkSecondary)
+    private static let uiMutedColor = UIColor(SHColor.inkMuted)
+    private static let uiLinkColor = UIColor(SHColor.brandAntigravity)
+
+    static func cachedSize(forKey key: String) -> CGSize? {
+        sizeCache.object(forKey: key as NSString)?.cgSizeValue
+    }
+
+    static func storeCachedSize(_ size: CGSize, forKey key: String) {
+        sizeCache.setObject(NSValue(cgSize: size), forKey: key as NSString)
+    }
+
+    static func cachedNSAttributedString(forKey key: String) -> NSAttributedString? {
+        nsAttrCache.object(forKey: key as NSString)
+    }
+
+    static func storeNSAttributedString(_ attr: NSAttributedString, forKey key: String) {
+        nsAttrCache.setObject(attr, forKey: key as NSString)
+    }
+
+    static func appendInlineStyled(
+        _ raw: String,
+        to out: NSMutableAttributedString,
+        isUserBubble: Bool,
+        fontSize: CGFloat,
+        fontWeight: UIFont.Weight,
+        baseUIColor: UIColor,
+        paragraphStyle: NSParagraphStyle,
+        scale: CGFloat
+    ) {
+        let baseFont = UIFont.systemFont(ofSize: fontSize, weight: fontWeight)
+        // Fast path: plain text with no markdown or URL punctuation skips AttributedString(markdown:).
+        if raw.rangeOfCharacter(from: markdownSpecialChars) == nil {
+            out.append(NSAttributedString(string: raw, attributes: [
+                .font: baseFont,
+                .foregroundColor: baseUIColor,
+                .paragraphStyle: paragraphStyle,
+            ]))
+            return
+        }
+
+        let attr = inlineAttributedString(for: raw, isUserBubble: isUserBubble, scale: scale)
+        let codeFont = UIFont.monospacedSystemFont(ofSize: 13.5 * scale, weight: .regular)
+        for run in attr.runs {
+            let chunk = String(attr[run.range].characters)
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: baseFont,
+                .foregroundColor: baseUIColor,
+                .paragraphStyle: paragraphStyle,
+            ]
+            if let intent = run.inlinePresentationIntent {
+                if intent.contains(.code) {
+                    attrs[.font] = codeFont
+                    attrs[.foregroundColor] = uiCodeColor
+                    attrs[.backgroundColor] = uiCodeBg
+                } else {
+                    var traits: UIFontDescriptor.SymbolicTraits = []
+                    if intent.contains(.stronglyEmphasized) {
+                        traits.insert(.traitBold)
+                        attrs[.foregroundColor] = uiPrimaryColor
+                    }
+                    if intent.contains(.emphasized) {
+                        traits.insert(.traitItalic)
+                    }
+                    if !traits.isEmpty, let desc = baseFont.fontDescriptor.withSymbolicTraits(traits) {
+                        attrs[.font] = UIFont(descriptor: desc, size: fontSize)
+                    }
+                    if intent.contains(.strikethrough) {
+                        attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                        attrs[.foregroundColor] = uiMutedColor
+                    }
+                }
+            }
+            if let url = run.link {
+                attrs[.link] = url
+                attrs[.foregroundColor] = uiLinkColor
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            out.append(NSAttributedString(string: chunk, attributes: attrs))
+        }
+    }
+
+    static func proseAttributedString(
+        blocks: [SHMarkdownBlock],
+        cacheKey: String,
+        isUserBubble: Bool,
+        scale: CGFloat,
+        blockGap: CGFloat,
+        listItemGap: CGFloat,
+        lineSpacing: CGFloat
+    ) -> NSAttributedString {
+        if let hit = cachedNSAttributedString(forKey: cacheKey) { return hit }
+
+        let out = NSMutableAttributedString()
+        let bodyColor = isUserBubble ? uiPrimaryColor : uiSecondaryColor
+        let bodySize = 15 * scale
+        let bulletFont = UIFont.systemFont(ofSize: 15 * scale, weight: .semibold)
+        let ordinalFont = UIFont.monospacedSystemFont(ofSize: 14 * scale, weight: .medium)
+
+        func headingSize(_ level: Int) -> CGFloat {
+            switch level {
+            case 1: return 18 * scale
+            case 2: return 16.5 * scale
+            case 3: return 15 * scale
+            case 4: return 14.5 * scale
+            default: return 14 * scale
+            }
+        }
+
+        func headingWeight(_ level: Int) -> UIFont.Weight {
+            switch level {
+            case 1: return .bold
+            case 2, 3, 4: return .semibold
+            default: return .medium
+            }
+        }
+
+        for (blockIdx, block) in blocks.enumerated() {
+            let isFirstBlock = blockIdx == 0
+            let isLastBlock = blockIdx == blocks.count - 1
+            if !isFirstBlock {
+                out.append(NSAttributedString(string: "\n"))
+            }
+
+            switch block {
+            case .heading(_, let level, let content):
+                let p = NSMutableParagraphStyle()
+                p.lineSpacing = 2
+                p.lineBreakMode = .byWordWrapping
+                p.paragraphSpacingBefore = isFirstBlock ? 0 : (level <= 2 ? 6 : 3)
+                p.paragraphSpacing = isLastBlock ? 0 : blockGap
+                appendInlineStyled(
+                    content,
+                    to: out,
+                    isUserBubble: isUserBubble,
+                    fontSize: headingSize(level),
+                    fontWeight: headingWeight(level),
+                    baseUIColor: uiPrimaryColor,
+                    paragraphStyle: p,
+                    scale: scale
+                )
+
+            case .paragraph(_, let content):
+                let p = NSMutableParagraphStyle()
+                p.lineSpacing = lineSpacing
+                p.lineBreakMode = .byWordWrapping
+                p.paragraphSpacing = isLastBlock ? 0 : blockGap
+                appendInlineStyled(
+                    content,
+                    to: out,
+                    isUserBubble: isUserBubble,
+                    fontSize: bodySize,
+                    fontWeight: .regular,
+                    baseUIColor: bodyColor,
+                    paragraphStyle: p,
+                    scale: scale
+                )
+
+            case .unorderedList(_, let items):
+                for (itemIdx, item) in items.enumerated() {
+                    if itemIdx > 0 { out.append(NSAttributedString(string: "\n")) }
+                    let isLastItem = itemIdx == items.count - 1
+                    let indent = CGFloat(item.indentLevel) * 16
+                    let bulletTab: CGFloat = indent + 17
+                    let p = NSMutableParagraphStyle()
+                    p.lineSpacing = lineSpacing
+                    p.lineBreakMode = .byWordWrapping
+                    p.firstLineHeadIndent = indent
+                    p.headIndent = bulletTab
+                    p.tabStops = [NSTextTab(textAlignment: .left, location: bulletTab)]
+                    p.paragraphSpacing = (isLastBlock && isLastItem) ? 0 : (isLastItem ? blockGap : listItemGap)
+                    let bullet = item.indentLevel % 2 == 0 ? "•\t" : "◦\t"
+                    out.append(NSAttributedString(string: bullet, attributes: [
+                        .font: bulletFont,
+                        .foregroundColor: uiMutedColor,
+                        .paragraphStyle: p,
+                    ]))
+                    appendInlineStyled(
+                        item.text,
+                        to: out,
+                        isUserBubble: isUserBubble,
+                        fontSize: bodySize,
+                        fontWeight: .regular,
+                        baseUIColor: bodyColor,
+                        paragraphStyle: p,
+                        scale: scale
+                    )
+                }
+
+            case .orderedList(_, let items):
+                for (itemIdx, item) in items.enumerated() {
+                    if itemIdx > 0 { out.append(NSAttributedString(string: "\n")) }
+                    let isLastItem = itemIdx == items.count - 1
+                    let indent = CGFloat(item.indentLevel) * 16
+                    let numTab: CGFloat = indent + max(24 * scale, 24)
+                    let p = NSMutableParagraphStyle()
+                    p.lineSpacing = lineSpacing
+                    p.lineBreakMode = .byWordWrapping
+                    p.firstLineHeadIndent = indent
+                    p.headIndent = numTab
+                    p.tabStops = [NSTextTab(textAlignment: .left, location: numTab)]
+                    p.paragraphSpacing = (isLastBlock && isLastItem) ? 0 : (isLastItem ? blockGap : listItemGap)
+                    out.append(NSAttributedString(string: "\(item.ordinal ?? 1).\t", attributes: [
+                        .font: ordinalFont,
+                        .foregroundColor: uiMutedColor,
+                        .paragraphStyle: p,
+                    ]))
+                    appendInlineStyled(
+                        item.text,
+                        to: out,
+                        isUserBubble: isUserBubble,
+                        fontSize: bodySize,
+                        fontWeight: .regular,
+                        baseUIColor: bodyColor,
+                        paragraphStyle: p,
+                        scale: scale
+                    )
+                }
+
+            default:
+                break
+            }
+        }
+
+        let final = NSAttributedString(attributedString: out)
+        storeNSAttributedString(final, forKey: cacheKey)
+        return final
+    }
+    #endif
+
     public static func blocks(for source: String) -> [SHMarkdownBlock] {
         let key = source as NSString
         if let hit = astCache.object(forKey: key) { return hit.value }
@@ -480,10 +728,23 @@ public enum SHMarkdownCache {
         return parsed
     }
 
+    public static func storeBlocks(_ blocks: [SHMarkdownBlock], for source: String) {
+        let key = source as NSString
+        if astCache.object(forKey: key) == nil {
+            astCache.setObject(MarkdownBlockBox(blocks), forKey: key)
+        }
+    }
+
     public static func inlineAttributedString(for raw: String, isUserBubble: Bool, scale: CGFloat = 1) -> AttributedString {
         // The inline-code font size is baked into the styled string, so the scale is part of the key.
         let cacheKey = "\(isUserBubble ? "u" : "a")\(Int((scale * 100).rounded()))|\(raw)" as NSString
         if let hit = inlineCache.object(forKey: cacheKey) { return hit.value }
+
+        if raw.rangeOfCharacter(from: markdownSpecialChars) == nil {
+            let plain = AttributedString(raw)
+            inlineCache.setObject(StyledAttributedBox(plain), forKey: cacheKey)
+            return plain
+        }
 
         let opts = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -607,11 +868,77 @@ private struct SHMarkdownBlockListView: View {
     let isUserBubble: Bool
     @Environment(\.shChatMetrics) private var metrics
 
+    #if canImport(UIKit)
+    private enum RenderSegment: Identifiable {
+        case proseRun(id: Int, blocks: [SHMarkdownBlock])
+        case single(SHMarkdownBlock)
+
+        var id: Int {
+            switch self {
+            case .proseRun(let id, _): return id
+            case .single(let block): return block.id
+            }
+        }
+    }
+
+    private static func isCoalesceableProse(_ block: SHMarkdownBlock) -> Bool {
+        switch block {
+        case .heading, .paragraph, .orderedList:
+            return true
+        case .unorderedList(_, let items):
+            return items.allSatisfy { $0.taskChecked == nil }
+        case .codeBlock, .blockquote, .table, .thematicBreak:
+            return false
+        }
+    }
+
+    private var renderSegments: [RenderSegment] {
+        var result: [RenderSegment] = []
+        var run: [SHMarkdownBlock] = []
+        for block in blocks {
+            if Self.isCoalesceableProse(block) {
+                run.append(block)
+            } else {
+                if !run.isEmpty {
+                    result.append(.proseRun(id: run[0].id, blocks: run))
+                    run.removeAll(keepingCapacity: true)
+                }
+                result.append(.single(block))
+            }
+        }
+        if !run.isEmpty {
+            result.append(.proseRun(id: run[0].id, blocks: run))
+        }
+        return result
+    }
+    #endif
+
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.blockGap) {
+            #if canImport(UIKit)
+            ForEach(renderSegments) { segment in
+                switch segment {
+                case .proseRun(_, let runBlocks):
+                    SHSelectableMarkdownText(
+                        content: .proseRun(
+                            blocks: runBlocks,
+                            blockGap: metrics.blockGap,
+                            listItemGap: metrics.listItemGap,
+                            lineSpacing: metrics.lineSpacing
+                        ),
+                        isUserBubble: isUserBubble,
+                        scale: metrics.scale
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                case .single(let block):
+                    renderBlock(block)
+                }
+            }
+            #else
             ForEach(blocks) { block in
                 renderBlock(block)
             }
+            #endif
         }
     }
 
@@ -723,12 +1050,14 @@ private struct SHMarkdownBlockListView: View {
     ) -> some View {
         #if canImport(UIKit)
         SHSelectableMarkdownText(
-            raw: raw,
+            content: .single(
+                raw: raw,
+                fontSize: fontSize,
+                fontWeight: fontWeight,
+                baseColor: color,
+                lineSpacing: lineSpacing
+            ),
             isUserBubble: isUserBubble,
-            fontSize: fontSize,
-            fontWeight: fontWeight,
-            baseColor: color,
-            lineSpacing: lineSpacing,
             scale: metrics.scale
         )
         #else
@@ -766,19 +1095,37 @@ private typealias SHPlatformFontWeight = UIFont.Weight
 /// Read-only non-scrolling UITextView that provides native iOS draggable text selection handles
 /// and native long-press link menus ("Open in Browser" / "Copy Link") inside SwiftUI transcripts.
 private struct SHSelectableMarkdownText: UIViewRepresentable {
-    let raw: String
+    enum Content {
+        case proseRun(blocks: [SHMarkdownBlock], blockGap: CGFloat, listItemGap: CGFloat, lineSpacing: CGFloat)
+        case single(raw: String, fontSize: CGFloat, fontWeight: UIFont.Weight, baseColor: Color, lineSpacing: CGFloat)
+    }
+
+    let content: Content
     let isUserBubble: Bool
-    let fontSize: CGFloat
-    let fontWeight: UIFont.Weight
-    let baseColor: Color
-    let lineSpacing: CGFloat
     let scale: CGFloat
 
     @Environment(\.lineLimit) private var lineLimit
     @Environment(\.openURL) private var openURL
 
     private var renderKey: String {
-        "\(isUserBubble ? 1 : 0)|\(Int((fontSize * 10).rounded()))|\(fontWeight.rawValue)|\(Int((lineSpacing * 10).rounded()))|\(Int((scale * 100).rounded()))|\(lineLimit ?? 0)|\(raw)"
+        switch content {
+        case .proseRun(let blocks, let blockGap, let listItemGap, let lineSpacing):
+            var key = "p|\(isUserBubble ? 1 : 0)|\(Int((scale * 100).rounded()))|\(Int((blockGap * 10).rounded()))|\(Int((listItemGap * 10).rounded()))|\(Int((lineSpacing * 10).rounded()))|\(lineLimit ?? 0)"
+            for b in blocks {
+                switch b {
+                case .heading(_, let l, let t): key += "|h\(l):\(t)"
+                case .paragraph(_, let t): key += "|p:\(t)"
+                case .unorderedList(_, let items):
+                    for it in items { key += "|u\(it.indentLevel):\(it.text)" }
+                case .orderedList(_, let items):
+                    for it in items { key += "|o\(it.indentLevel).\(it.ordinal ?? 1):\(it.text)" }
+                default: break
+                }
+            }
+            return key
+        case .single(let raw, let fontSize, let fontWeight, _, let lineSpacing):
+            return "s|\(isUserBubble ? 1 : 0)|\(Int((fontSize * 10).rounded()))|\(fontWeight.rawValue)|\(Int((lineSpacing * 10).rounded()))|\(Int((scale * 100).rounded()))|\(lineLimit ?? 0)|\(raw)"
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -786,7 +1133,9 @@ private struct SHSelectableMarkdownText: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let tv = UITextView()
+        // TextKit 1 is substantially faster to instantiate and measure for static read-only transcript
+        // blocks while preserving native draggable selection handles and iOS 17+ UITextItem link menus.
+        let tv = UITextView(usingTextLayoutManager: false)
         tv.delegate = context.coordinator
         tv.isEditable = false
         tv.isSelectable = true
@@ -813,11 +1162,24 @@ private struct SHSelectableMarkdownText: UIViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let maxW = proposal.width ?? uiView.bounds.width
-        guard maxW > 1 else { return nil }
-        let fitting = uiView.sizeThatFits(CGSize(width: maxW, height: .greatestFiniteMagnitude))
-        let w = isUserBubble ? min(maxW, ceil(fitting.width)) : maxW
-        return CGSize(width: max(1, w), height: max(1, ceil(fitting.height)))
+        let rawW: CGFloat
+        if let pw = proposal.width, pw.isFinite, pw > 1 {
+            rawW = pw
+        } else if uiView.bounds.width > 1 {
+            rawW = uiView.bounds.width
+        } else {
+            return nil
+        }
+        let widthBucket = Int((rawW * 2).rounded())
+        let sizeKey = "\(widthBucket)|\(context.coordinator.lastRenderKey)"
+        if let cached = SHMarkdownCache.cachedSize(forKey: sizeKey) {
+            return cached
+        }
+        let fitting = uiView.sizeThatFits(CGSize(width: rawW, height: .greatestFiniteMagnitude))
+        let w = isUserBubble ? min(rawW, ceil(fitting.width)) : rawW
+        let result = CGSize(width: max(1, w), height: max(1, ceil(fitting.height)))
+        SHMarkdownCache.storeCachedSize(result, forKey: sizeKey)
+        return result
     }
 
     private func applyContent(to tv: UITextView, coordinator: Coordinator) {
@@ -825,64 +1187,42 @@ private struct SHSelectableMarkdownText: UIViewRepresentable {
         guard coordinator.lastRenderKey != key else { return }
         coordinator.lastRenderKey = key
         tv.textContainer.maximumNumberOfLines = lineLimit ?? 0
-        tv.attributedText = buildNSAttributedString()
+        tv.attributedText = buildNSAttributedString(cacheKey: key)
         tv.invalidateIntrinsicContentSize()
     }
 
-    private func buildNSAttributedString() -> NSAttributedString {
-        let attr = SHMarkdownCache.inlineAttributedString(for: raw, isUserBubble: isUserBubble, scale: scale)
-        let baseFont = UIFont.systemFont(ofSize: fontSize, weight: fontWeight)
-        let baseUIColor = UIColor(baseColor)
-        let codeFont = UIFont.monospacedSystemFont(ofSize: 13.5 * scale, weight: .regular)
-        let codeColor = UIColor(Color(hex: 0x93C5FD))
-        let codeBg = UIColor(SHColor.surfaceBubble.opacity(0.92))
-        let primaryColor = UIColor(SHColor.inkPrimary)
-        let mutedColor = UIColor(SHColor.inkMuted)
-        let linkColor = UIColor(SHColor.brandAntigravity)
-
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = lineSpacing
-        paragraph.lineBreakMode = .byWordWrapping
-
-        let out = NSMutableAttributedString()
-        for run in attr.runs {
-            let chunk = String(attr[run.range].characters)
-            var attrs: [NSAttributedString.Key: Any] = [
-                .font: baseFont,
-                .foregroundColor: baseUIColor,
-                .paragraphStyle: paragraph,
-            ]
-            if let intent = run.inlinePresentationIntent {
-                if intent.contains(.code) {
-                    attrs[.font] = codeFont
-                    attrs[.foregroundColor] = codeColor
-                    attrs[.backgroundColor] = codeBg
-                } else {
-                    var traits: UIFontDescriptor.SymbolicTraits = []
-                    if intent.contains(.stronglyEmphasized) {
-                        traits.insert(.traitBold)
-                        attrs[.foregroundColor] = primaryColor
-                    }
-                    if intent.contains(.emphasized) {
-                        traits.insert(.traitItalic)
-                    }
-                    if !traits.isEmpty, let desc = baseFont.fontDescriptor.withSymbolicTraits(traits) {
-                        attrs[.font] = UIFont(descriptor: desc, size: fontSize)
-                    }
-                    if intent.contains(.strikethrough) {
-                        attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
-                        attrs[.foregroundColor] = mutedColor
-                    }
-                }
-            }
-            if let url = run.link {
-                attrs[.link] = url
-                attrs[.foregroundColor] = linkColor
-                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
-            }
-            out.append(NSAttributedString(string: chunk, attributes: attrs))
+    private func buildNSAttributedString(cacheKey: String) -> NSAttributedString {
+        switch content {
+        case .proseRun(let blocks, let blockGap, let listItemGap, let lineSpacing):
+            return SHMarkdownCache.proseAttributedString(
+                blocks: blocks,
+                cacheKey: cacheKey,
+                isUserBubble: isUserBubble,
+                scale: scale,
+                blockGap: blockGap,
+                listItemGap: listItemGap,
+                lineSpacing: lineSpacing
+            )
+        case .single(let raw, let fontSize, let fontWeight, let baseColor, let lineSpacing):
+            if let hit = SHMarkdownCache.cachedNSAttributedString(forKey: cacheKey) { return hit }
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = lineSpacing
+            paragraph.lineBreakMode = .byWordWrapping
+            let out = NSMutableAttributedString()
+            SHMarkdownCache.appendInlineStyled(
+                raw,
+                to: out,
+                isUserBubble: isUserBubble,
+                fontSize: fontSize,
+                fontWeight: fontWeight,
+                baseUIColor: UIColor(baseColor),
+                paragraphStyle: paragraph,
+                scale: scale
+            )
+            let final = NSAttributedString(attributedString: out)
+            SHMarkdownCache.storeNSAttributedString(final, forKey: cacheKey)
+            return final
         }
-        return out
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

@@ -992,28 +992,66 @@ public final class AppStore {
 
     private func startBackgroundPrefetch() {
         prefetchTask?.cancel()
-        let candidates = prefetchCandidateSessionIds(limit: 5)
+        let candidates = prefetchCandidateSessionIds(limit: 8)
         guard !candidates.isEmpty else { return }
         let activeClient = client
         prefetchTask = Task(priority: .utility) { [weak self] in
-            for sid in candidates {
-                guard !Task.isCancelled else { break }
-                let alreadyLoaded = await MainActor.run { self?.transcriptsBySessionId[sid] != nil }
-                if alreadyLoaded { continue }
-                if let result = try? await activeClient.fetchTranscript(sessionId: sid, limit: Self.initialTranscriptLimit) {
-                    await MainActor.run {
-                        guard let self, self.transcriptsBySessionId[sid] == nil else { return }
-                        self.transcriptsBySessionId[sid] = result
-                        if self.transcriptLimitsBySessionId[sid] == nil {
-                            self.transcriptLimitsBySessionId[sid] = Self.initialTranscriptLimit
-                        }
+            // Prefetch up to 3 top threads concurrently so cold-host sessions (large Codex/Muse
+            // JSONLs or remote hosts) are already cached before the user taps them.
+            await withTaskGroup(of: Void.self) { group in
+                var nextIdx = 0
+                let concurrency = min(3, candidates.count)
+                for _ in 0..<concurrency {
+                    let sid = candidates[nextIdx]
+                    nextIdx += 1
+                    group.addTask { [weak self] in
+                        await Self.prefetchOne(sid: sid, client: activeClient, store: self)
+                    }
+                }
+                while await group.next() != nil {
+                    guard !Task.isCancelled, nextIdx < candidates.count else { continue }
+                    let sid = candidates[nextIdx]
+                    nextIdx += 1
+                    group.addTask { [weak self] in
+                        await Self.prefetchOne(sid: sid, client: activeClient, store: self)
                     }
                 }
             }
         }
     }
 
-    public func prefetchCandidateSessionIds(limit: Int = 5) -> [String] {
+    private nonisolated static func prefetchOne(
+        sid: String,
+        client: any SuperHarnessClientProtocol,
+        store: AppStore?
+    ) async {
+        guard !Task.isCancelled else { return }
+        let alreadyLoaded = await MainActor.run { store?.transcriptsBySessionId[sid] != nil }
+        if alreadyLoaded { return }
+        if let result = try? await client.fetchTranscript(sessionId: sid, limit: AppStore.initialTranscriptLimit) {
+            // Parse markdown AST off the main thread before delivering to the UI.
+            var parsedTexts: [(String, [SHMarkdownBlock])] = []
+            for msg in result.messages {
+                for block in msg.blocks {
+                    if case .text(let text) = block {
+                        parsedTexts.append((text, SHMarkdownParser.parse(text)))
+                    }
+                }
+            }
+            await MainActor.run {
+                for (text, blocks) in parsedTexts {
+                    SHMarkdownCache.storeBlocks(blocks, for: text)
+                }
+                guard let store, store.transcriptsBySessionId[sid] == nil else { return }
+                store.transcriptsBySessionId[sid] = result
+                if store.transcriptLimitsBySessionId[sid] == nil {
+                    store.transcriptLimitsBySessionId[sid] = AppStore.initialTranscriptLimit
+                }
+            }
+        }
+    }
+
+    public func prefetchCandidateSessionIds(limit: Int = 8) -> [String] {
         let nonMaster = sessions.filter { !$0.isMaster && !$0.hidden && $0.status != .archived }
         let sorted = nonMaster.sorted { a, b in
             if a.pinnedToTop != b.pinnedToTop { return a.pinnedToTop }

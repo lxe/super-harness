@@ -2923,6 +2923,7 @@ export function createClaudeDriver(): HarnessDriver {
     },
 
     shutdown(): void {
+      remote.stop();
       streamPool.closeAll();
     },
 

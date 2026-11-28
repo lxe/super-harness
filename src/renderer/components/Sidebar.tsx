@@ -6,6 +6,7 @@ import {
   HelpCircle,
   Hourglass,
   Laptop,
+  WifiOff,
   ListFilter,
   MoreHorizontal,
   Pin,
@@ -35,6 +36,12 @@ import {
   SegmentedControl,
   resolveHarnessOrbTone,
 } from '../ui';
+import { formatRelativeTime } from '../utils/format';
+
+function formatLastSeen(ts: number): string {
+  const rel = formatRelativeTime(ts);
+  return rel === 'now' ? 'just now' : `${rel} ago`;
+}
 import {
   applyManualGroupOrder,
   canDropSessionIntoSection,
@@ -243,12 +250,23 @@ const SessionRow = React.memo(function SessionRow({
               </span>
             )}
             {s.hostAddress ? (
-              <span
-                title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
-                className="text-ink-muted"
-              >
-                <Laptop className="w-3.5 h-3.5" />
-              </span>
+              s.hostOffline ? (
+                <span
+                  title={`${s.hostLabel || s.hostAddress} (${s.hostAddress}) is offline${
+                    s.hostLastSeenAt ? `, last seen ${formatLastSeen(s.hostLastSeenAt)}` : ''
+                  }`}
+                  className="text-ink-faint"
+                >
+                  <WifiOff className="w-3.5 h-3.5" />
+                </span>
+              ) : (
+                <span
+                  title={`Running on ${s.hostLabel || s.hostAddress} (${s.hostAddress})`}
+                  className="text-ink-muted"
+                >
+                  <Laptop className="w-3.5 h-3.5" />
+                </span>
+              )
             ) : null}
           </>
         ) : undefined

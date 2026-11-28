@@ -15,6 +15,7 @@ import { cleanTextPreview, normalizeTimestamp, projectNameFromCwd } from '../uti
 import { loadRemoteHosts, shQuote, type RemoteHostConfig } from './remoteClaude';
 import { formatPromptWithImagePaths, isImageAttachment, type DispatchContext } from './types';
 import { parseAntigravityJsonlLines } from './antigravityAdapter';
+import { RemoteHostHealth } from './remoteHostHealth';
 
 /**
  * Google Antigravity sessions (both Antigravity Desktop and `agy` CLI) running on
@@ -385,7 +386,10 @@ export function buildRemoteAgyPrintCommand(opts: {
   return parts.join(' ');
 }
 
-export function toUnifiedRemoteAntigravitySession(e: RemoteAntigravityEntry): UnifiedSession {
+export function toUnifiedRemoteAntigravitySession(
+  e: RemoteAntigravityEntry,
+  host: { offline: boolean; lastSeenAt?: number } = { offline: false }
+): UnifiedSession {
   const cwd = extractRemoteCwd(e.workspaceUris);
   const title =
     cleanTextPreview(e.title || e.firstUserTitle || e.preview, 90) ||
@@ -394,10 +398,11 @@ export function toUnifiedRemoteAntigravitySession(e: RemoteAntigravityEntry): Un
     cleanTextPreview(e.preview || e.firstUserPreview, 140) || `Antigravity on ${e.label}`;
   const updatedAt = Math.max(e.mtimeMs || 0, normalizeTimestamp(e.lastModifiedTime ?? 0));
   const isRunning =
-    e.status === 'CASCADE_RUN_STATUS_RUNNING' ||
+    !host.offline &&
+    (e.status === 'CASCADE_RUN_STATUS_RUNNING' ||
     Boolean(e.tailWorking) ||
-    (e.status !== 'CASCADE_RUN_STATUS_IDLE' && Date.now() - e.mtimeMs < 20_000);
-  const isLive = isRunning || Date.now() - updatedAt < 10 * 60 * 1000;
+      (e.status !== 'CASCADE_RUN_STATUS_IDLE' && Date.now() - e.mtimeMs < 20_000));
+  const isLive = !host.offline && (isRunning || Date.now() - updatedAt < 10 * 60 * 1000);
   const projectName = cwd !== '~' ? projectNameFromCwd(cwd) : e.label;
 
   return {
@@ -418,6 +423,8 @@ export function toUnifiedRemoteAntigravitySession(e: RemoteAntigravityEntry): Un
     isRemote: true,
     hostAddress: e.host,
     hostLabel: e.label,
+    hostOffline: host.offline || undefined,
+    hostLastSeenAt: host.lastSeenAt,
     createdAt: e.ctimeMs || updatedAt,
     updatedAt,
     pinned: false,
@@ -443,6 +450,7 @@ export class RemoteAntigravityMirror {
   private polling: Promise<void> | null = null;
   private firstPoll: Promise<void> | null = null;
   private sink: ((sessionId: string) => void) | null = null;
+  private readonly health = new RemoteHostHealth(POLL_MS);
   private activeProcs = new Map<string, ChildProcess>();
 
   constructor(private readonly hostsProvider: () => RemoteHostConfig[] = () => loadRemoteHosts()) {}
@@ -465,7 +473,7 @@ export class RemoteAntigravityMirror {
       await Promise.race([this.firstPoll, new Promise((r) => setTimeout(r, 4000))]);
       this.firstPoll = null;
     }
-    const list = Array.from(this.entries.values()).map(toUnifiedRemoteAntigravitySession);
+    const list = Array.from(this.entries.values()).map((e) => toUnifiedRemoteAntigravitySession(e, this.health.status(e.host)));
     const subCountByParent = new Map<string, number>();
     for (const s of list) {
       if (s.isSubagent && s.parentSessionId) {
@@ -510,6 +518,10 @@ export class RemoteAntigravityMirror {
       await Promise.all(
         this.hostsProvider().map(async (h) => {
           const label = h.label || h.host;
+          if (!this.health.shouldPoll(h.host)) {
+            failedHosts.add(h.host);
+            return;
+          }
           try {
             const out = await ssh(h.host, 'python3 -', {
               input: ANTIGRAVITY_DISCOVERY_SCRIPT,
@@ -520,7 +532,9 @@ export class RemoteAntigravityMirror {
               if (!raw?.sessionId) continue;
               next.set(`antigravity:${raw.sessionId}`, { ...raw, host: h.host, label });
             }
+            this.health.recordSuccess(h.host);
           } catch {
+            this.health.recordFailure(h.host);
             failedHosts.add(h.host);
           }
         })

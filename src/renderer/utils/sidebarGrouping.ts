@@ -13,7 +13,8 @@ export type SidebarFilterTab =
   | 'tmux'
   | 'antigravity'
   | 'muse'
-  | 'pi';
+  | 'pi'
+  | 'acp';
 
 export interface SubSection {
   id: string;
@@ -128,7 +129,8 @@ export function isSingleHarnessFilter(filter: SidebarFilterTab): filter is Harne
     filter === 'codex' ||
     filter === 'claude' ||
     filter === 'muse' ||
-    filter === 'pi'
+    filter === 'pi' ||
+    filter === 'acp'
   );
 }
 
@@ -138,6 +140,7 @@ const HARNESS_DEFS: Array<{ id: HarnessGroup; label: string }> = [
   { id: 'claude', label: 'Claude' },
   { id: 'muse', label: 'Muse' },
   { id: 'pi', label: 'Pi' },
+  { id: 'acp', label: 'ACP agents' },
 ];
 
 /** Default harness order; lxe can rearrange it (settings.harnessOrder). */

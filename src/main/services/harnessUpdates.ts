@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {
   HarnessDetection,
+  BuiltinHarnessGroup,
   HarnessGroup,
   HarnessUpdateInfo,
   HarnessUpdateJob,
@@ -140,7 +141,7 @@ function readJson(io: UpdaterIO, p: string): Record<string, unknown> | null {
   }
 }
 
-export const HARNESS_UPDATE_SPECS: Record<HarnessGroup, HarnessSpec> = {
+export const HARNESS_UPDATE_SPECS: Record<BuiltinHarnessGroup, HarnessSpec> = {
   codex: {
     name: 'Codex',
     async latest(io) {
@@ -229,6 +230,13 @@ export const HARNESS_UPDATE_SPECS: Record<HarnessGroup, HarnessSpec> = {
     exe: /\/agy(?: \(deleted\))?$/,
   },
 };
+
+/** The updater for a harness, or undefined for one Superharness doesn't update (ACP agents). */
+function specOf(harness: HarnessGroup): HarnessSpec | undefined {
+  return Object.prototype.hasOwnProperty.call(HARNESS_UPDATE_SPECS, harness)
+    ? HARNESS_UPDATE_SPECS[harness as BuiltinHarnessGroup]
+    : undefined;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Running processes on an old build (Linux)
@@ -522,7 +530,9 @@ export class HarnessUpdateService {
   }
 
   private async checkLatest(harness: HarnessGroup, current: string | null): Promise<void> {
-    const res = await HARNESS_UPDATE_SPECS[harness].latest(this.io, current);
+    const spec = specOf(harness);
+    if (!spec) return;
+    const res = await spec.latest(this.io, current);
     const prev = this.latest[harness];
     this.latest[harness] = {
       // Keep the last good answer through a failed check.
@@ -545,15 +555,16 @@ export class HarnessUpdateService {
       }
     }
     for (const d of detections) {
-      this.stale[d.id] = await countStaleProcesses(HARNESS_UPDATE_SPECS[d.id], this.currentOf(d), this.exeLookup);
+      const spec = specOf(d.id);
+      if (spec) this.stale[d.id] = await countStaleProcesses(spec, this.currentOf(d), this.exeLookup);
     }
     if (notify) this.opts.onInfoChanged();
   }
 
   /** Update info for one detection (attached by the registry). */
   infoFor(d: HarnessDetection): HarnessUpdateInfo | undefined {
-    if (!d.installed || !Object.prototype.hasOwnProperty.call(HARNESS_UPDATE_SPECS, d.id)) return undefined;
-    const spec = HARNESS_UPDATE_SPECS[d.id];
+    const spec = d.installed ? specOf(d.id) : undefined;
+    if (!spec) return undefined;
     const current = this.currentOf(d);
     const cached = this.latest[d.id];
     const latest = cached?.version ?? null;
@@ -601,10 +612,8 @@ export class HarnessUpdateService {
   }
 
   startUpdate(harness: HarnessGroup): { ok: true; job: HarnessUpdateJob } | { ok: false; error: string } {
-    if (!Object.prototype.hasOwnProperty.call(HARNESS_UPDATE_SPECS, harness)) {
-      return { ok: false, error: `Unknown harness: ${String(harness)}` };
-    }
-    const spec = HARNESS_UPDATE_SPECS[harness];
+    const spec = specOf(harness);
+    if (!spec) return { ok: false, error: `Unknown harness: ${String(harness)}` };
     const detection = this.opts.getDetections().find((d) => d.id === harness);
     if (!detection?.installed) return { ok: false, error: `${spec.name} isn’t installed.` };
     const existing = this.jobsByHarness.get(harness);
@@ -638,7 +647,8 @@ export class HarnessUpdateService {
   }
 
   private async run(job: HarnessUpdateJob): Promise<void> {
-    const spec = HARNESS_UPDATE_SPECS[job.harness];
+    const spec = specOf(job.harness);
+    if (!spec) return;
     const pollMs = this.opts.waitPollMs ?? WAIT_POLL_MS;
     let lastEmit = 0;
     let pendingEmit: NodeJS.Timeout | null = null;

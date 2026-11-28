@@ -3,6 +3,7 @@ import { ExternalLink, RotateCcw } from 'lucide-react';
 import type {
   DailySpendPoint,
   HarnessDetection,
+  BuiltinHarnessGroup,
   HarnessGroup,
   HarnessUsageSummary,
   UsageQuotaWindow,
@@ -18,7 +19,7 @@ interface HarnessLink {
   url: string;
 }
 
-const HARNESS_ACCOUNT_LINKS: Record<HarnessGroup, HarnessLink[]> = {
+const HARNESS_ACCOUNT_LINKS: Record<BuiltinHarnessGroup, HarnessLink[]> = {
   claude: [
     { label: 'Usage details', url: 'https://claude.ai/settings/usage' },
     { label: 'Billing', url: 'https://claude.ai/settings/billing' },
@@ -352,7 +353,7 @@ const HarnessUpdateNotice: React.FC<{ detection: HarnessDetection }> = ({ detect
 };
 
 interface Props {
-  target: HarnessGroup | 'all';
+  target: BuiltinHarnessGroup | 'all';
   usage: UsageSnapshot;
   /** That harness's detection, for the update notice. */
   detection?: HarnessDetection;
@@ -426,7 +427,7 @@ export const HarnessUsageHoverCard: React.FC<Props> = ({
             const { hero } = pickHeroWindow(h.windows);
             const pace = hero ? computeWindowPace(hero) : null;
             const resetStr = hero ? formatResetLabel(hero.resetsAt) : null;
-            const primaryLink = HARNESS_ACCOUNT_LINKS[h.harness]?.[0];
+            const primaryLink = HARNESS_ACCOUNT_LINKS[h.harness as BuiltinHarnessGroup]?.[0];
             const pct = hero ? Math.round(hero.usedPercent) : null;
 
             return (

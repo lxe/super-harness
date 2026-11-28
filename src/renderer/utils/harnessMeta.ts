@@ -7,6 +7,7 @@ export const HARNESS_TITLES: Record<HarnessGroup, string> = {
   claude: 'Claude',
   muse: 'Muse',
   pi: 'Pi',
+  acp: 'ACP agents',
 };
 
 export function isHarnessGroup(v: unknown): v is HarnessGroup {

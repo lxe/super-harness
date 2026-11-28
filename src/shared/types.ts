@@ -6,9 +6,16 @@ export type HarnessKind =
   | 'claude-cli'
   | 'antigravity'
   | 'muse'
-  | 'pi';
+  | 'pi'
+  | 'acp';
 
-export type HarnessGroup = 'codex' | 'claude' | 'antigravity' | 'muse' | 'pi';
+export type HarnessGroup = 'codex' | 'claude' | 'antigravity' | 'muse' | 'pi' | 'acp';
+
+/**
+ * Harnesses Superharness knows natively (usage gauges, model catalog, updater). `acp` covers any
+ * user-configured Agent Client Protocol agent, which reports none of those.
+ */
+export type BuiltinHarnessGroup = Exclude<HarnessGroup, 'acp'>;
 
 export type SessionStatus =
   | 'running'
@@ -137,7 +144,8 @@ export interface UnifiedSession {
     | 'codex-resume'
     | 'agy-resume'
     | 'muse-msp'
-    | 'pi-rpc';
+    | 'pi-rpc'
+    | 'acp-rpc';
   /** Live sync ownership indicator for accurate bidirectional status in the UI. */
   liveOwner?: 'daemon' | 'tmux' | 'desktop' | 'super-harness';
   /** Held by a plain terminal with no programmatic attach endpoint (Muse or Pi TUI outside tmux). */
@@ -604,7 +612,9 @@ export interface SuperHarnessState {
 }
 
 export interface StartSessionRequest {
-  harness: 'codex' | 'claude-tmux' | 'claude-cli' | 'antigravity' | 'muse' | 'pi';
+  harness: 'codex' | 'claude-tmux' | 'claude-cli' | 'antigravity' | 'muse' | 'pi' | 'acp';
+  /** For `acp`: the agent ID from acp-agents.json (optional when only one is configured). */
+  agent?: string;
   cwd: string;
   title?: string;
   prompt?: string;
@@ -703,11 +713,41 @@ export interface HarnessProjectOption {
 }
 
 export interface HarnessCatalog {
-  models: Record<HarnessGroup, HarnessModelOption[]>;
+  models: Record<BuiltinHarnessGroup, HarnessModelOption[]> & Partial<Record<'acp', HarnessModelOption[]>>;
   /** Configured harness-level default reasoning effort (e.g. from ~/.codex/config.toml). */
   defaultReasoningEffort?: Partial<Record<HarnessGroup, string>>;
   projects: HarnessProjectOption[];
+  /** ACP agents configured in ~/.config/super-harness/acp-agents.json, for the new-session picker. */
+  acpAgents?: Array<{ id: string; name: string; models?: HarnessModelOption[] }>;
   updatedAt: number;
+}
+
+/** One ACP agent in ~/.config/super-harness/acp-agents.json. */
+export interface AcpAgentDefinition {
+  id: string;
+  name?: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/** An agent plus what Superharness can see of it, for Settings → Harnesses. */
+export interface AcpAgentStatus extends AcpAgentDefinition {
+  /** Where the command resolves on PATH, or null when it is not found. */
+  resolvedPath: string | null;
+  liveSessions: number;
+  totalSessions: number;
+}
+
+export interface AcpAgentTestResult {
+  ok: boolean;
+  agentName?: string;
+  agentVersion?: string;
+  canLoadSession?: boolean;
+  /** How many models the agent reported for a new session. */
+  modelCount?: number;
+  error?: string;
+  ms: number;
 }
 
 export interface SuperHarnessApi {
@@ -718,6 +758,10 @@ export interface SuperHarnessApi {
     controlPort: number;
   }>;
   getHarnessCatalog: (force?: boolean) => Promise<HarnessCatalog>;
+  /** ACP agents from acp-agents.json with PATH and session status. */
+  getAcpAgents: () => Promise<{ configPath: string; agents: AcpAgentStatus[] }>;
+  saveAcpAgents: (agents: AcpAgentDefinition[]) => Promise<{ ok: boolean; error?: string }>;
+  testAcpAgent: (agent: AcpAgentDefinition) => Promise<AcpAgentTestResult>;
   createProjectDirectory: (
     parentDir: string,
     name: string
@@ -871,4 +915,4 @@ export interface HarnessUsageSummary {
   note?: string;
 }
 
-export type UsageSnapshot = Record<HarnessGroup, HarnessUsageSummary>;
+export type UsageSnapshot = Record<BuiltinHarnessGroup, HarnessUsageSummary>;

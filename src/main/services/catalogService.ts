@@ -13,6 +13,7 @@ import type {
 import { querySqliteReadOnly } from '../utils/sqlite';
 import { projectNameFromCwd, whichBinary } from '../utils/system';
 import { runPiRpcQuery } from './piRpcClient';
+import { acpModelsFor, loadAcpAgents } from '../adapters/acpAdapter';
 
 const execFileAsync = promisify(execFile);
 
@@ -435,12 +436,14 @@ export class HarnessCatalogService {
 
     this.inFlight = (async () => {
       const museCfg = readMuseSettingsDefaults();
-      const [agyModels, museModels, pi, codexProjects, agyProjects] = await Promise.all([
+      const acpAgents = loadAcpAgents();
+      const [agyModels, museModels, pi, codexProjects, agyProjects, acpModels] = await Promise.all([
         this.fetchAgyModels(sessions),
         this.fetchMuseModels(museCfg.model),
         this.fetchPiModels(),
         this.fetchCodexProjects(),
         this.fetchAgyProjects(),
+        Promise.all(acpAgents.map((a) => acpModelsFor(a))),
       ]);
 
       const codexCfg = readCodexConfigDefaults();
@@ -486,6 +489,11 @@ export class HarnessCatalogService {
           pi: pi.thinking,
         },
         projects: mergeHarnessProjects(rawProjects),
+        acpAgents: acpAgents.map((a, i) => ({
+          id: a.id,
+          name: a.name ?? a.id,
+          models: acpModels[i]?.models.map((m) => ({ id: m.id, label: m.label, isDefault: m.id === acpModels[i]?.current })),
+        })),
         updatedAt: Date.now(),
       };
       this.cache = catalog;

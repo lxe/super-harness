@@ -35,7 +35,7 @@ const TOOLS = [
         query: { type: 'string', description: 'Optional text filter across title, project, cwd, preview, tags' },
         harness: {
           type: 'string',
-          description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity, muse, pi',
+          description: 'Optional harness filter: codex, claude, claude-tmux, claude-desktop, antigravity, muse, pi, acp',
         },
         folderId: { type: 'string', description: 'Optional folder ID filter' },
         liveOnly: { type: 'boolean', description: 'Only return currently live/running sessions' },
@@ -70,12 +70,13 @@ const TOOLS = [
   {
     name: 'sh_start_session',
     description:
-      'Launch a brand-new session on a chosen harness (e.g., claude-tmux with remote-control, codex, claude-cli, antigravity, muse, or pi).',
+      'Launch a brand-new session on a chosen harness (e.g., claude-tmux with remote-control, codex, claude-cli, antigravity, muse, pi, or acp for an agent configured in ~/.config/super-harness/acp-agents.json).',
     inputSchema: {
       type: 'object',
       required: ['harness', 'cwd'],
       properties: {
-        harness: { type: 'string', enum: ['codex', 'claude-tmux', 'claude-cli', 'antigravity', 'muse', 'pi'] },
+        harness: { type: 'string', enum: ['codex', 'claude-tmux', 'claude-cli', 'antigravity', 'muse', 'pi', 'acp'] },
+        agent: { type: 'string', description: 'For harness acp: the agent ID from acp-agents.json' },
         cwd: { type: 'string' },
         title: { type: 'string' },
         prompt: { type: 'string' },

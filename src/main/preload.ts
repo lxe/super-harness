@@ -14,6 +14,11 @@ import type {
 const api: SuperHarnessApi = {
   getBootstrap: () => ipcRenderer.invoke('sh:bootstrap'),
   getHarnessCatalog: (force?: boolean) => ipcRenderer.invoke('sh:catalog', force),
+  getAcpAgents: () => ipcRenderer.invoke('sh:acp-agents'),
+  saveAcpAgents: (agents: import('../shared/types').AcpAgentDefinition[]) =>
+    ipcRenderer.invoke('sh:acp-agents-save', agents),
+  testAcpAgent: (agent: import('../shared/types').AcpAgentDefinition) =>
+    ipcRenderer.invoke('sh:acp-agent-test', agent),
   createProjectDirectory: (parentDir: string, name: string) =>
     ipcRenderer.invoke('sh:create-project', parentDir, name),
   refreshDiscovery: () => ipcRenderer.invoke('sh:refresh'),

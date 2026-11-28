@@ -149,6 +149,23 @@ export const HarnessLogo: React.FC<Props> = ({ harness, size = 15, className = '
     );
   }
 
+  // ACP agents: two opposed arrows (a protocol link to any agent) in lime.
+  if (harness === 'acp') {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        className={`shrink-0 ${className}`}
+        aria-label="ACP agent"
+      >
+        <path d="M4 8.5h14.5M15 5l3.5 3.5L15 12" stroke="#A3E635" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M20 15.5H5.5M9 12l-3.5 3.5L9 19" stroke="#BEF264" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
   // Master Orchestrator: crisp monochrome four-point star
   return (
     <svg

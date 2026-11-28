@@ -19,6 +19,7 @@ function harnessGroupForStartRequest(harness: StartSessionRequest['harness']): H
   if (harness === 'antigravity') return 'antigravity';
   if (harness === 'muse') return 'muse';
   if (harness === 'pi') return 'pi';
+  if (harness === 'acp') return 'acp';
   return 'claude';
 }
 

@@ -990,7 +990,9 @@ export const App: React.FC = () => {
                       ? 'antigravity'
                       : launchedDraft.harness === 'muse'
                         ? 'muse'
-                        : 'claude';
+                        : launchedDraft.harness === 'acp'
+                          ? 'acp'
+                          : 'claude';
                 const cwdParts = launchedDraft.cwd.split('/').filter(Boolean);
                 const projectName = cwdParts[cwdParts.length - 1] || launchedDraft.cwd || 'Project';
                 const titleText =
@@ -1024,6 +1026,8 @@ export const App: React.FC = () => {
                           ? 'muse-msp'
                           : launchedDraft.harness === 'pi'
                             ? 'pi-rpc'
+                            : launchedDraft.harness === 'acp'
+                            ? 'acp-rpc'
                             : launchedDraft.harness === 'claude-tmux'
                             ? 'tmux-send'
                             : 'claude-resume',

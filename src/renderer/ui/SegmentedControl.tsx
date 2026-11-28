@@ -42,6 +42,7 @@ const GAUGE_COLORS: Record<ProgressTone, { stroke: string }> = {
   codex: { stroke: '#10a37f' },
   claude: { stroke: '#d97757' },
   pi: { stroke: '#22d3ee' },
+  acp: { stroke: '#a3e635' },
   muse: { stroke: '#a855f7' },
   warning: { stroke: '#fbbf24' },
   danger: { stroke: '#fb7185' },

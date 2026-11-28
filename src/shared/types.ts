@@ -111,6 +111,10 @@ export interface UnifiedSession {
   hostAddress?: string;
   /** Friendly name of that machine (e.g. `lxebook-2021`). */
   hostLabel?: string;
+  /** That machine stopped answering; its sessions are shown as last seen, not live. */
+  hostOffline?: boolean;
+  /** When that machine last answered a poll (ms epoch). */
+  hostLastSeenAt?: number;
   /** Start of the last message the person sent in this session (one line, for list rows). */
   lastUserText?: string;
   /** New activity since lxe last had this session open (on any client). */

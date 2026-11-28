@@ -11,6 +11,7 @@ import {
   extractPendingQuestionBlock,
   resolveClaudeQuestionAnswers,
 } from './claudeQuestionTui';
+import { RemoteHostHealth } from './remoteHostHealth';
 
 /**
  * Claude sessions running on other machines (e.g. lxe's Mac), mirrored over SSH.
@@ -282,7 +283,10 @@ export function buildRemoteTmuxTypingScript(target: string, text: string): strin
   return lines.join('\n') + '\n';
 }
 
-export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
+export function toUnifiedRemoteSession(
+  e: RemoteClaudeEntry,
+  host: { offline: boolean; lastSeenAt?: number } = { offline: false }
+): UnifiedSession {
   const cwd = e.cwd || '~';
   const tmuxSessionName = e.tmux ? e.tmux.split(':')[0] : undefined;
   const title =
@@ -294,7 +298,7 @@ export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
       tmuxSessionName,
       preview: e.preview?.replace(/\s+/g, ' ').trim(),
     }) || `Claude on ${e.label}`).slice(0, 90);
-  const running = e.status === 'busy' || e.status === 'running';
+  const running = !host.offline && (e.status === 'busy' || e.status === 'running');
   const updatedAt = e.lastMessageMs
     ? e.lastMessageMs
     : Math.max(e.mtimeMs ?? 0, e.startedAt ?? 0);
@@ -311,7 +315,7 @@ export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
     nativeSectionOrder: 50,
     model: e.model,
     status: running ? 'running' : 'idle',
-    isLive: true,
+    isLive: !host.offline,
     isRemote: Boolean(e.bridgeSessionId),
     remoteId: e.bridgeSessionId || undefined,
     tmuxTarget: e.tmux || undefined,
@@ -319,6 +323,8 @@ export function toUnifiedRemoteSession(e: RemoteClaudeEntry): UnifiedSession {
     lastUserText: cleanUserPreview(e.lastPrompt),
     hostAddress: e.host,
     hostLabel: e.label,
+    hostOffline: host.offline || undefined,
+    hostLastSeenAt: host.lastSeenAt,
     createdAt: e.startedAt ?? updatedAt,
     updatedAt,
     pinned: false,
@@ -336,6 +342,7 @@ export class RemoteClaudeMirror {
   private polling: Promise<void> | null = null;
   private firstPoll: Promise<void> | null = null;
   private sink: ((sessionId: string) => void) | null = null;
+  private readonly health = new RemoteHostHealth(POLL_MS);
 
   constructor(private readonly hostsProvider: () => RemoteHostConfig[] = () => loadRemoteHosts()) {}
 
@@ -358,7 +365,7 @@ export class RemoteClaudeMirror {
       await Promise.race([this.firstPoll, new Promise((r) => setTimeout(r, 4000))]);
       this.firstPoll = null;
     }
-    return Array.from(this.entries.values()).map(toUnifiedRemoteSession);
+    return Array.from(this.entries.values()).map((e) => toUnifiedRemoteSession(e, this.health.status(e.host)));
   }
 
   fingerprint(sessionId: string): string | undefined {
@@ -379,12 +386,18 @@ export class RemoteClaudeMirror {
       await Promise.all(
         this.hostsProvider().map(async (h) => {
           const label = h.label || h.host;
+          if (!this.health.shouldPoll(h.host)) {
+            failedHosts.add(h.host);
+            return;
+          }
           try {
             const out = await ssh(h.host, 'python3 -', { input: DISCOVERY_SCRIPT, timeout: 8000 });
             for (const raw of JSON.parse(out) as Array<Omit<RemoteClaudeEntry, 'host' | 'label'>>) {
               next.set(`claude:${raw.sessionId}`, { ...raw, host: h.host, label });
             }
+            this.health.recordSuccess(h.host);
           } catch {
+            this.health.recordFailure(h.host);
             failedHosts.add(h.host);
           }
         })

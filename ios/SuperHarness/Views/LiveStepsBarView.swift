@@ -78,7 +78,9 @@ public struct LiveStepsBarView: View {
             if isExpanded && hasDetails {
                 VStack(alignment: .leading, spacing: SHLayout.itemGap) {
                     ForEach(steps) { step in
-                        HStack(spacing: 7) {
+                        // First-baseline alignment keeps the status icon on the first line
+                        // when a step title wraps to two.
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Image(systemName: stepIcon(step.status))
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(stepColor(step.status))
@@ -90,7 +92,7 @@ public struct LiveStepsBarView: View {
                         }
                     }
                     ForEach(runningTasks) { task in
-                        HStack(spacing: 7) {
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Image(systemName: "apple.terminal")
                                 .font(.system(size: 11))
                                 .foregroundStyle(accentColor)

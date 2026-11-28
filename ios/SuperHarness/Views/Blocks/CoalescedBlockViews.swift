@@ -1389,7 +1389,7 @@ private struct QuestionBlockView: View {
                                 guard !answered else { return }
                                 onSelectOption(option)
                             } label: {
-                                HStack(spacing: 8) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Image(systemName: isChosen ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 13))
                                         .foregroundStyle(isChosen ? SHColor.statusSuccess : SHColor.inkMuted)

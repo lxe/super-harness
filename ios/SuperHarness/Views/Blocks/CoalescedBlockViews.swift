@@ -607,7 +607,7 @@ public struct UnifiedBlockView: View, Equatable {
         case .image(let path, let name, let dataUrl):
             ImageBlockView(path: path, name: name, dataUrl: dataUrl, onTapImage: onTapImage, onLoadMedia: onLoadMedia)
         case .video(let path, let name, let mimeType):
-            VideoBlockView(path: path, name: name, mimeType: mimeType)
+            VideoBlockView(path: path, name: name, mimeType: mimeType, onTapImage: onTapImage)
                 .equatable()
         case .thinking(let text, let summary):
             ThinkingBlockView(text: text, summary: summary)
@@ -780,6 +780,8 @@ private struct VideoBlockView: View, Equatable {
     let path: String
     let name: String?
     let mimeType: String?
+    /// Opens the video in the system player (the root view routes video payloads there).
+    var onTapImage: ((LightboxPayload) -> Void)? = nil
     @State private var copied = false
 
     nonisolated static func == (lhs: VideoBlockView, rhs: VideoBlockView) -> Bool {
@@ -865,6 +867,11 @@ private struct VideoBlockView: View, Equatable {
         .padding(13)
         .background(SHColor.surfaceCode)
         .clipShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: SHRadius.lg, style: .continuous))
+        .onTapGesture {
+            guard !path.isEmpty else { return }
+            onTapImage?(LightboxPayload(title: displayName, dataUrl: nil, path: path))
+        }
     }
 }
 

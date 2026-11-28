@@ -86,9 +86,13 @@ public protocol SuperHarnessClientProtocol: Sendable {
     func sendTestPush() async throws -> Bool
     func testConnection() async throws -> ConnectionTestResult
     func eventStream() -> AsyncStream<SuperHarnessServerEvent>
+    /// URL and headers for streaming a host file (a video) straight into a player, which fetches
+    /// byte ranges itself. Nil when the client has no host to stream from.
+    func mediaStreamRequest(path: String) -> (url: URL, headers: [String: String])?
 }
 
 public extension SuperHarnessClientProtocol {
+    func mediaStreamRequest(path: String) -> (url: URL, headers: [String: String])? { nil }
     func fetchMedia(path: String, maxWidth: Int?) async throws -> Data {
         try await fetchMedia(path: path)
     }
@@ -356,6 +360,13 @@ public final class LiveSuperHarnessClient: SuperHarnessClientProtocol, Sendable 
             let message = String(data: data, encoding: .utf8) ?? "Media request failed"
             throw SuperHarnessAPIError.httpError(http.statusCode, message)
         }
+    }
+
+    public func mediaStreamRequest(path: String) -> (url: URL, headers: [String: String])? {
+        guard !path.isEmpty,
+              let url = makeURL(path: "/api/media", queryItems: [URLQueryItem(name: "path", value: path), URLQueryItem(name: "raw", value: "1")])
+        else { return nil }
+        return (url, token.isEmpty ? [:] : ["Authorization": "Bearer \(token)"])
     }
 
     public func fetchDictationStatus() async -> DictationStatusResponse? {

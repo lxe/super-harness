@@ -65,6 +65,12 @@ public struct LightboxPayload: Identifiable, Equatable {
     public let title: String
     public let dataUrl: String?
     public let path: String?
+
+    /// True for a video file: these open in the system player instead of the image lightbox.
+    public var isVideo: Bool {
+        guard let path else { return false }
+        return ["mp4", "m4v", "mov", "webm", "mkv", "avi"].contains((path as NSString).pathExtension.lowercased())
+    }
 }
 
 public struct StreamTurnBaseline: Sendable, Equatable {
@@ -2118,6 +2124,11 @@ public final class AppStore {
         lightboxPayload = nil
         selectSession(target.id)
         return true
+    }
+
+    /// Where the system player streams a host video from, with the auth header it needs.
+    public func mediaStreamRequest(path: String) -> (url: URL, headers: [String: String])? {
+        client.mediaStreamRequest(path: path)
     }
 
     public func loadMediaData(path: String, maxWidth: Int? = nil) async -> Data? {

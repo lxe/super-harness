@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 public struct RootView: View {
@@ -77,10 +78,21 @@ public struct RootView: View {
             }
             return .systemAction
         })
-        .fullScreenCover(item: $store.lightboxPayload) { payload in
+        .fullScreenCover(item: Binding(
+            get: { store.lightboxPayload.flatMap { $0.isVideo ? nil : $0 } },
+            set: { store.lightboxPayload = $0 }
+        )) { payload in
             ImageLightboxView(payload: payload) { path in
                 await store.loadMediaData(path: path)
             }
+        }
+        // A tapped video opens in the system player (AVPlayerViewController), streamed from the
+        // host's copy of the attachment, rather than in the image lightbox.
+        .onChange(of: store.lightboxPayload?.id) { _, _ in
+            guard let payload = store.lightboxPayload, payload.isVideo else { return }
+            store.lightboxPayload = nil
+            guard let path = payload.path, let stream = store.mediaStreamRequest(path: path) else { return }
+            SHVideoPlayerPresenter.present(url: stream.url, headers: stream.headers)
         }
     }
 
@@ -325,5 +337,29 @@ public struct ConnectionStatusPill: View {
         case .syncing: return "Syncing"
         case .problem: return "Host unreachable"
         }
+    }
+}
+
+/// Presents the system video player full screen, with its own close button, scrubbing and
+/// Picture in Picture. The player streams the file with range requests, so long clips start
+/// playing before they finish downloading.
+@MainActor
+enum SHVideoPlayerPresenter {
+    static func present(url: URL, headers: [String: String]) {
+        let asset = AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.modalPresentationStyle = .fullScreen
+        guard let presenter = topViewController() else { return }
+        presenter.present(controller, animated: true) { player.play() }
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.first?.windows.first
+        var top = window?.rootViewController
+        while let next = top?.presentedViewController { top = next }
+        return top
     }
 }

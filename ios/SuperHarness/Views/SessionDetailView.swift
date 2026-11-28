@@ -814,8 +814,6 @@ private struct MessageBubbleView: View, Equatable {
                             items: imageItems,
                             thumbSize: SHLayout.thumbSize,
                             onTap: { item in
-                                // The lightbox shows still images only; a video tile has nothing to open yet.
-                                guard !item.isVideo else { return }
                                 onTapImage(LightboxPayload(title: item.name, dataUrl: item.dataUrl, path: item.path))
                             },
                             onLoadMedia: onLoadMedia
